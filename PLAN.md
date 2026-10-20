@@ -140,6 +140,10 @@ flowchart LR
 | 20/10/2026 | `/health`: `ok` chỉ khi FFmpeg chạy được và đủ `libx264` + filter `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect`; trả danh sách `missing` (IMPLEMENT.md mục 9) | Biết ngay máy có dựng được video không; Whisper và GPU đã có đường dự phòng |
 | 20/10/2026 | Claude Code phải hỏi trước khi cài, gỡ, nâng cấp phần mềm cấp hệ thống; gói trong `backend/.venv` và npm của dự án thì được tự cài | Chủ dự án kiểm soát máy; tránh thay đổi hệ thống ngoài ý muốn |
 | 20/10/2026 | Không tự push lên GitHub; chỉ push khi chủ dự án yêu cầu | Chủ dự án duyệt trước những gì công khai lên remote |
+| 20/10/2026 | Giữ tag `v0.1.0` (commit tài liệu, đã push); bản M0 gắn `v0.1.1` (merge `f329c8e`); không force-push | Tag đã công khai thì không ghi đè |
+| 20/10/2026 | Whoosh cảnh cú lật: tại offset xfade của cảnh (cảnh 1 thì 0 s), âm lượng 0,30 trước loudnorm tổng (IMPLEMENT.md mục 6.3) | Giống thông số 6 video đã đăng |
+| 20/10/2026 | Cho dựng video không nhạc: bỏ ducking, giọng −14 LUFS, xuất stereo (IMPLEMENT.md mục 6.4) | Đã có video cũ không dùng nhạc |
+| 20/10/2026 | M1 làm luôn `models.py`, tự chọn đoạn nhạc, `publish.txt`; lint từ nhạy cảm để M4 (IMPLEMENT.md mục 11) | `render.py` cần các phần này để chạy trọn |
 
 ## 11. Tiến độ
 

@@ -215,6 +215,13 @@ UI cho chọn nhạc từ thư viện hoặc tải file mới (tải mới thì 
 ### 6.3 Whoosh
 Tổng hợp bằng FFmpeg (`synth_whoosh` trong reference), không dùng file ngoài → không vướng bản quyền.
 
+Thông số (chủ dự án chốt 20/10/2026, giống 6 video cũ), áp khi `settings.sfx_on_punch = true`:
+- Thời điểm `at` = offset xfade của cảnh `punch` đó (lúc bắt đầu trượt). Cảnh 1 là `punch` thì `at = 0`.
+- Âm lượng `vol = 0.30`, áp trước bước loudnorm tổng (−14 LUFS) trong `mix_audio`.
+
+### 6.4 Video không có nhạc
+Cho phép dựng khi `music` trống (chủ dự án chốt 20/10/2026). Bỏ bước cắt nhạc và ducking; giọng đã chuẩn hoá −14 LUFS (bước 2) được chuyển sang **stereo** để xuất. Whoosh (nếu có) vẫn trộn vào rồi loudnorm tổng −14 LUFS như khi có nhạc.
+
 ---
 
 ## 7. Kiểm tra nội dung nhạy cảm (`pipeline/lint.py`)
@@ -342,9 +349,12 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [x] Vite + React + TS + Tailwind, trang trống gọi `/api/health`
 - [x] ruff, ESLint, Prettier; GitHub Actions chạy lint + pytest (không cần GPU)
 - **Xong khi:** `npm run dev` mở trang hiện trạng thái môi trường.
+- **Tag:** `v0.1.0` trỏ vào commit tài liệu `ad64301` (đã push, giữ nguyên). Bản M0 là `v0.1.1` (commit merge `f329c8e`). Không force-push tag (chủ dự án chốt 20/10/2026).
 
 ### M1 · Bộ dựng (không giao diện)
-- [ ] Copy `reference/pipeline/{text,align,visual}.py` vào `backend/hbt/pipeline/`
+> Ranh giới (chủ dự án chốt 20/10/2026): `models.py` (Pydantic, dùng ở bước 1), tự chọn đoạn nhạc (mục 6.1) và sinh `publish.txt` (mục 8) làm luôn trong M1 vì `render.py` cần. Lint từ nhạy cảm (mục 7) để M4; trong M1 bước 1 chỉ để sẵn chỗ gọi.
+
+- [x] Copy `reference/pipeline/{text,align,visual}.py` vào `backend/hbt/pipeline/`
 - [ ] Viết `audio.py`, `captions.py`, `render.py` theo mục 4–6 dựa trên `render_reference.py`
 - [ ] Cache theo hash trong `build/`; ghi `log.txt`; trả tiến độ qua callback
 - [ ] `cli.py render <dir> [--preview] [--fps]`
