@@ -137,13 +137,16 @@ flowchart LR
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
 | 20/10/2026 | Giữ 3 điểm duyệt của con người: kịch bản → ảnh → video | Tránh lỗi chữ, bản đồ, từ nhạy cảm lọt lên mạng |
+| 20/10/2026 | `/health`: `ok` chỉ khi FFmpeg chạy được và đủ `libx264` + filter `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect`; trả danh sách `missing` (IMPLEMENT.md mục 9) | Biết ngay máy có dựng được video không; Whisper và GPU đã có đường dự phòng |
+| 20/10/2026 | Claude Code phải hỏi trước khi cài, gỡ, nâng cấp phần mềm cấp hệ thống; gói trong `backend/.venv` và npm của dự án thì được tự cài | Chủ dự án kiểm soát máy; tránh thay đổi hệ thống ngoài ý muốn |
+| 20/10/2026 | Không tự push lên GitHub; chỉ push khi chủ dự án yêu cầu | Chủ dự án duyệt trước những gì công khai lên remote |
 
 ## 11. Tiến độ
 
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
-| M0 | ☐ | Đã làm xong, chờ chủ dự án kiểm tra |
-| M1 | ☐ | |
+| M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.0` |
+| M1 | ☐ | Đang làm trên nhánh `feat/m1-render-engine` |
 | M2 | ☐ | |
 | M3 | ☐ | |
 | M4 | ☐ | |

@@ -15,6 +15,8 @@
 - Mỗi tính năng có test cho logic chính; `npm run lint` và `npm run test` phải xanh trước khi báo xong.
 - Commit theo Conventional Commits, mỗi mốc một nhánh `feat/mX-…`.
 - Gặp điểm đặc tả chưa nói tới: **hỏi chủ dự án**, không tự quyết. Quyết định xong thì ghi thêm vào `IMPLEMENT.md`.
+- Phải hỏi chủ dự án trước khi cài, gỡ hoặc nâng cấp bất kỳ phần mềm, driver hay gói nào ở cấp hệ thống (winget, choco, CUDA…). Gói Python trong `backend/.venv` và gói npm của dự án thì được tự cài.
+- Không tự push. Chỉ push khi chủ dự án yêu cầu.
 
 ## Lệnh hay dùng
 ```

@@ -257,7 +257,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 
 | Method | Path | Mô tả |
 |---|---|---|
-| GET | `/health` | `{ok, ffmpeg, whisper, gpu}` — kiểm tra môi trường |
+| GET | `/health` | `{ok, ffmpeg, whisper, gpu, missing}` — kiểm tra môi trường (xem định nghĩa dưới bảng) |
 | GET | `/projects` | danh sách `{slug, title, updated_at, thumb, last_render}` |
 | POST | `/projects` | `{title, series?, scene_count=8}` → tạo project rỗng |
 | GET / PUT / DELETE | `/projects/{slug}` | đọc / lưu toàn bộ `project.json` / xoá |
@@ -272,6 +272,12 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | GET | `/music` · POST `/music` | thư viện nhạc |
 | GET | `/settings/sensitive-words` · PUT | danh sách từ nhạy cảm |
 | GET | `/files/{path}` | phục vụ file trong workspace (chặn `..`) |
+
+**Định nghĩa `/health`** (chủ dự án duyệt 20/10/2026):
+- `ffmpeg`: `ffmpeg -version` chạy được.
+- `missing`: các mục bắt buộc còn thiếu. Encoder: `libx264` (theo `ffmpeg -encoders`). Filter: `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect` (theo `ffmpeg -filters`). Nếu FFmpeg không chạy được thì `missing = ["ffmpeg"]`.
+- `ok`: `true` khi và chỉ khi `missing` rỗng. Whisper và GPU **không** ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
+- `whisper`: import được `faster_whisper`. `gpu`: CTranslate2 thấy ít nhất 1 thiết bị CUDA.
 
 ---
 
