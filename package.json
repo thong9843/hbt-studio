@@ -1,0 +1,29 @@
+{
+  "name": "hbt-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c red,yellow \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node scripts/py.mjs -m uvicorn hbt.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload --reload-dir backend/hbt",
+    "dev:web": "npm -w frontend run dev",
+    "build": "npm -w frontend run build",
+    "lint": "npm run lint:py && npm run lint:web",
+    "lint:py": "node scripts/py.mjs -m ruff check backend && node scripts/py.mjs -m ruff format --check backend",
+    "lint:web": "prettier --check . && npm -w frontend run lint",
+    "format": "node scripts/py.mjs -m ruff format backend && prettier --write .",
+    "test": "npm run test:py && npm run test:web",
+    "test:py": "node scripts/py.mjs -m pytest backend",
+    "test:web": "npm -w frontend run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5",
+    "prettier": "^3.9.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

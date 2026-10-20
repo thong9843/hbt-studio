@@ -330,11 +330,11 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 ## 11. Danh sách việc (Claude Code làm lần lượt, đánh dấu khi xong)
 
 ### M0 · Khởi tạo
-- [ ] Tạo cấu trúc mục 1, `.gitignore`, `.env.example`, `README.md` hướng dẫn cài trên Windows
-- [ ] `package.json` gốc với `dev`, `lint`, `test` (dùng `concurrently`)
-- [ ] FastAPI `/api/health` kiểm tra `ffmpeg -version`, import faster-whisper, CUDA
-- [ ] Vite + React + TS + Tailwind, trang trống gọi `/api/health`
-- [ ] ruff, ESLint, Prettier; GitHub Actions chạy lint + pytest (không cần GPU)
+- [x] Tạo cấu trúc mục 1, `.gitignore`, `.env.example`, `README.md` hướng dẫn cài trên Windows
+- [x] `package.json` gốc với `dev`, `lint`, `test` (dùng `concurrently`)
+- [x] FastAPI `/api/health` kiểm tra `ffmpeg -version`, import faster-whisper, CUDA
+- [x] Vite + React + TS + Tailwind, trang trống gọi `/api/health`
+- [x] ruff, ESLint, Prettier; GitHub Actions chạy lint + pytest (không cần GPU)
 - **Xong khi:** `npm run dev` mở trang hiện trạng thái môi trường.
 
 ### M1 · Bộ dựng (không giao diện)

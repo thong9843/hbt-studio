@@ -1,0 +1,6 @@
+node_modules
+dist
+package-lock.json
+backend/.venv
+# Tài liệu của chủ dự án (và DESIGN.md bên thứ ba) — giữ nguyên định dạng gốc
+/*.md
