@@ -28,6 +28,8 @@ export interface Health {
   ffmpeg: boolean;
   whisper: boolean;
   gpu: boolean;
+  /** Encoder/filter FFmpeg còn thiếu; ["ffmpeg"] nếu không chạy được FFmpeg. */
+  missing: string[];
 }
 
 export const fetchHealth = (fetchFn?: typeof fetch) => apiGet<Health>('/health', fetchFn);

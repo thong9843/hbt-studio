@@ -1,4 +1,9 @@
-"""GET /api/health — kiểm tra môi trường: FFmpeg, faster-whisper, GPU CUDA."""
+"""GET /api/health — kiểm tra môi trường: FFmpeg (kèm encoder/filter cần dùng), faster-whisper, GPU.
+
+Định nghĩa (IMPLEMENT.md mục 9): `ok` = FFmpeg chạy được và đủ mọi encoder/filter trong
+REQUIRED_ENCODERS + REQUIRED_FILTERS; `missing` liệt kê thứ còn thiếu. Whisper và GPU không
+ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
+"""
 
 from __future__ import annotations
 
@@ -10,16 +15,52 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
+REQUIRED_ENCODERS = ("libx264",)
+REQUIRED_FILTERS = ("zoompan", "xfade", "sidechaincompress", "loudnorm", "silencedetect")
 
-def check_ffmpeg() -> bool:
+
+def _ffmpeg_stdout(*args: str) -> str | None:
+    """Chạy `ffmpeg -hide_banner <args>`; None nếu không có FFmpeg hoặc lỗi."""
     exe = shutil.which("ffmpeg")
     if exe is None:
-        return False
+        return None
     try:
-        result = subprocess.run([exe, "-version"], capture_output=True, timeout=10, check=False)
+        result = subprocess.run(
+            [exe, "-hide_banner", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def parse_names(listing: str) -> set[str]:
+    """Lấy tên từ bảng `ffmpeg -encoders` / `-filters`: cột thứ 2, sau dòng `------`."""
+    names: set[str] = set()
+    started = False
+    for line in listing.splitlines():
+        if not started:
+            started = line.strip().startswith("------")
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            names.add(parts[1])
+    return names
+
+
+def check_ffmpeg() -> list[str] | None:
+    """None nếu không chạy được FFmpeg; ngược lại là danh sách encoder/filter còn thiếu."""
+    if _ffmpeg_stdout("-version") is None:
+        return None
+    encoders = _ffmpeg_stdout("-encoders")
+    filters = _ffmpeg_stdout("-filters")
+    have = parse_names(encoders or "") | parse_names(filters or "")
+    return [n for n in (*REQUIRED_ENCODERS, *REQUIRED_FILTERS) if n not in have]
 
 
 def check_whisper() -> bool:
@@ -40,7 +81,15 @@ def check_gpu() -> bool:
 
 
 @router.get("/health")
-def health() -> dict[str, bool]:
-    ffmpeg = check_ffmpeg()
-    # Chỉ FFmpeg là bắt buộc để dựng; Whisper và GPU có đường dự phòng (mục 5.2).
-    return {"ok": ffmpeg, "ffmpeg": ffmpeg, "whisper": check_whisper(), "gpu": check_gpu()}
+def health() -> dict[str, bool | list[str]]:
+    missing = check_ffmpeg()
+    ffmpeg = missing is not None
+    if missing is None:
+        missing = ["ffmpeg"]
+    return {
+        "ok": not missing,
+        "ffmpeg": ffmpeg,
+        "whisper": check_whisper(),
+        "gpu": check_gpu(),
+        "missing": missing,
+    }
