@@ -142,7 +142,7 @@ flowchart LR
 
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
-| M0 | ☐ | |
+| M0 | ☐ | Đã làm xong, chờ chủ dự án kiểm tra |
 | M1 | ☐ | |
 | M2 | ☐ | |
 | M3 | ☐ | |

@@ -1,0 +1,18 @@
+# Media & dữ liệu người dùng — không lên Git
+workspace/
+models/
+library/music/**/*.mp3
+*.mp4
+*.wav
+.env
+
+# Môi trường
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+frontend/dist/
+*.tsbuildinfo

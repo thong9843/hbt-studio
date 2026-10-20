@@ -1,0 +1,22 @@
+/* Token giao diện. Màu HBT theo IMPLEMENT.md mục 10.1.
+   Token phong cách từ DESIGN.md sẽ thêm ở M3, sau khi chủ dự án duyệt file. */
+:root {
+  --hbt-red: #b22228;
+  --hbt-cream: #f7eeda;
+  --hbt-mustard: #f4b630;
+  --hbt-ink: #1e1816;
+
+  --color-bg: #ffffff;
+  --color-fg: #111111;
+  --color-muted: #6b6b6b;
+  --color-surface: #f5f5f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #111111;
+    --color-fg: #ffffff;
+    --color-muted: #a3a3a3;
+    --color-surface: #1f1f1f;
+  }
+}
