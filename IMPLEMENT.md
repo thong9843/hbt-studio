@@ -1,7 +1,8 @@
 # HBT Studio — Đặc tả triển khai (cho Claude Code)
 
 > Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `reference/pipeline/*.py` → `DESIGN.md`.
-> Phiên bản: v1.1 · 20/10/2026 (bổ sung thương hiệu HBT, ghim getdesign).
+> Phiên bản: v1.2 · 21/10/2026 (v1.1: thương hiệu HBT, ghim getdesign · v1.2: 50fps chất lượng cao, outro, giới hạn lời đọc, cắt quảng cáo Vbee).
+> **Mục 4b–4d bên dưới GHI ĐÈ các tham số cũ ở mục 4** khi có mâu thuẫn.
 > Phạm vi file này: **Giai đoạn 1** (mốc M0–M4). Giai đoạn 2 chỉ định nghĩa interface ở mục 12.
 > Mọi tham số dựng video trong `reference/` **đã chạy thật trên 6 video**: giữ nguyên, trừ khi file này ghi khác.
 
@@ -78,7 +79,7 @@ WORKSPACE_DIR=./workspace
 LIBRARY_DIR=./library
 WHISPER_MODEL=large-v3
 WHISPER_DEVICE=auto        # auto | cuda | cpu
-DEFAULT_FPS=60
+DEFAULT_FPS=50
 ```
 
 Backend chỉ bind `127.0.0.1`. Không có đăng nhập.
@@ -108,7 +109,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
   "theme": { "primary": "#146268", "accent": "#DE5C48" },
   "voice": "voice.mp3",
   "music": { "file": "music.mp3", "start": null, "credit": "The Wacky Sprint – nkbloom (Pixabay)" },
-  "settings": { "fps": 60, "captions": true, "aligner": "auto", "sfx_on_punch": true },
+  "settings": { "fps": 50, "captions": true, "aligner": "auto", "sfx_on_punch": true, "outro": true },
   "scenes": [
     {
       "image": "images/scene-01.png",
@@ -172,7 +173,40 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 
 **Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, `ultrafast`. Dùng để duyệt trước khi xuất bản đẹp.
 
-**FPS:** mặc định **60** (cho phép 30). Không cho chọn số lạ như 45.
+**FPS:** mặc định **50** (cho phép 30, 50, 60). Không cho chọn số lạ như 45 (nền tảng dễ chuyển đổi lại gây giật). Xem mục 4b.
+
+### 4b. Chất lượng chuyển động 50fps (ghi đè bước 6 và 9)
+
+Đã chạy thật trên 6 video, chủ dự án xác nhận mượt hơn bản 30/60fps cũ. Mã tham khảo: `reference/pipeline/render50_reference.py` (đối chiếu từng tham số).
+
+| Hạng mục | Quy cách |
+|---|---|
+| FPS | 50 |
+| Phóng ảnh | Ảnh nội bộ **3240×5760** (`scale ... flags=lanczos`, gấp 3 lần) rồi `zoompan` ra 1080×1920. Hết rung lăn tăn khi phóng chậm |
+| Easing phóng | `smoothstep(p) = p·p·(3−2p)`: cảnh lẻ 1.00→1.08, cảnh chẵn 1.08→1.00. Cảnh `punch`: 1.18→1.00 trong 0,45 s theo `easeOutCubic`, rồi 1.00→1.05 theo smoothstep |
+| Chuyển cảnh | **Không dùng `xfade`.** Ghép bằng Python (numpy): trượt ngang theo `easeInOutCubic` trong 0,4 s (20 khung), mỗi khung lấy **6 mẫu con** trong nửa chu kỳ khung (màn trập 180°) rồi lấy trung bình để tạo nhoè chuyển động |
+| Mã hoá | Clip cảnh `crf 12 veryfast`; bản cuối `crf 16 veryfast`, `-profile:v high`, `-g 100`, yuv420p, AAC 192k |
+| Lý do chất lượng cao | TikTok/YouTube nén lại video khi đăng, nên cần dư chi tiết đầu vào. Dung lượng ~45–55 MB cho video 45–55 giây là bình thường |
+| Hiệu năng | Máy 1 nhân dựng ~3,6 giây cho mỗi giây video. Giữ chế độ **Xem nhanh** (540×960, 30fps) để duyệt trước |
+
+Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
+
+### 4c. Outro (tự động thêm cuối mỗi video)
+
+- Clip dựng sẵn: `brand/outro/outro_4s_50fps.mp4` (4,0 giây, 1080×1920, 50fps). Mã tạo: `reference/pipeline/outro_reference.py` (Pillow, nền đỏ chấm bi, logo bật nảy, dòng "Theo dõi để biết tuốt mọi chuyện!", nút THEO DÕI, 2 nút chữ TikTok và YouTube, tên kênh). **Không dùng logo TikTok/YouTube.**
+- Cài đặt: `settings.outro` (mặc định `true`), thời lượng 3–5 giây (mặc định 4,0).
+- Ghép: nối sau cảnh cuối bằng hoà trộn (`fade`) **0,5 s**; không áp phụ đề karaoke lên outro. Âm thanh: nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**, sau đó âm "ting" nhẹ 2 lần (tổng hợp bằng FFmpeg, như `synth_whoosh`) lúc logo hiện (0,15 s) và nút hiện (1,2 s), tổng độ lớn vẫn −14 LUFS.
+- **Lời outro (tuỳ chọn):** câu `Theo dõi Hay Biết Tuốt để biết tuốt mọi chuyện nhé!` (51 ký tự). Chủ dự án tạo file giọng một lần, đặt ở `library/outro/voice.wav`; nếu có thì trộn vào outro từ giây 0,3. Không cần tạo lại cho từng video.
+- UI: công tắc **Thêm outro** trong tab Xuất video.
+
+### 4d. Lời đọc Vbee
+
+- **Giới hạn ký tự:** lời đọc mỗi video **≤ 750 ký tự** (tính cả dấu cách; bỏ ký hiệu `|` và `{}`), vì gói Vbee giới hạn 3.000 ký tự mỗi ngày. Hiển thị bộ đếm cạnh ô lời đọc, cảnh báo vàng khi > 750 (mức `warn`, vẫn cho xuất).
+- **Cắt quảng cáo cuối file Vbee:** file giọng từ Vbee có thể kèm câu giới thiệu hoặc quảng cáo ở cuối. Sau khi căn chữ (bước 3), mọi âm thanh nằm **sau chữ cuối của kịch bản** đều bị cắt:
+  1. Với Whisper: `voice_end = end(token cuối) + 0,35 s`, cắt đuôi, fade ra 80 ms.
+  2. Với chế độ khoảng lặng: khi ghép cụm câu ↔ đoạn tiếng nói, thử **bỏ 0–3 đoạn cuối**, chọn phương án chi phí thấp nhất (phạt 0,5 mỗi đoạn bỏ).
+  3. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
+  4. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
 
 **Vùng an toàn TikTok:** nội dung quan trọng (thẻ, phụ đề) trong khoảng y = 100…1500, tránh mép phải 120 px.
 
@@ -216,7 +250,7 @@ UI cho chọn nhạc từ thư viện hoặc tải file mới (tải mới thì 
 Tổng hợp bằng FFmpeg (`synth_whoosh` trong reference), không dùng file ngoài → không vướng bản quyền.
 
 Thông số (chủ dự án chốt 20/10/2026, giống 6 video cũ), áp khi `settings.sfx_on_punch = true`:
-- Thời điểm `at` = offset xfade của cảnh `punch` đó (lúc bắt đầu trượt). Cảnh 1 là `punch` thì `at = 0`.
+- Thời điểm `at` = lúc bắt đầu trượt chuyển cảnh vào cảnh `punch` đó (v1.2 không còn `xfade`, mốc vẫn là `cut − 0,2 s`, mục 4b). Cảnh 1 là `punch` thì `at = 0`.
 - Âm lượng `vol = 0.30`, áp trước bước loudnorm tổng (−14 LUFS) trong `mix_audio`.
 
 ### 6.4 Video không có nhạc
@@ -244,6 +278,8 @@ Cho phép dựng khi `music` trống (chủ dự án chốt 20/10/2026). Bỏ b�
 - Thêm cảnh báo khi lời đọc có chữ số mà không ghi cách đọc (`100` thay vì `100{một trăm}`): mức `info`.
 
 ---
+
+Thêm vào lint: tổng ký tự lời đọc > 750 → `warn` (mục 4d); lời đọc có chữ số chưa ghi cách đọc → `info`.
 
 ## 8. Sinh nội dung đăng (`publish.txt`)
 
@@ -320,7 +356,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | **Dự án** (`/`) | Lưới thẻ project (ảnh cảnh 1, tiêu đề, ngày, trạng thái xuất). Nút **Tạo video mới**, **Nhân bản**. Thanh trạng thái môi trường từ `/health` (FFmpeg ✓, Whisper ✓, GPU ✓) |
 | **Soạn video** (`/p/:slug`) | Cột trái: danh sách cảnh, kéo để đổi thứ tự. Giữa: trình sửa cảnh đang chọn — ô thả ảnh, các dòng thẻ chữ (chữ, cỡ, màu), vị trí thẻ, nhãn cố định, lời đọc (có đếm số chữ và gợi ý cú pháp `|`, `{}`), công tắc **Cú lật**. Phải: **ảnh xem trước** cảnh (gọi `preview.png`, cập nhật sau 600 ms ngừng gõ) |
 | **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn |
-| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** và **Xuất bản đẹp 60fps**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất |
+| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất |
 | **Cài đặt** | Danh sách từ nhạy cảm, model Whisper, fps mặc định, màu chủ đề mặc định |
 
 Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
@@ -357,9 +393,10 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [x] Copy `reference/pipeline/{text,align,visual}.py` vào `backend/hbt/pipeline/`
 - [ ] Viết `audio.py`, `captions.py`, `render.py` theo mục 4–6 dựa trên `render_reference.py`
 - [ ] Cache theo hash trong `build/`; ghi `log.txt`; trả tiến độ qua callback
-- [ ] `cli.py render <dir> [--preview] [--fps]`
+- [ ] `cli.py render <dir> [--preview] [--fps 30|50|60]`; chất lượng chuyển động theo mục 4b
+- [ ] Outro (mục 4c) và cắt đuôi file giọng (mục 4d)
 - [ ] Test mục 10b
-- **Xong khi:** dựng được tập "muỗi" 60 fps, 1080×1920, −14 ±1 LUFS, phụ đề đúng chữ.
+- **Xong khi:** dựng được tập "muỗi" 50 fps, 1080×1920, −14 ±1 LUFS, phụ đề đúng chữ, có outro 4 giây, và đuôi giọng thừa (nếu có) bị cắt.
 
 ### M2 · API
 - [ ] Models Pydantic + storage + toàn bộ endpoint mục 9

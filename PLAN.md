@@ -1,7 +1,7 @@
 # HBT Studio — Kế hoạch
 
 > Web app chạy **local** để sản xuất video ngắn cho kênh **Hay Biết Tuốt** (TikTok, YouTube Shorts, Facebook Reels).
-> Phiên bản kế hoạch: v1.1 · 20/10/2026 · Chủ dự án: Thong · Người code: Claude Code
+> Phiên bản kế hoạch: v1.2 · 21/10/2026 · Chủ dự án: Thong · Người code: Claude Code
 > File chi tiết kỹ thuật: [`IMPLEMENT.md`](IMPLEMENT.md) · Quy tắc cho Claude Code: [`CLAUDE.md`](CLAUDE.md)
 
 ---
@@ -22,7 +22,7 @@ Claude (kịch bản) → Gemini web (8 ảnh) → Vbee (giọng đọc) → Pix
 
 | Giai đoạn | Nội dung | Kết quả |
 |---|---|---|
-| **1 · Studio dựng video** (làm ngay) | Kéo thả ảnh, giọng, nhạc + soạn thẻ chữ, lời đọc → app tự dựng video 60fps có phụ đề karaoke chính xác (Whisper), ducking nhạc, kiểm tra từ nhạy cảm, sinh sẵn title/description | Không cần gửi file cho Claude để dựng nữa |
+| **1 · Studio dựng video** (làm ngay) | Kéo thả ảnh, giọng, nhạc + soạn thẻ chữ, lời đọc → app tự dựng video 50fps có phụ đề karaoke chính xác (Whisper), ducking nhạc, kiểm tra từ nhạy cảm, sinh sẵn title/description | Không cần gửi file cho Claude để dựng nữa |
 | **2 · Tạo nội dung tự động** | Nối API: kịch bản (Claude/Gemini), ảnh (Forge/ComfyUI chạy trên GPU), giọng (VieNeu-TTS local hoặc Vbee API), tự chọn nhạc từ thư viện theo tâm trạng | Nhập 1 chủ đề → ra bản nháp đầy đủ để duyệt |
 | **3 · Mở rộng** (sau) | Hàng đợi nhiều video, template theo series, lịch đăng, thống kê | Sản xuất hàng loạt |
 
@@ -84,7 +84,7 @@ flowchart LR
 | Mốc | Việc | Buổi | Kiểm chứng |
 |---|---|---|---|
 | **M0** · Khởi tạo | Repo, cấu trúc thư mục, script chạy 1 lệnh, CI lint | 0,5 | `npm run dev` mở được trang trống + API `/health` |
-| **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 60fps, -14 LUFS |
+| **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 50fps, -14 LUFS |
 | **M2** · API | CRUD project, tải file, job dựng + SSE, ảnh xem trước từng cảnh | 1,5 | Gọi API bằng curl dựng được video |
 | **M3** · Giao diện | Danh sách project, trình soạn cảnh, nhạc, xuất video, xem video | 2,5 | Làm trọn 1 video chỉ bằng giao diện |
 | **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Phụ đề lệch < 0,05 giây; cảnh báo khi kịch bản có "bia", "máu"… |
@@ -132,7 +132,10 @@ flowchart LR
 | Ngày | Quyết định | Lý do |
 |---|---|---|
 | 20/10/2026 | Làm web app local, mã nguồn trên Git, media không lên Git | Dễ quản lý, không tốn phí server |
-| 20/10/2026 | Xuất video **60fps** (không dùng 45fps) | 60fps là chuẩn mượt cả TikTok và YouTube xử lý tốt; 45fps có thể bị nền tảng chuyển đổi gây giật |
+| 20/10/2026 | Thử **60fps** (không dùng 45fps) | 60fps là chuẩn mượt; 45fps có thể bị nền tảng chuyển đổi gây giật |
+| 21/10/2026 | **Mặc định 50fps** + easing + phóng nội bộ 3 lần + chuyển cảnh nhoè chuyển động + mã hoá chất lượng cao (IMPLEMENT mục 4b) | Chủ dự án so sánh thấy mượt hơn; chống mất nét khi nền tảng nén lại. Đã dựng lại 5 video cũ theo chuẩn này |
+| 21/10/2026 | Thêm **outro 4 giây** kêu gọi theo dõi TikTok + YouTube (IMPLEMENT mục 4c) | Tăng lượt theo dõi kênh; dùng chung mọi video |
+| 21/10/2026 | Lời đọc **≤ 750 ký tự/video**; **cắt đoạn quảng cáo cuối file Vbee** (IMPLEMENT mục 4d) | Gói Vbee giới hạn 3.000 ký tự/ngày; không để người xem nghe quảng cáo |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -149,7 +152,7 @@ flowchart LR
 
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
-| M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.0` |
+| M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
 | M1 | ☐ | Đang làm trên nhánh `feat/m1-render-engine` |
 | M2 | ☐ | |
 | M3 | ☐ | |
