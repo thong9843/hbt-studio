@@ -14,8 +14,20 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from hbt.config import DEFAULT_FPS
-from hbt.models import MAX_SCENES, MIN_SCENES, SLUG, Music, Project, Scene, Settings, Voice
-from hbt.pipeline.ffutil import FFmpegError, probe
+from hbt.models import (
+    MAX_SCENES,
+    MIN_SCENES,
+    SLUG_MAX,
+    WINDOWS_RESERVED,
+    Music,
+    Project,
+    Scene,
+    Settings,
+    Voice,
+    check_slug,
+    is_valid_slug,
+)
+from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
@@ -42,6 +54,10 @@ class BadRequest(StorageError):
     pass
 
 
+class ServiceUnavailable(StorageError):
+    """Thiếu công cụ bên ngoài (ví dụ FFmpeg) nên chưa làm được việc này."""
+
+
 class Unprocessable(StorageError):
     """Yêu cầu hợp lệ về cú pháp nhưng project chưa đủ điều kiện (ví dụ thiếu ảnh để dựng)."""
 
@@ -65,8 +81,10 @@ def slugify(title: str) -> str:
     s = unicodedata.normalize("NFD", s)
     s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    if len(s) > 60:
-        s = s[:60].rsplit("-", 1)[0] or s[:60]
+    if len(s) > SLUG_MAX:
+        s = s[:SLUG_MAX].rsplit("-", 1)[0] or s[:SLUG_MAX]
+    if s in WINDOWS_RESERVED:  # "Con", "NUL"... không tạo được thư mục tên này trên Windows
+        s += "-video"
     return s or "video"
 
 
@@ -91,14 +109,16 @@ class Storage:
 
     # ---------------------------------------------------------------- đường dẫn
     def project_dir(self, slug: str) -> Path:
-        if not SLUG.match(slug):  # chặn `..`, dấu `/`... trước khi chạm vào đĩa
-            raise NotFound(f"Không có project '{slug}'")
+        try:  # chặn `..`, dấu `/`, tên Windows dành riêng... trước khi chạm vào đĩa
+            check_slug(slug)
+        except ValueError as e:
+            raise Unprocessable(f"Slug không hợp lệ: {e}") from e
         return self.projects_dir / slug
 
     def exists(self, slug: str) -> bool:
         try:
             return (self.project_dir(slug) / "project.json").is_file()
-        except NotFound:
+        except Unprocessable:
             return False
 
     def rel(self, path: Path) -> str:
@@ -108,7 +128,8 @@ class Storage:
     def unique_slug(self, base: str) -> str:
         slug, n = base, 2
         while (self.projects_dir / slug).exists():
-            slug = f"{base}-{n}"
+            suffix = f"-{n}"
+            slug = base[: SLUG_MAX - len(suffix)].rstrip("-") + suffix  # luôn ≤ SLUG_MAX
             n += 1
         return slug
 
@@ -198,7 +219,7 @@ class Storage:
             return out
         for d in self.projects_dir.iterdir():
             pj = d / "project.json"
-            if not pj.is_file() or not SLUG.match(d.name):
+            if not pj.is_file() or not is_valid_slug(d.name):
                 continue
             item = {
                 "slug": d.name,
@@ -274,8 +295,10 @@ def _audio_extension(path: Path, filename: str) -> str:
         raise BadRequest("Âm thanh phải là " + ", ".join(sorted(AUDIO_EXTENSIONS)))
     try:
         streams = probe(path)["streams"]
+    except FFmpegNotFound as e:
+        raise ServiceUnavailable(str(e)) from e
     except FFmpegError as e:
-        raise BadRequest("File không phải âm thanh hợp lệ (hoặc thiếu FFmpeg)") from e
+        raise BadRequest("File không phải âm thanh hợp lệ") from e
     if not any(s.get("codec_type") == "audio" for s in streams):
         raise BadRequest("File không có luồng âm thanh")
     return ext.lstrip(".")

@@ -306,3 +306,14 @@ def test_ffmpeg_missing_is_a_clear_error(monkeypatch):
     monkeypatch.setattr(ffutil.shutil, "which", lambda _: None)
     with pytest.raises(ffutil.FFmpegError, match="FFmpeg"):
         ffutil.ffmpeg_exe()
+
+
+def test_ffmpeg_not_found_error_carries_the_install_hint(monkeypatch, tmp_path):
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    for call in (lambda: ffutil.run_ffmpeg(["-version"]), lambda: ffutil.probe("x.mp4")):
+        with pytest.raises(ffutil.FFmpegNotFound) as e:
+            call()
+        assert "winget install Gyan.FFmpeg" in str(e.value) and "README.md" in str(e.value)
+    assert issubclass(ffutil.FFmpegNotFound, ffutil.FFmpegError)

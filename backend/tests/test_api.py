@@ -171,10 +171,15 @@ def test_put_validation_and_mismatches(client):
     )
 
 
-@pytest.mark.parametrize("slug", ["Bad%20Slug", "UPPER", "a..b", "x%2Fy"])
-def test_bad_slugs_are_404(client, slug):
-    assert client.get(f"/api/projects/{slug}").status_code == 404
-    assert client.delete(f"/api/projects/{slug}").status_code == 404
+@pytest.mark.parametrize("slug", ["Bad%20Slug", "UPPER", "a..b", "%2e%2e", "-a"])
+def test_invalid_slugs_are_422_not_404(client, slug):
+    r = client.get(f"/api/projects/{slug}")
+    assert r.status_code == 422 and r.json()["detail"].startswith("Slug không hợp lệ")
+    assert client.delete(f"/api/projects/{slug}").status_code == 422
+
+
+def test_valid_but_missing_slug_is_still_404(client):
+    assert client.get("/api/projects/khong-co").status_code == 404
 
 
 def test_duplicate(client):
@@ -413,7 +418,7 @@ def test_files_blocks_traversal_and_missing(client, path):
     (client.tmp / "outside.txt").write_text("bí mật", encoding="utf-8")
     client.post("/api/projects", json={"title": "Muỗi"})
     r = client.get(f"/api/files/{path}")
-    assert r.status_code == 404 and "bí mật" not in r.text
+    assert r.status_code in (404, 422) and "bí mật" not in r.text
 
 
 # ---------------------------------------------------------------- dựng và job
@@ -436,6 +441,7 @@ def test_job_endpoints_unknown_ids(client):
 def test_cancel_queued_and_running_jobs_via_api(client):
     fake = FakeRender()
     client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None  # không phụ thuộc FFmpeg thật
     slug = complete_project(client)
     a = client.post(f"/api/projects/{slug}/render", json={"preview": True}).json()["job_id"]
     assert fake.started.wait(5)
@@ -566,3 +572,208 @@ def test_lint_issue_uses_scene_index(client):
     client.put(f"/api/projects/{slug}", json=p)
     issue = client.post(f"/api/projects/{slug}/lint").json()["issues"][0]
     assert "scene_index" in issue and issue["scene_index"] is None and "scene" not in issue
+
+
+# ---------------------------------------------------------- thiếu FFmpeg: lỗi rõ, server không sập
+INSTALL = "winget install Gyan.FFmpeg"
+
+
+def no_ffmpeg(monkeypatch, tmp_path):
+    """Xoá FFmpeg khỏi PATH của chính tiến trình test (PATH chỉ còn một thư mục rỗng)."""
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    assert shutil.which("ffmpeg") is None and shutil.which("ffprobe") is None
+
+
+def ready_without_ffmpeg(client, n=3):
+    """Project đủ ảnh/lời/giọng mà KHÔNG cần FFmpeg (giọng được đặt thẳng vào thư mục project)."""
+    slug = client.post("/api/projects", json={"title": "Không FFmpeg", "scene_count": n}).json()[
+        "slug"
+    ]
+    for i in range(n):
+        assert upload_image(client, slug, i).status_code == 200
+    write_wav(client.app.state.hbt.storage.project_dir(slug) / "voice.wav", speech(n))
+    p = client.get(f"/api/projects/{slug}").json()
+    p["voice"] = "voice.wav"
+    for i, scene in enumerate(p["scenes"]):
+        scene["voice"] = SENTENCES[i % len(SENTENCES)]
+    assert client.put(f"/api/projects/{slug}", json=p).status_code == 200
+    return slug
+
+
+def test_health_without_ffmpeg_reports_it_and_stays_up(client, monkeypatch, tmp_path):
+    no_ffmpeg(monkeypatch, tmp_path)
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False and body["ffmpeg"] is False and body["missing"] == ["ffmpeg"]
+
+
+def test_render_without_ffmpeg_is_a_clear_503_and_creates_no_job(client, monkeypatch, tmp_path):
+    slug = ready_without_ffmpeg(client)
+    no_ffmpeg(monkeypatch, tmp_path)
+    r = client.post(f"/api/projects/{slug}/render", json={"preview": True})
+    assert r.status_code == 503
+    detail = r.json()["detail"]
+    assert "FFmpeg" in detail and INSTALL in detail and "README.md" in detail
+    assert client.app.state.hbt.jobs._jobs == {}  # không tạo job treo
+    # server vẫn sống và trả lời bình thường
+    assert client.get("/api/health").status_code == 200
+    assert client.get(f"/api/projects/{slug}").status_code == 200
+
+
+def test_incomplete_project_still_gets_the_422_list_before_the_ffmpeg_check(
+    client, monkeypatch, tmp_path
+):
+    slug = client.post("/api/projects", json={"title": "Nháp"}).json()["slug"]
+    no_ffmpeg(monkeypatch, tmp_path)
+    r = client.post(f"/api/projects/{slug}/render")
+    assert r.status_code == 422 and "Project chưa đủ để dựng" in r.json()["detail"]
+
+
+def test_features_that_do_not_need_ffmpeg_keep_working(client, monkeypatch, tmp_path):
+    slug = ready_without_ffmpeg(client)
+    no_ffmpeg(monkeypatch, tmp_path)
+    assert upload_image(client, slug, 0, (10, 20, 30)).status_code == 200
+    assert client.get(f"/api/projects/{slug}/scenes/0/preview.png").status_code == 200
+    assert client.post(f"/api/projects/{slug}/lint").status_code == 200
+    assert client.get(f"/api/files/projects/{slug}/images/scene-01.png").status_code == 200
+    assert client.get("/api/music").status_code == 200
+    assert client.get("/api/settings/sensitive-words").status_code == 200
+    assert client.get("/api/projects").status_code == 200
+    assert client.post(f"/api/projects/{slug}/duplicate").status_code == 201
+
+
+def test_audio_uploads_without_ffprobe_say_so_with_503(client, monkeypatch, tmp_path):
+    slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
+    wav = tmp_path / "v.wav"
+    write_wav(wav, [("tone", 1.0)])
+    no_ffmpeg(monkeypatch, tmp_path)
+    for kind in ("voice", "music"):
+        r = client.post(
+            f"/api/projects/{slug}/assets",
+            data={"kind": kind},
+            files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+        )
+        assert r.status_code == 503 and INSTALL in r.json()["detail"], kind
+    r = client.post(
+        "/api/music",
+        data={"title": "T", "artist": "A", "source": "S", "license": "L"},
+        files={"file": ("a.wav", wav.read_bytes(), "audio/wav")},
+    )
+    assert r.status_code == 503 and INSTALL in r.json()["detail"]
+    project = client.get(f"/api/projects/{slug}").json()
+    assert project["voice"] is None and project["music"] is None  # không ghi dở
+    assert not list((client.app.state.hbt.settings.workspace_dir / ".uploads").glob("*"))
+
+
+def test_render_refused_when_ffmpeg_lacks_an_encoder_or_filter(client, monkeypatch):
+    slug = ready_without_ffmpeg(client)
+    from hbt.api import health
+
+    listing = {
+        "-version": "ffmpeg version 6.0",
+        "-encoders": "Encoders:\n ------\n V....D libx265  HEVC\n",
+        "-filters": "Filters:\n ------\n .. loudnorm  A->A  EBU R128\n",
+    }
+    monkeypatch.setattr(health, "_ffmpeg_stdout", lambda arg: listing[arg])
+    r = client.post(f"/api/projects/{slug}/render")
+    assert r.status_code == 503
+    assert "libx264" in r.json()["detail"] and "xfade" in r.json()["detail"]
+
+
+def test_render_refused_when_only_ffprobe_is_missing(client, monkeypatch):
+    slug = ready_without_ffmpeg(client)
+    from hbt import jobs
+
+    real_which = shutil.which
+    monkeypatch.setattr(jobs.shutil, "which", lambda n: None if n == "ffprobe" else real_which(n))
+    r = client.post(f"/api/projects/{slug}/render")
+    assert r.status_code == 503 and "ffprobe" in r.json()["detail"]
+
+
+# ------------------------------------------------ slug: [a-z0-9-], tối đa 60, không tên Windows
+BAD_ROUTE_SLUGS = ["a%20b", "UPPER", "%2e%2e", "con", "NUL", "com1", "lpt9", "-a", "a--b", "x" * 61]
+
+
+@pytest.mark.parametrize("slug", BAD_ROUTE_SLUGS)
+def test_every_project_endpoint_rejects_an_invalid_slug_with_422(client, slug):
+    p = f"/api/projects/{slug}"
+    body = {
+        "slug": "x",
+        "title": "T",
+        "scenes": [{} for _ in range(3)],
+    }
+    calls = [
+        client.get(p),
+        client.put(p, json=body),
+        client.delete(p),
+        client.post(p + "/duplicate"),
+        client.post(p + "/lint"),
+        client.post(p + "/render"),
+        client.get(p + "/scenes/0/preview.png"),
+        client.post(
+            p + "/assets",
+            data={"kind": "image", "scene_index": "0"},
+            files={"file": ("a.png", png_bytes(), "image/png")},
+        ),
+    ]
+    for r in calls:
+        assert r.status_code == 422, (slug, r.request.method, r.request.url.path, r.text)
+        assert isinstance(r.json()["detail"], str)
+    ws = client.app.state.hbt.settings.workspace_dir
+    assert not (ws / "projects").exists() or not any((ws / "projects").iterdir())
+
+
+def test_put_rejects_a_body_with_an_invalid_slug(client):
+    slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
+    p = client.get(f"/api/projects/{slug}").json()
+    for bad in ("../x", "a/b", "con", "A b", "a" * 61, ""):
+        r = client.put(f"/api/projects/{slug}", json={**p, "slug": bad})
+        assert r.status_code == 422 and "slug" in r.json()["detail"], bad
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "projects/con/images/scene-01.png",
+        "projects/NUL/x",
+        "projects/a%20b/x",
+        "projects/UPPER/x",
+        "projects/" + "x" * 61 + "/x",
+        "projects/-a/x",
+        "projects/%2e%2e/x",
+    ],
+)
+def test_files_rejects_an_invalid_project_slug_with_422(client, path):
+    r = client.get(f"/api/files/{path}")
+    assert r.status_code == 422 and "detail" in r.json()
+
+
+@pytest.mark.parametrize(
+    "path", ["projects/..%2Fx", "projects/a/%2e%2e/%2e%2e/x", "%2e%2e/x", ".uploads/x", "C%3A/x"]
+)
+def test_files_rejects_traversal_with_422(client, path):
+    assert client.get(f"/api/files/{path}").status_code == 422
+
+
+def test_files_valid_but_missing_is_404(client):
+    assert client.get("/api/files/projects/khong-co/images/scene-01.png").status_code == 404
+    assert client.get("/api/files/settings/khong-co.json").status_code == 404
+
+
+@pytest.mark.parametrize("title", ["Con", "NUL", "com1", "Lpt9"])
+def test_creating_a_project_whose_title_is_a_windows_device_name_works(client, title):
+    r = client.post("/api/projects", json={"title": title})
+    assert r.status_code == 201 and r.json()["slug"] == title.lower() + "-video"
+    assert client.get(f"/api/projects/{r.json()['slug']}").status_code == 200
+
+
+def test_slug_length_limit_holds_through_the_api(client):
+    slugs = [
+        client.post("/api/projects", json={"title": "muoi dot nguoi " * 12}).json()["slug"]
+        for _ in range(3)
+    ]
+    assert len(set(slugs)) == 3 and all(len(s) <= 60 for s in slugs)
+    assert all(client.get(f"/api/projects/{s}").status_code == 200 for s in slugs)

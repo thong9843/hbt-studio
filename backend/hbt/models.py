@@ -20,10 +20,41 @@ from hbt.config import ALLOWED_FPS, DEFAULT_FPS
 
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SLUG_MAX = 60
+# Tên thiết bị dành riêng của Windows: không tạo được thư mục tên này
+WINDOWS_RESERVED = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+)
 MIN_SCENES, MAX_SCENES = 3, 12
 
 LineSize = Literal["s", "m", "l", "xl"]
 CardY = Literal["top", "upper", "middle", "lower"]
+
+
+def check_slug(slug: str) -> str:
+    """Trả về `slug` nếu hợp lệ; ngược lại ném ValueError với lý do (tiếng Việt)."""
+    if len(slug) > SLUG_MAX:
+        raise ValueError(f"slug dài tối đa {SLUG_MAX} ký tự")
+    if not SLUG.match(slug):
+        raise ValueError("slug chỉ gồm chữ thường a-z, số và dấu gạch ngang (không đầu/cuối/đôi)")
+    if slug in WINDOWS_RESERVED:
+        raise ValueError(f"'{slug}' là tên dành riêng của Windows")
+    return slug
+
+
+def is_valid_slug(slug: str) -> bool:
+    try:
+        check_slug(slug)
+    except ValueError:
+        return False
+    return True
 
 
 def _check_color(value: str, *, allow_names: bool) -> str:
@@ -169,9 +200,7 @@ class Project(_Model):
     @field_validator("slug")
     @classmethod
     def _slug(cls, v: str) -> str:
-        if not SLUG.match(v):
-            raise ValueError("slug chỉ gồm chữ thường, số và dấu gạch ngang")
-        return v
+        return check_slug(v)
 
     @model_validator(mode="after")
     def _thumbnail_scene(self) -> Project:

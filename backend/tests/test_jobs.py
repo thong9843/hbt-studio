@@ -26,7 +26,7 @@ def env(tmp_path):
 
 def manager(env, render_fn=None):
     store, opts = env
-    kwargs = {"render_fn": render_fn} if render_fn else {}
+    kwargs = {"render_fn": render_fn, "tool_check": None} if render_fn else {}
     return JobManager(store, opts.library_dir, opts.brand_dir, **kwargs)
 
 

@@ -5,7 +5,7 @@ from PIL import Image
 
 from hbt.library import MusicLibrary
 from hbt.sensitive import SensitiveStore, SensitiveWords
-from hbt.storage import BadRequest, Conflict, NotFound, Storage, slugify
+from hbt.storage import BadRequest, Conflict, NotFound, Storage, Unprocessable, slugify
 from tests.helpers import needs_ffmpeg, write_wav
 
 
@@ -69,11 +69,39 @@ def test_create_rejects_blank_title(store):
         store.create("   ")
 
 
-@pytest.mark.parametrize("slug", ["..", "../x", "a/b", "A", "", "a b", "con.", "x\\y"])
-def test_bad_slugs_never_touch_the_disk(store, slug):
-    with pytest.raises(NotFound):
+BAD_SLUGS = [
+    "..", "../x", "a/b", "A", "", "a b", "con.", "x\\y", "-a", "a-", "a--b", "a.b", "a_b", "é",
+    "con", "CON", "nul", "prn", "aux", "com1", "com9", "lpt1", "lpt9", "a" * 61,
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("slug", BAD_SLUGS)
+def test_bad_slugs_are_rejected_before_touching_the_disk(store, slug):
+    with pytest.raises(Unprocessable, match="Slug không hợp lệ"):
         store.project_dir(slug)
     assert not store.exists(slug)
+    for call in (store.load, store.delete, store.duplicate):
+        with pytest.raises(Unprocessable):
+            call(slug)
+    assert not store.projects_dir.exists()  # chưa tạo gì
+
+
+@pytest.mark.parametrize("slug", ["a", "muoi", "vi-sao-2", "a" * 60, "con-video", "com10", "nul2"])
+def test_good_slugs_pass(store, slug):
+    assert store.project_dir(slug).name == slug
+
+
+@pytest.mark.parametrize("title", ["Con", "NUL", "COM1", "lpt9", "Aux", "PRN"])
+def test_titles_that_slugify_to_a_windows_reserved_name_get_a_suffix(store, title):
+    p = store.create(title)
+    assert p.slug == title.lower() + "-video" and store.exists(p.slug)
+
+
+def test_slug_is_at_most_60_characters_even_with_a_uniqueness_suffix(store):
+    long_title = "muoi dot nguoi " * 12
+    slugs = [store.create(long_title).slug for _ in range(12)]
+    assert len(set(slugs)) == 12 and all(len(s) <= 60 for s in slugs)
+    assert all(store.exists(s) for s in slugs)
 
 
 def test_save_roundtrip_is_utf8_and_atomic(store):

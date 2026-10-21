@@ -18,9 +18,23 @@ from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
 from hbt.sensitive import SensitiveStore
 from hbt.state import AppState
-from hbt.storage import BadRequest, Conflict, NotFound, Storage, StorageError, Unprocessable
+from hbt.storage import (
+    BadRequest,
+    Conflict,
+    NotFound,
+    ServiceUnavailable,
+    Storage,
+    StorageError,
+    Unprocessable,
+)
 
-STATUS_BY_ERROR = {NotFound: 404, Conflict: 409, BadRequest: 400, Unprocessable: 422}
+STATUS_BY_ERROR = {
+    NotFound: 404,
+    Conflict: 409,
+    BadRequest: 400,
+    Unprocessable: 422,
+    ServiceUnavailable: 503,
+}
 
 
 def create_app(settings: Settings | None = None, brand_dir: Path | None = None) -> FastAPI:

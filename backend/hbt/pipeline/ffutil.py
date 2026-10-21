@@ -14,14 +14,24 @@ from . import cancel
 LUFS_RE = re.compile(r"I:\s+(-?inf|-?\d+(?:\.\d+)?)\s+LUFS")
 
 
+INSTALL_HINT = (
+    "Hãy cài FFmpeg 6 trở lên (winget install Gyan.FFmpeg), mở lại terminal để PATH nhận, "
+    "rồi thử lại. Xem README.md."
+)
+
+
 class FFmpegError(RuntimeError):
     """Lệnh FFmpeg/ffprobe lỗi; thông báo chứa phần cuối stderr."""
+
+
+class FFmpegNotFound(FFmpegError):
+    """Không có ffmpeg/ffprobe trên PATH."""
 
 
 def _exe(name: str) -> str:
     path = shutil.which(name)
     if path is None:
-        raise FFmpegError(f"Không tìm thấy {name} trên PATH. Hãy cài FFmpeg (xem README.md).")
+        raise FFmpegNotFound(f"Không tìm thấy {name} trên PATH. {INSTALL_HINT}")
     return path
 
 

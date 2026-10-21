@@ -79,7 +79,9 @@ def test_render_problems_empty_when_complete_and_markup_only_script_counts_as_em
     assert Project.model_validate(markup_only).render_problems() == ["Cảnh 1: lời đọc đang trống"]
 
 
-@pytest.mark.parametrize("slug", ["Muoi", "muoi dot", "-a", "a--b", ""])
+@pytest.mark.parametrize(
+    "slug", ["Muoi", "muoi dot", "-a", "a--b", "", "../x", "a/b", "con", "nul", "com1", "a" * 61]
+)
 def test_bad_slug(slug):
     with pytest.raises(ValidationError):
         Project.model_validate(project(slug=slug))

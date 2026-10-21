@@ -5,6 +5,7 @@ Job nằm trong bộ nhớ (mất khi khởi động lại server); file đã xu
 
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 import uuid
@@ -17,8 +18,9 @@ from typing import Any
 from hbt.config import ALLOWED_FPS
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
+from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.render import RenderOptions, render_project
-from hbt.storage import Conflict, NotFound, Storage, Unprocessable
+from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
 LOG_TAIL = 20
@@ -103,6 +105,20 @@ class Job:
             return True
 
 
+def check_render_tools() -> None:
+    """Đủ FFmpeg (và ffprobe) để dựng chưa? Thiếu thì ServiceUnavailable kèm lời nhắn cài."""
+    from hbt.api.health import check_ffmpeg
+
+    missing = check_ffmpeg()
+    if missing is None or shutil.which("ffprobe") is None:
+        what = "FFmpeg" if missing is None else "ffprobe"
+        raise ServiceUnavailable(
+            f"Không tìm thấy {what} trên PATH nên chưa dựng được. {INSTALL_HINT}"
+        )
+    if missing:
+        raise ServiceUnavailable(f"FFmpeg trên máy thiếu: {', '.join(missing)}. {INSTALL_HINT}")
+
+
 class JobManager:
     def __init__(
         self,
@@ -110,11 +126,13 @@ class JobManager:
         library_dir: Path,
         brand_dir: Path | None = None,
         render_fn=render_project,
+        tool_check=check_render_tools,
     ):
         self.storage = storage
         self.library_dir = library_dir
         self.brand_dir = brand_dir
         self._render = render_fn
+        self._tool_check = tool_check
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -147,6 +165,8 @@ class JobManager:
         problems = project.render_problems()
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
+        if self._tool_check is not None:
+            self._tool_check()
         job = Job(uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim)
         with self._lock:
             self._jobs[job.id] = job
