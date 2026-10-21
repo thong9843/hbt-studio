@@ -9,6 +9,8 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from . import cancel
+
 LUFS_RE = re.compile(r"I:\s+(-?inf|-?\d+(?:\.\d+)?)\s+LUFS")
 
 
@@ -32,11 +34,32 @@ def _tail(text: str, lines: int = 12) -> str:
 
 
 def run_ffmpeg(args: Sequence[str | Path]) -> None:
-    """Chạy `ffmpeg -y -v error <args>`; lỗi thì ném FFmpegError kèm stderr."""
+    """Chạy `ffmpeg -y -v error <args>`; lỗi thì ném FFmpegError kèm stderr.
+
+    Nếu lần dựng bị huỷ (`cancel.use_token`), tiến trình bị kill và ném RenderCancelled."""
     cmd = [_exe("ffmpeg"), "-hide_banner", "-v", "error", "-y", *map(str, args)]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if result.returncode != 0:
-        raise FFmpegError(f"ffmpeg lỗi (mã {result.returncode}):\n{_tail(result.stderr)}")
+    token = cancel.current()
+    if token is not None:
+        token.check()
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if token is not None:
+        token.track(proc)
+    try:
+        _, stderr = proc.communicate()
+    finally:
+        if token is not None:
+            token.untrack(proc)
+    if token is not None:
+        token.check()  # bị kill vì huỷ: mã thoát khác 0 không phải lỗi của FFmpeg
+    if proc.returncode != 0:
+        raise FFmpegError(f"ffmpeg lỗi (mã {proc.returncode}):\n{_tail(stderr)}")
 
 
 def probe(path: str | Path) -> dict:

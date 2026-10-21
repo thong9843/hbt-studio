@@ -25,12 +25,13 @@ from hbt.config import ALLOWED_FPS, BRAND_DIR, load_settings
 from hbt.models import load_project
 
 from . import align as _align
-from . import audio, cache
+from . import audio, cache, cancel
 from . import captions as _captions
 from . import scene_align as _scene_align
 from . import text as _text
 from . import visual as _visual
 from .align import align_whisper
+from .cancel import CancelToken, RenderCancelled
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
 from .lint import lint_project
@@ -88,6 +89,7 @@ class RenderOptions:
     library_dir: Path | None = None
     brand_dir: Path | None = None
     whisper_model: str | None = None
+    job_id: str | None = None  # tên thư mục renders/<job_id>; None → thời điểm dựng
 
 
 @dataclass
@@ -196,6 +198,9 @@ class FrameReader:
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=self.fs * 2
         )
+        self.token = cancel.current()
+        if self.token is not None:
+            self.token.track(self.proc)
         self.idx = -1
         self.frame: np.ndarray | None = None
         self.done = False
@@ -208,11 +213,15 @@ class FrameReader:
                 break
             self.frame = np.frombuffer(data, np.uint8).reshape(self.shape)
             self.idx += 1
+        if self.done and self.token is not None:
+            self.token.check()  # đọc cụt vì tiến trình bị kill do huỷ
         if self.frame is None:
             raise RenderError("Clip trung gian không có khung hình nào")
         return self.frame
 
     def close(self) -> None:
+        if self.token is not None:
+            self.token.untrack(self.proc)
         self.proc.stdout.close()
         self.proc.kill()
         self.proc.wait()
@@ -273,6 +282,7 @@ def compose(
             readers.pop(j - 1).close()
         return reader(j).get(int(round((t - starts[j]) * fps)))
 
+    partial = out.with_name(out.stem + ".part.mp4")  # chỉ đổi tên thành `out` khi mã hoá xong
     cap_fc = f"[1:v]fps={fps},"
     cap_fc += f"scale={w}:{h}," if w != 1080 else ""
     cap_fc += "format=rgba[cap];[0:v][cap]overlay=0:0:shortest=1:format=auto,format=yuv420p[v]"
@@ -283,12 +293,17 @@ def compose(
         "-filter_complex", cap_fc, "-map", "[v]", "-map", "2:a", "-r", str(fps),
         "-c:v", "libx264", "-preset", q.final_preset, "-crf", str(q.final_crf),
         "-profile:v", "high", "-g", str(2 * fps),
-        "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(out),
+        "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(partial),
     ]  # fmt: skip
     err = tempfile.TemporaryFile()
     enc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)
+    token = cancel.current()
+    if token is not None:
+        token.track(enc)
+    finished = False
     try:
         for f in range(n_frames):
+            cancel.check_current()
             t = f / fps
             if outro_reader is not None and t >= overlap_start - 1e-9:
                 o = outro_reader.get(int(round((t - overlap_start) * fps)))
@@ -303,18 +318,30 @@ def compose(
             if progress and f % fps == 0:
                 progress(f / n_frames)
         enc.stdin.close()
+        finished = True
     except (BrokenPipeError, OSError):
-        pass  # bộ mã hoá đã dừng; lỗi thật nằm ở stderr bên dưới
+        finished = True  # bộ mã hoá đã dừng; lỗi thật nằm ở stderr bên dưới
     finally:
         for r in readers.values():
             r.close()
         if outro_reader is not None:
             outro_reader.close()
-    code = enc.wait()
-    if code != 0:
-        err.seek(0)
-        detail = err.read().decode("utf-8", errors="replace").strip()[-800:]
-        raise RenderError(f"Bộ mã hoá lỗi (mã {code}):\n{detail}")
+        if not finished:  # bị huỷ hoặc lỗi giữa chừng: không để bộ mã hoá treo chờ dữ liệu
+            enc.kill()
+            enc.wait()
+        if token is not None:
+            token.untrack(enc)
+    try:
+        cancel.check_current()  # bộ mã hoá chết vì bị huỷ thì không phải lỗi mã hoá
+        code = enc.wait()
+        if code != 0:
+            err.seek(0)
+            detail = err.read().decode("utf-8", errors="replace").strip()[-800:]
+            raise RenderError(f"Bộ mã hoá lỗi (mã {code}):\n{detail}")
+        cache.publish_atomic(partial, out)
+    except BaseException:
+        partial.unlink(missing_ok=True)  # không để lại video dang dở
+        raise
 
 
 # ---------------------------------------------------------------- căn chữ
@@ -352,6 +379,7 @@ class _Reporter:
         self.lines: list[str] = []
 
     def at(self, pct: float, step: str) -> None:
+        cancel.check_current()
         self.pct, self.step = pct, step
         self.say(f"== {step}", emit=False)
         if self.progress:
@@ -374,6 +402,17 @@ def render_project(
     project_dir: str | Path,
     options: RenderOptions | None = None,
     progress: ProgressFn | None = None,
+    cancel_token: CancelToken | None = None,
+) -> RenderResult:
+    """Dựng video. `cancel_token.cancel()` (từ luồng khác) kill ffmpeg con, ném RenderCancelled."""
+    with cancel.use_token(cancel_token):
+        return _render_project(project_dir, options, progress)
+
+
+def _render_project(
+    project_dir: str | Path,
+    options: RenderOptions | None,
+    progress: ProgressFn | None,
 ) -> RenderResult:
     opts = options or RenderOptions()
     t_start = time.time()
@@ -384,7 +423,7 @@ def render_project(
     model_size = opts.whisper_model or settings.whisper_model
 
     project = load_project(project_dir)  # lỗi đường dẫn/JSON thì dừng trước khi tạo thư mục nào
-    job_id = time.strftime("%Y%m%d-%H%M%S") + ("-preview" if opts.preview else "")
+    job_id = opts.job_id or time.strftime("%Y%m%d-%H%M%S") + ("-preview" if opts.preview else "")
     job_dir = project_dir / "renders" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     rep = _Reporter(job_dir / "log.txt", progress)
@@ -669,6 +708,18 @@ def render_project(
         warn(f"Độ lớn tổng {lufs:.1f} LUFS nằm ngoài khoảng −15…−13")
     publish = job_dir / "publish.txt"
     publish.write_text(build_publish_text(project), encoding="utf-8")
+    meta = {
+        "job_id": job_id,
+        "preview": q.preview,
+        "fps": q.fps,
+        "width": q.width,
+        "height": q.height,
+        "duration": round(duration, 3),
+        "lufs": round(lufs, 2),
+        "aligner": aligner,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     rep.at(100, "Xong")
     rep.say(
         f"Xong: {video} — {duration:.2f} s, {q.fps} fps, {lufs:.1f} LUFS, "
@@ -682,7 +733,9 @@ def render_project(
 
 
 __all__ = [
+    "CancelToken",
     "Quality",
+    "RenderCancelled",
     "RenderError",
     "RenderOptions",
     "RenderResult",
