@@ -1,3 +1,5 @@
+import types
+
 from hbt.models import Project
 from hbt.pipeline import cache
 from hbt.pipeline.publish import build_publish_text
@@ -69,3 +71,20 @@ def test_is_fresh_roundtrip(tmp_path):
     assert cache.is_fresh(art, "k1") and not cache.is_fresh(art, "k2")
     art.unlink()
     assert not cache.is_fresh(art, "k1")
+
+
+def test_code_digest_changes_with_the_source(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("A = 1", encoding="utf-8")
+    mod = types.ModuleType("mod")
+    mod.__file__ = str(f)
+    first = cache.code_digest(mod)
+    assert first == cache.code_digest(mod)
+    f.write_text("A = 2", encoding="utf-8")
+    assert cache.code_digest(mod) != first
+
+
+def test_pipeline_version_follows_the_pipeline_code():
+    from hbt.pipeline import render
+
+    assert len(render.PIPELINE_VERSION) == 12 and render.PIPELINE_VERSION.isalnum()

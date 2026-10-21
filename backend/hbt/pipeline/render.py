@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from bisect import bisect_right
@@ -23,7 +24,12 @@ import numpy as np
 from hbt.config import ALLOWED_FPS, BRAND_DIR, load_settings
 from hbt.models import load_project
 
+from . import align as _align
 from . import audio, cache
+from . import captions as _captions
+from . import scene_align as _scene_align
+from . import text as _text
+from . import visual as _visual
 from .align import align_whisper
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
@@ -38,7 +44,10 @@ SUBSAMPLES = 6  # mẫu con mỗi khung trong nửa chu kỳ khung (màn trập 
 INTERNAL_SCALE = (3240, 5760)  # ảnh phóng nội bộ gấp 3 lần 1080×1920
 CARD_FADE = 0.35
 OUTRO_FILE = "outro_4s_50fps.mp4"
-PIPELINE_VERSION = 2  # tăng khi đổi thuật toán để vô hiệu cache cũ
+# Hash mã nguồn pipeline: đổi thuật toán thì mọi khoá cache trong build/ tự đổi theo.
+PIPELINE_VERSION = cache.code_digest(
+    _text, _align, _scene_align, audio, _captions, _visual, cache, sys.modules[__name__]
+)
 MAX_PARALLEL_CLIPS = 3
 
 ProgressFn = Callable[[float, str, str], None]

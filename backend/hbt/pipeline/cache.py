@@ -43,6 +43,14 @@ def digest(*parts: Any) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
+def code_digest(*modules: Any) -> str:
+    """Hash mã nguồn của các module: đổi thuật toán thì cache cũ tự mất hiệu lực."""
+    h = hashlib.sha1()
+    for m in modules:
+        h.update(Path(m.__file__).read_bytes())
+    return h.hexdigest()[:12]
+
+
 def _key_file(artifact: Path) -> Path:
     return artifact.with_name(artifact.name + ".key")
 

@@ -7,12 +7,15 @@ một PNG 1080×1920 trong suốt; FFmpeg phủ chúng lên video bằng `overla
 from __future__ import annotations
 
 import hashlib
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
 
+from . import visual as _visual
+from .cache import code_digest
 from .visual import H, W, render_caption
 
 MAX_TOKENS = 7  # cụm dài hơn thì tự tách đôi
@@ -104,8 +107,11 @@ def build_phrases(
     return phrases
 
 
+_CODE = code_digest(sys.modules[__name__], _visual)  # đổi kiểu vẽ thì vẽ lại PNG
+
+
 def _state_path(out_dir: Path, words: Sequence[str], act: int, yc: int) -> Path:
-    key = hashlib.sha1(f"{list(words)}|{act}|{yc}".encode()).hexdigest()[:16]
+    key = hashlib.sha1(f"{_CODE}|{list(words)}|{act}|{yc}".encode()).hexdigest()[:16]
     return out_dir / f"cap_{key}.png"
 
 
