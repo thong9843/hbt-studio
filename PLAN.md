@@ -155,7 +155,7 @@ flowchart LR
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
 | M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
-| M1 | ☐ | Đang làm trên nhánh `feat/m1-render-engine` |
+| M1 | ☐ | Làm xong trên nhánh `feat/m1-render-engine`, chờ chủ dự án kiểm tra. Golden "muỗi": 50 fps, 1080×1920, −13,7 LUFS, có outro, dựng 145 s; aligner khoảng lặng nên một số cụm phụ đề lệch (Whisper ở M4). Quyết định kỹ thuật: IMPLEMENT mục 11 |
 | M2 | ☐ | |
 | M3 | ☐ | |
 | M4 | ☐ | |

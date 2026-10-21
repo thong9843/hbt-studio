@@ -446,12 +446,23 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 > Ranh giới (chủ dự án chốt 20/10/2026): `models.py` (Pydantic, dùng ở bước 1), tự chọn đoạn nhạc (mục 6.1) và sinh `publish.txt` (mục 8) làm luôn trong M1 vì `render.py` cần. Lint từ nhạy cảm (mục 7) để M4; trong M1 bước 1 chỉ để sẵn chỗ gọi.
 
 - [x] Copy `reference/pipeline/{text,align,visual}.py` vào `backend/hbt/pipeline/`
-- [ ] Viết `audio.py`, `captions.py`, `render.py` theo mục 4–6 dựa trên `render_reference.py`
-- [ ] Cache theo hash trong `build/`; ghi `log.txt`; trả tiến độ qua callback
-- [ ] `cli.py render <dir> [--preview] [--fps 30|50|60]`; chất lượng chuyển động theo mục 4b
-- [ ] Outro (mục 4c) và cắt đuôi file giọng (mục 4d)
-- [ ] Test mục 10b
+- [x] Viết `audio.py`, `captions.py`, `render.py` theo mục 4–6 dựa trên `render_reference.py`
+- [x] Cache theo hash trong `build/`; ghi `log.txt`; trả tiến độ qua callback
+- [x] `cli.py render <dir> [--preview] [--fps 30|50|60]`; chất lượng chuyển động theo mục 4b
+- [x] Outro (mục 4c) và cắt đuôi file giọng (mục 4d)
+- [x] Test mục 10b (phần của M1; test lint từ nhạy cảm và thumbnail thuộc M4)
 - **Xong khi:** dựng được tập "muỗi" 50 fps, 1080×1920, −14 ±1 LUFS, phụ đề đúng chữ, có outro 4 giây, và đuôi giọng thừa (nếu có) bị cắt.
+
+**Quyết định kỹ thuật khi làm M1** (Claude Code ghi 21/10/2026; các mục đánh dấu ⚠ chờ chủ dự án duyệt):
+- ⚠ **Mục 4d.2 có điều kiện bảo vệ:** chỉ được bỏ tối đa `số đoạn tiếng − số cụm câu` đoạn cuối. Quy tắc phạt 0,5 đơn thuần trên tập "muỗi" (22 cụm, 20 đoạn) đã bỏ nhầm câu kết thật "Comment cho mình biết!" rồi cắt mất khỏi âm thanh.
+- **`text.parse_voice` sửa so với reference:** nhóm `{...}` được giữ nguyên dù có khoảng trắng bên trong (`100{một trăm}`, `Comment{com men}`); reference dùng `split()` nên chẻ đôi nhóm này và phụ đề hiện ký tự `{`.
+- **Clip cảnh:** luồng ảnh thẻ chữ được ép chạy cùng fps của clip (`-framerate`). Mặc định 25 fps làm clip 1,0 s ở 50 fps chỉ có 49 khung. Hình ảnh không đổi.
+- **Sau khi cắt đuôi giọng (4d):** đệm lại `TAIL` = 1,6 s sau chữ cuối và chuẩn hoá lại −14 LUFS trên phần giọng giữ lại. Đặc tả chưa nói rõ đoạn đệm sau khi cắt.
+- **Phụ đề:** cụm không chồng lên cụm sau; cụm kết thúc đúng lúc cụm sau hiện (cách chữ đầu 0,05 s), thay vì kéo đến đầu chữ đầu cụm sau.
+- ⚠ **Tiếng "ting" của outro:** đặc tả chưa ghi cách tổng hợp. Tạm dùng 1760 Hz + hài 2640 Hz, tắt dần `exp(−6t)`, dài 0,8 s (`audio.synth_ting`). Cần thông số gốc của bản đã chạy thật.
+- **`settings.outro`** chỉ là bật/tắt; clip outro cố định 4,0 s (cài đặt thời lượng 3–5 s chưa làm).
+- **Đếm 750 ký tự (4d):** bỏ các ký tự `|`, `{`, `}` (giữ nội dung trong `{}`), gộp khoảng trắng, các cảnh nối bằng một dấu cách.
+- **Aligner khoảng lặng** (khi chưa có Whisper) chỉ ghép được theo từng đoạn nghỉ; nếu giọng ít đoạn hơn số cụm câu thì một số cụm phụ đề lệch cả giây trong cảnh đó. Whisper (M4) khắc phục.
 
 ### M2 · API
 - [ ] Models Pydantic + storage + toàn bộ endpoint mục 9
