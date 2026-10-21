@@ -138,6 +138,14 @@ flowchart LR
 | 21/10/2026 | Lời đọc **≤ 750 ký tự/video**; **cắt đoạn quảng cáo cuối file Vbee** (IMPLEMENT mục 4d) | Gói Vbee giới hạn 3.000 ký tự/ngày; không để người xem nghe quảng cáo |
 | 21/10/2026 | Mỗi video có **ảnh bìa** (9:16 cho TikTok/Reels, cắt 3:2 cho YouTube Shorts), làm cùng lúc với video (IMPLEMENT mục 4e) | Không phải làm bìa tay riêng cho từng video; dùng chung bộ chữ, logo HBT |
 | 21/10/2026 | Outro có **lời đọc cố định** `library/outro/voice.wav` (IMPLEMENT mục 4c); `.gitignore` có ngoại lệ cho clip outro và lời outro | Outro nghe rõ lời kêu gọi theo dõi; file nhỏ, dùng chung mọi video nên commit để sang máy khác vẫn có |
+| 21/10/2026 | **Cắt đuôi file giọng (silence aligner):** chỉ tự động khi (a) bỏ tối đa `số đoạn tiếng − số cụm`, (b) chi phí ghép giảm ≥ 1,0, (c) đoạn cuối ≥ 1,5 s; ngược lại giữ + cảnh báo "Có thể có đoạn thừa…"; thêm `voice.trim_end` (giây của file gốc) để tự cắt, cắt trước khi căn chữ (IMPLEMENT 4d) | Quy tắc phạt 0,5 từng bỏ nhầm câu kết thật "Comment cho mình biết!" của tập muỗi và cắt mất khỏi âm thanh |
+| 21/10/2026 | **Căn chữ khoảng lặng 2 cấp** (cảnh → cụm câu), hạ dần ngưỡng khoảng lặng trong từng cảnh, cấp 1 phạt ranh giới cảnh rơi vào khoảng nghỉ ngắn khi cảnh kết thúc bằng dấu cuối câu (IMPLEMENT 5.2) | Tập muỗi: 7 mốc cắt khớp bản đã đăng ≤ 4 ms, cụm cuối đúng ở 40,3 s; Whisper (M4) sẽ chính xác hơn |
+| 21/10/2026 | Sau khi cắt đuôi giọng: **đệm lại 1,6 s** và chuẩn hoá lại −14 LUFS trên phần giữ lại | Giữ nhịp dừng hình cuối như video thường |
+| 21/10/2026 | `settings.outro` chỉ bật/tắt; **clip outro cố định 4,0 s** (bỏ ý "3–5 giây" ở IMPLEMENT 4c) | Clip dựng sẵn một độ dài |
+| 21/10/2026 | `text.parse_voice` nhận diện nhóm `{...}` có khoảng trắng (`100{một trăm}`, `Comment{com men}`), có test | Reference tách bằng `split()` nên chẻ đôi nhóm và phụ đề hiện ký tự `{` |
+| 21/10/2026 | Tiếng "ting" outro dùng thông số bản đã chạy thật; mọi âm tổng hợp ghi ở IMPLEMENT 6.5 | Tránh mất thông số lần nữa |
+| 21/10/2026 | CI cài FFmpeg; test cần FFmpeg thất bại (không skip) khi `CI=true`, máy cá nhân thiếu FFmpeg thì skip | Không để test lặng lẽ không chạy |
+| 21/10/2026 | Khoá cache trong `build/` gồm hash mã nguồn pipeline (đổi thuật toán thì cache tự mất hiệu lực) | Cache cũ làm golden test ra mốc cắt sai |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -155,7 +163,7 @@ flowchart LR
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
 | M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
-| M1 | ☐ | Làm xong trên nhánh `feat/m1-render-engine`, chờ chủ dự án kiểm tra. Golden "muỗi": 50 fps, 1080×1920, −13,7 LUFS, có outro, dựng 145 s; aligner khoảng lặng nên một số cụm phụ đề lệch (Whisper ở M4). Quyết định kỹ thuật: IMPLEMENT mục 11 |
+| M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
 | M2 | ☐ | |
 | M3 | ☐ | |
 | M4 | ☐ | |

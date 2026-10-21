@@ -201,7 +201,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 ### 4c. Outro (tự động thêm cuối mỗi video)
 
 - Clip dựng sẵn: `brand/outro/outro_4s_50fps.mp4` (4,0 giây, 1080×1920, 50fps). Mã tạo: `reference/pipeline/outro_reference.py` (Pillow, nền đỏ chấm bi, logo bật nảy, dòng "Theo dõi để biết tuốt mọi chuyện!", nút THEO DÕI, 2 nút chữ TikTok và YouTube, tên kênh). **Không dùng logo TikTok/YouTube.**
-- Cài đặt: `settings.outro` (mặc định `true`), thời lượng 3–5 giây (mặc định 4,0).
+- Cài đặt: `settings.outro` (mặc định `true`) chỉ là bật/tắt; clip outro cố định **4,0 giây** (không có cài đặt thời lượng).
 - **Thời điểm hình** trong clip: nút THEO DÕI 1,15 s, nút TikTok 2,15 s, nút YouTube 2,55 s, tên kênh 2,85 s (đã căn theo lời đọc).
 - Ghép vào video: nối sau cảnh cuối bằng hoà trộn hình (`fade`) **0,5 s** kèm `acrossfade` **0,5 s** cho tiếng; không áp phụ đề karaoke lên outro. Nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**.
 - **Lời outro:** file `library/outro/voice.wav` đã có sẵn (44,1 kHz mono, dài 2,65 s, **−16,2 LUFS**, đỉnh **−1,5 dBFS**; độ lớn riêng của file này không được dùng để suy ra độ lớn outro), đọc câu `Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé!`. Dùng chung mọi video, không cần tạo lại. Thiếu file thì vẫn dựng được, outro chỉ còn tiếng "ting".
@@ -485,9 +485,11 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Sau khi cắt đuôi giọng (4d):** đệm lại `TAIL` = 1,6 s sau chữ cuối và chuẩn hoá lại −14 LUFS trên phần giọng giữ lại. Đặc tả chưa nói rõ đoạn đệm sau khi cắt.
 - **Phụ đề:** cụm không chồng lên cụm sau; cụm kết thúc đúng lúc cụm sau hiện (cách chữ đầu 0,05 s), thay vì kéo đến đầu chữ đầu cụm sau.
 - **Tiếng "ting" của outro:** dùng thông số bản đã chạy thật (mục 6.5), thay bản tạm của Claude Code.
-- **`settings.outro`** chỉ là bật/tắt; clip outro cố định 4,0 s (cài đặt thời lượng 3–5 s chưa làm).
+- **`settings.outro`** chỉ là bật/tắt; clip outro cố định 4,0 s (chủ dự án chốt 21/10/2026: bỏ ý "3–5 giây" ở mục 4c).
 - **Đếm 750 ký tự (4d):** bỏ các ký tự `|`, `{`, `}` (giữ nội dung trong `{}`), gộp khoảng trắng, các cảnh nối bằng một dấu cách.
 - **Aligner khoảng lặng** (khi chưa có Whisper) chỉ ghép được theo từng đoạn nghỉ; nếu giọng ít đoạn hơn số cụm câu thì một số cụm phụ đề lệch cả giây trong cảnh đó. Whisper (M4) khắc phục.
+- **Cache `build/`:** khoá gồm hash mã nguồn các module pipeline (`render.PIPELINE_VERSION`), nên sửa thuật toán thì cache cũ tự mất hiệu lực.
+- **Outro không có lời:** mix bắt đầu từ nền im lặng dài đúng 4,0 s (`amix duration=first`); cách `apad=whole_dur` đôi khi chỉ ra 2,05 s.
 
 ### M2 · API
 - [ ] Models Pydantic + storage + toàn bộ endpoint mục 9
