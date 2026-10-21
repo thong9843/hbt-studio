@@ -17,6 +17,7 @@
 - Gặp điểm đặc tả chưa nói tới: **hỏi chủ dự án**, không tự quyết. Quyết định xong thì ghi thêm vào `IMPLEMENT.md`.
 - Phải hỏi chủ dự án trước khi cài, gỡ hoặc nâng cấp bất kỳ phần mềm, driver hay gói nào ở cấp hệ thống (winget, choco, CUDA…). Gói Python trong `backend/.venv` và gói npm của dự án thì được tự cài.
 - Không tự push. Chỉ push khi chủ dự án yêu cầu.
+- Không commit khi lint hoặc test đang đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
 
 ## Lệnh hay dùng
 ```
