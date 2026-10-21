@@ -102,31 +102,50 @@ def test_scene_clip_full_quality_frame_count(tmp_path):
 
 # ---------------------------------------------------------------- dựng đầu-cuối (Xem nhanh)
 
-SCRIPT = ["Xin chào các bạn.", "Hôm nay mình học.", "Hẹn gặp lại nhé."]
-SPEECH = [("gap", 0.3), ("tone", 1.0), ("gap", 0.8), ("tone", 1.0), ("gap", 0.8), ("tone", 1.0)]
-BODY = 0.2 + 0.3 + 1.0 + 0.8 + 1.0 + 0.8 + 1.0 + 0.3 + 1.6  # giọng sau prep_voice (có đệm đuôi)
+SENTENCES = ["Xin chào các bạn.", "Hôm nay mình học.", "Hẹn gặp lại nhé."]
+COLORS = [(220, 90, 70), (60, 140, 160), (240, 200, 80), (120, 90, 200)]
 
 
-def make_project(tmp_path, *, tail=(), outro_voice=True, aligner="silence", **settings):
+def speech(n):
+    """Giọng giả: mỗi cảnh một câu dài 1,0 s, cách nhau 0,8 s."""
+    parts = [("gap", 0.3)]
+    for i in range(n):
+        parts += [("tone", 1.0)] + ([("gap", 0.8)] if i < n - 1 else [])
+    return parts
+
+
+def body_len(n, tail=0.0):
+    """Độ dài giọng sau prep_voice: trễ 0,2 s + lời + 0,3 s lặng + đệm 1,6 s (+ đuôi thừa)."""
+    return 0.2 + 0.3 + n * 1.0 + (n - 1) * 0.8 + tail + 0.3 + 1.6
+
+
+BODY = body_len(3)
+
+
+def make_project(
+    tmp_path, *, n=3, tail=(), outro_voice=True, aligner="silence", voice=None, **settings
+):
     pdir = tmp_path / "proj"
     (pdir / "images").mkdir(parents=True)
-    for i, color in enumerate([(220, 90, 70), (60, 140, 160), (240, 200, 80)], 1):
-        Image.new("RGB", (540, 960), color).save(pdir / "images" / f"s{i}.png")
-    write_wav(pdir / "voice.wav", [*SPEECH, *tail, ("gap", 0.3)])
+    for i in range(n):
+        Image.new("RGB", (540, 960), COLORS[i % len(COLORS)]).save(
+            pdir / "images" / f"s{i + 1}.png"
+        )
+    write_wav(pdir / "voice.wav", [*speech(n), *tail, ("gap", 0.3)])
     project = {
         "version": 1,
         "slug": "demo",
         "title": "Demo",
         "series": "Loạt thử",
-        "voice": "voice.wav",
+        "voice": voice or "voice.wav",
         "settings": {"aligner": aligner, **settings},
         "scenes": [
             {
-                "image": f"images/s{i}.png",
-                "voice": text,
-                "card": {"lines": [{"text": f"Cảnh {i}", "size": "l", "color": "accent"}]},
+                "image": f"images/s{i + 1}.png",
+                "voice": SENTENCES[i % len(SENTENCES)],
+                "card": {"lines": [{"text": f"Cảnh {i + 1}", "size": "l", "color": "accent"}]},
             }
-            for i, text in enumerate(SCRIPT, 1)
+            for i in range(n)
         ],
         "publish": {"hook": "Xin chào", "hashtags": ["demo"]},
     }
@@ -192,14 +211,49 @@ def test_render_without_outro_voice_still_builds(tmp_path):
 
 @needs_ffmpeg
 def test_render_trims_extra_tail_and_logs(tmp_path):
-    pdir, opts = make_project(tmp_path, tail=[("gap", 0.8), ("tone", 4.0)], outro=False)
+    # 8 cảnh + đuôi thừa 3 s: đủ điều kiện tự cắt (chi phí giảm ≥ 1,0, đoạn cuối ≥ 1,5 s)
+    pdir, opts = make_project(tmp_path, n=8, tail=[("gap", 0.8), ("tone", 3.0)], outro=False)
     res = render_project(pdir, opts)
     log = res.log.read_text(encoding="utf-8")
     assert "Đã cắt 1 đoạn thừa ở cuối file giọng" in log
-    # chữ cuối kết thúc ở 5,3 s (đã trễ 0,2 s) → giọng giữ đến +0,35 s, rồi đệm 1,6 s
-    assert res.duration == pytest.approx(
-        0.2 + 0.3 + 1.0 + 0.8 + 1.0 + 0.8 + 1.0 + 0.35 + 1.6, abs=0.15
+    # giọng giữ đến chữ cuối + 0,35 s rồi đệm lại 1,6 s
+    assert res.duration == pytest.approx(0.2 + 0.3 + 8 + 7 * 0.8 + 0.35 + 1.6, abs=0.15)
+    assert not res.warnings
+
+
+@needs_ffmpeg
+def test_short_script_with_tail_warns_and_keeps_audio(tmp_path):
+    pdir, opts = make_project(tmp_path, tail=[("gap", 0.8), ("tone", 3.0)], outro=False)
+    res = render_project(pdir, opts)
+    assert any(w.startswith("Có thể có đoạn thừa ở cuối file giọng") for w in res.warnings)
+    assert "Đã cắt" not in res.log.read_text(encoding="utf-8")
+    assert res.duration == pytest.approx(body_len(3, tail=3.8), abs=0.15)
+
+
+@needs_ffmpeg
+def test_voice_trim_end_cuts_before_alignment(tmp_path):
+    speech_end = 0.3 + 3 + 2 * 0.8  # giây trên file gốc
+    pdir, opts = make_project(
+        tmp_path,
+        tail=[("gap", 0.8), ("tone", 3.0)],
+        outro=False,
+        voice={"file": "voice.wav", "trim_end": speech_end + 0.4},
     )
+    res = render_project(pdir, opts)
+    assert "Cắt đuôi giọng theo voice.trim_end = 5,30 giây" in res.log.read_text(encoding="utf-8")
+    assert not res.warnings
+    assert res.duration == pytest.approx(speech_end + 0.4 + 0.2 + 1.6, abs=0.15)
+    # phụ đề cuối vẫn nằm đúng cuối lời (không bị kéo sang đoạn đã cắt)
+    last_cue = res.srt.read_text(encoding="utf-8").strip().splitlines()[-2]
+    end = last_cue.split(" --> ")[1]
+    assert end.startswith("00:00:05")
+
+
+@needs_ffmpeg
+def test_voice_trim_end_beyond_the_file_is_an_error(tmp_path):
+    pdir, opts = make_project(tmp_path, voice={"file": "voice.wav", "trim_end": 99})
+    with pytest.raises(RenderError, match="trim_end"):
+        render_project(pdir, opts)
 
 
 @needs_ffmpeg

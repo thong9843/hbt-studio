@@ -151,7 +151,8 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
 | `card.lines[].size` | `s`=50, `m`=62, `l`=84, `xl`=100 (≥70 dùng ExtraBold) |
 | `card.lines[].color` | `ink` (mặc định), `primary`, `accent`, hoặc mã hex |
 | `labels[]` | `{text, x, y, size, color, rot}` — chữ **gắn cố định vào ảnh** (di chuyển theo hiệu ứng phóng), dùng cho chữ trên băng rôn, số trên bục… |
-| `voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
+| `voice` (gốc project) | `"voice.mp3"` hoặc `{"file", "trim_end"}`: file giọng; `trim_end` = giây của file gốc để cắt đuôi (mục 4d.3) |
+| `scenes[].voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
 | `punch` | `true` = cảnh "cú lật": phóng giật + hiện thẻ nhanh + whoosh |
 | `caption_y` | `null` = tự động (1420; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
 | `music.start` | `null` = tự chọn đoạn hay; hoặc số giây |
@@ -219,10 +220,16 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 
 - **Giới hạn ký tự:** lời đọc mỗi video **≤ 750 ký tự** (tính cả dấu cách; bỏ ký hiệu `|` và `{}`), vì gói Vbee giới hạn 3.000 ký tự mỗi ngày. Hiển thị bộ đếm cạnh ô lời đọc, cảnh báo vàng khi > 750 (mức `warn`, vẫn cho xuất).
 - **Cắt quảng cáo cuối file Vbee:** file giọng từ Vbee có thể kèm câu giới thiệu hoặc quảng cáo ở cuối. Sau khi căn chữ (bước 3), mọi âm thanh nằm **sau chữ cuối của kịch bản** đều bị cắt:
-  1. Với Whisper: `voice_end = end(token cuối) + 0,35 s`, cắt đuôi, fade ra 80 ms.
-  2. Với chế độ khoảng lặng: khi ghép cụm câu ↔ đoạn tiếng nói, thử **bỏ 0–3 đoạn cuối**, chọn phương án chi phí thấp nhất (phạt 0,5 mỗi đoạn bỏ).
-  3. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
-  4. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
+  1. Với Whisper (M4): `voice_end = end(token cuối) + 0,35 s`, cắt đuôi, fade ra 80 ms.
+  2. Với chế độ khoảng lặng (chưa có Whisper), căn 2 cấp: cấp 1 ghép cảnh ↔ nhóm đoạn tiếng, cấp 2 ghép cụm câu ↔ đoạn tiếng trong từng cảnh (mục 5.2). Chỉ **tự động** bỏ đoạn cuối khi đủ **cả ba** điều kiện:
+     - điều kiện bảo vệ: tối đa `số đoạn tiếng − số cụm câu` đoạn cuối (và không quá 3);
+     - bỏ đoạn đó làm chi phí ghép **giảm từ 1,0 trở lên**;
+     - đoạn cuối dài **từ 1,5 giây**.
+
+     Ngược lại giữ nguyên và ghi cảnh báo `Có thể có đoạn thừa ở cuối file giọng (x,xx giây), chưa cắt` (nếu bỏ đoạn đó vẫn làm chi phí giảm). Kịch bản ngắn (khoảng 3 cảnh) thường không đạt ngưỡng 1,0 nên chỉ cảnh báo.
+  3. **Tự cắt tay bằng `voice.trim_end`:** trong `project.json`, `voice` có thể là `"voice.mp3"` hoặc `{"file": "voice.mp3", "trim_end": 41.5}`. `trim_end` là giây trên **file giọng gốc** (nghe file gốc để chọn điểm cắt). Có `trim_end` thì cắt **trước khi căn chữ** (để đoạn thừa không làm lệch căn), không chạy cắt tự động và không cần xác nhận, fade ra 80 ms, đệm lại 1,6 s. `trim_end` nằm sau hết file giọng thì báo lỗi.
+  4. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
+  5. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
 
 ### 4e. Ảnh bìa (thumbnail)
 
@@ -254,7 +261,12 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.2 Căn thời gian (`align.align`)
 1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
-2. **Dự phòng — khoảng lặng:** `align_silence` (quy hoạch động ghép cụm câu ↔ đoạn có tiếng). Dùng khi không cài Whisper hoặc `aligner="silence"`.
+2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
+   - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh. Thêm số hạng phạt: nếu cảnh kết thúc bằng dấu cuối câu (`.` `?` `!`) thì ranh giới cảnh phải rơi vào khoảng nghỉ dài (ngưỡng = 0,85 × phân vị 75 của các khoảng nghỉ trong chính file). Không có số hạng này thì ranh giới cảnh có thể trôi sang đoạn kế bên.
+   - Cấp 2: trong từng cảnh, ghép các cụm câu với các đoạn tiếng của cảnh đó bằng quy hoạch động của reference (`align_silence`).
+   - Nếu một cảnh có ít đoạn tiếng hơn số cụm câu, hạ dần ngưỡng khoảng lặng **chỉ trong phạm vi cảnh đó**: (0,25 s, −38 dB) → (0,18 s, −36 dB) → (0,12 s, −35 dB) → (0,08 s, −34 dB), dừng khi đủ đoạn. Nếu số đoạn toàn file ít hơn số cảnh thì hạ ngưỡng toàn cục.
+   - Nếu cả khi đó vẫn ít đoạn hơn cụm (hai cụm nói liền không có khoảng nghỉ), các cụm chia nhau đoạn theo trọng số, nên có thể lệch nửa giây trong cảnh đó; Whisper khắc phục.
+   - Quyết định bỏ đoạn thừa ở cuối file: mục 4d.2.
 3. Sau khi căn xong: giải phóng model Whisper khỏi VRAM.
 
 ### 5.3 Phụ đề karaoke (`captions.py`)
@@ -421,8 +433,11 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
     - Đoạn outro có tiếng, dài đúng 4,0 s, độ lớn −14 ±1 LUFS.
     - Thiếu `library/outro/voice.wav` thì vẫn dựng được (chỉ có tiếng "ting").
   - Mục 4d (lời đọc):
-    - File giọng giả có đoạn thừa 3 s sau câu cuối thì bị cắt và có ghi log.
-    - Không có đoạn thừa thì giữ nguyên.
+    - File giọng giả (8 cảnh) có đoạn thừa 3 s sau câu cuối thì bị cắt và có ghi log.
+    - Kịch bản ngắn (3 cảnh) có đoạn thừa 3 s: không cắt, chỉ cảnh báo.
+    - Không có đoạn thừa thì không bao giờ bị cắt.
+    - `voice.trim_end` cắt trước khi căn chữ; nằm sau hết file thì báo lỗi.
+    - Căn 2 cấp: cảnh có 5 cụm nhưng chỉ 3 đoạn tiếng rõ thì cụm cuối vẫn rơi đúng đoạn cuối.
     - Đoạn thừa trên 8 s thì dừng và hỏi.
     - Lint cảnh báo khi lời đọc có 751 ký tự, không cảnh báo khi 750.
   - `thumbnail` (mục 4e): khối chữ tiêu đề nằm trọn trong y=600..1320; logo và nhãn series nằm trong y=240..1680; đầu ra đúng kích thước 1080×1920 (`cover_9x16.jpg`) và 1080×720 (`youtube_3x2.jpg`).
@@ -454,7 +469,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Xong khi:** dựng được tập "muỗi" 50 fps, 1080×1920, −14 ±1 LUFS, phụ đề đúng chữ, có outro 4 giây, và đuôi giọng thừa (nếu có) bị cắt.
 
 **Quyết định kỹ thuật khi làm M1** (Claude Code ghi 21/10/2026; các mục đánh dấu ⚠ chờ chủ dự án duyệt):
-- ⚠ **Mục 4d.2 có điều kiện bảo vệ:** chỉ được bỏ tối đa `số đoạn tiếng − số cụm câu` đoạn cuối. Quy tắc phạt 0,5 đơn thuần trên tập "muỗi" (22 cụm, 20 đoạn) đã bỏ nhầm câu kết thật "Comment cho mình biết!" rồi cắt mất khỏi âm thanh.
+- **Mục 4d.2 có điều kiện bảo vệ** (chủ dự án duyệt 21/10/2026): tối đa `số đoạn tiếng − số cụm câu` đoạn cuối. Quy tắc phạt 0,5 đơn thuần trên tập "muỗi" (22 cụm, 20 đoạn) đã bỏ nhầm câu kết thật "Comment cho mình biết!" rồi cắt mất khỏi âm thanh. Đã siết thêm: xem 4d.2.
 - **`text.parse_voice` sửa so với reference:** nhóm `{...}` được giữ nguyên dù có khoảng trắng bên trong (`100{một trăm}`, `Comment{com men}`); reference dùng `split()` nên chẻ đôi nhóm này và phụ đề hiện ký tự `{`.
 - **Clip cảnh:** luồng ảnh thẻ chữ được ép chạy cùng fps của clip (`-framerate`). Mặc định 25 fps làm clip 1,0 s ở 50 fps chỉ có 49 khung. Hình ảnh không đổi.
 - **Sau khi cắt đuôi giọng (4d):** đệm lại `TAIL` = 1,6 s sau chữ cuối và chuẩn hoá lại −14 LUFS trên phần giọng giữ lại. Đặc tả chưa nói rõ đoạn đệm sau khi cắt.

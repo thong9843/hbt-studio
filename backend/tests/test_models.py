@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from hbt.models import Project, load_project
+from hbt.models import Project, Voice, load_project
 
 
 def scene(**kw):
@@ -111,3 +111,21 @@ def test_load_project_errors(tmp_path):
 def test_load_project_roundtrip(tmp_path):
     (tmp_path / "project.json").write_text(json.dumps(project()), encoding="utf-8")
     assert load_project(tmp_path).slug == "demo"
+
+
+def test_voice_accepts_string_or_object():
+    assert Project.model_validate(project()).voice == Voice(file="voice.mp3")
+    obj = Project.model_validate(project(voice={"file": "v.wav", "trim_end": 41.5}))
+    assert obj.voice.file == "v.wav" and obj.voice.trim_end == 41.5
+
+
+@pytest.mark.parametrize("trim_end", [0, -1])
+def test_voice_trim_end_must_be_positive(trim_end):
+    with pytest.raises(ValidationError):
+        Project.model_validate(project(voice={"file": "v.wav", "trim_end": trim_end}))
+
+
+def test_voice_serializes_back_to_a_plain_string_when_untrimmed():
+    assert Project.model_validate(project()).model_dump()["voice"] == "voice.mp3"
+    trimmed = Project.model_validate(project(voice={"file": "v.wav", "trim_end": 3.5}))
+    assert trimmed.model_dump()["voice"] == {"file": "v.wav", "trim_end": 3.5}

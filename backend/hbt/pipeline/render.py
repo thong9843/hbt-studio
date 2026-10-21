@@ -44,6 +44,10 @@ MAX_PARALLEL_CLIPS = 3
 ProgressFn = Callable[[float, str, str], None]
 
 
+def _sec(x: float) -> str:
+    return f"{x:.2f}".replace(".", ",")
+
+
 class RenderError(RuntimeError):
     """Lỗi dựng video có thông báo dành cho người dùng."""
 
@@ -391,7 +395,7 @@ def render_project(
     if opts.preview and opts.fps:
         rep.say("Chế độ Xem nhanh luôn dùng 30 fps, bỏ qua --fps")
 
-    voice_src = project_dir / project.voice
+    voice_src = project_dir / project.voice.file
     needed = [voice_src, *(project_dir / sc.image for sc in project.scenes)]
     music_src = None
     if project.music and project.music.file:
@@ -424,6 +428,29 @@ def render_project(
         cache.mark(voice_wav, key)
     prepped_total = media_duration(voice_wav)
 
+    # voice.trim_end: người dùng tự chọn điểm cắt (giây của file gốc); cắt TRƯỚC khi căn chữ để
+    # đoạn thừa không làm lệch căn (IMPLEMENT.md 4d.3)
+    manual_trim = project.voice.trim_end
+    voice_align = voice_wav
+    if manual_trim is not None:
+        voice_end = manual_trim + audio.VOICE_DELAY
+        content_end = prepped_total - audio.TAIL
+        if voice_end >= content_end:
+            raise RenderError(
+                f"voice.trim_end = {_sec(manual_trim)} giây nằm sau hết file giọng "
+                f"({_sec(content_end - audio.VOICE_DELAY)} giây)"
+            )
+        voice_align = build / "voice_cut.wav"
+        key = cache.digest("cut", voice_wav, round(voice_end, 3), PIPELINE_VERSION)
+        if not cache.is_fresh(voice_align, key):
+            audio.trim_voice_tail(voice_wav, voice_align, voice_end)
+            cache.mark(voice_align, key)
+        rep.say(
+            f"Cắt đuôi giọng theo voice.trim_end = {_sec(manual_trim)} giây "
+            f"(bỏ {_sec(content_end - voice_end)} giây)"
+        )
+        prepped_total = media_duration(voice_align)
+
     # ---- 3. Căn chữ (6–20)
     rep.at(6, "Căn chữ")
     tokens, scene_of = [], []
@@ -433,7 +460,7 @@ def render_project(
         scene_of += [si] * len(ts)
     timing_path = build / "timing.json"
     key = cache.digest(
-        "timing", voice_wav, [t["disp"] for t in tokens], project.settings.aligner, model_size,
+        "timing", voice_align, [t["disp"] for t in tokens], project.settings.aligner, model_size,
         PIPELINE_VERSION,
     )  # fmt: skip
     if cache.is_fresh(timing_path, key):
@@ -443,7 +470,7 @@ def render_project(
         rep.say(f"Mốc thời gian chữ: dùng bản đã có (aligner: {aligner})")
     else:
         times, aligner, dropped, tail_warning = run_alignment(
-            tokens, scene_of, str(voice_wav), prepped_total, project.settings.aligner,
+            tokens, scene_of, str(voice_align), prepped_total, project.settings.aligner,
             model_size, rep.say,
         )  # fmt: skip
         timing_path.write_text(
@@ -457,11 +484,14 @@ def render_project(
         warn(tail_warning)
     rep.say(f"Aligner đã dùng: {aligner}" + (f" (bỏ {dropped} đoạn cuối)" if dropped else ""))
 
-    # cắt đuôi giọng thừa (4d)
-    voice_final, trim = audio.trim_tail_if_needed(
-        voice_wav, times[-1][1], build / "voice_trimmed.wav", rep.say,
-        allow_long=opts.allow_long_trim,
-    )  # fmt: skip
+    # cắt đuôi giọng thừa (4d); đã cắt tay bằng voice.trim_end thì thôi
+    if manual_trim is None:
+        voice_final, trim = audio.trim_tail_if_needed(
+            voice_wav, times[-1][1], build / "voice_trimmed.wav", rep.say,
+            allow_long=opts.allow_long_trim,
+        )  # fmt: skip
+    else:
+        voice_final = voice_align
     total = media_duration(voice_final)
     rep.say(f"Phần có lời dài {total:.2f} giây")
 

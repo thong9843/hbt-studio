@@ -7,7 +7,14 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from hbt.config import ALLOWED_FPS, DEFAULT_FPS
 
@@ -83,6 +90,13 @@ class Scene(_Model):
         return v
 
 
+class Voice(_Model):
+    """File giọng đọc. `trim_end`: cắt đuôi file tại giây này của file GỐC (IMPLEMENT.md 4d.3)."""
+
+    file: str = Field(min_length=1)
+    trim_end: float | None = Field(default=None, gt=0)
+
+
 class Theme(_Model):
     primary: str = "#146268"
     accent: str = "#DE5C48"
@@ -139,12 +153,21 @@ class Project(_Model):
     title: str
     series: str = ""
     theme: Theme = Field(default_factory=Theme)
-    voice: str
+    voice: Voice
     music: Music | None = None
     settings: Settings = Field(default_factory=Settings)
     scenes: list[Scene] = Field(min_length=MIN_SCENES, max_length=MAX_SCENES)
     publish: Publish = Field(default_factory=Publish)
     thumbnail: Thumbnail | None = None
+
+    @field_validator("voice", mode="before")
+    @classmethod
+    def _voice_shorthand(cls, v):
+        return {"file": v} if isinstance(v, str) else v  # "voice": "voice.mp3" vẫn hợp lệ
+
+    @field_serializer("voice")
+    def _voice_out(self, v: Voice):
+        return v.file if v.trim_end is None else {"file": v.file, "trim_end": v.trim_end}
 
     @field_validator("slug")
     @classmethod
