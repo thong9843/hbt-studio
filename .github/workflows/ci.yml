@@ -33,6 +33,9 @@ jobs:
           pip install -e "backend[dev]"
           npm ci
 
+      - name: Diagnose ffmpeg (tạm thời)
+        run: python scripts/ci_diagnose_ffmpeg.py
+
       - name: Lint
         run: npm run lint
 

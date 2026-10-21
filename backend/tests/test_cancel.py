@@ -31,6 +31,17 @@ def ffmpeg_process_count() -> int:
     return int(out.strip() or 0)
 
 
+def describe_ffmpeg_processes() -> str:
+    """Danh sách tiến trình ffmpeg kèm trạng thái (Z = zombie), để chẩn đoán khi test fail."""
+    if sys.platform == "win32":
+        cmd = ["tasklist", "/FI", "IMAGENAME eq ffmpeg.exe"]
+    else:
+        cmd = ["ps", "-eo", "pid,ppid,stat,etime,args"]
+    out = subprocess.run(cmd, capture_output=True, text=True).stdout
+    lines = [x for x in out.splitlines() if "ffmpeg" in x.lower() or x.lstrip().startswith("PID")]
+    return "tiến trình ffmpeg còn sót:\n" + "\n".join(lines)
+
+
 def wait_until(predicate, timeout=10.0):
     end = time.time() + timeout
     while time.time() < end:
@@ -174,7 +185,7 @@ def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step):
     assert len(renders) == 1
     assert not (renders[0] / "meta.json").exists()
     assert not list(renders[0].glob("*.mp4")), "để lại video dang dở"
-    assert wait_until(lambda: ffmpeg_process_count() <= before, 10)
+    assert wait_until(lambda: ffmpeg_process_count() <= before, 10), describe_ffmpeg_processes()
 
 
 @needs_ffmpeg
