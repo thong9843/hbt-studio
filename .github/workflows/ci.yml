@@ -21,6 +21,12 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
       - name: Install
         run: |
           pip install -e "backend[dev]"
@@ -29,6 +35,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Không cần GPU hay FFmpeg: test /health tự giả lập môi trường.
+      # Không cần GPU. Test cần FFmpeg sẽ THẤT BẠI (không bỏ qua) nếu runner thiếu FFmpeg vì CI=true.
       - name: Test
         run: npm run test
