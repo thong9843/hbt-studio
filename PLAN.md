@@ -1,7 +1,7 @@
 # HBT Studio — Kế hoạch
 
 > Web app chạy **local** để sản xuất video ngắn cho kênh **Hay Biết Tuốt** (TikTok, YouTube Shorts, Facebook Reels).
-> Phiên bản kế hoạch: v1.2 · 21/10/2026 · Chủ dự án: Thong · Người code: Claude Code
+> Phiên bản kế hoạch: v1.4 · 21/10/2026 · Chủ dự án: Thong · Người code: Claude Code
 > File chi tiết kỹ thuật: [`IMPLEMENT.md`](IMPLEMENT.md) · Quy tắc cho Claude Code: [`CLAUDE.md`](CLAUDE.md)
 
 ---
@@ -136,6 +136,7 @@ flowchart LR
 | 21/10/2026 | **Mặc định 50fps** + easing + phóng nội bộ 3 lần + chuyển cảnh nhoè chuyển động + mã hoá chất lượng cao (IMPLEMENT mục 4b) | Chủ dự án so sánh thấy mượt hơn; chống mất nét khi nền tảng nén lại. Đã dựng lại 5 video cũ theo chuẩn này |
 | 21/10/2026 | Thêm **outro 4 giây** kêu gọi theo dõi TikTok + YouTube (IMPLEMENT mục 4c) | Tăng lượt theo dõi kênh; dùng chung mọi video |
 | 21/10/2026 | Lời đọc **≤ 750 ký tự/video**; **cắt đoạn quảng cáo cuối file Vbee** (IMPLEMENT mục 4d) | Gói Vbee giới hạn 3.000 ký tự/ngày; không để người xem nghe quảng cáo |
+| 21/10/2026 | Mỗi video có **ảnh bìa** (9:16 cho TikTok/Reels, cắt 3:2 cho YouTube Shorts), làm cùng lúc với video (IMPLEMENT mục 4e) | Không phải làm bìa tay riêng cho từng video; dùng chung bộ chữ, logo HBT |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |

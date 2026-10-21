@@ -133,6 +133,12 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
   "publish": {
     "hook": "Bạn có phải người \"được muỗi yêu\"? 🦟",
     "hashtags": ["visaovayta", "muoi", "khoahoc", "haybiettuot", "learnontiktok"]
+  },
+  "thumbnail": {
+    "scene": 1,
+    "lines": ["BẠN CÓ PHẢI", "NGƯỜI ĐƯỢC", "MUỖI YÊU?"],
+    "series": "VÌ SAO VẬY TA?",
+    "accent": "#FFD43B"
   }
 }
 ```
@@ -207,6 +213,24 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
   2. Với chế độ khoảng lặng: khi ghép cụm câu ↔ đoạn tiếng nói, thử **bỏ 0–3 đoạn cuối**, chọn phương án chi phí thấp nhất (phạt 0,5 mỗi đoạn bỏ).
   3. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
   4. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
+
+### 4e. Ảnh bìa (thumbnail)
+
+Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumbnail.py`). Mã tham khảo: `reference/pipeline/thumbnail_reference.py` (đối chiếu từng tham số; file đó ghi cứng đường dẫn font và logo nên không chạy trực tiếp).
+
+- **Đầu ra** (trong `renders/<job>/`):
+  - `cover_9x16.jpg`: 1080×1920, JPG chất lượng 93, sRGB, dưới 5 MB, dùng cho TikTok/Reels.
+  - `youtube_3x2.jpg`: 1080×720, là dải cắt giữa y=600..1320 của cùng ảnh, dùng cho YouTube Shorts.
+- **Dữ liệu** (`project.json` → `thumbnail`, mục 3.1): `scene` (cảnh làm nền, mặc định 1), `lines` (2–3 dòng tiêu đề), `series` (chữ trên nhãn series), `accent` (màu dòng cuối, mặc định `#FFD43B`).
+- **Nền:** ảnh của cảnh được chọn (`thumbnail.scene`), độ sáng ×0,82, bão hoà ×1,1, thêm dải tối mềm quanh y=960 (alpha tối đa 0,5).
+- **Tiêu đề:** 2–3 dòng IN HOA, căn giữa, font **Bricolage Grotesque** 800 (width 78).
+  - Font này (OFL) phải được thêm vào `backend/hbt/fonts/` kèm giấy phép. Khi chưa có thì dự phòng Be Vietnam Pro ExtraBold.
+  - Dòng lớn nhất cỡ tối đa 185 px và vừa trong 950 px. Dòng cuối (từ khoá) màu `accent` (mặc định vàng `#FFD43B`), lớn hơn ×1,12 (tối đa 205 px) nếu vẫn vừa 950 px.
+  - Tổng chiều cao khối chữ tối đa 610 px.
+  - Viền tối bằng 11% cỡ chữ, cộng bóng đổ lệch (10, 12).
+- **Vùng an toàn:** khối tiêu đề nằm trong y=600..1320 (vừa khung cắt 3:2 của YouTube Shorts). Nhãn series (cao 84 px, y=330) và logo HBT (rộng 300 px, y=1385) nằm trong y=240..1680 (vừa khung cắt 3:4 của lưới hồ sơ TikTok).
+- **Quy tắc chung:** chữ luôn vẽ bằng Pillow. Áp dụng lint từ nhạy cảm (mục 7) cho các dòng bìa.
+- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` thêm khối `[Thumbnail]`.
 
 **Vùng an toàn TikTok:** nội dung quan trọng (thẻ, phụ đề) trong khoảng y = 100…1500, tránh mép phải 120 px.
 
@@ -371,6 +395,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - `align_whisper`: test so khớp + nội suy bằng dữ liệu `heard` giả (không cần model).
   - `render` end-to-end ở chế độ preview với 3 ảnh màu + giọng giả: file ra đúng 540×960, 30 fps, có audio.
   - `lint`: bắt được "bia", không bắt nhầm "bìa".
+  - `thumbnail` (mục 4e): khối chữ tiêu đề nằm trọn trong y=600..1320; logo và nhãn series nằm trong y=240..1680; đầu ra đúng kích thước 1080×1920 (`cover_9x16.jpg`) và 1080×720 (`youtube_3x2.jpg`).
 - **Golden test thủ công (M1):** chủ dự án đặt bộ file tập "muỗi" vào `workspace/samples/muoi/`, chạy CLI, so với bản đã đăng.
 - **Vitest:** hàm tiện ích frontend (định dạng thời gian, gọi API).
 
@@ -415,6 +440,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] Lint nội dung + trang chỉnh danh sách từ
 - [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
 - [ ] `publish.txt` + nút sao chép
+- [ ] `thumbnail.py` (mục 4e)
 - **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
 
 ---
