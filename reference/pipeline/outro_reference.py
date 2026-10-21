@@ -53,10 +53,10 @@ for f in range(int(DUR*FPS)):
     s=ease_out_back((t-1.15)/0.5); pulse=1+0.035*math.sin(2*math.pi*max(t-1.7,0)/0.9) if t>1.7 else 1
     put(fr,btn_follow,W/2,1230,s*pulse,1.0)
     # 2 nút nền tảng lần lượt 1.45s, 1.65s
-    s=ease_out_back((t-1.45)/0.45); put(fr,btn_tt,W/2-190,1385,s,1.0)
-    s=ease_out_back((t-1.65)/0.45); put(fr,btn_yt,W/2+190,1385,s,1.0)
+    s=ease_out_back((t-2.15)/0.45); put(fr,btn_tt,W/2-190,1385,s,1.0)
+    s=ease_out_back((t-2.55)/0.45); put(fr,btn_yt,W/2+190,1385,s,1.0)
     # tên kênh 1.9s
-    p=ease_out((t-1.9)/0.4); put(fr,name,W/2,1505+(1-p)*20,1.0,p)
+    p=ease_out((t-2.85)/0.4); put(fr,name,W/2,1505+(1-p)*20,1.0,p)
     # mờ vào đầu, mờ ra cuối
     if t<0.12 or t>DUR-0.25:
         a=min(t/0.12,1) if t<0.12 else max((DUR-t)/0.25,0)

@@ -137,6 +137,7 @@ flowchart LR
 | 21/10/2026 | Thêm **outro 4 giây** kêu gọi theo dõi TikTok + YouTube (IMPLEMENT mục 4c) | Tăng lượt theo dõi kênh; dùng chung mọi video |
 | 21/10/2026 | Lời đọc **≤ 750 ký tự/video**; **cắt đoạn quảng cáo cuối file Vbee** (IMPLEMENT mục 4d) | Gói Vbee giới hạn 3.000 ký tự/ngày; không để người xem nghe quảng cáo |
 | 21/10/2026 | Mỗi video có **ảnh bìa** (9:16 cho TikTok/Reels, cắt 3:2 cho YouTube Shorts), làm cùng lúc với video (IMPLEMENT mục 4e) | Không phải làm bìa tay riêng cho từng video; dùng chung bộ chữ, logo HBT |
+| 21/10/2026 | Outro có **lời đọc cố định** `library/outro/voice.wav` (IMPLEMENT mục 4c); `.gitignore` có ngoại lệ cho clip outro và lời outro | Outro nghe rõ lời kêu gọi theo dõi; file nhỏ, dùng chung mọi video nên commit để sang máy khác vẫn có |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |

@@ -1,7 +1,7 @@
 # HBT Studio — Đặc tả triển khai (cho Claude Code)
 
 > Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `reference/pipeline/*.py` → `DESIGN.md`.
-> Phiên bản: v1.2 · 21/10/2026 (v1.1: thương hiệu HBT, ghim getdesign · v1.2: 50fps chất lượng cao, outro, giới hạn lời đọc, cắt quảng cáo Vbee).
+> Phiên bản: v1.4 · 21/10/2026 (v1.1 thương hiệu HBT; v1.2 50fps, outro, lời đọc 750 ký tự; v1.3 outro có lời; v1.4 ảnh bìa).
 > **Mục 4b–4d bên dưới GHI ĐÈ các tham số cũ ở mục 4** khi có mâu thuẫn.
 > Phạm vi file này: **Giai đoạn 1** (mốc M0–M4). Giai đoạn 2 chỉ định nghĩa interface ở mục 12.
 > Mọi tham số dựng video trong `reference/` **đã chạy thật trên 6 video**: giữ nguyên, trừ khi file này ghi khác.
@@ -201,8 +201,14 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 
 - Clip dựng sẵn: `brand/outro/outro_4s_50fps.mp4` (4,0 giây, 1080×1920, 50fps). Mã tạo: `reference/pipeline/outro_reference.py` (Pillow, nền đỏ chấm bi, logo bật nảy, dòng "Theo dõi để biết tuốt mọi chuyện!", nút THEO DÕI, 2 nút chữ TikTok và YouTube, tên kênh). **Không dùng logo TikTok/YouTube.**
 - Cài đặt: `settings.outro` (mặc định `true`), thời lượng 3–5 giây (mặc định 4,0).
-- Ghép: nối sau cảnh cuối bằng hoà trộn (`fade`) **0,5 s**; không áp phụ đề karaoke lên outro. Âm thanh: nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**, sau đó âm "ting" nhẹ 2 lần (tổng hợp bằng FFmpeg, như `synth_whoosh`) lúc logo hiện (0,15 s) và nút hiện (1,2 s), tổng độ lớn vẫn −14 LUFS.
-- **Lời outro (tuỳ chọn):** câu `Theo dõi Hay Biết Tuốt để biết tuốt mọi chuyện nhé!` (51 ký tự). Chủ dự án tạo file giọng một lần, đặt ở `library/outro/voice.wav`; nếu có thì trộn vào outro từ giây 0,3. Không cần tạo lại cho từng video.
+- **Thời điểm hình** trong clip: nút THEO DÕI 1,15 s, nút TikTok 2,15 s, nút YouTube 2,55 s, tên kênh 2,85 s (đã căn theo lời đọc).
+- Ghép vào video: nối sau cảnh cuối bằng hoà trộn hình (`fade`) **0,5 s** kèm `acrossfade` **0,5 s** cho tiếng; không áp phụ đề karaoke lên outro. Nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**.
+- **Lời outro:** file `library/outro/voice.wav` đã có sẵn (44,1 kHz mono, dài 2,65 s), đọc câu `Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé!`. Dùng chung mọi video, không cần tạo lại. Thiếu file thì vẫn dựng được, outro chỉ còn tiếng "ting".
+- **Âm thanh outro** (đã chạy thật):
+  - Giọng đặt trễ **0,5 s** (lời bắt đầu khoảng 0,6 s, kết thúc khoảng 3,0 s).
+  - Hai tiếng "ting" tổng hợp bằng FFmpeg (như `synth_whoosh`): `vol 0,22` tại **0,15 s** và `vol 0,18` tại **1,15 s**.
+  - Outro đạt **−14,0 LUFS**, đỉnh khoảng **−2 dBFS**. Giới hạn đỉnh dùng `alimiter=limit=0.89:level=0`; **không để `level` mặc định** vì filter sẽ tự nâng mức lên −13 LUFS.
+  - Mờ ra **0,3 s** cuối clip.
 - UI: công tắc **Thêm outro** trong tab Xuất video.
 
 ### 4d. Lời đọc Vbee
@@ -230,7 +236,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
   - Viền tối bằng 11% cỡ chữ, cộng bóng đổ lệch (10, 12).
 - **Vùng an toàn:** khối tiêu đề nằm trong y=600..1320 (vừa khung cắt 3:2 của YouTube Shorts). Nhãn series (cao 84 px, y=330) và logo HBT (rộng 300 px, y=1385) nằm trong y=240..1680 (vừa khung cắt 3:4 của lưới hồ sơ TikTok).
 - **Quy tắc chung:** chữ luôn vẽ bằng Pillow. Áp dụng lint từ nhạy cảm (mục 7) cho các dòng bìa.
-- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` thêm khối `[Thumbnail]`.
+- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` thêm khối `[Thumbnail]` gồm 3 dòng (mục 8): `Dòng chữ bìa: <các dòng cách nhau bằng dấu />`, `TikTok: cover_9x16.jpg`, `YouTube Shorts: youtube_3x2.jpg`.
 
 **Vùng an toàn TikTok:** nội dung quan trọng (thẻ, phụ đề) trong khoảng y = 100…1500, tránh mép phải 120 px.
 
@@ -315,6 +321,11 @@ Thêm vào lint: tổng ký tự lời đọc > 750 → `warn` (mục 4d); lời
 [YouTube Shorts]
 Title: {title} #shorts
 Description: {hook} Series "{series}". Nhạc: {music.credit}
+
+[Thumbnail]
+Dòng chữ bìa: {thumbnail.lines cách nhau bằng dấu /}
+TikTok: cover_9x16.jpg
+YouTube Shorts: youtube_3x2.jpg
 ```
 Hiện trong UI với nút **Sao chép** từng khối.
 
@@ -395,6 +406,21 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - `align_whisper`: test so khớp + nội suy bằng dữ liệu `heard` giả (không cần model).
   - `render` end-to-end ở chế độ preview với 3 ảnh màu + giọng giả: file ra đúng 540×960, 30 fps, có audio.
   - `lint`: bắt được "bia", không bắt nhầm "bìa".
+  - Mục 4b (chuyển động):
+    - Số khung hình của clip = `round(thời lượng × 50)`.
+    - `smoothstep(0) = 0`, `smoothstep(1) = 1` và đơn điệu tăng.
+    - Chuyển cảnh dài đúng 20 khung.
+    - ffprobe bản dựng ra 50 fps, 1080×1920.
+  - Mục 4c (outro):
+    - Tổng thời lượng = phần có lời + 4,0 − 0,5.
+    - `settings.outro = false` thì không có outro.
+    - Đoạn outro có tiếng, dài đúng 4,0 s, độ lớn −14 ±1 LUFS.
+    - Thiếu `library/outro/voice.wav` thì vẫn dựng được (chỉ có tiếng "ting").
+  - Mục 4d (lời đọc):
+    - File giọng giả có đoạn thừa 3 s sau câu cuối thì bị cắt và có ghi log.
+    - Không có đoạn thừa thì giữ nguyên.
+    - Đoạn thừa trên 8 s thì dừng và hỏi.
+    - Lint cảnh báo khi lời đọc có 751 ký tự, không cảnh báo khi 750.
   - `thumbnail` (mục 4e): khối chữ tiêu đề nằm trọn trong y=600..1320; logo và nhãn series nằm trong y=240..1680; đầu ra đúng kích thước 1080×1920 (`cover_9x16.jpg`) và 1080×720 (`youtube_3x2.jpg`).
 - **Golden test thủ công (M1):** chủ dự án đặt bộ file tập "muỗi" vào `workspace/samples/muoi/`, chạy CLI, so với bản đã đăng.
 - **Vitest:** hàm tiện ích frontend (định dạng thời gian, gọi API).
