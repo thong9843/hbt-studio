@@ -42,6 +42,10 @@ class BadRequest(StorageError):
     pass
 
 
+class Unprocessable(StorageError):
+    """Yêu cầu hợp lệ về cú pháp nhưng project chưa đủ điều kiện (ví dụ thiếu ảnh để dựng)."""
+
+
 def slugify(title: str) -> str:
     """Tiêu đề tiếng Việt → slug ASCII: 'Vì sao muỗi đốt?' → 'vi-sao-muoi-dot'."""
     s = title.replace("đ", "d").replace("Đ", "D")
