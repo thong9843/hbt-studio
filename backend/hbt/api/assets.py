@@ -48,7 +48,7 @@ def upload_asset(
     state: State,
     kind: Annotated[str, Form(description="image | voice | music")],
     file: Annotated[UploadFile, File()],
-    scene: Annotated[int | None, Form(description="số cảnh từ 0 (chỉ với ảnh)")] = None,
+    scene_index: Annotated[int | None, Form(description="chỉ số cảnh từ 0 (chỉ với ảnh)")] = None,
 ):
     if kind not in MAX_BYTES:
         raise BadRequest("`kind` phải là image, voice hoặc music")
@@ -57,7 +57,7 @@ def upload_asset(
         raise Conflict("Project đang được dựng, hãy chờ hoặc huỷ job trước khi thay file")
     tmp = save_upload(file, state.settings.workspace_dir / ".uploads", MAX_BYTES[kind])
     try:
-        rel, project = state.storage.save_asset(slug, kind, tmp, file.filename or "", scene)
+        rel, project = state.storage.save_asset(slug, kind, tmp, file.filename or "", scene_index)
     finally:
         tmp.unlink(missing_ok=True)  # đã được di chuyển thì không còn gì để xoá
     return {"kind": kind, "path": rel, "project": project}

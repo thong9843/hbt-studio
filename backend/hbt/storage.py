@@ -46,6 +46,19 @@ class Unprocessable(StorageError):
     """Yêu cầu hợp lệ về cú pháp nhưng project chưa đủ điều kiện (ví dụ thiếu ảnh để dựng)."""
 
 
+def scene_image_stem(scene_index: int) -> str:
+    """Chỉ số cảnh của API (từ 0) → tên file ảnh đánh số từ 1: 0 → 'scene-01'."""
+    return f"scene-{scene_index + 1:02d}"
+
+
+def scene_index_from_stem(stem: str) -> int:
+    """Chiều ngược lại của `scene_image_stem`: 'scene-03' → 2."""
+    m = re.fullmatch(r"scene-(\d{2,})", stem)
+    if not m or int(m.group(1)) < 1:
+        raise ValueError(f"Không phải tên ảnh cảnh: {stem!r}")
+    return int(m.group(1)) - 1
+
+
 def slugify(title: str) -> str:
     """Tiêu đề tiếng Việt → slug ASCII: 'Vì sao muỗi đốt?' → 'vi-sao-muoi-dot'."""
     s = title.replace("đ", "d").replace("Đ", "D")
@@ -207,21 +220,21 @@ class Storage:
 
     # ---------------------------------------------------------------- tài sản
     def save_asset(
-        self, slug: str, kind: str, src: Path, filename: str, scene: int | None = None
+        self, slug: str, kind: str, src: Path, filename: str, scene_index: int | None = None
     ) -> tuple[str, Project]:
         """Nhận file tải lên (`src` là file tạm), kiểm tra, đặt vào project và lưu project.json."""
         project = self.load(slug)
         folder = self.project_dir(slug)
         if kind == "image":
-            if scene is None or not 0 <= scene < len(project.scenes):
-                raise BadRequest(f"Cần `scene` từ 0 đến {len(project.scenes) - 1} cho ảnh")
+            if scene_index is None or not 0 <= scene_index < len(project.scenes):
+                raise BadRequest(f"Cần `scene_index` từ 0 đến {len(project.scenes) - 1} cho ảnh")
             ext = _image_extension(src)
-            stem = f"scene-{scene + 1:02d}"
+            stem = scene_image_stem(scene_index)
             rel = f"images/{stem}.{ext}"
             (folder / "images").mkdir(exist_ok=True)
             _remove_siblings(folder / "images", stem)
             shutil.move(src, folder / rel)
-            project.scenes[scene].image = rel
+            project.scenes[scene_index].image = rel
         elif kind in ("voice", "music"):
             ext = _audio_extension(src, filename)
             rel = f"{kind}.{ext}"

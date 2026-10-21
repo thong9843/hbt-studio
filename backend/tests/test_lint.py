@@ -46,7 +46,7 @@ def test_751_characters_warns():
     assert lint.voice_char_count(p) == 751
     (issue,) = lint.lint_project(p)
     assert issue.level == "warn" and issue.category == "voice_length"
-    assert "751" in issue.message and issue.scene is None
+    assert "751" in issue.message and issue.scene_index is None
 
 
 @pytest.mark.parametrize("n", [100, 749])

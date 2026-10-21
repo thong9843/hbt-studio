@@ -19,7 +19,7 @@ Level = Literal["info", "warn", "block"]
 
 @dataclass(frozen=True)
 class LintIssue:
-    scene: int | None  # chỉ số cảnh từ 0; None nếu áp dụng cho cả video
+    scene_index: int | None  # chỉ số cảnh từ 0; None nếu áp dụng cho cả video
     field: str
     category: str
     level: Level
@@ -44,7 +44,7 @@ def lint_project(project: Project) -> list[LintIssue]:
     if count > VOICE_CHAR_LIMIT:
         issues.append(
             LintIssue(
-                scene=None,
+                scene_index=None,
                 field="voice",
                 category="voice_length",
                 level="warn",

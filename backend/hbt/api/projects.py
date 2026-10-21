@@ -72,18 +72,20 @@ def duplicate_project(slug: str, state: State, body: ProjectDuplicate | None = N
     return state.storage.duplicate(slug, body.title if body else None)
 
 
-@router.get("/projects/{slug}/scenes/{index}/preview.png")
+@router.get("/projects/{slug}/scenes/{scene_index}/preview.png")
 def scene_preview(
     slug: str,
-    index: int,
+    scene_index: int,
     state: State,
     w: int | None = Query(default=None, ge=16, le=1080, description="chiều rộng thu nhỏ (px)"),
 ) -> Response:
-    """`index` tính từ 0 (cảnh đầu tiên là 0)."""
+    """`scene_index` tính từ 0 (cảnh đầu tiên là 0)."""
     project = state.storage.load(slug)
-    if not 0 <= index < len(project.scenes):
-        raise NotFound(f"Project '{slug}' không có cảnh {index} (0..{len(project.scenes) - 1})")
-    png = scene_preview_png(project, state.storage.project_dir(slug), index, state.brand_dir)
+    if not 0 <= scene_index < len(project.scenes):
+        raise NotFound(
+            f"Project '{slug}' không có scene_index {scene_index} (0..{len(project.scenes) - 1})"
+        )
+    png = scene_preview_png(project, state.storage.project_dir(slug), scene_index, state.brand_dir)
     if w and w < 1080:
         png = resize_png(png, w)
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})

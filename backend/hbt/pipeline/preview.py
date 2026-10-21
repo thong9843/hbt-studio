@@ -34,9 +34,11 @@ def first_phrase_words(voice: str) -> list[str]:
     return [tokens[i]["disp"] for i in ids]
 
 
-def scene_preview_png(project: Project, project_dir: Path, index: int, brand_dir: Path) -> bytes:
-    """PNG 1080×1920 của cảnh `index` (từ 0). Có cache trong `build/previews/`."""
-    scene = project.scenes[index]
+def scene_preview_png(
+    project: Project, project_dir: Path, scene_index: int, brand_dir: Path
+) -> bytes:
+    """PNG 1080×1920 của cảnh `scene_index` (từ 0). Có cache trong `build/previews/`."""
+    scene = project.scenes[scene_index]
     image = project_dir / scene.image if scene.image else None
     if image is None or not image.is_file():
         image = brand_dir / AVATAR
@@ -46,7 +48,7 @@ def scene_preview_png(project: Project, project_dir: Path, index: int, brand_dir
         "preview", image, scene.model_dump(exclude={"punch", "image"}), theme, words, _CODE
     )
     out_dir = project_dir / "build" / "previews"
-    out = out_dir / f"p{index}-{key[:16]}.png"
+    out = out_dir / f"p{scene_index}-{key[:16]}.png"
     if out.is_file():
         return out.read_bytes()
 

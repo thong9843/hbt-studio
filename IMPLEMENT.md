@@ -367,8 +367,8 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | POST | `/projects` | `{title, series?, scene_count=8}` → tạo project rỗng |
 | GET / PUT / DELETE | `/projects/{slug}` | đọc / lưu toàn bộ `project.json` / xoá |
 | POST | `/projects/{slug}/duplicate` | nhân bản làm template |
-| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene` (với ảnh) |
-| GET | `/projects/{slug}/scenes/{i}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
+| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
+| GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
@@ -386,10 +386,14 @@ Hiện trong UI với nút **Sao chép** từng khối.
 
 **Chi tiết triển khai M2** (Claude Code ghi 21/10/2026; các mục ⚠ chờ chủ dự án duyệt):
 - **Lỗi** luôn là `{"detail": "<chuỗi>"}`: 404 không có project/job/file, 409 xung đột (đang dựng, job đã kết thúc), 400 dữ liệu sai (file hỏng, `scene` sai), 413 file quá lớn, 422 body sai hoặc project chưa đủ để dựng.
-- ⚠ **Chỉ số cảnh tính từ 0** trong `scenes/{i}/preview.png` và trường `scene` khi tải ảnh. Tên file ảnh vẫn đánh số từ 1: cảnh 0 → `images/scene-01.<ext>`. (`thumbnail.scene` trong project.json vẫn tính từ 1 như mục 4e.)
+- **Đánh số cảnh** (chủ dự án chốt 21/10/2026): ba nơi, hai cách đếm, một quy tắc đổi.
+  - **API dùng chỉ số từ 0**, tham số tên `scene_index`: trong đường dẫn `/projects/{slug}/scenes/{scene_index}/preview.png`, trường form `scene_index` khi tải ảnh, và trường `scene_index` trong kết quả lint (`null` nếu áp dụng cho cả video). Chỉ số ngoài khoảng → 404 (preview) hoặc 400 (tải ảnh).
+  - **Người dùng thấy số thứ tự từ 1** ("Cảnh 1"), và trường `thumbnail.scene` trong project.json cũng tính từ 1 (mục 4e).
+  - **Tên file ảnh** do backend đặt, đánh số từ 1: `scene_index` 0 → `images/scene-01.<ext>` (`storage.scene_image_stem` / `scene_index_from_stem`, có test hai chiều).
+  - **Giao diện** hiển thị số từ 1 qua **một chỗ duy nhất**: `frontend/src/utils/scene.ts` (`sceneNumber`: từ 0 → từ 1; `sceneIndex`: từ 1 → từ 0). Không được tự cộng/trừ 1 ở nơi khác. Có test ép hai chiều đổi luôn ngược nhau (Vitest).
 - **Project nháp:** `POST /projects` tạo project chưa có ảnh/lời/giọng (mô hình cho phép rỗng). `POST /render` trả 422 kèm danh sách còn thiếu (`Project chưa đủ để dựng: Cảnh 1: chưa có ảnh; …`).
 - **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
-- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
+- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
 - **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
 - **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
 - **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).

@@ -181,7 +181,9 @@ def test_list_projects_empty_workspace(tmp_path):
 # ---------------------------------------------------------------- tài sản
 def test_image_upload_renames_and_updates_project(store, tmp_path):
     p = store.create("Muỗi")
-    rel, project = store.save_asset(p.slug, "image", png(tmp_path / "up.bin"), "a.png", scene=1)
+    rel, project = store.save_asset(
+        p.slug, "image", png(tmp_path / "up.bin"), "a.png", scene_index=1
+    )
     assert rel == "images/scene-02.png" and project.scenes[1].image == rel
     assert (store.project_dir(p.slug) / rel).is_file() and not (tmp_path / "up.bin").exists()
     assert store.load(p.slug).scenes[1].image == rel
@@ -190,28 +192,28 @@ def test_image_upload_renames_and_updates_project(store, tmp_path):
 def test_image_replacement_removes_the_old_file_with_another_extension(store, tmp_path):
     p = store.create("Muỗi")
     Image.new("RGB", (32, 32)).save(tmp_path / "a.jpg", format="JPEG")
-    store.save_asset(p.slug, "image", tmp_path / "a.jpg", "a.jpg", scene=0)
+    store.save_asset(p.slug, "image", tmp_path / "a.jpg", "a.jpg", scene_index=0)
     folder = store.project_dir(p.slug) / "images"
     assert (folder / "scene-01.jpg").is_file()
-    store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene=0)
+    store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene_index=0)
     assert [f.name for f in folder.iterdir()] == ["scene-01.png"]
 
 
-@pytest.mark.parametrize("scene", [None, -1, 3, 99])
-def test_image_upload_needs_a_valid_scene(store, tmp_path, scene):
+@pytest.mark.parametrize("scene_index", [None, -1, 3, 99])
+def test_image_upload_needs_a_valid_scene(store, tmp_path, scene_index):
     p = store.create("Muỗi", scene_count=3)
-    with pytest.raises(BadRequest, match="scene"):
-        store.save_asset(p.slug, "image", png(tmp_path / "x.png"), "x.png", scene=scene)
+    with pytest.raises(BadRequest, match="scene_index"):
+        store.save_asset(p.slug, "image", png(tmp_path / "x.png"), "x.png", scene_index=scene_index)
 
 
 def test_image_upload_rejects_non_images_and_other_formats(store, tmp_path):
     p = store.create("Muỗi")
     (tmp_path / "t.txt").write_text("không phải ảnh", encoding="utf-8")
     with pytest.raises(BadRequest, match="ảnh hợp lệ"):
-        store.save_asset(p.slug, "image", tmp_path / "t.txt", "t.png", scene=0)
+        store.save_asset(p.slug, "image", tmp_path / "t.txt", "t.png", scene_index=0)
     Image.new("RGB", (8, 8)).save(tmp_path / "g.gif", format="GIF")
     with pytest.raises(BadRequest, match="PNG, JPG hoặc WEBP"):
-        store.save_asset(p.slug, "image", tmp_path / "g.gif", "g.gif", scene=0)
+        store.save_asset(p.slug, "image", tmp_path / "g.gif", "g.gif", scene_index=0)
     assert (tmp_path / "t.txt").exists()  # file lỗi không bị di chuyển
 
 
@@ -318,3 +320,34 @@ def test_sensitive_words_default_and_user_override(tmp_path):
 def test_sensitive_words_validation(bad):
     with pytest.raises(ValueError):
         SensitiveWords.model_validate(bad)
+
+
+# ---------------------------------------------------------------- chỉ số cảnh <-> tên file ảnh
+from hbt.storage import scene_image_stem, scene_index_from_stem  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "index, stem", [(0, "scene-01"), (1, "scene-02"), (8, "scene-09"), (11, "scene-12")]
+)
+def test_scene_index_and_image_stem_convert_both_ways(index, stem):
+    assert scene_image_stem(index) == stem  # API từ 0 -> tên file từ 1
+    assert scene_index_from_stem(stem) == index  # và ngược lại
+
+
+def test_scene_stem_round_trip_for_every_valid_scene():
+    for index in range(12):
+        assert scene_index_from_stem(scene_image_stem(index)) == index
+
+
+@pytest.mark.parametrize("bad", ["scene-00", "scene-1", "scene_01", "scene-ab", "voice", ""])
+def test_scene_index_from_stem_rejects_other_names(bad):
+    with pytest.raises(ValueError):
+        scene_index_from_stem(bad)
+
+
+def test_scene_index_zero_is_stored_as_scene_01(store, tmp_path):
+    p = store.create("Muỗi")
+    rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "a.png"), "a.png", scene_index=0)
+    assert rel == "images/scene-01.png"
+    rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene_index=7)
+    assert rel == "images/scene-08.png"

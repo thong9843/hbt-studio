@@ -43,7 +43,7 @@ def png_bytes(color=(220, 90, 70), size=(540, 960)):
 def upload_image(client, slug, scene, color=(220, 90, 70)):
     return client.post(
         f"/api/projects/{slug}/assets",
-        data={"kind": "image", "scene": str(scene)},
+        data={"kind": "image", "scene_index": str(scene)},
         files={"file": ("a.png", png_bytes(color), "image/png")},
     )
 
@@ -211,16 +211,16 @@ def test_image_upload_updates_the_project(client):
     assert got.status_code == 200 and got.headers["content-type"] == "image/png"
 
 
-@pytest.mark.parametrize("scene", [None, 8, -1])
-def test_image_upload_needs_a_valid_scene(client, scene):
+@pytest.mark.parametrize("scene_index", [None, 8, -1])
+def test_image_upload_needs_a_valid_scene(client, scene_index):
     slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
-    data = {"kind": "image"} | ({} if scene is None else {"scene": str(scene)})
+    data = {"kind": "image"} | ({} if scene_index is None else {"scene_index": str(scene_index)})
     r = client.post(
         f"/api/projects/{slug}/assets",
         data=data,
         files={"file": ("a.png", png_bytes(), "image/png")},
     )
-    assert r.status_code == 400 and "scene" in r.json()["detail"]
+    assert r.status_code == 400 and "scene_index" in r.json()["detail"]
 
 
 def test_asset_rejections(client, monkeypatch):
@@ -228,14 +228,14 @@ def test_asset_rejections(client, monkeypatch):
     url = f"/api/projects/{slug}/assets"
     r = client.post(
         url,
-        data={"kind": "image", "scene": "0"},
+        data={"kind": "image", "scene_index": "0"},
         files={"file": ("a.png", b"khong phai anh", "image/png")},
     )
     assert r.status_code == 400 and "ảnh hợp lệ" in r.json()["detail"]
     r = client.post(url, data={"kind": "video"}, files={"file": ("a.mp4", b"x", "video/mp4")})
     assert r.status_code == 400 and "kind" in r.json()["detail"]
     r = client.post(
-        url, data={"kind": "image", "scene": "0"}, files={"file": ("a.png", b"", "image/png")}
+        url, data={"kind": "image", "scene_index": "0"}, files={"file": ("a.png", b"", "image/png")}
     )
     assert r.status_code == 400 and "rỗng" in r.json()["detail"]
     r = client.post(
@@ -523,3 +523,46 @@ def test_every_error_is_a_detail_string(client):
     ]
     for r in responses:
         assert r.status_code >= 400 and isinstance(r.json()["detail"], str)
+
+
+# ---------------------------------------------------------------- scene_index (từ 0)
+def test_old_scene_field_is_no_longer_accepted(client):
+    slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
+    r = client.post(
+        f"/api/projects/{slug}/assets",
+        data={"kind": "image", "scene": "0"},  # tên cũ
+        files={"file": ("a.png", png_bytes(), "image/png")},
+    )
+    assert r.status_code == 400 and "scene_index" in r.json()["detail"]
+
+
+def test_openapi_names_the_zero_based_index_scene_index(client):
+    spec = client.get("/openapi.json").json()
+    assert "/api/projects/{slug}/scenes/{scene_index}/preview.png" in spec["paths"]
+    body = next(
+        s["properties"]
+        for s in spec["components"]["schemas"].values()
+        if "kind" in s.get("properties", {})
+        and "file" in s["properties"]
+        and "title" not in s["properties"]
+    )
+    assert "scene_index" in body and "scene" not in body
+
+
+def test_scene_index_zero_is_the_first_scene_and_file_is_numbered_from_one(client):
+    slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
+    first = upload_image(client, slug, 0).json()
+    last = upload_image(client, slug, 7).json()
+    assert first["path"] == "images/scene-01.png" and first["project"]["scenes"][0]["image"]
+    assert last["path"] == "images/scene-08.png" and last["project"]["scenes"][7]["image"]
+    assert client.get(f"/api/projects/{slug}/scenes/0/preview.png").status_code == 200
+    assert client.get(f"/api/projects/{slug}/scenes/8/preview.png").status_code == 404
+
+
+def test_lint_issue_uses_scene_index(client):
+    slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
+    p = client.get(f"/api/projects/{slug}").json()
+    p["scenes"][0]["voice"] = "a" * 751
+    client.put(f"/api/projects/{slug}", json=p)
+    issue = client.post(f"/api/projects/{slug}/lint").json()["issues"][0]
+    assert "scene_index" in issue and issue["scene_index"] is None and "scene" not in issue
