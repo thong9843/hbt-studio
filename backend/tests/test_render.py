@@ -275,6 +275,19 @@ def test_missing_files_are_reported(tmp_path):
 
 
 @needs_ffmpeg
+def test_incomplete_draft_is_rejected_with_a_list(tmp_path):
+    pdir, opts = make_project(tmp_path)
+    data = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    data["scenes"][1]["image"] = ""
+    data["scenes"][2]["voice"] = ""
+    (pdir / "project.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(RenderError) as e:
+        render_project(pdir, opts)
+    assert "Project chưa đủ để dựng" in str(e.value)
+    assert "Cảnh 2: chưa có ảnh" in str(e.value) and "Cảnh 3: lời đọc đang trống" in str(e.value)
+
+
+@needs_ffmpeg
 def test_rejects_unsupported_fps(tmp_path):
     pdir, opts = make_project(tmp_path)
     opts.fps = 45

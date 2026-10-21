@@ -404,6 +404,10 @@ def render_project(
     if opts.preview and opts.fps:
         rep.say("Chế độ Xem nhanh luôn dùng 30 fps, bỏ qua --fps")
 
+    problems = project.render_problems()
+    if problems:
+        listing = "\n  - ".join(problems)
+        raise RenderError(f"Project chưa đủ để dựng:\n  - {listing}")
     voice_src = project_dir / project.voice.file
     needed = [voice_src, *(project_dir / sc.image for sc in project.scenes)]
     music_src = None

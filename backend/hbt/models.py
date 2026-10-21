@@ -75,19 +75,14 @@ class Label(_Model):
 
 
 class Scene(_Model):
-    image: str
+    # Bản nháp (project mới tạo) được phép chưa có ảnh / lời đọc; `Project.render_problems()` kiểm
+    # tra đủ chưa trước khi dựng.
+    image: str = ""
     card: Card = Field(default_factory=Card)
     labels: list[Label] = Field(default_factory=list)
-    voice: str = Field(min_length=1)
+    voice: str = ""
     punch: bool = False
     caption_y: int | None = None
-
-    @field_validator("voice")
-    @classmethod
-    def _voice(cls, v: str) -> str:
-        if not v.replace("|", " ").strip():
-            raise ValueError("Lời đọc của cảnh đang trống")
-        return v
 
 
 class Voice(_Model):
@@ -153,7 +148,7 @@ class Project(_Model):
     title: str
     series: str = ""
     theme: Theme = Field(default_factory=Theme)
-    voice: Voice
+    voice: Voice | None = None
     music: Music | None = None
     settings: Settings = Field(default_factory=Settings)
     scenes: list[Scene] = Field(min_length=MIN_SCENES, max_length=MAX_SCENES)
@@ -166,7 +161,9 @@ class Project(_Model):
         return {"file": v} if isinstance(v, str) else v  # "voice": "voice.mp3" vẫn hợp lệ
 
     @field_serializer("voice")
-    def _voice_out(self, v: Voice):
+    def _voice_out(self, v: Voice | None):
+        if v is None:
+            return None
         return v.file if v.trim_end is None else {"file": v.file, "trim_end": v.trim_end}
 
     @field_validator("slug")
@@ -181,6 +178,18 @@ class Project(_Model):
         if self.thumbnail and self.thumbnail.scene > len(self.scenes):
             raise ValueError("thumbnail.scene vượt quá số cảnh")
         return self
+
+    def render_problems(self) -> list[str]:
+        """Những thứ còn thiếu để dựng được video (rỗng nếu đủ)."""
+        problems = []
+        if self.voice is None or not self.voice.file:
+            problems.append("Chưa có file giọng đọc")
+        for i, scene in enumerate(self.scenes, 1):
+            if not scene.image:
+                problems.append(f"Cảnh {i}: chưa có ảnh")
+            if not re.sub(r"[|{}\s]", "", scene.voice):
+                problems.append(f"Cảnh {i}: lời đọc đang trống")
+        return problems
 
 
 def load_project(project_dir: Path | str) -> Project:
