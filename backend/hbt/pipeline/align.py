@@ -130,14 +130,20 @@ def speech_segments(wav, total):
     return segs
 
 
-def _align_silence_segments(tokens, segs):
-    """Quy hoạch động ghép cụm câu ↔ đoạn tiếng nói; trả về (chi phí, thời gian từng token)."""
+def split_phrases(tokens):
+    """Chia token thành cụm câu theo dấu câu (`phrase_end`); trả về danh sách chỉ số token."""
     phrases, cur = [], []
     for i, t in enumerate(tokens):
         cur.append(i)
         if t["phrase_end"] or i == len(tokens) - 1:
             phrases.append(cur)
             cur = []
+    return phrases
+
+
+def _align_silence_segments(tokens, segs):
+    """Quy hoạch động ghép cụm câu ↔ đoạn tiếng nói; trả về (chi phí, thời gian từng token)."""
+    phrases = split_phrases(tokens)
     pw = [sum(weight(tokens[i]) for i in p) for p in phrases]
     dur = [e - s for s, e in segs]
     rate = sum(pw) / sum(dur)
@@ -203,8 +209,13 @@ MAX_DROP = 3
 def align_silence_ex(tokens, wav, total, max_drop=MAX_DROP):
     """Như `align_silence` nhưng thử bỏ 0..max_drop đoạn cuối (phạt 0,5 mỗi đoạn bỏ).
 
+    Chỉ được bỏ tối đa `số đoạn − số cụm` đoạn: khi giọng có ít đoạn hơn số cụm câu thì không còn
+    đoạn "dư" nào để coi là quảng cáo. Điều kiện này bổ sung ngoài mục 4d.2: trên tập "muỗi"
+    (22 cụm, 20 đoạn) quy tắc phạt 0,5 đơn thuần bỏ nhầm câu kết thật "Comment cho mình biết!".
+
     Trả về (thời gian từng token, số đoạn cuối đã bỏ)."""
     segs = speech_segments(wav, total)
+    max_drop = min(max_drop, max(0, len(segs) - len(split_phrases(tokens))))
     best = None
     for drop in range(max_drop + 1):
         if drop >= len(segs):

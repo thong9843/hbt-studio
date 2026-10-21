@@ -57,6 +57,23 @@ def test_silence_ex_drops_trailing_extra_segment(tmp_path):
 
 
 @needs_ffmpeg
+def test_silence_ex_never_drops_when_segments_do_not_outnumber_phrases(tmp_path):
+    # 3 cụm nhưng giọng chỉ có 2 đoạn (hai cụm liền nhau không nghỉ): không có đoạn "dư" để bỏ,
+    # dù bỏ đoạn cuối có thể cho chi phí thấp hơn. Hồi quy từ tập "muỗi" (22 cụm / 20 đoạn).
+    wav = tmp_path / "v.wav"
+    total = write_wav(wav, [("gap", 0.3), ("tone", 2.9), ("gap", 0.7), ("tone", 1.2), ("gap", 0.5)])
+    tokens = parse_voice(SCRIPT)
+    res, dropped = align.align_silence_ex(tokens, str(wav), total)
+    assert dropped == 0
+    assert res[-1][1] == pytest.approx(0.3 + 2.9 + 0.7 + 1.2, abs=0.1)  # câu cuối vẫn còn
+
+
+def test_split_phrases_follows_punctuation():
+    tokens = parse_voice("Một hai. Ba bốn năm, sáu")
+    assert align.split_phrases(tokens) == [[0, 1], [2, 3, 4], [5]]
+
+
+@needs_ffmpeg
 def test_silence_ex_without_drop_matches_reference_behaviour(tmp_path):
     wav = tmp_path / "v.wav"
     total = write_wav(

@@ -10,6 +10,9 @@ import re
 import unicodedata
 
 TOKEN_RE = re.compile(r"^(?P<disp>.*?)\{(?P<spoken>[^}]*)\}(?P<punct>[,.!?:;…\"”’)]*)$")
+# Token: chuỗi ký tự không khoảng trắng, nhưng nhóm `{...}` được giữ nguyên kể cả khi có
+# khoảng trắng bên trong ("100{một trăm}"). Bản reference dùng `text.split()` nên chẻ đôi nhóm này.
+RAW_TOKEN_RE = re.compile(r"(?:\{[^}]*\}|\S)+")
 PHRASE_END = re.compile(r"[,.!?:;…]+[\"”’)]*$")
 SENTENCE_END = re.compile(r"[.!?…]+[\"”’)]*$")
 
@@ -26,7 +29,7 @@ def parse_voice(text: str):
     """Trả về danh sách token: dict(disp, syl=[âm tiết đã chuẩn hoá], chunk_break, phrase_end)."""
     tokens = []
     pending_break = False
-    for raw in text.split():
+    for raw in RAW_TOKEN_RE.findall(text):
         if raw == "|":
             pending_break = True
             continue
