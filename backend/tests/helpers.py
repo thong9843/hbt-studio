@@ -14,14 +14,14 @@ SR = 44100
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="cần FFmpeg trên PATH")
 
 
-def write_wav(path: Path, parts: list[tuple[str, float]], freq: float = 440.0) -> float:
-    """Ghi wav mono 44,1 kHz. `parts`: [("tone"|"gap", giây)]. Trả về tổng thời lượng."""
+def write_wav(path: Path, parts: list[tuple], freq: float = 440.0) -> float:
+    """Ghi wav mono 44,1 kHz. `parts`: [("tone"|"gap", giây[, biên độ])]. Trả về tổng thời lượng."""
     chunks = []
-    for kind, dur in parts:
+    for kind, dur, *rest in parts:
         n = int(round(dur * SR))
         if kind == "tone":
             t = np.arange(n) / SR
-            chunks.append(0.5 * np.sin(2 * np.pi * freq * t))
+            chunks.append((rest[0] if rest else 0.5) * np.sin(2 * np.pi * freq * t))
         else:
             chunks.append(np.zeros(n))
     data = np.concatenate(chunks)
