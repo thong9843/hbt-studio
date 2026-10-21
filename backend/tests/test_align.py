@@ -36,53 +36,9 @@ def test_align_silence_places_each_phrase_in_its_segment(tmp_path):
     assert all(flat[i][1] <= flat[i + 1][0] + 1e-6 for i in range(len(flat) - 1))
 
 
-@needs_ffmpeg
-def test_silence_ex_drops_trailing_extra_segment(tmp_path):
-    # Độ dài tiếng tỉ lệ với số âm tiết của từng cụm (như giọng thật).
-    base = [("gap", 0.3), ("tone", 1.13), ("gap", 0.7), ("tone", 1.75), ("gap", 0.7)]
-    base += [("tone", 1.21)]
-    tokens = parse_voice(SCRIPT)
-
-    clean = tmp_path / "clean.wav"
-    total = write_wav(clean, base + [("gap", 0.5)])
-    _, dropped = align.align_silence_ex(tokens, str(clean), total)
-    assert dropped == 0
-
-    # Đoạn thừa dài 4 s sau câu cuối (quảng cáo) → bị bỏ, câu cuối không bị kéo dài sang đó.
-    ad = tmp_path / "ad.wav"
-    total = write_wav(ad, base + [("gap", 0.8), ("tone", 4.0), ("gap", 0.5)])
-    res, dropped = align.align_silence_ex(tokens, str(ad), total)
-    assert dropped == 1
-    assert res[-1][1] == pytest.approx(0.3 + 1.13 + 0.7 + 1.75 + 0.7 + 1.21, abs=0.1)
-
-
-@needs_ffmpeg
-def test_silence_ex_never_drops_when_segments_do_not_outnumber_phrases(tmp_path):
-    # 3 cụm nhưng giọng chỉ có 2 đoạn (hai cụm liền nhau không nghỉ): không có đoạn "dư" để bỏ,
-    # dù bỏ đoạn cuối có thể cho chi phí thấp hơn. Hồi quy từ tập "muỗi" (22 cụm / 20 đoạn).
-    wav = tmp_path / "v.wav"
-    total = write_wav(wav, [("gap", 0.3), ("tone", 2.9), ("gap", 0.7), ("tone", 1.2), ("gap", 0.5)])
-    tokens = parse_voice(SCRIPT)
-    res, dropped = align.align_silence_ex(tokens, str(wav), total)
-    assert dropped == 0
-    assert res[-1][1] == pytest.approx(0.3 + 2.9 + 0.7 + 1.2, abs=0.1)  # câu cuối vẫn còn
-
-
 def test_split_phrases_follows_punctuation():
     tokens = parse_voice("Một hai. Ba bốn năm, sáu")
     assert align.split_phrases(tokens) == [[0, 1], [2, 3, 4], [5]]
-
-
-@needs_ffmpeg
-def test_silence_ex_without_drop_matches_reference_behaviour(tmp_path):
-    wav = tmp_path / "v.wav"
-    total = write_wav(
-        wav, [("gap", 0.3), ("tone", 1.2), ("gap", 0.7), ("tone", 2.4), ("gap", 0.7), ("tone", 1.0)]
-    )
-    tokens = parse_voice(SCRIPT)
-    assert align.align_silence_ex(tokens, str(wav), total, max_drop=0)[0] == align.align_silence(
-        tokens, str(wav), total
-    )
 
 
 def test_align_whisper_matches_and_interpolates(monkeypatch):

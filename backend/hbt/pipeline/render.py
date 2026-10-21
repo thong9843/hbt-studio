@@ -24,11 +24,12 @@ from hbt.config import ALLOWED_FPS, BRAND_DIR, load_settings
 from hbt.models import load_project
 
 from . import audio, cache
-from .align import align_silence_ex, align_whisper
+from .align import align_whisper
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
 from .lint import lint_project
 from .publish import build_publish_text
+from .scene_align import AlignError, align_scenes
 from .text import parse_voice
 from .visual import build_scene_layers
 
@@ -37,7 +38,7 @@ SUBSAMPLES = 6  # mẫu con mỗi khung trong nửa chu kỳ khung (màn trập 
 INTERNAL_SCALE = (3240, 5760)  # ảnh phóng nội bộ gấp 3 lần 1080×1920
 CARD_FADE = 0.35
 OUTRO_FILE = "outro_4s_50fps.mp4"
-PIPELINE_VERSION = 1  # tăng khi đổi thuật toán để vô hiệu cache cũ
+PIPELINE_VERSION = 2  # tăng khi đổi thuật toán để vô hiệu cache cũ
 MAX_PARALLEL_CLIPS = 3
 
 ProgressFn = Callable[[float, str, str], None]
@@ -304,13 +305,13 @@ def compose(
 
 
 # ---------------------------------------------------------------- căn chữ
-def run_alignment(tokens, wav, total, method, model_size, log):
-    """Trả về (thời gian từng token, phương pháp đã dùng, số đoạn cuối đã bỏ)."""
+def run_alignment(tokens, scene_of, wav, total, method, model_size, log):
+    """Trả về (thời gian token, phương pháp đã dùng, số đoạn cuối bỏ, cảnh báo hoặc None)."""
     if method in ("auto", "whisper"):
         try:
             times = align_whisper(tokens, wav, model_size)
             log("Căn phụ đề bằng Whisper: OK")
-            return times, "whisper", 0
+            return times, "whisper", 0, None
         except Exception as e:  # noqa: BLE001
             if method == "whisper":
                 raise
@@ -318,8 +319,13 @@ def run_alignment(tokens, wav, total, method, model_size, log):
                 f"Không dùng được Whisper ({e.__class__.__name__}), "
                 "chuyển sang căn theo khoảng lặng"
             )
-    times, dropped = align_silence_ex(tokens, wav, total)
-    return times, "silence", dropped
+    try:
+        res = align_scenes(tokens, scene_of, wav, total)
+    except AlignError as e:
+        raise RenderError(str(e)) from e
+    if res.refined_scenes:
+        log("Hạ ngưỡng khoảng lặng ở cảnh " + ", ".join(str(k + 1) for k in res.refined_scenes))
+    return res.times, "silence", res.dropped, res.warning
 
 
 # ---------------------------------------------------------------- điều phối
@@ -433,16 +439,22 @@ def render_project(
     if cache.is_fresh(timing_path, key):
         data = json.loads(timing_path.read_text(encoding="utf-8"))
         times = [tuple(x) for x in data["times"]]
-        aligner, dropped = data["aligner"], data["dropped"]
+        aligner, dropped, tail_warning = data["aligner"], data["dropped"], data["warning"]
         rep.say(f"Mốc thời gian chữ: dùng bản đã có (aligner: {aligner})")
     else:
-        times, aligner, dropped = run_alignment(
-            tokens, str(voice_wav), prepped_total, project.settings.aligner, model_size, rep.say
-        )
+        times, aligner, dropped, tail_warning = run_alignment(
+            tokens, scene_of, str(voice_wav), prepped_total, project.settings.aligner,
+            model_size, rep.say,
+        )  # fmt: skip
         timing_path.write_text(
-            json.dumps({"aligner": aligner, "dropped": dropped, "times": times}), encoding="utf-8"
+            json.dumps(
+                {"aligner": aligner, "dropped": dropped, "warning": tail_warning, "times": times}
+            ),
+            encoding="utf-8",
         )
         cache.mark(timing_path, key)
+    if tail_warning:
+        warn(tail_warning)
     rep.say(f"Aligner đã dùng: {aligner}" + (f" (bỏ {dropped} đoạn cuối)" if dropped else ""))
 
     # cắt đuôi giọng thừa (4d)

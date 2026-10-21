@@ -119,9 +119,9 @@ def silences(wav, min_dur=0.25, noise="-38dB"):
     return list(zip(v[0::2], v[1::2], strict=False))
 
 
-def speech_segments(wav, total):
+def speech_segments(wav, total, min_dur=0.25, noise="-38dB"):
     segs, prev = [], 0.0
-    for s, e in silences(wav):
+    for s, e in silences(wav, min_dur, noise):
         if s - prev > 0.05:
             segs.append((prev, s))
         prev = e
@@ -141,8 +141,10 @@ def split_phrases(tokens):
     return phrases
 
 
-def _align_silence_segments(tokens, segs):
-    """Quy hoạch động ghép cụm câu ↔ đoạn tiếng nói; trả về (chi phí, thời gian từng token)."""
+def _align_silence_segments(tokens, segs, max_group=6):
+    """Quy hoạch động ghép cụm câu ↔ đoạn tiếng nói; trả về (chi phí, thời gian từng token).
+
+    `max_group`: số cụm (hoặc số đoạn) tối đa gộp vào một nhóm; reference dùng 6."""
     phrases = split_phrases(tokens)
     pw = [sum(weight(tokens[i]) for i in p) for p in phrases]
     dur = [e - s for s, e in segs]
@@ -154,8 +156,8 @@ def _align_silence_segments(tokens, segs):
             if (i, j) not in best:
                 continue
             c0 = best[(i, j)][0]
-            for a in range(1, min(P - i, 6) + 1):
-                for b in range(1, min(S - j, 6) + 1):
+            for a in range(1, min(P - i, max_group) + 1):
+                for b in range(1, min(S - j, max_group) + 1):
                     if a > 1 and b > 1:
                         continue
                     c = (
@@ -199,37 +201,6 @@ def _align_silence_segments(tokens, segs):
 def align_silence(tokens, wav, total):
     """Ghép từng cụm câu (tách theo dấu câu) với các đoạn có tiếng nói bằng quy hoạch động."""
     return _align_silence_segments(tokens, speech_segments(wav, total))[1]
-
-
-# IMPLEMENT.md 4d.2: file giọng Vbee có thể kèm quảng cáo ở cuối → thử bỏ 0–3 đoạn cuối.
-DROP_PENALTY = 0.5
-MAX_DROP = 3
-
-
-def align_silence_ex(tokens, wav, total, max_drop=MAX_DROP):
-    """Như `align_silence` nhưng thử bỏ 0..max_drop đoạn cuối (phạt 0,5 mỗi đoạn bỏ).
-
-    Chỉ được bỏ tối đa `số đoạn − số cụm` đoạn: khi giọng có ít đoạn hơn số cụm câu thì không còn
-    đoạn "dư" nào để coi là quảng cáo. Điều kiện này bổ sung ngoài mục 4d.2: trên tập "muỗi"
-    (22 cụm, 20 đoạn) quy tắc phạt 0,5 đơn thuần bỏ nhầm câu kết thật "Comment cho mình biết!".
-
-    Trả về (thời gian từng token, số đoạn cuối đã bỏ)."""
-    segs = speech_segments(wav, total)
-    max_drop = min(max_drop, max(0, len(segs) - len(split_phrases(tokens))))
-    best = None
-    for drop in range(max_drop + 1):
-        if drop >= len(segs):
-            break
-        try:
-            cost, res = _align_silence_segments(tokens, segs[: len(segs) - drop])
-        except (RuntimeError, ZeroDivisionError):
-            continue
-        cost += DROP_PENALTY * drop
-        if best is None or cost < best[0]:
-            best = (cost, res, drop)
-    if best is None:
-        raise RuntimeError("Không ghép được lời đọc với giọng nói, hãy kiểm tra kịch bản")
-    return best[1], best[2]
 
 
 def align(tokens, wav, total, method="auto", model_size="large-v3", log=print):
