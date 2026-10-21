@@ -26,6 +26,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
+          echo "::notice title=Môi trường CI::$(ffmpeg -version | head -1) | $(python --version) | $(. /etc/os-release && echo "$PRETTY_NAME")"
 
       - name: Install
         run: |
@@ -38,3 +39,10 @@ jobs:
       # Không cần GPU. Test cần FFmpeg sẽ THẤT BẠI (không bỏ qua) nếu runner thiếu FFmpeg vì CI=true.
       - name: Test
         run: npm run test
+        env:
+          PYTEST_ADDOPTS: --junitxml=pytest-report.xml
+
+      # Nhật ký job cần quyền admin để tải; chú thích thì đọc được qua API công khai.
+      - name: Show failed tests as annotations
+        if: failure()
+        run: python scripts/ci_annotate.py pytest-report.xml
