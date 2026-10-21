@@ -364,6 +364,7 @@ def render_project(
     brand_dir = opts.brand_dir or BRAND_DIR
     model_size = opts.whisper_model or settings.whisper_model
 
+    project = load_project(project_dir)  # lỗi đường dẫn/JSON thì dừng trước khi tạo thư mục nào
     job_id = time.strftime("%Y%m%d-%H%M%S") + ("-preview" if opts.preview else "")
     job_dir = project_dir / "renders" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -376,7 +377,6 @@ def render_project(
 
     # ---- 1. Kiểm tra (0–3)
     rep.at(0, "Kiểm tra")
-    project = load_project(project_dir)
     fps = opts.fps or project.settings.fps
     if fps not in ALLOWED_FPS:
         raise RenderError(f"fps phải là một trong {ALLOWED_FPS}, nhận {fps}")
