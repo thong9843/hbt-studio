@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from hbt.storage import AUDIO_EXTENSIONS, BadRequest, _audio_extension, slugify
 
@@ -42,6 +42,11 @@ class MusicLibrary:
 
     def add(self, src: Path, filename: str, meta: dict) -> MusicEntry:
         """Thêm một bài: kiểm tra âm thanh, đặt file vào thư viện và ghi vào index."""
+        try:  # kiểm tra thông tin ghi công trước khi động tới file
+            MusicEntry.model_validate({**meta, "file": "x"})
+        except ValidationError as e:
+            detail = "; ".join(f"{'.'.join(map(str, x['loc']))}: {x['msg']}" for x in e.errors())
+            raise BadRequest(f"Thông tin bài nhạc không hợp lệ: {detail}") from e
         ext = _audio_extension(src, filename)
         entries = self.list()
         stem = slugify(meta.get("title", "")) or "bai-nhac"

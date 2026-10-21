@@ -1,0 +1,22 @@
+"""Trạng thái dùng chung của app, gắn vào `app.state.hbt`."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from hbt.config import Settings
+from hbt.jobs import JobManager
+from hbt.library import MusicLibrary
+from hbt.sensitive import SensitiveStore
+from hbt.storage import Storage
+
+
+@dataclass
+class AppState:
+    settings: Settings
+    storage: Storage
+    jobs: JobManager
+    library: MusicLibrary
+    sensitive: SensitiveStore
+    brand_dir: Path

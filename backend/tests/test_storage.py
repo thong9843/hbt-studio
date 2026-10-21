@@ -284,7 +284,7 @@ def test_music_library_add_and_list(tmp_path):
 def test_music_library_requires_credit_fields(tmp_path):
     lib = MusicLibrary(tmp_path / "library")
     write_wav(tmp_path / "a.tmp", [("tone", 1.0)])
-    with pytest.raises(ValueError):
+    with pytest.raises(BadRequest, match="artist"):
         lib.add(tmp_path / "a.tmp", "x.wav", {"title": "Chỉ có tên"})
     assert lib.list() == [] and (tmp_path / "a.tmp").exists()
 
