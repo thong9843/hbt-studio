@@ -130,9 +130,8 @@ def speech_segments(wav, total):
     return segs
 
 
-def align_silence(tokens, wav, total):
-    """Ghép từng cụm câu (tách theo dấu câu) với các đoạn có tiếng nói bằng quy hoạch động."""
-    segs = speech_segments(wav, total)
+def _align_silence_segments(tokens, segs):
+    """Quy hoạch động ghép cụm câu ↔ đoạn tiếng nói; trả về (chi phí, thời gian từng token)."""
     phrases, cur = [], []
     for i, t in enumerate(tokens):
         cur.append(i)
@@ -188,7 +187,38 @@ def align_silence(tokens, wav, total):
             d = total_sp * w / sum(ws)
             res[t] = (at(x), at(x + d))
             x += d
-    return res
+    return best[(P, S)][0], res
+
+
+def align_silence(tokens, wav, total):
+    """Ghép từng cụm câu (tách theo dấu câu) với các đoạn có tiếng nói bằng quy hoạch động."""
+    return _align_silence_segments(tokens, speech_segments(wav, total))[1]
+
+
+# IMPLEMENT.md 4d.2: file giọng Vbee có thể kèm quảng cáo ở cuối → thử bỏ 0–3 đoạn cuối.
+DROP_PENALTY = 0.5
+MAX_DROP = 3
+
+
+def align_silence_ex(tokens, wav, total, max_drop=MAX_DROP):
+    """Như `align_silence` nhưng thử bỏ 0..max_drop đoạn cuối (phạt 0,5 mỗi đoạn bỏ).
+
+    Trả về (thời gian từng token, số đoạn cuối đã bỏ)."""
+    segs = speech_segments(wav, total)
+    best = None
+    for drop in range(max_drop + 1):
+        if drop >= len(segs):
+            break
+        try:
+            cost, res = _align_silence_segments(tokens, segs[: len(segs) - drop])
+        except (RuntimeError, ZeroDivisionError):
+            continue
+        cost += DROP_PENALTY * drop
+        if best is None or cost < best[0]:
+            best = (cost, res, drop)
+    if best is None:
+        raise RuntimeError("Không ghép được lời đọc với giọng nói, hãy kiểm tra kịch bản")
+    return best[1], best[2]
 
 
 def align(tokens, wav, total, method="auto", model_size="large-v3", log=print):
