@@ -147,10 +147,15 @@ flowchart LR
 | 21/10/2026 | CI cài FFmpeg; test cần FFmpeg thất bại (không skip) khi `CI=true`, máy cá nhân thiếu FFmpeg thì skip | Không để test lặng lẽ không chạy |
 | 21/10/2026 | Khoá cache trong `build/` gồm hash mã nguồn pipeline (đổi thuật toán thì cache tự mất hiệu lực) | Cache cũ làm golden test ra mốc cắt sai |
 | 21/10/2026 | M2: project nháp được phép chưa có ảnh/lời/giọng; thiếu gì thì `POST /render` trả 422 kèm danh sách (IMPLEMENT mục 9) | `POST /projects` phải tạo được project rỗng |
-| 21/10/2026 | M2: chỉ số cảnh trong API tính từ 0 (tên file ảnh vẫn `scene-01…`) ⚠ chờ duyệt | Khớp chỉ số mảng `scenes`; `thumbnail.scene` vẫn tính từ 1 |
+| 21/10/2026 | M2: chỉ số cảnh trong API tính từ 0 (tên file ảnh vẫn `scene-01…`) | Khớp chỉ số mảng `scenes`; `thumbnail.scene` vẫn tính từ 1 |
 | 21/10/2026 | M2: job nằm trong bộ nhớ, một luồng dựng; huỷ kill ffmpeg và không để lại video dở; SSE gồm `progress` và `end` | Một người dùng, một máy; file xuất vẫn còn trên đĩa sau khi khởi động lại |
-| 21/10/2026 | M2: nhân bản project không chép `build/` và `renders/`; bản sao tên "… (bản sao)" ⚠ chờ duyệt | "Làm template" cần cấu trúc và media, không cần file trung gian |
+| 21/10/2026 | M2: nhân bản project không chép `build/` và `renders/`; bản sao tên "… (bản sao)" | "Làm template" cần cấu trúc và media, không cần file trung gian |
 | 21/10/2026 | M2: danh sách từ nhạy cảm do người dùng sửa lưu ở `workspace/settings/`, bản mặc định nằm trên Git | Không sửa file đang được Git theo dõi |
+| 21/10/2026 | Số hạng phạt khoảng nghỉ ở cấp 1 của căn chữ khoảng lặng được duyệt (điểm lệch khỏi mô tả ban đầu, IMPLEMENT 5.2); có test cảnh kết thúc bằng dấu cuối câu | Không có nó thì mốc cắt cảnh 6→7 và 7→8 của tập muỗi trôi sang đoạn kế bên |
+| 21/10/2026 | API đặt tên chỉ số cảnh từ 0 là `scene_index` (preview, tải ảnh, lint); người dùng thấy số từ 1 qua một hàm duy nhất `frontend/src/utils/scene.ts`; tên file ảnh `scene-01…`; có test ép hai chiều đổi (IMPLEMENT 9) | Tránh lệch một đơn vị giữa API, giao diện và tên file |
+| 21/10/2026 | Thiếu FFmpeg: `/health` báo thiếu, `POST /render` và tải âm thanh trả 503 kèm lời nhắn cài, không tạo job, server không sập (IMPLEMENT 9) | Lỗi rõ ràng thay vì job treo hoặc lỗi 500 |
+| 21/10/2026 | Slug project chỉ `[a-z0-9-]`, ≤ 60 ký tự, không tên Windows dành riêng; mọi nơi kiểm tra và trả 422 (IMPLEMENT 9) | Chặn `..`, dấu `/`, tên thư mục không tạo được trên Windows |
+| 21/10/2026 | CLAUDE.md: không commit khi lint/test đỏ; chuỗi kiểm tra dùng `&&` và `set -o pipefail` | Hai commit từng đi qua dù kiểm tra thất bại vì `;` và `\| tail` |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
