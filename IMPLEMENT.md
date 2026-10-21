@@ -203,11 +203,15 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 - Cài đặt: `settings.outro` (mặc định `true`), thời lượng 3–5 giây (mặc định 4,0).
 - **Thời điểm hình** trong clip: nút THEO DÕI 1,15 s, nút TikTok 2,15 s, nút YouTube 2,55 s, tên kênh 2,85 s (đã căn theo lời đọc).
 - Ghép vào video: nối sau cảnh cuối bằng hoà trộn hình (`fade`) **0,5 s** kèm `acrossfade` **0,5 s** cho tiếng; không áp phụ đề karaoke lên outro. Nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**.
-- **Lời outro:** file `library/outro/voice.wav` đã có sẵn (44,1 kHz mono, dài 2,65 s), đọc câu `Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé!`. Dùng chung mọi video, không cần tạo lại. Thiếu file thì vẫn dựng được, outro chỉ còn tiếng "ting".
+- **Lời outro:** file `library/outro/voice.wav` đã có sẵn (44,1 kHz mono, dài 2,65 s, **−16,2 LUFS**, đỉnh **−1,5 dBFS**; độ lớn riêng của file này không được dùng để suy ra độ lớn outro), đọc câu `Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé!`. Dùng chung mọi video, không cần tạo lại. Thiếu file thì vẫn dựng được, outro chỉ còn tiếng "ting".
 - **Âm thanh outro** (đã chạy thật):
   - Giọng đặt trễ **0,5 s** (lời bắt đầu khoảng 0,6 s, kết thúc khoảng 3,0 s).
   - Hai tiếng "ting" tổng hợp bằng FFmpeg (như `synth_whoosh`): `vol 0,22` tại **0,15 s** và `vol 0,18` tại **1,15 s**.
-  - Outro đạt **−14,0 LUFS**, đỉnh khoảng **−2 dBFS**. Giới hạn đỉnh dùng `alimiter=limit=0.89:level=0`; **không để `level` mặc định** vì filter sẽ tự nâng mức lên −13 LUFS.
+  - Outro đạt **−14,0 LUFS**, đỉnh khoảng **−2 dBFS**. Quy trình khi dựng:
+    1. Nhân đôi giọng sang stereo (`pan=stereo|c0=c0|c1=c0`) rồi trộn với hai tiếng "ting". Chưa chỉnh độ lớn: mức này đo được **−13,4 LUFS**.
+    2. **Đo** tổng bằng `ebur128`, tính `gain = −14,0 − số đo` (ở mẫu hiện tại khoảng −0,6 dB), áp gain.
+    3. Giới hạn đỉnh bằng `alimiter=limit=0.89:level=0`. **Không để `level` mặc định** vì filter sẽ tự nâng mức lên −13 LUFS.
+  - Không dựa vào độ lớn riêng của `voice.wav`; luôn đo lại sau khi trộn.
   - Mờ ra **0,3 s** cuối clip.
 - UI: công tắc **Thêm outro** trong tab Xuất video.
 
