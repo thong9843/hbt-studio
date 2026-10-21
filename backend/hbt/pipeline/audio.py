@@ -229,16 +229,20 @@ def build_outro_audio(
     workdir = Path(workdir)
     ting = workdir / "ting.wav"
     synth_ting(ting)
-    inputs: list[str | Path] = []
+    # Đầu vào 0 là nền im lặng dài đúng OUTRO_DURATION; `amix duration=first` lấy độ dài theo nền,
+    # nên kết quả luôn 4,0 s. (Cách cũ dùng `apad=whole_dur` đôi khi chỉ ra 2,05 s.)
+    inputs: list[str | Path] = [
+        "-f", "lavfi", "-t", str(OUTRO_DURATION), "-i", f"anullsrc=r={SR}:cl=stereo",
+    ]  # fmt: skip
     fc = ""
-    labels = ""
-    idx = 0
+    labels = "[0:a]"
+    idx = 1
     if outro_voice is not None:
         inputs += ["-i", outro_voice]
         ms = int(OUTRO_VOICE_DELAY * 1000)
-        fc += f"[0:a]pan=stereo|c0=c0|c1=c0,adelay={ms}:all=1[ov];"
+        fc += f"[{idx}:a]pan=stereo|c0=c0|c1=c0,adelay={ms}:all=1[ov];"
         labels += "[ov]"
-        idx = 1
+        idx += 1
     for i, (at, vol) in enumerate(OUTRO_TINGS):
         inputs += ["-i", ting]
         ms = int(at * 1000)
@@ -246,8 +250,8 @@ def build_outro_audio(
         labels += f"[t{i}]"
     n = labels.count("[")
     fc += (
-        f"{labels}amix=inputs={n}:normalize=0,aresample={SR},"
-        f"apad=whole_dur={OUTRO_DURATION},atrim=0:{OUTRO_DURATION}"
+        f"{labels}amix=inputs={n}:duration=first:normalize=0,"
+        f"aresample={SR},atrim=0:{OUTRO_DURATION}"
     )
     raw = workdir / "outro_raw.wav"
     run_ffmpeg([*inputs, "-filter_complex", fc, "-c:a", "pcm_s16le", raw])

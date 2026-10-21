@@ -208,6 +208,20 @@ def test_outro_audio_without_voice_still_builds(tmp_path):
 
 
 @needs_ffmpeg
+def test_outro_audio_length_is_deterministic(tmp_path):
+    # Hồi quy: cách cũ (`apad=whole_dur`) đôi khi chỉ ra 2,05 s khi không có lời; dựng nhiều lần.
+    voice = tmp_path / "ov.wav"
+    write_wav(voice, [("tone", 2.65, 0.5)], freq=300)
+    for i in range(6):
+        work = tmp_path / f"w{i}"
+        work.mkdir()
+        for name, v in (("novoice", None), ("voice", voice)):
+            out = work / f"{name}.wav"
+            audio.build_outro_audio(v, out, work)
+            assert media_duration(out) == pytest.approx(4.0, abs=0.03), (i, name)
+
+
+@needs_ffmpeg
 def test_join_audio_crossfades_half_second(tmp_path):
     body, outro, out = tmp_path / "b.wav", tmp_path / "o.wav", tmp_path / "j.wav"
     write_wav(body, [("tone", 6.0)])
