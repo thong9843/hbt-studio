@@ -163,12 +163,12 @@ def synth_whoosh(out: str | Path) -> None:
 
 
 def synth_ting(out: str | Path) -> None:
-    """Tiếng 'ting' nhẹ cho outro. Thông số (1760 Hz + hài 2640 Hz, tắt dần exp(−6t)) là lựa chọn
-    tạm của Claude Code vì đặc tả chưa ghi cách tổng hợp — chờ chủ dự án xác nhận."""
-    expr = "0.55*(sin(2*PI*1760*t)+0.5*sin(2*PI*2640*t))*exp(-6*t)"
+    """Tiếng 'ting' nhẹ cho outro: ba hài 1318 / 1976 / 2637 Hz tắt dần exp(−5t), dài 0,9 s,
+    stereo 44,1 kHz (thông số của bản đã chạy thật, IMPLEMENT.md 6.5)."""
+    expr = "0.35*(sin(2*PI*1318*t)+0.6*sin(2*PI*1976*t)+0.4*sin(2*PI*2637*t))*exp(-5*t)"
     run_ffmpeg([
-        "-f", "lavfi", "-i", f"aevalsrc='{expr}':d=0.8:s={SR}",
-        "-af", "afade=t=in:d=0.003", "-ac", "1", out,
+        "-f", "lavfi", "-i", f"aevalsrc='{expr}':d=0.9:s={SR}",
+        "-ar", str(SR), "-ac", "2", out,
     ])  # fmt: skip
 
 
@@ -242,7 +242,7 @@ def build_outro_audio(
     for i, (at, vol) in enumerate(OUTRO_TINGS):
         inputs += ["-i", ting]
         ms = int(at * 1000)
-        fc += f"[{idx + i}:a]pan=stereo|c0=c0|c1=c0,volume={vol},adelay={ms}:all=1[t{i}];"
+        fc += f"[{idx + i}:a]volume={vol},adelay={ms}:all=1[t{i}];"
         labels += f"[t{i}]"
     n = labels.count("[")
     fc += (

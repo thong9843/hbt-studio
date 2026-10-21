@@ -1,7 +1,10 @@
+import wave
+
+import numpy as np
 import pytest
 
 from hbt.pipeline import audio
-from hbt.pipeline.ffutil import measure_lufs, media_duration, probe
+from hbt.pipeline.ffutil import measure_lufs, media_duration, probe, run_ffmpeg
 from tests.helpers import needs_ffmpeg, write_wav
 
 # Giọng giả: hai câu cách nhau 0,8 s.
@@ -134,7 +137,6 @@ def test_mix_with_music_and_whoosh(tmp_path):
 
 @needs_ffmpeg
 def test_mix_music_is_ducked_under_voice(tmp_path):
-    from hbt.pipeline.ffutil import run_ffmpeg
 
     voice, music = tmp_path / "v.wav", tmp_path / "m.wav"
     # 4 s giọng rồi 8 s im lặng (cửa sổ đo nằm trước đoạn nhạc mờ ra ở 2,5 s cuối);
@@ -170,6 +172,22 @@ def test_mix_without_music_is_stereo_minus_14(tmp_path):
 
 # ---------------------------------------------------------------- outro
 @needs_ffmpeg
+def test_synth_ting_matches_the_recorded_parameters(tmp_path):
+    out = tmp_path / "ting.wav"
+    audio.synth_ting(out)
+    s = stream(out)
+    assert s["channels"] == 2 and int(s["sample_rate"]) == 44100
+    assert media_duration(out) == pytest.approx(0.9, abs=0.03)
+    # tắt dần exp(−5t): đoạn cuối nhỏ hơn hẳn đoạn đầu (so RMS, đoạn quá ngắn để đo LUFS)
+    with wave.open(str(out)) as w:
+        data = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(float)
+    sr = 44100 * 2  # hai kênh xen kẽ
+    first, last = data[: int(0.3 * sr)], data[-int(0.3 * sr) :]
+    rms = lambda x: float(np.sqrt((x**2).mean()))  # noqa: E731
+    assert rms(last) < rms(first) / 5
+
+
+@needs_ffmpeg
 def test_outro_audio_with_voice_is_4s_and_minus_14(tmp_path):
     voice = tmp_path / "ov.wav"
     write_wav(voice, [("tone", 2.65, 0.5)], freq=300)
@@ -195,7 +213,6 @@ def test_join_audio_crossfades_half_second(tmp_path):
     write_wav(body, [("tone", 6.0)])
     write_wav(outro, [("tone", 4.0)], freq=300)
     # acrossfade cần cùng số kênh: tạo stereo như bản thật
-    from hbt.pipeline.ffutil import run_ffmpeg
 
     b2, o2 = tmp_path / "b2.wav", tmp_path / "o2.wav"
     run_ffmpeg(["-i", body, "-ac", "2", b2])

@@ -302,6 +302,16 @@ Thông số (chủ dự án chốt 20/10/2026, giống 6 video cũ), áp khi `se
 ### 6.4 Video không có nhạc
 Cho phép dựng khi `music` trống (chủ dự án chốt 20/10/2026). Bỏ bước cắt nhạc và ducking; giọng đã chuẩn hoá −14 LUFS (bước 2) được chuyển sang **stereo** để xuất. Whoosh (nếu có) vẫn trộn vào rồi loudnorm tổng −14 LUFS như khi có nhạc.
 
+
+### 6.5 Âm thanh tổng hợp (thông số đã chạy thật, chủ dự án cung cấp 21/10/2026)
+Tất cả tổng hợp bằng FFmpeg, không dùng file ngoài. Xuất stereo 44,1 kHz.
+
+| Tiếng | Lệnh `aevalsrc` / chuỗi lọc | Dùng ở |
+|---|---|---|
+| **Vút** (cảnh "cú lật") | như `synth_whoosh` trong `render_reference.py`: `anoisesrc=d=0.7:c=pink:a=0.6`, `highpass=f=300,lowpass=f=6000,afade=t=in:d=0.35,afade=t=out:st=0.35:d=0.35`; âm lượng 0,30 | mục 6.3 |
+| **Ting** (outro) | `aevalsrc='0.35*(sin(2*PI*1318*t)+0.6*sin(2*PI*1976*t)+0.4*sin(2*PI*2637*t))*exp(-5*t)':d=0.9:s=44100`; hai tiếng: âm lượng 0,22 tại 0,15 s và 0,18 tại 1,15 s | mục 4c |
+| **Rít** ngắt nhịp (tuỳ chọn, chưa làm ở M1) | `aevalsrc='0.6*sin(2*PI*(900*t-1300*t*t))*exp(-4*t)':d=0.38:s=44100`, rồi `afade=t=out:st=0.25:d=0.13` | dự phòng |
+
 ---
 
 ## 7. Kiểm tra nội dung nhạy cảm (`pipeline/lint.py`)
@@ -474,7 +484,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Clip cảnh:** luồng ảnh thẻ chữ được ép chạy cùng fps của clip (`-framerate`). Mặc định 25 fps làm clip 1,0 s ở 50 fps chỉ có 49 khung. Hình ảnh không đổi.
 - **Sau khi cắt đuôi giọng (4d):** đệm lại `TAIL` = 1,6 s sau chữ cuối và chuẩn hoá lại −14 LUFS trên phần giọng giữ lại. Đặc tả chưa nói rõ đoạn đệm sau khi cắt.
 - **Phụ đề:** cụm không chồng lên cụm sau; cụm kết thúc đúng lúc cụm sau hiện (cách chữ đầu 0,05 s), thay vì kéo đến đầu chữ đầu cụm sau.
-- ⚠ **Tiếng "ting" của outro:** đặc tả chưa ghi cách tổng hợp. Tạm dùng 1760 Hz + hài 2640 Hz, tắt dần `exp(−6t)`, dài 0,8 s (`audio.synth_ting`). Cần thông số gốc của bản đã chạy thật.
+- **Tiếng "ting" của outro:** dùng thông số bản đã chạy thật (mục 6.5), thay bản tạm của Claude Code.
 - **`settings.outro`** chỉ là bật/tắt; clip outro cố định 4,0 s (cài đặt thời lượng 3–5 s chưa làm).
 - **Đếm 750 ký tự (4d):** bỏ các ký tự `|`, `{`, `}` (giữ nội dung trong `{}`), gộp khoảng trắng, các cảnh nối bằng một dấu cách.
 - **Aligner khoảng lặng** (khi chưa có Whisper) chỉ ghép được theo từng đoạn nghỉ; nếu giọng ít đoạn hơn số cụm câu thì một số cụm phụ đề lệch cả giây trong cảnh đó. Whisper (M4) khắc phục.
