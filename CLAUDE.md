@@ -11,10 +11,12 @@
 - Chữ hiển thị cho người dùng: tiếng Việt, đặt trong `frontend/src/i18n/vi.ts`. Tên biến, hàm, file: tiếng Anh.
 - Chữ trên video (thẻ, nhãn, phụ đề) luôn vẽ bằng Pillow với font trong `backend/hbt/fonts/` để đúng dấu tiếng Việt. Không vẽ chữ bằng AI tạo ảnh.
 - Backend chỉ bind `127.0.0.1`. Không thêm đăng nhập, không gửi dữ liệu ra ngoài trừ khi tính năng Giai đoạn 2 yêu cầu và có khoá API trong `.env`.
-- Không commit: `workspace/`, `models/`, file media, `.env`.
+- Không commit: `workspace/`, `models/`, file media, `.env`. Ngoại lệ (tài sản cố định): logo và clip outro trong `brand/`, và `library/outro/voice.wav`.
 - Mỗi tính năng có test cho logic chính; `npm run lint` và `npm run test` phải xanh trước khi báo xong.
 - Commit theo Conventional Commits, mỗi mốc một nhánh `feat/mX-…`.
 - Gặp điểm đặc tả chưa nói tới: **hỏi chủ dự án**, không tự quyết. Quyết định xong thì ghi thêm vào `IMPLEMENT.md`.
+- Phải hỏi chủ dự án trước khi cài, gỡ hoặc nâng cấp bất kỳ phần mềm, driver hay gói nào ở cấp hệ thống (winget, choco, CUDA…). Gói Python trong `backend/.venv` và gói npm của dự án thì được tự cài.
+- Không tự push. Chỉ push khi chủ dự án yêu cầu.
 
 ## Lệnh hay dùng
 ```

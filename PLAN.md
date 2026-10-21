@@ -1,7 +1,7 @@
 # HBT Studio — Kế hoạch
 
 > Web app chạy **local** để sản xuất video ngắn cho kênh **Hay Biết Tuốt** (TikTok, YouTube Shorts, Facebook Reels).
-> Phiên bản kế hoạch: v1.1 · 20/10/2026 · Chủ dự án: Thong · Người code: Claude Code
+> Phiên bản kế hoạch: v1.4 · 21/10/2026 · Chủ dự án: Thong · Người code: Claude Code
 > File chi tiết kỹ thuật: [`IMPLEMENT.md`](IMPLEMENT.md) · Quy tắc cho Claude Code: [`CLAUDE.md`](CLAUDE.md)
 
 ---
@@ -22,7 +22,7 @@ Claude (kịch bản) → Gemini web (8 ảnh) → Vbee (giọng đọc) → Pix
 
 | Giai đoạn | Nội dung | Kết quả |
 |---|---|---|
-| **1 · Studio dựng video** (làm ngay) | Kéo thả ảnh, giọng, nhạc + soạn thẻ chữ, lời đọc → app tự dựng video 60fps có phụ đề karaoke chính xác (Whisper), ducking nhạc, kiểm tra từ nhạy cảm, sinh sẵn title/description | Không cần gửi file cho Claude để dựng nữa |
+| **1 · Studio dựng video** (làm ngay) | Kéo thả ảnh, giọng, nhạc + soạn thẻ chữ, lời đọc → app tự dựng video 50fps có phụ đề karaoke chính xác (Whisper), ducking nhạc, kiểm tra từ nhạy cảm, sinh sẵn title/description | Không cần gửi file cho Claude để dựng nữa |
 | **2 · Tạo nội dung tự động** | Nối API: kịch bản (Claude/Gemini), ảnh (Forge/ComfyUI chạy trên GPU), giọng (VieNeu-TTS local hoặc Vbee API), tự chọn nhạc từ thư viện theo tâm trạng | Nhập 1 chủ đề → ra bản nháp đầy đủ để duyệt |
 | **3 · Mở rộng** (sau) | Hàng đợi nhiều video, template theo series, lịch đăng, thống kê | Sản xuất hàng loạt |
 
@@ -84,7 +84,7 @@ flowchart LR
 | Mốc | Việc | Buổi | Kiểm chứng |
 |---|---|---|---|
 | **M0** · Khởi tạo | Repo, cấu trúc thư mục, script chạy 1 lệnh, CI lint | 0,5 | `npm run dev` mở được trang trống + API `/health` |
-| **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 60fps, -14 LUFS |
+| **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 50fps, -14 LUFS |
 | **M2** · API | CRUD project, tải file, job dựng + SSE, ảnh xem trước từng cảnh | 1,5 | Gọi API bằng curl dựng được video |
 | **M3** · Giao diện | Danh sách project, trình soạn cảnh, nhạc, xuất video, xem video | 2,5 | Làm trọn 1 video chỉ bằng giao diện |
 | **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Phụ đề lệch < 0,05 giây; cảnh báo khi kịch bản có "bia", "máu"… |
@@ -132,18 +132,38 @@ flowchart LR
 | Ngày | Quyết định | Lý do |
 |---|---|---|
 | 20/10/2026 | Làm web app local, mã nguồn trên Git, media không lên Git | Dễ quản lý, không tốn phí server |
-| 20/10/2026 | Xuất video **60fps** (không dùng 45fps) | 60fps là chuẩn mượt cả TikTok và YouTube xử lý tốt; 45fps có thể bị nền tảng chuyển đổi gây giật |
+| 20/10/2026 | Thử **60fps** (không dùng 45fps) | 60fps là chuẩn mượt; 45fps có thể bị nền tảng chuyển đổi gây giật |
+| 21/10/2026 | **Mặc định 50fps** + easing + phóng nội bộ 3 lần + chuyển cảnh nhoè chuyển động + mã hoá chất lượng cao (IMPLEMENT mục 4b) | Chủ dự án so sánh thấy mượt hơn; chống mất nét khi nền tảng nén lại. Đã dựng lại 5 video cũ theo chuẩn này |
+| 21/10/2026 | Thêm **outro 4 giây** kêu gọi theo dõi TikTok + YouTube (IMPLEMENT mục 4c) | Tăng lượt theo dõi kênh; dùng chung mọi video |
+| 21/10/2026 | Lời đọc **≤ 750 ký tự/video**; **cắt đoạn quảng cáo cuối file Vbee** (IMPLEMENT mục 4d) | Gói Vbee giới hạn 3.000 ký tự/ngày; không để người xem nghe quảng cáo |
+| 21/10/2026 | Mỗi video có **ảnh bìa** (9:16 cho TikTok/Reels, cắt 3:2 cho YouTube Shorts), làm cùng lúc với video (IMPLEMENT mục 4e) | Không phải làm bìa tay riêng cho từng video; dùng chung bộ chữ, logo HBT |
+| 21/10/2026 | Outro có **lời đọc cố định** `library/outro/voice.wav` (IMPLEMENT mục 4c); `.gitignore` có ngoại lệ cho clip outro và lời outro | Outro nghe rõ lời kêu gọi theo dõi; file nhỏ, dùng chung mọi video nên commit để sang máy khác vẫn có |
+| 21/10/2026 | **Cắt đuôi file giọng (silence aligner):** chỉ tự động khi (a) bỏ tối đa `số đoạn tiếng − số cụm`, (b) chi phí ghép giảm ≥ 1,0, (c) đoạn cuối ≥ 1,5 s; ngược lại giữ + cảnh báo "Có thể có đoạn thừa…"; thêm `voice.trim_end` (giây của file gốc) để tự cắt, cắt trước khi căn chữ (IMPLEMENT 4d) | Quy tắc phạt 0,5 từng bỏ nhầm câu kết thật "Comment cho mình biết!" của tập muỗi và cắt mất khỏi âm thanh |
+| 21/10/2026 | **Căn chữ khoảng lặng 2 cấp** (cảnh → cụm câu), hạ dần ngưỡng khoảng lặng trong từng cảnh, cấp 1 phạt ranh giới cảnh rơi vào khoảng nghỉ ngắn khi cảnh kết thúc bằng dấu cuối câu (IMPLEMENT 5.2) | Tập muỗi: 7 mốc cắt khớp bản đã đăng ≤ 4 ms, cụm cuối đúng ở 40,3 s; Whisper (M4) sẽ chính xác hơn |
+| 21/10/2026 | Sau khi cắt đuôi giọng: **đệm lại 1,6 s** và chuẩn hoá lại −14 LUFS trên phần giữ lại | Giữ nhịp dừng hình cuối như video thường |
+| 21/10/2026 | `settings.outro` chỉ bật/tắt; **clip outro cố định 4,0 s** (bỏ ý "3–5 giây" ở IMPLEMENT 4c) | Clip dựng sẵn một độ dài |
+| 21/10/2026 | `text.parse_voice` nhận diện nhóm `{...}` có khoảng trắng (`100{một trăm}`, `Comment{com men}`), có test | Reference tách bằng `split()` nên chẻ đôi nhóm và phụ đề hiện ký tự `{` |
+| 21/10/2026 | Tiếng "ting" outro dùng thông số bản đã chạy thật; mọi âm tổng hợp ghi ở IMPLEMENT 6.5 | Tránh mất thông số lần nữa |
+| 21/10/2026 | CI cài FFmpeg; test cần FFmpeg thất bại (không skip) khi `CI=true`, máy cá nhân thiếu FFmpeg thì skip | Không để test lặng lẽ không chạy |
+| 21/10/2026 | Khoá cache trong `build/` gồm hash mã nguồn pipeline (đổi thuật toán thì cache tự mất hiệu lực) | Cache cũ làm golden test ra mốc cắt sai |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
 | 20/10/2026 | Giữ 3 điểm duyệt của con người: kịch bản → ảnh → video | Tránh lỗi chữ, bản đồ, từ nhạy cảm lọt lên mạng |
+| 20/10/2026 | `/health`: `ok` chỉ khi FFmpeg chạy được và đủ `libx264` + filter `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect`; trả danh sách `missing` (IMPLEMENT.md mục 9) | Biết ngay máy có dựng được video không; Whisper và GPU đã có đường dự phòng |
+| 20/10/2026 | Claude Code phải hỏi trước khi cài, gỡ, nâng cấp phần mềm cấp hệ thống; gói trong `backend/.venv` và npm của dự án thì được tự cài | Chủ dự án kiểm soát máy; tránh thay đổi hệ thống ngoài ý muốn |
+| 20/10/2026 | Không tự push lên GitHub; chỉ push khi chủ dự án yêu cầu | Chủ dự án duyệt trước những gì công khai lên remote |
+| 20/10/2026 | Giữ tag `v0.1.0` (commit tài liệu, đã push); bản M0 gắn `v0.1.1` (merge `f329c8e`); không force-push | Tag đã công khai thì không ghi đè |
+| 20/10/2026 | Whoosh cảnh cú lật: tại offset xfade của cảnh (cảnh 1 thì 0 s), âm lượng 0,30 trước loudnorm tổng (IMPLEMENT.md mục 6.3) | Giống thông số 6 video đã đăng |
+| 20/10/2026 | Cho dựng video không nhạc: bỏ ducking, giọng −14 LUFS, xuất stereo (IMPLEMENT.md mục 6.4) | Đã có video cũ không dùng nhạc |
+| 20/10/2026 | M1 làm luôn `models.py`, tự chọn đoạn nhạc, `publish.txt`; lint từ nhạy cảm để M4 (IMPLEMENT.md mục 11) | `render.py` cần các phần này để chạy trọn |
 
 ## 11. Tiến độ
 
 | Mốc | Trạng thái | Ghi chú |
 |---|---|---|
-| M0 | ☐ | Đã làm xong, chờ chủ dự án kiểm tra |
-| M1 | ☐ | |
+| M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
+| M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
 | M2 | ☐ | |
 | M3 | ☐ | |
 | M4 | ☐ | |

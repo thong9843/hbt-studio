@@ -5,6 +5,9 @@ library/music/**/*.mp3
 *.mp4
 *.wav
 .env
+# Ngoại lệ: tài sản cố định của thương hiệu (CLAUDE.md)
+!brand/outro/*.mp4
+!library/outro/voice.wav
 
 # Môi trường
 node_modules/
@@ -15,4 +18,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 frontend/dist/
+frontend/.vite/
 *.tsbuildinfo

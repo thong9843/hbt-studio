@@ -23,6 +23,11 @@ export function HealthStatus() {
           <p className={`mt-4 text-2xl font-extrabold ${data.ok ? '' : 'text-hbt-red'}`}>
             {data.ok ? vi.health.ready : vi.health.notReady}
           </p>
+          {data.ffmpeg && data.missing.length > 0 && (
+            <p className="mt-2 font-semibold text-hbt-red">
+              {vi.health.missingList} {data.missing.join(', ')}
+            </p>
+          )}
           <ul className="mt-6 flex flex-wrap gap-3">
             {ITEMS.map((key) => (
               <li

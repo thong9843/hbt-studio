@@ -31,7 +31,7 @@ describe('apiGet', () => {
 
 describe('fetchHealth', () => {
   it('calls /api/health', async () => {
-    const health = { ok: true, ffmpeg: true, whisper: false, gpu: false };
+    const health = { ok: true, ffmpeg: true, whisper: false, gpu: false, missing: [] };
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse(health));
     await expect(fetchHealth(fetchFn)).resolves.toEqual(health);
     expect(fetchFn.mock.calls[0][0]).toBe('/api/health');

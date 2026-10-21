@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_FPS = (30, 60)
+BRAND_DIR = REPO_ROOT / "brand"
+ALLOWED_FPS = (30, 50, 60)
+DEFAULT_FPS = 50
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -40,9 +42,9 @@ def load_settings(env_file: Path | None = None) -> Settings:
         p = Path(env.get(key, default))
         return p if p.is_absolute() else (REPO_ROOT / p).resolve()
 
-    fps = int(env.get("DEFAULT_FPS", "60"))
+    fps = int(env.get("DEFAULT_FPS", str(DEFAULT_FPS)))
     if fps not in ALLOWED_FPS:
-        raise ValueError(f"DEFAULT_FPS phải là 30 hoặc 60, nhận {fps}")
+        raise ValueError(f"DEFAULT_FPS phải là 30, 50 hoặc 60, nhận {fps}")
     device = env.get("WHISPER_DEVICE", "auto")
     if device not in ("auto", "cuda", "cpu"):
         raise ValueError(f"WHISPER_DEVICE phải là auto|cuda|cpu, nhận {device}")

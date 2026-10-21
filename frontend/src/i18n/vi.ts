@@ -5,7 +5,8 @@ export const vi = {
     loading: 'Đang kiểm tra…',
     unreachable: 'Không kết nối được máy chủ. Hãy chạy npm run dev.',
     ready: 'Sẵn sàng dựng video',
-    notReady: 'Chưa dựng được video: thiếu FFmpeg',
+    notReady: 'Chưa dựng được video',
+    missingList: 'FFmpeg thiếu:',
     recheck: 'Kiểm tra lại',
     items: {
       ffmpeg: 'FFmpeg',
