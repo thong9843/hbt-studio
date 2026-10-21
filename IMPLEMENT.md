@@ -383,6 +383,20 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - `ok`: `true` khi và chỉ khi `missing` rỗng. Whisper và GPU **không** ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
 - `whisper`: import được `faster_whisper`. `gpu`: CTranslate2 thấy ít nhất 1 thiết bị CUDA.
 
+**Chi tiết triển khai M2** (Claude Code ghi 21/10/2026; các mục ⚠ chờ chủ dự án duyệt):
+- **Lỗi** luôn là `{"detail": "<chuỗi>"}`: 404 không có project/job/file, 409 xung đột (đang dựng, job đã kết thúc), 400 dữ liệu sai (file hỏng, `scene` sai), 413 file quá lớn, 422 body sai hoặc project chưa đủ để dựng.
+- ⚠ **Chỉ số cảnh tính từ 0** trong `scenes/{i}/preview.png` và trường `scene` khi tải ảnh. Tên file ảnh vẫn đánh số từ 1: cảnh 0 → `images/scene-01.<ext>`. (`thumbnail.scene` trong project.json vẫn tính từ 1 như mục 4e.)
+- **Project nháp:** `POST /projects` tạo project chưa có ảnh/lời/giọng (mô hình cho phép rỗng). `POST /render` trả 422 kèm danh sách còn thiếu (`Project chưa đủ để dựng: Cảnh 1: chưa có ảnh; …`).
+- **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
+- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
+- **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
+- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
+- **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
+- **Job:** một luồng dựng, job nằm trong bộ nhớ (giữ 200 job; mất khi khởi động lại server, file đã xuất vẫn còn). `GET /jobs/{id}` → `{id, project, status, progress, step, log_tail, output, error, needs_confirmation, …}`; `output` có URL `/api/files/...`. **SSE** `GET /jobs/{id}/events`: `event: progress` (`{progress, step, message}`) rồi `event: end` (`{status, error, output}`); người nối sau nhận lại từ đầu. **Huỷ**: job xếp hàng huỷ ngay và không bao giờ chạy; job đang chạy bị kill ffmpeg, đợi tối đa 5 s cho luồng dừng, không để lại video dở. Đuôi giọng cần cắt > 8 s: job `failed` với `needs_confirmation = true` (gửi lại với `allow_long_trim`).
+- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu `library/music/<slug-tiêu-đề>.<ext>` và thêm vào `index.json`.
+- **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
+- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`), phát nhạc thư viện cho nút nghe thử (cần cho M3).
+
 ---
 
 ## 10. Giao diện
@@ -492,9 +506,9 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Outro không có lời:** mix bắt đầu từ nền im lặng dài đúng 4,0 s (`amix duration=first`); cách `apad=whole_dur` đôi khi chỉ ra 2,05 s.
 
 ### M2 · API
-- [ ] Models Pydantic + storage + toàn bộ endpoint mục 9
-- [ ] Job runner 1 luồng, SSE, huỷ job
-- [ ] `preview.png` từng cảnh (dùng chung code `visual.py` + `captions.render_caption`)
+- [x] Models Pydantic + storage + toàn bộ endpoint mục 9
+- [x] Job runner 1 luồng, SSE, huỷ job
+- [x] `preview.png` từng cảnh (dùng chung code `visual.py` + `captions.render_caption`)
 - **Xong khi:** tạo project, tải file, dựng video hoàn toàn bằng `curl`.
 
 ### M3 · Giao diện

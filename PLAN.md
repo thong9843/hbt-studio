@@ -146,6 +146,11 @@ flowchart LR
 | 21/10/2026 | Tiếng "ting" outro dùng thông số bản đã chạy thật; mọi âm tổng hợp ghi ở IMPLEMENT 6.5 | Tránh mất thông số lần nữa |
 | 21/10/2026 | CI cài FFmpeg; test cần FFmpeg thất bại (không skip) khi `CI=true`, máy cá nhân thiếu FFmpeg thì skip | Không để test lặng lẽ không chạy |
 | 21/10/2026 | Khoá cache trong `build/` gồm hash mã nguồn pipeline (đổi thuật toán thì cache tự mất hiệu lực) | Cache cũ làm golden test ra mốc cắt sai |
+| 21/10/2026 | M2: project nháp được phép chưa có ảnh/lời/giọng; thiếu gì thì `POST /render` trả 422 kèm danh sách (IMPLEMENT mục 9) | `POST /projects` phải tạo được project rỗng |
+| 21/10/2026 | M2: chỉ số cảnh trong API tính từ 0 (tên file ảnh vẫn `scene-01…`) ⚠ chờ duyệt | Khớp chỉ số mảng `scenes`; `thumbnail.scene` vẫn tính từ 1 |
+| 21/10/2026 | M2: job nằm trong bộ nhớ, một luồng dựng; huỷ kill ffmpeg và không để lại video dở; SSE gồm `progress` và `end` | Một người dùng, một máy; file xuất vẫn còn trên đĩa sau khi khởi động lại |
+| 21/10/2026 | M2: nhân bản project không chép `build/` và `renders/`; bản sao tên "… (bản sao)" ⚠ chờ duyệt | "Làm template" cần cấu trúc và media, không cần file trung gian |
+| 21/10/2026 | M2: danh sách từ nhạy cảm do người dùng sửa lưu ở `workspace/settings/`, bản mặc định nằm trên Git | Không sửa file đang được Git theo dõi |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -164,6 +169,6 @@ flowchart LR
 |---|---|---|
 | M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
 | M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
-| M2 | ☐ | |
+| M2 | ☐ | Làm xong trên nhánh `feat/m2-api`, chờ chủ dự án kiểm tra. toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☐ | |
 | M4 | ☐ | |
