@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// Màu lấy từ biến CSS trong src/styles/tokens.css (token từ DESIGN.md bổ sung ở M3).
+// Mọi màu lấy từ biến CSS trong src/styles/tokens.css (sáng/tối đổi theo hệ thống).
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
@@ -10,6 +10,16 @@ export default {
         fg: 'var(--color-fg)',
         muted: 'var(--color-muted)',
         surface: 'var(--color-surface)',
+        'surface-2': 'var(--color-surface-2)',
+        border: 'var(--color-border)',
+        accent: 'var(--color-accent)',
+        'on-accent': 'var(--color-on-accent)',
+        ok: 'var(--color-ok)',
+        'ok-bg': 'var(--color-ok-bg)',
+        warn: 'var(--color-warn)',
+        'warn-bg': 'var(--color-warn-bg)',
+        danger: 'var(--color-danger)',
+        'danger-bg': 'var(--color-danger-bg)',
         hbt: {
           red: 'var(--hbt-red)',
           cream: 'var(--hbt-cream)',

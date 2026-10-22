@@ -1,15 +1,32 @@
-/* Token giao diện. Màu HBT theo IMPLEMENT.md mục 10.1.
-   Token phong cách từ DESIGN.md sẽ thêm ở M3, sau khi chủ dự án duyệt file. */
+/* Token giao diện theo IMPLEMENT.md mục 10.1: nền/chữ đen trắng tương phản mạnh, màu nhấn là màu
+   thương hiệu HBT. Chế độ sáng/tối theo hệ thống.
+   Việc áp token từ DESIGN.md chờ chủ dự án duyệt file đó (CLAUDE.md, IMPLEMENT.md mục 10.1). */
 :root {
+  /* Thương hiệu HBT */
   --hbt-red: #b22228;
   --hbt-cream: #f7eeda;
   --hbt-mustard: #f4b630;
   --hbt-ink: #1e1816;
 
+  /* Nền, chữ, viền */
   --color-bg: #ffffff;
   --color-fg: #111111;
   --color-muted: #6b6b6b;
   --color-surface: #f5f5f5;
+  --color-surface-2: #ebebeb;
+  --color-border: #dedede;
+
+  /* Màu nhấn và trạng thái */
+  --color-accent: var(--hbt-red);
+  --color-on-accent: #ffffff;
+  --color-ok: #1c7c4a;
+  --color-ok-bg: #e3f4ea;
+  --color-warn: #8a5a00;
+  --color-warn-bg: #fdf0c9;
+  --color-danger: #b22228;
+  --color-danger-bg: #fbe4e5;
+
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,6 +34,18 @@
     --color-bg: #111111;
     --color-fg: #ffffff;
     --color-muted: #a3a3a3;
-    --color-surface: #1f1f1f;
+    --color-surface: #1c1c1c;
+    --color-surface-2: #292929;
+    --color-border: #333333;
+
+    --color-accent: #e0393f;
+    --color-ok: #4cc287;
+    --color-ok-bg: #12301f;
+    --color-warn: #f4b630;
+    --color-warn-bg: #36290a;
+    --color-danger: #ff6b70;
+    --color-danger-bg: #3a1416;
+
+    color-scheme: dark;
   }
 }

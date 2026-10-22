@@ -1,9 +1,100 @@
 @import './styles/tokens.css';
 
+/* Be Vietnam Pro (OFL, kèm giấy phép ở public/fonts/OFL.txt). Chỉ có các đậm 500/700/800:
+   chữ thường dùng 500. */
+@font-face {
+  font-family: 'Be Vietnam Pro';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/BeVietnamPro-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Be Vietnam Pro';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/BeVietnamPro-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Be Vietnam Pro';
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/BeVietnamPro-ExtraBold.ttf') format('truetype');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-bg font-sans text-fg antialiased;
+@layer base {
+  body {
+    @apply bg-bg font-sans text-fg antialiased;
+  }
+  h1,
+  h2 {
+    @apply font-extrabold uppercase tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-fg ring-offset-2 ring-offset-bg;
+  }
+  ::selection {
+    @apply bg-hbt-mustard text-hbt-ink;
+  }
+}
+
+@layer components {
+  /* Nút viên thuốc */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold transition;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply bg-fg text-bg enabled:hover:opacity-85;
+  }
+  .btn-secondary {
+    @apply bg-surface text-fg enabled:hover:bg-surface-2;
+  }
+  .btn-accent {
+    @apply bg-accent text-on-accent enabled:hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-fg enabled:hover:bg-surface;
+  }
+  .btn-sm {
+    @apply px-4 py-1.5 text-xs;
+  }
+  .btn-icon {
+    @apply h-9 w-9 shrink-0 rounded-full bg-surface p-0 text-fg enabled:hover:bg-surface-2;
+  }
+
+  /* Ô nhập */
+  .input {
+    @apply w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted;
+    @apply focus:border-fg disabled:opacity-50;
+  }
+  .label {
+    @apply mb-1 block text-xs font-bold uppercase tracking-wider text-muted;
+  }
+
+  /* Thẻ và nhãn */
+  .card {
+    @apply rounded-2xl bg-surface;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold;
+  }
+  .chip-ok {
+    @apply bg-ok-bg text-ok;
+  }
+  .chip-warn {
+    @apply bg-warn-bg text-warn;
+  }
+  .chip-danger {
+    @apply bg-danger-bg text-danger;
+  }
+  .chip-muted {
+    @apply bg-surface-2 text-muted;
+  }
 }
