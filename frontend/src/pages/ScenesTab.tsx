@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Project, Scene } from '../api/types';
+import type { Scene } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EyeIcon, XIcon } from '../components/icons';
 import { SceneEditor } from '../components/SceneEditor';
@@ -13,15 +13,6 @@ import { MAX_SCENES, MIN_SCENES } from '../utils/limits';
 import { emptyScene } from '../utils/newScene';
 import { sceneNumber } from '../utils/scene';
 import { countProjectVoiceChars } from '../utils/voice';
-
-/** `thumbnail.scene` (số từ 1) không được vượt số cảnh còn lại, nếu không máy chủ từ chối lưu. */
-function clampThumbnail(p: Project): Project {
-  const t = p.thumbnail as { scene?: number } | null;
-  if (t && typeof t.scene === 'number' && t.scene > p.scenes.length) {
-    return { ...p, thumbnail: { ...t, scene: p.scenes.length } };
-  }
-  return p;
-}
 
 export function ScenesTab() {
   const editor = useProjectEditor();
@@ -73,12 +64,7 @@ export function ScenesTab() {
     if (count <= MIN_SCENES) return;
     setBusy(true);
     try {
-      // Đưa cảnh cần xoá xuống cuối (máy chủ đổi tên ảnh cho khớp), rồi cắt bỏ cảnh cuối.
-      if (index !== count - 1) {
-        const order = [...Array(count).keys()].filter((i) => i !== index).concat(index);
-        await editor.reorder(order);
-      }
-      editor.update((p) => clampThumbnail({ ...p, scenes: p.scenes.slice(0, -1) }));
+      await editor.deleteScene(index);
       setSelected(Math.min(index, count - 2));
     } catch (e) {
       toast.error(e);

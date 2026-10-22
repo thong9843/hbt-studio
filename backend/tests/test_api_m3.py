@@ -9,7 +9,7 @@ from tests.helpers import write_wav
 from tests.test_api import client, complete_project, upload_image  # noqa: F401
 
 
-def test_reorder_scenes_renames_images_and_keeps_content(client):  # noqa: F811
+def test_reorder_scenes_preserves_image_names_and_content(client):  # noqa: F811
     slug = client.post("/api/projects", json={"title": "Sắp xếp", "scene_count": 3}).json()["slug"]
     for i, color in enumerate([(200, 0, 0), (0, 200, 0), (0, 0, 200)]):
         assert upload_image(client, slug, i, color).status_code == 200
@@ -17,16 +17,39 @@ def test_reorder_scenes_renames_images_and_keeps_content(client):  # noqa: F811
     for i, s in enumerate(p["scenes"]):
         s["voice"] = f"Câu {i}"
     client.put(f"/api/projects/{slug}", json=p)
+    orig_images = [s["image"] for s in p["scenes"]]
 
     r = client.post(f"/api/projects/{slug}/scenes/reorder", json={"order": [2, 0, 1]})
     assert r.status_code == 200
     scenes = r.json()["scenes"]
     assert [s["voice"] for s in scenes] == ["Câu 2", "Câu 0", "Câu 1"]
-    assert [s["image"] for s in scenes] == [f"images/scene-0{i}.png" for i in (1, 2, 3)]
+    assert [s["image"] for s in scenes] == [orig_images[2], orig_images[0], orig_images[1]]
     folder = client.app.state.hbt.storage.project_dir(slug)
     reds = [Image.open(folder / s["image"]).convert("RGB").getpixel((5, 5)) for s in scenes]
     assert reds == [(0, 0, 200), (200, 0, 0), (0, 200, 0)]
-    assert not list((folder / "images").glob(".reorder-*"))
+
+
+def test_delete_scene_api(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Xoá cảnh", "scene_count": 4}).json()["slug"]
+    for i, color in enumerate([(10, 0, 0), (20, 0, 0), (30, 0, 0), (40, 0, 0)]):
+        upload_image(client, slug, i, color)
+    p = client.get(f"/api/projects/{slug}").json()
+    deleted_img = p["scenes"][1]["image"]
+
+    r = client.delete(f"/api/projects/{slug}/scenes/1")
+    assert r.status_code == 200
+    p_after = r.json()
+    assert len(p_after["scenes"]) == 3
+
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    assert not (folder / deleted_img).exists()
+
+    # Chỉ còn 3 cảnh -> xoá tiếp sẽ báo 400
+    r_bad = client.delete(f"/api/projects/{slug}/scenes/0")
+    assert r_bad.status_code == 400 and "ít nhất 3 cảnh" in r_bad.json()["detail"]
+
+    # Sai scene_index -> 404
+    assert client.delete(f"/api/projects/{slug}/scenes/99").status_code == 404
 
 
 def test_reorder_rejects_non_permutations(client):  # noqa: F811

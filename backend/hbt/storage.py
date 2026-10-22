@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import unicodedata
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -66,6 +66,25 @@ class Unprocessable(StorageError):
 
 
 CANONICAL_IMAGE = re.compile(r"^images/scene-[0-9]{2,}(\.[a-z0-9]+)$")
+
+
+def content_hash_16(data: bytes) -> str:
+    """16 ký tự đầu của SHA-256 nội dung file ảnh."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def _cleanup_unused_images(folder: Path, project: Project) -> None:
+    """Xoá file trong images/ không còn cảnh nào tham chiếu."""
+    images_dir = folder / "images"
+    if not images_dir.is_dir():
+        return
+    referenced = {Path(s.image).name for s in project.scenes if s.image}
+    for f in images_dir.iterdir():
+        if f.is_file() and not f.name.startswith(".") and f.name not in referenced:
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
 
 def scene_image_stem(scene_index: int) -> str:
@@ -177,15 +196,42 @@ class Storage:
         if not path.is_file():
             raise NotFound(f"Không có project '{slug}'")
         try:
-            return Project.model_validate(json.loads(path.read_text(encoding="utf-8")))
+            project = Project.model_validate(json.loads(path.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, ValidationError) as e:
             raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+
+        # Tự chuyển project cũ dạng scene-01.png hoặc ảnh chưa chuẩn hash sang
+        # định dạng images/<sha256 16 ký tự>.<ext>
+        folder = self.project_dir(slug)
+        images_dir = folder / "images"
+        changed = False
+        if images_dir.is_dir():
+            for scene in project.scenes:
+                if not scene.image:
+                    continue
+                img_path = folder / scene.image
+                if not img_path.is_file():
+                    continue
+                data = img_path.read_bytes()
+                h = content_hash_16(data)
+                ext = img_path.suffix.lower().lstrip(".")
+                expected_rel = f"images/{h}.{ext}"
+                if scene.image != expected_rel:
+                    dest = folder / expected_rel
+                    if not dest.is_file():
+                        shutil.copy2(img_path, dest)
+                    scene.image = expected_rel
+                    changed = True
+        if changed:
+            self.save(slug, project)
+        return project
 
     def save(self, slug: str, project: Project) -> Project:
         if project.slug != slug:
             raise BadRequest(f"slug trong nội dung ('{project.slug}') khác đường dẫn ('{slug}')")
         folder = self.project_dir(slug)
         folder.mkdir(parents=True, exist_ok=True)
+        _cleanup_unused_images(folder, project)
         _write_json_atomic(folder / "project.json", project.model_dump(mode="json"))
         return project
 
@@ -194,6 +240,23 @@ class Storage:
         if not (folder / "project.json").is_file():
             raise NotFound(f"Không có project '{slug}'")
         shutil.rmtree(folder)
+
+    def delete_scene(self, slug: str, scene_index: int) -> Project:
+        """Xoá một cảnh trong project (giữ ràng buộc MIN_SCENES..MAX_SCENES)."""
+        project = self.load(slug)
+        if not 0 <= scene_index < len(project.scenes):
+            raise NotFound(
+                f"Project '{slug}' không có cảnh {scene_index} (0..{len(project.scenes) - 1})"
+            )
+        if len(project.scenes) <= MIN_SCENES:
+            raise BadRequest(f"Project phải có ít nhất {MIN_SCENES} cảnh")
+        del project.scenes[scene_index]
+        if project.thumbnail and isinstance(project.thumbnail.scene, int):
+            deleted_1 = scene_index + 1
+            if deleted_1 < project.thumbnail.scene:
+                project.thumbnail.scene -= 1
+            project.thumbnail.scene = max(1, min(project.thumbnail.scene, len(project.scenes)))
+        return self.save(slug, project)
 
     def duplicate(self, slug: str, title: str | None = None) -> Project:
         source = self.load(slug)
@@ -209,36 +272,12 @@ class Storage:
 
     # ---------------------------------------------------------------- thứ tự cảnh
     def reorder_scenes(self, slug: str, order: list[int]) -> Project:
-        """Đổi thứ tự cảnh: cảnh mới thứ i là cảnh cũ `order[i]`.
-
-        Ảnh có tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để NN luôn bằng
-        chỉ số + 1 (nếu không, tải ảnh cho cảnh 0 sau này sẽ ghi đè ảnh của cảnh khác)."""
+        """Đổi thứ tự cảnh: cảnh mới thứ i là cảnh cũ `order[i]`. Tên file ảnh không đổi."""
         project = self.load(slug)
         n = len(project.scenes)
         if sorted(order) != list(range(n)):
             raise BadRequest(f"`order` phải là một hoán vị của 0..{n - 1}")
-        folder = self.project_dir(slug)
-        scenes = [project.scenes[k] for k in order]
-        staged = []
-        for i, scene in enumerate(scenes):
-            m = CANONICAL_IMAGE.match(scene.image)
-            if not m:
-                continue  # tên tuỳ ý: giữ nguyên
-            new_rel = f"images/{scene_image_stem(i)}{m.group(1)}"
-            if new_rel == scene.image:
-                continue
-            # hai pha (qua tên tạm) để hai ảnh đổi chỗ cho nhau không ghi đè nhau
-            src = folder / scene.image
-            tmp = None
-            if src.is_file():
-                tmp = folder / "images" / f".reorder-{uuid.uuid4().hex[:8]}{m.group(1)}"
-                os.replace(src, tmp)
-            staged.append((scene, tmp, new_rel))
-        for scene, tmp, new_rel in staged:
-            if tmp is not None:
-                os.replace(tmp, folder / new_rel)
-            scene.image = new_rel
-        project.scenes = scenes
+        project.scenes = [project.scenes[k] for k in order]
         return self.save(slug, project)
 
     # ---------------------------------------------------------------- lịch sử xuất, nhạc thư viện
@@ -356,11 +395,15 @@ class Storage:
             if scene_index is None or not 0 <= scene_index < len(project.scenes):
                 raise BadRequest(f"Cần `scene_index` từ 0 đến {len(project.scenes) - 1} cho ảnh")
             ext = _image_extension(src)
-            stem = scene_image_stem(scene_index)
-            rel = f"images/{stem}.{ext}"
+            data = src.read_bytes()
+            h = content_hash_16(data)
+            rel = f"images/{h}.{ext}"
             (folder / "images").mkdir(exist_ok=True)
-            _remove_siblings(folder / "images", stem)
-            shutil.move(src, folder / rel)
+            dest = folder / rel
+            if not dest.is_file():
+                shutil.move(src, dest)
+            else:
+                src.unlink(missing_ok=True)
             project.scenes[scene_index].image = rel
         elif kind in ("voice", "music"):
             ext = _audio_extension(src, filename)

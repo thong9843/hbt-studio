@@ -102,6 +102,14 @@ def reorder_scenes(slug: str, body: SceneReorder, state: State):
     return state.storage.reorder_scenes(slug, body.order)
 
 
+@router.delete("/projects/{slug}/scenes/{scene_index}", response_model=Project)
+def delete_scene(slug: str, scene_index: int, state: State):
+    """Xoá một cảnh trong project (`scene_index` từ 0), giữ ràng buộc 3–12 cảnh."""
+    if state.jobs.is_busy(slug):
+        raise Conflict("Project đang được dựng, hãy huỷ job trước khi xoá cảnh")
+    return state.storage.delete_scene(slug, scene_index)
+
+
 class DraftPreview(BaseModel):
     scene: Scene
     theme: Theme | None = None  # bỏ trống → dùng theme đã lưu của project

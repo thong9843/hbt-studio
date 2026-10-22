@@ -68,6 +68,16 @@ function EditorProvider({ initial }: { initial: Project }) {
     [bumpImages, commit, flush, slug],
   );
 
+  const deleteScene = useCallback(
+    async (sceneIndex: number) => {
+      await flush();
+      const next = await api.deleteScene(slug, sceneIndex);
+      commit(next);
+      bumpImages();
+    },
+    [bumpImages, commit, flush, slug],
+  );
+
   const uploadImage = useCallback(
     async (sceneIndex: number, file: File) => {
       await flush();
@@ -120,6 +130,7 @@ function EditorProvider({ initial }: { initial: Project }) {
       imageVersion,
       bumpImages,
       reorder,
+      deleteScene,
       uploadImage,
     }),
     [
@@ -133,6 +144,7 @@ function EditorProvider({ initial }: { initial: Project }) {
       imageVersion,
       bumpImages,
       reorder,
+      deleteScene,
       uploadImage,
     ],
   );

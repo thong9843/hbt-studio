@@ -17,8 +17,10 @@ export interface ProjectEditor {
   /** Tăng khi ảnh trong thư mục project đổi — để làm mới ảnh thu nhỏ. */
   imageVersion: number;
   bumpImages: () => void;
-  /** Đổi thứ tự cảnh qua API (đổi tên ảnh phía máy chủ) và nạp lại project. */
+  /** Đổi thứ tự cảnh qua API và nạp lại project. */
   reorder: (order: number[]) => Promise<void>;
+  /** Xoá cảnh qua API và nạp lại project. */
+  deleteScene: (sceneIndex: number) => Promise<void>;
   /** Tải ảnh cho cảnh `sceneIndex` (từ 0). */
   uploadImage: (sceneIndex: number, file: File) => Promise<void>;
 }

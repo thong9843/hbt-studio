@@ -35,6 +35,8 @@ export const api = {
     apiRequest<Project>('POST', `/projects/${enc(slug)}/duplicate`, { json: {} }),
   reorderScenes: (slug: string, order: number[]) =>
     apiRequest<Project>('POST', `/projects/${enc(slug)}/scenes/reorder`, { json: { order } }),
+  deleteScene: (slug: string, sceneIndex: number) =>
+    apiRequest<Project>('DELETE', `/projects/${enc(slug)}/scenes/${sceneIndex}`),
 
   /** Xem trước một cảnh bản nháp (chưa lưu). `sceneIndex` tính từ 0. */
   previewScene: (

@@ -25,9 +25,23 @@ function setup(initial: Project, extra: Record<string, unknown> = {}) {
       saved.push(body);
       return ok(body);
     },
-    ...extra,
   };
-  for (let i = 0; i < 12; i++) routes[`POST /api/projects/muoi/scenes/${i}/preview.png`] = png;
+  for (let i = 0; i < 12; i++) {
+    routes[`POST /api/projects/muoi/scenes/${i}/preview.png`] = png;
+    routes[`DELETE /api/projects/muoi/scenes/${i}`] = () => {
+      const p = saved.length > 0 ? saved[saved.length - 1] : initial;
+      const scenes = p.scenes.filter((_, idx) => idx !== i);
+      const t = p.thumbnail as { scene?: number } | null;
+      const thumbnail =
+        t && typeof t.scene === 'number'
+          ? { ...t, scene: Math.min(t.scene, scenes.length) }
+          : p.thumbnail;
+      const next = { ...p, scenes, thumbnail };
+      saved.push(next);
+      return ok(next);
+    };
+  }
+  Object.assign(routes, extra);
   stubFetch(routes);
   renderWithProviders(
     <ToastProvider>
@@ -70,13 +84,15 @@ describe('ScenesTab', () => {
     expect((saved[0].thumbnail as { scene: number }).scene).toBe(3);
   });
 
-  it('moves the scene to the end through the API before dropping it', async () => {
+  it('deletes the scene directly through the DELETE API without reordering', async () => {
     const four = project({ scenes: [scene(), scene(), scene(), scene()] });
-    let order: number[] | undefined;
+    let deletedIndex: number | undefined;
     const { saved } = setup(four, {
-      'POST /api/projects/muoi/scenes/reorder': (_u: string, init?: RequestInit) => {
-        order = (JSON.parse(String(init?.body)) as { order: number[] }).order;
-        return ok(four);
+      'DELETE /api/projects/muoi/scenes/0': () => {
+        deletedIndex = 0;
+        const next = { ...four, scenes: four.scenes.slice(1) };
+        saved.push(next);
+        return ok(next);
       },
     });
     const user = userEvent.setup();
@@ -84,7 +100,8 @@ describe('ScenesTab', () => {
     await user.click(screen.getByRole('button', { name: /Xoá cảnh này/ }));
     await user.click(screen.getAllByRole('button', { name: 'Xoá cảnh này' }).at(-1)!);
     await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3000 });
-    expect(order).toEqual([1, 2, 3, 0]);
+    expect(deletedIndex).toBe(0);
+    expect(saved[0].scenes).toHaveLength(3);
   });
 
   it('Ctrl+S saves immediately and Alt+Down moves to the next scene', async () => {
