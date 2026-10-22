@@ -569,6 +569,8 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
 - **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
 
+- **Thời gian dựng bản đẹp (đo 22/10/2026, i5-10400, không GPU, máy rảnh, tập "muỗi" 8 cảnh 50 s, 1080×1920 50 fps):** 143 s, tương đương M1 (145 s). Lần 261 s ở M3 đo khi trình duyệt và máy chủ dev đang chạy; không có lỗi hiệu năng trong bộ dựng. Khi đo thời gian, tắt `npm run dev` và trình duyệt.
+
 **Backlog sau M3 (chưa làm, không thuộc mốc nào):**
 - Chuyển sang `lucide-react` (cần chủ dự án duyệt thêm thư viện, xem quyết định Biểu tượng ở trên).
 - Thêm font độ đậm 400 và 600 thật (hiện dùng 500 và 700 thay thế).
