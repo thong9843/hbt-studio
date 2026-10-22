@@ -72,12 +72,13 @@ class Quality:
     clip_crf: int
     final_preset: str
     final_crf: int
+    audio_bitrate: str
 
 
 def quality_for(preview: bool, fps: int) -> Quality:
     if preview:  # Xem nhanh: 540×960, 30 fps
-        return Quality(True, 30, 540, 960, "ultrafast", 23, "ultrafast", 23)
-    return Quality(False, fps, 1080, 1920, "veryfast", 12, "veryfast", 16)
+        return Quality(True, 30, 540, 960, "ultrafast", 23, "veryfast", 30, "96k")
+    return Quality(False, fps, 1080, 1920, "veryfast", 12, "veryfast", 16, "192k")
 
 
 @dataclass
@@ -293,7 +294,8 @@ def compose(
         "-filter_complex", cap_fc, "-map", "[v]", "-map", "2:a", "-r", str(fps),
         "-c:v", "libx264", "-preset", q.final_preset, "-crf", str(q.final_crf),
         "-profile:v", "high", "-g", str(2 * fps),
-        "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(partial),
+        "-c:a", "aac", "-b:a", q.audio_bitrate,
+        "-shortest", "-movflags", "+faststart", str(partial),
     ]  # fmt: skip
     err = tempfile.TemporaryFile()
     enc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)

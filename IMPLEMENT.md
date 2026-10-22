@@ -194,7 +194,7 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 | 9 | Ghép cuối | `assemble` (reference): xfade `slideleft` 0,4 s + phủ phụ đề + tiếng; H.264 `crf 18 medium`, `-r {fps}`, yuv420p, AAC 192k, `+faststart` | 80–98 |
 | 10 | Kiểm tra đầu ra | ffprobe đúng fps, 1080×1920, độ dài; đo `ebur128` trong khoảng −15…−13 LUFS; sinh `publish.txt` | 98–100 |
 
-**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, `ultrafast`. Dùng để duyệt trước khi xuất bản đẹp.
+**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
 
 **FPS:** mặc định **50** (cho phép 30, 50, 60). Không cho chọn số lạ như 45 (nền tảng dễ chuyển đổi lại gây giật). Xem mục 4b.
 
