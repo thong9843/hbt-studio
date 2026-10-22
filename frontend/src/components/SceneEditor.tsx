@@ -2,16 +2,24 @@ import { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useMutation } from '@tanstack/react-query';
 import { projectFileUrl } from '../api/endpoints';
-import type { CardLine, CardPreset, Label, LineSize, Scene } from '../api/types';
+import type { CardLine, Label, LineSize, Scene } from '../api/types';
 import { vi } from '../i18n/vi';
+import {
+  CARD_PRESETS,
+  CARD_Y_MAX,
+  LINE_SIZES,
+  MAX_CARD_LINES,
+  cardPositionKey,
+  cardYFromSelection,
+  clampCardY,
+  newCardLine,
+} from '../utils/card';
 import { VOICE_CHAR_LIMIT, countVoiceChars } from '../utils/voice';
 import { ColorField } from './ColorField';
 import { ErrorNote } from './ErrorNote';
+import { AlertIcon, ImageIcon, PlusIcon, TrashIcon } from './icons';
 
 const T = vi.compose.editor;
-const PRESETS: CardPreset[] = ['top', 'upper', 'middle', 'lower'];
-const SIZES: LineSize[] = ['s', 'm', 'l', 'xl'];
-const MAX_LINES = 5;
 const IMAGE_ACCEPT = { 'image/png': [], 'image/jpeg': [], 'image/webp': [] };
 
 interface Props {
@@ -52,12 +60,17 @@ function ImageDrop({
     <div>
       <div
         {...getRootProps()}
-        className={`flex cursor-pointer items-center gap-4 rounded-2xl border-2 border-dashed p-3 transition ${
-          isDragActive ? 'border-fg bg-surface-2' : 'border-border bg-surface'
+        className={`flex cursor-pointer items-center gap-4 rounded-card border-2 border-dashed p-3 transition ${
+          isDragActive ? 'border-text bg-surface-2' : 'border-border bg-surface'
         }`}
       >
         <input {...getInputProps({ 'aria-label': T.image })} />
         <span className="h-24 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-2">
+          {!scene.image && (
+            <span className="flex h-full w-full items-center justify-center text-text-muted">
+              <ImageIcon />
+            </span>
+          )}
           {scene.image && (
             <img
               src={`${projectFileUrl(slug, scene.image)}?v=${imageVersion}`}
@@ -66,7 +79,7 @@ function ImageDrop({
             />
           )}
         </span>
-        <span className="text-sm font-bold">
+        <span className="text-small font-bold">
           {upload.isPending
             ? T.imageUploading
             : isDragActive
@@ -77,7 +90,7 @@ function ImageDrop({
         </span>
       </div>
       {fileRejections.length > 0 && (
-        <p role="alert" className="mt-2 text-sm font-bold text-danger">
+        <p role="alert" className="mt-2 text-small font-bold text-danger">
           {T.imageRejected}
         </p>
       )}
@@ -115,7 +128,7 @@ export function SceneEditor({
   const setLabel = (i: number, patch: Partial<Label>) =>
     onChange((s) => ({ ...s, labels: s.labels.map((l, k) => (k === i ? { ...l, ...patch } : l)) }));
 
-  const preset = typeof scene.card.y === 'number' ? 'custom' : scene.card.y;
+  const preset = cardPositionKey(scene.card.y);
   const voiceChars = countVoiceChars(scene.voice);
 
   return (
@@ -136,11 +149,9 @@ export function SceneEditor({
               id={`${idp}-cardy`}
               className="input"
               value={preset}
-              onChange={(e) =>
-                setCard({ y: e.target.value === 'custom' ? 300 : (e.target.value as CardPreset) })
-              }
+              onChange={(e) => setCard({ y: cardYFromSelection(e.target.value, scene.card.y) })}
             >
-              {PRESETS.map((p) => (
+              {CARD_PRESETS.map((p) => (
                 <option key={p} value={p}>
                   {T.positions[p]}
                 </option>
@@ -152,20 +163,18 @@ export function SceneEditor({
             <input
               type="number"
               min={0}
-              max={1920}
+              max={CARD_Y_MAX}
               aria-label={T.positions.custom}
               className="input w-28"
               value={scene.card.y}
-              onChange={(e) =>
-                setCard({ y: Math.min(1920, Math.max(0, Math.round(Number(e.target.value) || 0))) })
-              }
+              onChange={(e) => setCard({ y: clampCardY(e.target.value) })}
             />
           )}
         </div>
 
         <ul className="space-y-2">
           {scene.card.lines.map((line, i) => (
-            <li key={i} className="grid grid-cols-[1fr_auto] gap-2 rounded-2xl bg-surface p-3">
+            <li key={i} className="grid grid-cols-[1fr_auto] gap-2 rounded-card bg-surface p-3">
               <input
                 aria-label={`${T.line(i + 1)}: ${T.lineText}`}
                 className="input col-span-2"
@@ -180,7 +189,7 @@ export function SceneEditor({
                   value={line.size}
                   onChange={(e) => setLine(i, { size: e.target.value as LineSize })}
                 >
-                  {SIZES.map((s) => (
+                  {LINE_SIZES.map((s) => (
                     <option key={s} value={s}>
                       {T.sizes[s]}
                     </option>
@@ -196,9 +205,10 @@ export function SceneEditor({
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-sm justify-self-end"
+                className="btn btn-outline btn-sm justify-self-end"
                 onClick={() => setCard({ lines: scene.card.lines.filter((_, k) => k !== i) })}
               >
+                <TrashIcon size={18} />
                 {T.removeLine}
               </button>
             </li>
@@ -207,12 +217,11 @@ export function SceneEditor({
         <button
           type="button"
           className="btn btn-secondary btn-sm"
-          disabled={scene.card.lines.length >= MAX_LINES}
-          onClick={() =>
-            setCard({ lines: [...scene.card.lines, { text: '', size: 'm', color: 'ink' }] })
-          }
+          disabled={scene.card.lines.length >= MAX_CARD_LINES}
+          onClick={() => setCard({ lines: [...scene.card.lines, newCardLine()] })}
         >
-          + {T.addLine}
+          <PlusIcon size={18} />
+          {T.addLine}
         </button>
       </section>
 
@@ -222,7 +231,7 @@ export function SceneEditor({
           {scene.labels.map((label, i) => (
             <li
               key={i}
-              className="grid grid-cols-2 gap-2 rounded-2xl bg-surface p-3 sm:grid-cols-6"
+              className="grid grid-cols-2 gap-2 rounded-card bg-surface p-3 sm:grid-cols-6"
             >
               <input
                 aria-label={`${T.labelText} ${i + 1}`}
@@ -258,11 +267,12 @@ export function SceneEditor({
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-sm col-span-2 justify-self-end sm:col-span-6"
+                className="btn btn-outline btn-sm col-span-2 justify-self-end sm:col-span-6"
                 onClick={() =>
                   onChange((s) => ({ ...s, labels: s.labels.filter((_, k) => k !== i) }))
                 }
               >
+                <TrashIcon size={18} />
                 {T.removeLabel}
               </button>
             </li>
@@ -278,7 +288,8 @@ export function SceneEditor({
             }))
           }
         >
-          + {T.addLabel}
+          <PlusIcon size={18} />
+          {T.addLabel}
         </button>
       </section>
 
@@ -296,29 +307,33 @@ export function SceneEditor({
         />
         <p
           id={`${idp}-voice-hint`}
-          className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted"
+          className="mt-1 flex flex-wrap justify-between gap-2 text-small text-text-muted"
         >
           <span>{T.voiceHintSyntax}</span>
           <span>
             {T.voiceCount(voiceChars)} ·{' '}
-            <span className={totalVoiceChars > VOICE_CHAR_LIMIT ? 'font-bold text-danger' : ''}>
-              {T.voiceTotal(totalVoiceChars, VOICE_CHAR_LIMIT)}
-            </span>
+            <span className="num">{T.voiceTotal(totalVoiceChars, VOICE_CHAR_LIMIT)}</span>
+            {totalVoiceChars > VOICE_CHAR_LIMIT && (
+              <span role="alert" className="chip chip-warn ml-2">
+                <AlertIcon size={14} />
+                {T.voiceOver}
+              </span>
+            )}
           </span>
         </p>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
-        <label className="flex items-start gap-3 rounded-2xl bg-surface p-4">
+        <label className="flex items-start gap-3 rounded-card bg-surface p-4">
           <input
             type="checkbox"
-            className="mt-1 h-5 w-5 accent-[var(--color-accent)]"
+            className="mt-1 h-5 w-5 accent-[var(--accent)]"
             checked={scene.punch}
             onChange={(e) => onChange((s) => ({ ...s, punch: e.target.checked }))}
           />
           <span>
             <span className="block font-extrabold">{T.punch}</span>
-            <span className="block text-xs text-muted">{T.punchHelp}</span>
+            <span className="block text-small text-text-muted">{T.punchHelp}</span>
           </span>
         </label>
         <div>
@@ -329,7 +344,7 @@ export function SceneEditor({
             id={`${idp}-capy`}
             type="number"
             min={0}
-            max={1920}
+            max={CARD_Y_MAX}
             className="input"
             value={scene.caption_y ?? ''}
             onChange={(e) => onChange((s) => ({ ...s, caption_y: numberOrNull(e.target.value) }))}

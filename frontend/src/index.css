@@ -1,27 +1,27 @@
 @import './styles/tokens.css';
 
-/* Be Vietnam Pro (OFL, kèm giấy phép ở public/fonts/OFL.txt). Chỉ có các đậm 500/700/800:
-   chữ thường dùng 500. */
+/* Be Vietnam Pro (OFL, giấy phép ở public/fonts/OFL.txt), bản woff2 đóng gói sẵn, không tải từ
+   mạng. Chỉ có ba độ đậm: 400 dùng bản 500, 600 dùng bản 700. */
 @font-face {
   font-family: 'Be Vietnam Pro';
-  font-weight: 500;
+  font-weight: 400 500;
   font-style: normal;
   font-display: swap;
-  src: url('/fonts/BeVietnamPro-Medium.ttf') format('truetype');
+  src: url('/fonts/BeVietnamPro-Medium.woff2') format('woff2');
 }
 @font-face {
   font-family: 'Be Vietnam Pro';
-  font-weight: 700;
+  font-weight: 600 700;
   font-style: normal;
   font-display: swap;
-  src: url('/fonts/BeVietnamPro-Bold.ttf') format('truetype');
+  src: url('/fonts/BeVietnamPro-Bold.woff2') format('woff2');
 }
 @font-face {
   font-family: 'Be Vietnam Pro';
   font-weight: 800;
   font-style: normal;
   font-display: swap;
-  src: url('/fonts/BeVietnamPro-ExtraBold.ttf') format('truetype');
+  src: url('/fonts/BeVietnamPro-ExtraBold.woff2') format('woff2');
 }
 
 @tailwind base;
@@ -30,71 +30,110 @@
 
 @layer base {
   body {
-    @apply bg-bg font-sans text-fg antialiased;
+    @apply bg-bg font-sans text-body text-text antialiased;
   }
-  h1,
+  h1 {
+    @apply text-h1 font-extrabold uppercase;
+  }
   h2 {
-    @apply font-extrabold uppercase tracking-tight;
+    @apply text-h2 font-bold;
   }
+  h3 {
+    @apply text-body font-bold;
+  }
+  /* Viền tiêu điểm 2 px, cách 2 px (mục 10) */
   :focus-visible {
-    @apply outline-none ring-2 ring-fg ring-offset-2 ring-offset-bg;
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
   ::selection {
-    @apply bg-hbt-mustard text-hbt-ink;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  button:not(:disabled),
+  [role='button'] {
+    cursor: pointer;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer components {
-  /* Nút viên thuốc */
+  /* Nút viên thuốc cao 48 (mục 6) */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold transition;
-    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full px-6 text-body font-bold;
+    @apply transition duration-[180ms] ease-hbt;
+    @apply enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-primary {
-    @apply bg-fg text-bg enabled:hover:opacity-85;
+    @apply bg-primary text-on-primary enabled:hover:brightness-125 enabled:active:brightness-90;
   }
   .btn-secondary {
-    @apply bg-surface text-fg enabled:hover:bg-surface-2;
+    @apply bg-surface text-text enabled:hover:bg-surface-2;
+  }
+  .btn-outline {
+    @apply border-[1.5px] border-text bg-transparent text-text enabled:hover:bg-surface;
   }
   .btn-accent {
-    @apply bg-accent text-on-accent enabled:hover:brightness-110;
+    @apply bg-accent text-on-accent enabled:hover:brightness-110 enabled:active:brightness-90;
+  }
+  .btn-danger {
+    @apply border-[1.5px] border-danger bg-transparent text-danger enabled:hover:bg-danger/10;
   }
   .btn-ghost {
-    @apply bg-transparent text-fg enabled:hover:bg-surface;
+    @apply bg-transparent text-text enabled:hover:bg-surface;
   }
+  /* Gọn hơn nhưng vẫn đủ vùng chạm 44 px */
   .btn-sm {
-    @apply px-4 py-1.5 text-xs;
+    @apply min-h-[44px] px-4 text-small;
   }
   .btn-icon {
-    @apply h-9 w-9 shrink-0 rounded-full bg-surface p-0 text-fg enabled:hover:bg-surface-2;
+    @apply h-11 w-11 min-h-0 shrink-0 rounded-full bg-surface p-0 text-text enabled:hover:bg-surface-2;
   }
 
-  /* Ô nhập */
+  /* Ô nhập cao 48, bo 12 */
   .input {
-    @apply w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-muted;
-    @apply focus:border-fg disabled:opacity-50;
+    @apply min-h-[48px] w-full rounded-input border border-border bg-surface px-3 py-2 text-body text-text;
+    @apply placeholder:text-text-muted disabled:opacity-40;
+  }
+  textarea.input {
+    @apply py-3;
   }
   .label {
-    @apply mb-1 block text-xs font-bold uppercase tracking-wider text-muted;
+    @apply mb-1 block text-tiny font-semibold uppercase text-text-muted;
   }
 
-  /* Thẻ và nhãn */
+  /* Thẻ, chip, huy hiệu */
   .card {
-    @apply rounded-2xl bg-surface;
+    @apply rounded-card border border-border bg-surface;
   }
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold;
+    @apply inline-flex h-6 items-center gap-1 rounded-full bg-surface-2 px-3 text-tiny font-semibold text-text;
   }
   .chip-ok {
-    @apply bg-ok-bg text-ok;
-  }
-  .chip-warn {
-    @apply bg-warn-bg text-warn;
-  }
-  .chip-danger {
-    @apply bg-danger-bg text-danger;
+    @apply bg-surface-2 text-text;
   }
   .chip-muted {
-    @apply bg-surface-2 text-muted;
+    @apply bg-surface-2 text-text-muted;
+  }
+  .chip-warn {
+    @apply bg-accent text-on-accent;
+  }
+  .chip-danger {
+    @apply bg-danger text-bg;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    @apply font-semibold;
+  }
+  .spinner {
+    @apply inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent;
   }
 }

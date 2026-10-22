@@ -58,30 +58,36 @@ export function ScenePreview({ slug, sceneIndex, scene, theme, imageVersion }: P
   const stale = key !== settled || loading;
   return (
     <section aria-label={vi.compose.preview.title}>
-      <h2 className="mb-3 text-sm text-muted">{vi.compose.preview.title}</h2>
-      <div className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-3xl bg-surface">
+      <h2 className="mb-3 text-tiny font-semibold uppercase text-text-muted">
+        {vi.compose.preview.title}
+      </h2>
+      <div className="relative mx-auto aspect-[9/16] w-full max-w-[360px] overflow-hidden rounded-frame bg-surface">
         {url && (
           <img
             src={url}
             alt={vi.compose.preview.alt(sceneNumber(sceneIndex))}
-            className={`h-full w-full object-cover transition-opacity ${stale ? 'opacity-60' : ''}`}
+            className={`h-full w-full object-cover transition-opacity duration-[180ms] ${stale ? 'opacity-60' : ''}`}
           />
         )}
         {stale && !error && (
-          <span role="status" className="chip chip-muted absolute bottom-3 left-3">
+          <span
+            role="status"
+            className="absolute right-3 top-3 flex items-center gap-2 rounded-full bg-primary px-3 py-1.5 text-tiny font-semibold uppercase text-on-primary"
+          >
+            <span className="spinner h-4 w-4" aria-hidden="true" />
             {vi.compose.preview.loading}
           </span>
         )}
         {error && (
           <p
             role="alert"
-            className="absolute inset-x-3 bottom-3 rounded-xl bg-danger-bg p-2 text-xs font-bold text-danger"
+            className="absolute inset-x-3 bottom-3 rounded-input bg-bg p-3 text-small font-bold text-danger"
           >
             {vi.compose.preview.error}: {error}
           </p>
         )}
       </div>
-      <p className="mt-3 text-center text-xs text-muted">{vi.compose.preview.hint}</p>
+      <p className="mt-3 text-center text-small text-text-muted">{vi.compose.preview.hint}</p>
     </section>
   );
 }

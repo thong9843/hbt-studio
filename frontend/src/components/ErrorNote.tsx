@@ -7,7 +7,7 @@ export function ErrorNote({ error, className = '' }: { error: unknown; className
   return (
     <p
       role="alert"
-      className={`rounded-xl bg-danger-bg px-4 py-2 text-sm font-bold text-danger ${className}`}
+      className={`rounded-input bg-danger/10 px-4 py-2 text-small font-bold text-danger ${className}`}
     >
       {vi.common.errorPrefix} {errorMessage(error)}
     </p>

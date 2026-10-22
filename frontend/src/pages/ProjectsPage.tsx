@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { HealthStatus } from '../components/HealthStatus';
+import { PlusIcon } from '../components/icons';
+import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDateTime, formatDuration } from '../utils/format';
 
@@ -24,23 +27,27 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   });
   const t = vi.projects.dialog;
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (title.trim()) create.mutate();
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
       <form
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-project-title"
         onSubmit={submit}
-        className="w-full max-w-md space-y-4 rounded-3xl bg-bg p-8 shadow-xl"
+        className="w-full max-w-md space-y-4 rounded-frame bg-bg p-8 shadow-xl"
       >
-        <h2 id="new-project-title" className="text-2xl">
-          {t.title}
-        </h2>
+        <h2 id="new-project-title">{t.title}</h2>
         <div>
           <label className="label" htmlFor="np-title">
             {t.name}
@@ -82,7 +89,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
         </div>
         <ErrorNote error={create.error} />
         <div className="flex justify-end gap-2">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
             {vi.common.cancel}
           </button>
           <button
@@ -98,28 +105,25 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProjectCard({ project }: { project: ProjectSummary }) {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
-  const duplicate = useMutation({
-    mutationFn: () => api.duplicateProject(project.slug),
-    onSuccess: (copy) => {
-      void refresh();
-      navigate(`/p/${copy.slug}`);
-    },
-  });
-  const remove = useMutation({
-    mutationFn: () => api.deleteProject(project.slug),
-    onSuccess: refresh,
-  });
+/** Thẻ dự án: ảnh cảnh 1 tràn sát mép (9:16), tiêu đề chữ hoa, ngày và huy hiệu ngay dưới ảnh. */
+export function ProjectCard({
+  project,
+  onDuplicate,
+  onDelete,
+  busy,
+}: {
+  project: ProjectSummary;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  busy?: boolean;
+}) {
   const render = project.last_render;
-
   return (
-    <li className="card flex flex-col overflow-hidden">
+    <li className="flex flex-col overflow-hidden rounded-card border border-border bg-surface">
       <Link
         to={`/p/${project.slug}`}
-        className="block aspect-[9/16] max-h-80 w-full overflow-hidden bg-hbt-red"
+        aria-label={`${vi.projects.open}: ${project.title}`}
+        className="block aspect-[9/16] w-full overflow-hidden bg-surface"
       >
         <img
           src={project.thumb ?? '/brand/hay-biet-tuot_avatar.png'}
@@ -129,46 +133,45 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
         />
       </Link>
       <div className="flex flex-1 flex-col gap-2 p-4">
-        <h3 className="text-lg font-extrabold leading-tight">
+        <h3 className="text-small font-bold uppercase leading-5">
           <Link to={`/p/${project.slug}`} className="hover:underline">
             {project.title}
           </Link>
         </h3>
-        <p className="text-xs text-muted">
-          {vi.projects.updatedAt}: {formatDateTime(project.updated_at)}
+        <p className="text-small text-text-muted">
+          {vi.projects.updatedAt}: <span className="num">{formatDateTime(project.updated_at)}</span>
         </p>
-        {project.error ? (
-          <p className="chip chip-danger w-fit">{vi.projects.broken}</p>
-        ) : render ? (
-          <p className="chip chip-ok w-fit">
-            {vi.projects.lastRender}
-            {render.preview ? ` · ${vi.projects.previewRender}` : ''}
-            {render.duration ? ` · ${formatDuration(render.duration)}` : ''}
-          </p>
-        ) : (
-          <p className="chip chip-muted w-fit">{vi.projects.notRendered}</p>
-        )}
-        <div className="mt-auto flex gap-2 pt-2">
+        <div className="mt-2">
+          {project.error ? (
+            <p className="chip chip-danger">{vi.projects.broken}</p>
+          ) : render ? (
+            <p className="chip chip-ok">
+              {vi.projects.lastRender}
+              {render.preview ? ` · ${vi.projects.previewRender}` : ''}
+              {render.duration ? ` · ${formatDuration(render.duration)}` : ''}
+            </p>
+          ) : (
+            <p className="chip chip-muted">{vi.projects.notRendered}</p>
+          )}
+        </div>
+        <div className="mt-auto flex flex-wrap gap-2 pt-3">
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            disabled={duplicate.isPending}
-            onClick={() => duplicate.mutate()}
+            disabled={busy}
+            onClick={onDuplicate}
           >
             {vi.projects.duplicate}
           </button>
           <button
             type="button"
-            className="btn btn-ghost btn-sm"
-            disabled={remove.isPending}
-            onClick={() => {
-              if (window.confirm(vi.projects.confirmDelete(project.title))) remove.mutate();
-            }}
+            className="btn btn-danger btn-sm"
+            disabled={busy}
+            onClick={onDelete}
           >
             {vi.projects.delete}
           </button>
         </div>
-        <ErrorNote error={duplicate.error ?? remove.error} />
       </div>
     </li>
   );
@@ -176,43 +179,103 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
 
 export function ProjectsPage() {
   const [creating, setCreating] = useState(false);
-  const { data, isPending, error } = useQuery({
+  const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: api.listProjects,
   });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
+
+  const duplicate = useMutation({
+    mutationFn: (slug: string) => api.duplicateProject(slug),
+    onSuccess: (copy) => {
+      void refresh();
+      navigate(`/p/${copy.slug}`);
+    },
+    onError: (e, slug) => toast.error(e, () => duplicate.mutate(slug)),
+  });
+  const remove = useMutation({
+    mutationFn: (slug: string) => api.deleteProject(slug),
+    onSuccess: () => {
+      setDeleting(null);
+      void refresh();
+      toast.info(vi.projects.deleted);
+    },
+    onError: (e) => {
+      setDeleting(null);
+      toast.error(e);
+    },
+  });
 
   return (
-    <main className="mx-auto max-w-[1400px] px-6 py-10">
+    <main className="mx-auto max-w-[1280px] px-6 py-12">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <h1 className="text-5xl leading-none">{vi.projects.title}</h1>
-        <button type="button" className="btn btn-accent" onClick={() => setCreating(true)}>
+        <h1>{vi.projects.title}</h1>
+        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+          <PlusIcon size={20} />
           {vi.projects.create}
         </button>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-12">
         <HealthStatus />
       </div>
 
-      <section className="mt-10">
-        {isPending && <p className="text-muted">{vi.common.loading}</p>}
-        <ErrorNote error={error} />
+      <section className="mt-12" aria-label={vi.projects.title}>
+        {isPending && (
+          <p className="flex items-center gap-3 text-text-muted">
+            <span className="spinner" aria-hidden="true" />
+            {vi.common.loading}
+          </p>
+        )}
+        {error && (
+          <div className="space-y-3">
+            <ErrorNote error={error} />
+            <button type="button" className="btn btn-secondary" onClick={() => void refetch()}>
+              {vi.common.retry}
+            </button>
+          </div>
+        )}
         {data && data.length === 0 && (
-          <div className="card flex flex-col items-center gap-4 p-12 text-center">
+          <div className="flex flex-col items-center gap-6 rounded-card bg-surface p-12 text-center">
             <img src="/brand/hbt-logo-mark.png" alt="" className="h-20 w-auto" />
-            <p className="text-lg font-bold">{vi.projects.empty}</p>
+            <p className="text-hero font-extrabold uppercase">{vi.projects.emptyHero}</p>
+            <p className="text-text-muted">{vi.projects.empty}</p>
+            <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+              {vi.projects.create}
+            </button>
           </div>
         )}
         {data && data.length > 0 && (
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5">
+          <ul className="grid grid-cols-1 gap-6 min-[640px]:grid-cols-2 min-[1024px]:grid-cols-3 min-[1280px]:grid-cols-4">
             {data.map((p) => (
-              <ProjectCard key={p.slug} project={p} />
+              <ProjectCard
+                key={p.slug}
+                project={p}
+                busy={duplicate.isPending || remove.isPending}
+                onDuplicate={() => duplicate.mutate(p.slug)}
+                onDelete={() => setDeleting(p)}
+              />
             ))}
           </ul>
         )}
       </section>
 
       {creating && <NewProjectDialog onClose={() => setCreating(false)} />}
+      {deleting && (
+        <ConfirmDialog
+          title={vi.projects.deleteTitle}
+          message={vi.projects.confirmDelete(deleting.title)}
+          confirmLabel={vi.projects.delete}
+          danger
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(deleting.slug)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
     </main>
   );
 }

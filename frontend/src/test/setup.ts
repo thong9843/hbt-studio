@@ -18,7 +18,7 @@ if (!('ResizeObserver' in globalThis)) {
 
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
-    matches: false,
+    matches: /min-width/.test(query), // mặc định mô phỏng màn hình rộng
     media: query,
     onchange: null,
     addEventListener() {},

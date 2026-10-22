@@ -104,7 +104,7 @@ describe('Compose page', () => {
     const user = userEvent.setup();
     page();
     await screen.findByLabelText('Dòng 1: Chữ');
-    await user.click(screen.getByRole('button', { name: '+ Thêm dòng' }));
+    await user.click(screen.getByRole('button', { name: 'Thêm dòng' }));
     expect(screen.getByLabelText('Dòng 2: Chữ')).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: 'Bỏ dòng' })[0]);
     expect(screen.queryByLabelText('Dòng 2: Chữ')).not.toBeInTheDocument();

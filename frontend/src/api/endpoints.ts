@@ -77,7 +77,7 @@ export const api = {
     if (input.bpm) form.set('bpm', String(input.bpm));
     return apiRequest<MusicEntry>('POST', '/music', { form });
   },
-  libraryMusicUrl: (file: string) => `/api/library/music/${enc(file)}`,
+  libraryMusicUrl: (file: string) => `/api/music/${enc(file)}/audio`,
   attachLibraryMusic: (slug: string, file: string) =>
     apiRequest<Project>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { file } }),
 

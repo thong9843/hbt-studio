@@ -32,7 +32,7 @@ function GeneralSection({ initial }: { initial: AppSettings }) {
   return (
     <section className="space-y-5">
       <div className="flex items-center gap-4">
-        <h2 className="text-2xl">{G.title}</h2>
+        <h2>{G.title}</h2>
         <SaveIndicator status={status} error={error} />
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
@@ -126,11 +126,14 @@ function GeneralSection({ initial }: { initial: AppSettings }) {
         </div>
       </div>
       {slow && (
-        <p role="note" className="rounded-xl bg-warn-bg px-4 py-2 text-sm font-bold text-warn">
+        <p
+          role="note"
+          className="rounded-input bg-warn-bg px-4 py-2 text-small font-bold text-warn"
+        >
           {G.whisperSlowWarning}
         </p>
       )}
-      <p className="text-xs text-muted">{G.whisperNote}</p>
+      <p className="text-small text-text-muted">{G.whisperNote}</p>
     </section>
   );
 }
@@ -162,8 +165,8 @@ function WordsSection({ initial }: { initial: SensitiveWords }) {
 
   return (
     <section className="space-y-5">
-      <h2 className="text-2xl">{W.title}</h2>
-      <p className="text-sm text-muted">{W.help}</p>
+      <h2>{W.title}</h2>
+      <p className="text-small text-text-muted">{W.help}</p>
       <ul className="space-y-4">
         {categories.map((c, i) => (
           <li key={i} className="card space-y-3 p-4">
@@ -283,9 +286,11 @@ export function SettingsPage() {
 
   return (
     <main className="mx-auto max-w-3xl space-y-12 px-6 py-10">
-      <h1 className="text-5xl leading-none">{S.title}</h1>
+      <h1>{S.title}</h1>
       <ErrorNote error={app.error ?? words.error} />
-      {!ready && !app.error && !words.error && <p className="text-muted">{vi.common.loading}</p>}
+      {!ready && !app.error && !words.error && (
+        <p className="text-text-muted">{vi.common.loading}</p>
+      )}
       {ready && app.data && words.data && (
         <>
           <GeneralSection initial={app.data} />

@@ -39,15 +39,15 @@ function AudioDrop({
     <div>
       <div
         {...getRootProps()}
-        className={`cursor-pointer rounded-2xl border-2 border-dashed p-5 text-sm font-bold transition ${
-          isDragActive ? 'border-fg bg-surface-2' : 'border-border bg-surface'
+        className={`cursor-pointer rounded-card border-2 border-dashed p-5 text-small font-bold transition ${
+          isDragActive ? 'border-text bg-surface-2' : 'border-border bg-surface'
         }`}
       >
         <input {...getInputProps({ 'aria-label': label })} />
         {busy ? vi.common.loading : label}
       </div>
       {fileRejections.length > 0 && (
-        <p role="alert" className="mt-2 text-sm font-bold text-danger">
+        <p role="alert" className="mt-2 text-small font-bold text-danger">
           {rejected}
         </p>
       )}
@@ -74,7 +74,7 @@ function VoiceSection() {
 
   return (
     <section className="space-y-4">
-      <h2 className="text-2xl">{A.voice.title}</h2>
+      <h2>{A.voice.title}</h2>
       {file ? (
         <audio
           key={version}
@@ -83,7 +83,7 @@ function VoiceSection() {
           src={`${projectFileUrl(project.slug, file)}?v=${version}`}
         />
       ) : (
-        <p className="text-muted">{A.voice.none}</p>
+        <p className="text-text-muted">{A.voice.none}</p>
       )}
       <AudioDrop
         label={file ? A.voice.replace : A.voice.drop}
@@ -109,7 +109,7 @@ function VoiceSection() {
               editor.update((p) => withVoiceTrim(p, v && v > 0 ? v : null));
             }}
           />
-          <p className="mt-1 text-xs text-muted">{A.voice.trimHelp}</p>
+          <p className="mt-1 text-small text-text-muted">{A.voice.trimHelp}</p>
         </div>
       )}
     </section>
@@ -186,10 +186,10 @@ function NewTrackForm({ onAdded }: { onAdded: (entry: MusicEntry) => void }) {
 
   return (
     <form onSubmit={submit} className="card space-y-4 p-5">
-      <h3 className="text-lg font-extrabold">{A.music.upload}</h3>
+      <h3>{A.music.upload}</h3>
       <AudioDrop label={A.music.uploadDrop} rejected={A.voice.rejected} onFile={setFile} />
       {file && (
-        <p className="text-sm">
+        <p className="text-small">
           {A.music.fileChosen}: <b>{file.name}</b>
         </p>
       )}
@@ -242,12 +242,12 @@ function MusicSection() {
 
   return (
     <section className="space-y-5">
-      <h2 className="text-2xl">{A.music.title}</h2>
+      <h2>{A.music.title}</h2>
 
       {music?.file ? (
         <div className="card space-y-4 p-5">
-          <p className="text-sm">
-            <span className="label inline">{A.music.current}: </span>
+          <p className="text-small">
+            <span className="text-text-muted">{A.music.current}: </span>
             <b>{music.credit || music.file}</b>
           </p>
           <audio controls className="w-full" src={projectFileUrl(project.slug, music.file)} />
@@ -265,7 +265,7 @@ function MusicSection() {
                 value={music.start ?? ''}
                 onChange={(e) => patchMusic({ start: numberOrNull(e.target.value) })}
               />
-              <p className="mt-1 text-xs text-muted">{A.music.startHelp}</p>
+              <p className="mt-1 text-small text-text-muted">{A.music.startHelp}</p>
             </div>
             <div>
               <label className="label" htmlFor="music-credit">
@@ -277,14 +277,14 @@ function MusicSection() {
                 value={music.credit}
                 onChange={(e) => patchMusic({ credit: e.target.value })}
               />
-              <p className="mt-1 text-xs text-muted">{A.music.creditHelp}</p>
+              <p className="mt-1 text-small text-text-muted">{A.music.creditHelp}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <SnippetPlayer src={projectFileUrl(project.slug, music.file)} start={start} />
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className="btn btn-outline btn-sm"
               onClick={() => editor.update((p) => ({ ...p, music: null }))}
             >
               {A.music.remove}
@@ -292,20 +292,20 @@ function MusicSection() {
           </div>
         </div>
       ) : (
-        <p className="text-muted">{A.music.none}</p>
+        <p className="text-text-muted">{A.music.none}</p>
       )}
 
       <div>
-        <h3 className="mb-3 text-lg font-extrabold">{A.music.library}</h3>
+        <h3 className="mb-3">{A.music.library}</h3>
         {library.data && library.data.length === 0 && (
-          <p className="text-muted">{A.music.libraryEmpty}</p>
+          <p className="text-text-muted">{A.music.libraryEmpty}</p>
         )}
         <ul className="space-y-2">
           {library.data?.map((entry) => (
             <li key={entry.file} className="card flex flex-wrap items-center gap-3 p-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-extrabold">{entry.title}</p>
-                <p className="truncate text-xs text-muted">
+                <p className="truncate font-bold">{entry.title}</p>
+                <p className="truncate text-small text-text-muted">
                   {entry.artist} · {entry.source} · {entry.license}
                   {entry.bpm ? ` · ${entry.bpm} BPM` : ''}
                 </p>

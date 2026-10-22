@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth, type Health } from '../api/client';
 import { vi } from '../i18n/vi';
+import { AlertIcon, CheckIcon } from './icons';
 
 const ITEMS = ['ffmpeg', 'whisper', 'gpu'] as const satisfies readonly (keyof Health)[];
 
@@ -12,35 +13,45 @@ export function HealthStatus() {
   });
 
   return (
-    <section className="rounded-3xl bg-surface p-8">
-      <h2 className="text-sm font-bold uppercase tracking-widest text-muted">{vi.health.title}</h2>
+    <section className="rounded-card border border-border bg-surface p-6">
+      <h2 className="text-tiny font-semibold uppercase text-text-muted">{vi.health.title}</h2>
 
-      {isPending && <p className="mt-4">{vi.health.loading}</p>}
-      {isError && <p className="mt-4 font-semibold text-hbt-red">{vi.health.unreachable}</p>}
+      {isPending && (
+        <p className="mt-4 flex items-center gap-3">
+          <span className="spinner" aria-hidden="true" />
+          {vi.health.loading}
+        </p>
+      )}
+      {isError && (
+        <p role="alert" className="mt-4 flex items-center gap-2 font-bold text-danger">
+          <AlertIcon />
+          {vi.health.unreachable}
+        </p>
+      )}
 
       {data && (
         <>
-          <p className={`mt-4 text-2xl font-extrabold ${data.ok ? '' : 'text-hbt-red'}`}>
-            {data.ok ? vi.health.ready : vi.health.notReady}
-          </p>
+          <p className="mt-4 text-h2 font-bold">{data.ok ? vi.health.ready : vi.health.notReady}</p>
           {data.ffmpeg && data.missing.length > 0 && (
-            <p className="mt-2 font-semibold text-hbt-red">
+            <p className="mt-2 flex items-center gap-2 font-bold text-danger">
+              <AlertIcon />
               {vi.health.missingList} {data.missing.join(', ')}
             </p>
           )}
-          <ul className="mt-6 flex flex-wrap gap-3">
+          <ul className="mt-4 flex flex-wrap gap-2">
             {ITEMS.map((key) => (
               <li
                 key={key}
-                className={`rounded-full px-5 py-2 font-semibold ${
-                  data[key] ? 'bg-fg text-bg' : 'bg-hbt-red text-white'
+                className={`chip h-10 gap-2 px-4 text-small normal-case ${
+                  data[key]
+                    ? 'chip-warn'
+                    : 'border-[1.5px] border-danger bg-transparent text-danger'
                 }`}
               >
-                <span aria-hidden="true">
-                  {vi.health.items[key]} {data[key] ? '✓' : '✗'}
-                </span>
+                {data[key] ? <CheckIcon size={16} /> : <AlertIcon size={16} />}
+                {vi.health.items[key]}
                 <span className="sr-only">
-                  {`${vi.health.items[key]}: ${data[key] ? vi.health.available : vi.health.missing}`}
+                  {`: ${data[key] ? vi.health.available : vi.health.missing}`}
                 </span>
               </li>
             ))}
@@ -52,7 +63,7 @@ export function HealthStatus() {
         type="button"
         onClick={() => refetch()}
         disabled={isFetching}
-        className="mt-8 rounded-full border border-fg px-6 py-2 font-semibold transition hover:bg-fg hover:text-bg disabled:opacity-50"
+        className="btn btn-outline btn-sm mt-6"
       >
         {vi.health.recheck}
       </button>
