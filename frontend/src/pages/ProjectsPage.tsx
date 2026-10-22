@@ -214,10 +214,13 @@ export function ProjectsPage() {
     <main className="mx-auto max-w-[1280px] px-6 py-12">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1>{vi.projects.title}</h1>
-        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-          <PlusIcon size={20} />
-          {vi.projects.create}
-        </button>
+        {/* Một nút chính mỗi màn: khi danh sách trống, nút nằm trong khối trống bên dưới. */}
+        {data?.length !== 0 && (
+          <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+            <PlusIcon size={20} />
+            {vi.projects.create}
+          </button>
+        )}
       </div>
 
       <div className="mt-12">

@@ -554,10 +554,20 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Xong khi:** tạo project, tải file, dựng video hoàn toàn bằng `curl`.
 
 ### M3 · Giao diện
-- [ ] Áp `DESIGN.md` → tokens.css + màu HBT; gắn logo, favicon, icon từ `brand/` (theo mục 10.1)
-- [ ] 4 màn hình mục 10.2, kéo thả ảnh/cảnh, lưu tự động
-- [ ] Theo dõi tiến độ bằng SSE, trình phát video, tải file
+- [x] Áp `DESIGN-HBT.md` → tokens.css + màu HBT; gắn logo, favicon, icon từ `brand/` (không dùng `DESIGN.md` của getdesign)
+- [x] 4 màn hình mục 10.2, kéo thả ảnh/cảnh, lưu tự động
+- [x] Theo dõi tiến độ bằng SSE, trình phát video, tải file
 - **Xong khi:** làm trọn 1 video chỉ bằng giao diện, không mở terminal.
+
+**Quyết định kỹ thuật khi làm M3** (23/10/2026, chờ chủ dự án duyệt):
+- **Biểu tượng:** `DESIGN-HBT.md` mục 6 ghi `lucide-react`, nhưng danh sách thư viện được phép không có. Đã vẽ bộ biểu tượng SVG riêng (`components/icons.tsx`, nét 1,8). Nếu muốn dùng `lucide-react`, chủ dự án duyệt rồi đổi.
+- **Font:** chỉ có ba bản (500/700/800) trong `backend/hbt/fonts/`; đổi sang `.woff2` bằng fontTools (cài trong `backend/.venv`). Độ đậm 400 dùng bản 500, 600 dùng bản 700.
+- **Lưu tự động:** giữ bản nháp trên máy, `PUT` sau 1 s; trước khi tải file, đổi thứ tự cảnh hoặc dựng thì lưu ngay. Ctrl+S lưu ngay, Alt+↑/↓ chuyển cảnh.
+- **Xoá cảnh:** API không có thao tác xoá cảnh. Giao diện đưa cảnh cần xoá xuống cuối bằng `POST /scenes/reorder` (máy chủ đổi tên ảnh) rồi `PUT` bỏ cảnh cuối; ảnh mồ côi của cảnh bị xoá vẫn nằm trong `images/` và bị ghi đè khi thêm cảnh mới.
+- **Nghe thử nhạc thư viện:** `GET /music/{file}/audio` (`file` là tên file, bảng `GET /music` chưa có trường `id`).
+- **Bản đẹp:** chọn 30/50/60 fps, mặc định theo fps của project; nút "Xem nhanh" là nút đen duy nhất, "Xuất bản đẹp" là nút vàng duy nhất.
+- **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
+- **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
 
 ### M4 · Hoàn thiện
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng

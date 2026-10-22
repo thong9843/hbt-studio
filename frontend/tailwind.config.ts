@@ -20,6 +20,7 @@ export default {
         'brand-cream': 'var(--brand-cream)',
         'brand-ink': 'var(--brand-ink)',
         danger: 'var(--danger)',
+        'danger-soft': 'color-mix(in srgb, var(--danger) 12%, transparent)',
         focus: 'var(--focus)',
       },
       fontFamily: {

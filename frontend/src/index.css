@@ -85,7 +85,7 @@
     @apply bg-accent text-on-accent enabled:hover:brightness-110 enabled:active:brightness-90;
   }
   .btn-danger {
-    @apply border-[1.5px] border-danger bg-transparent text-danger enabled:hover:bg-danger/10;
+    @apply border-[1.5px] border-danger bg-transparent text-danger enabled:hover:bg-danger-soft;
   }
   .btn-ghost {
     @apply bg-transparent text-text enabled:hover:bg-surface;

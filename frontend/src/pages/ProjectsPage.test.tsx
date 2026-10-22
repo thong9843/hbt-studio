@@ -69,7 +69,8 @@ describe('ProjectsPage', () => {
     });
     stubFetch({ 'GET /api/health': health, 'GET /api/projects': [], 'POST /api/projects': create });
     page();
-    await user.click(await screen.findByRole('button', { name: 'Tạo video mới' }));
+    await screen.findByText('Tạo video đầu tiên');
+    await user.click(screen.getByRole('button', { name: 'Tạo video mới' }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
     await user.type(screen.getByLabelText('Tiêu đề'), 'Video mới');
@@ -94,7 +95,8 @@ describe('ProjectsPage', () => {
         }),
     });
     page();
-    await user.click(await screen.findByRole('button', { name: 'Tạo video mới' }));
+    await screen.findByText('Tạo video đầu tiên');
+    await user.click(screen.getByRole('button', { name: 'Tạo video mới' }));
     await user.type(screen.getByLabelText('Tiêu đề'), 'A');
     await user.click(screen.getByRole('button', { name: 'Tạo' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Tiêu đề trùng'));
