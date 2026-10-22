@@ -1,21 +1,25 @@
-import { HealthStatus } from '../components/HealthStatus';
-import { vi } from '../i18n/vi';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { Shell } from '../components/Shell';
+import { AudioTab } from '../pages/AudioTab';
+import { ComposePage } from '../pages/ComposePage';
+import { ExportTab } from '../pages/ExportTab';
+import { ProjectsPage } from '../pages/ProjectsPage';
+import { ScenesTab } from '../pages/ScenesTab';
+import { SettingsPage } from '../pages/SettingsPage';
 
 export function App() {
   return (
-    <div className="min-h-screen">
-      <header className="px-6 py-5">
-        {/* Logo từ brand/ gắn ở M3 (IMPLEMENT.md mục 10.1). */}
-        <span className="text-xl font-extrabold uppercase tracking-tight">{vi.appName}</span>
-      </header>
-      <main className="mx-auto max-w-3xl px-6 py-16">
-        <h1 className="text-5xl font-extrabold uppercase leading-none tracking-tight">
-          {vi.appName}
-        </h1>
-        <div className="mt-12">
-          <HealthStatus />
-        </div>
-      </main>
-    </div>
+    <Routes>
+      <Route element={<Shell />}>
+        <Route index element={<ProjectsPage />} />
+        <Route path="p/:slug" element={<ComposePage />}>
+          <Route index element={<ScenesTab />} />
+          <Route path="audio" element={<AudioTab />} />
+          <Route path="export" element={<ExportTab />} />
+        </Route>
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
   );
 }
