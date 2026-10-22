@@ -392,6 +392,13 @@ def test_reorder_and_upload_preserves_other_image_hashes(store, tmp_path):
         r, _ = store.save_asset(p.slug, "image", img, f"c{i}.png", scene_index=i)
         rels.append(r)
 
+    images_dir = store.project_dir(p.slug) / "images"
+
+    def content_hash(rel):
+        return hashlib.sha256((images_dir / Path(rel).name).read_bytes()).hexdigest()
+
+    before = {r: content_hash(r) for r in rels}  # băm NỘI DUNG file trên đĩa
+
     # Đổi thứ tự: [2, 0, 1]
     p_reordered = store.reorder_scenes(p.slug, [2, 0, 1])
     assert [s.image for s in p_reordered.scenes] == [rels[2], rels[0], rels[1]]
@@ -405,6 +412,12 @@ def test_reorder_and_upload_preserves_other_image_hashes(store, tmp_path):
     # Hash ảnh của cảnh 1 và cảnh 2 không đổi
     assert p_updated.scenes[1].image == rels[0]
     assert p_updated.scenes[2].image == rels[1]
+    # ...và nội dung file trên đĩa của hai cảnh đó đúng bằng trước khi đổi thứ tự
+    assert content_hash(p_updated.scenes[1].image) == before[rels[0]]
+    assert content_hash(p_updated.scenes[2].image) == before[rels[1]]
+    # tên file khớp với hash nội dung thật (không chỉ được đặt lúc lưu)
+    for scene in p_updated.scenes:
+        assert Path(scene.image).stem == content_hash(scene.image)[:16]
 
 
 def test_delete_scene_removes_unreferenced_image_and_keeps_others(store, tmp_path):
