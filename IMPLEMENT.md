@@ -383,6 +383,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - `missing`: các mục bắt buộc còn thiếu. Encoder: `libx264` (theo `ffmpeg -encoders`). Filter: `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect` (theo `ffmpeg -filters`). Nếu FFmpeg không chạy được thì `missing = ["ffmpeg"]`.
 - `ok`: `true` khi và chỉ khi `missing` rỗng. Whisper và GPU **không** ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
 - `whisper`: import được `faster_whisper`. `gpu`: CTranslate2 thấy ít nhất 1 thiết bị CUDA.
+- Cách đọc: mỗi dòng của `ffmpeg -encoders` / `-filters` được nhận diện theo dạng "2–6 ký tự cờ rồi tên", bỏ dòng chú thích; **không** dựa vào dòng `------` (FFmpeg 6.1 không in dòng này cho `-filters`, bản 9.0 có; số cờ cũng khác nhau). Đã thử trên 6.1.1 (Ubuntu, CI) và 9.0.2 (Windows).
 
 **Chi tiết triển khai M2** (chủ dự án duyệt 21/10/2026):
 - **Lỗi** luôn là `{"detail": "<chuỗi>"}`: 404 không có project/job/file (slug đúng dạng mà chưa có), 409 xung đột (đang dựng, job đã kết thúc), 400 dữ liệu sai (file hỏng, `scene_index` sai), 413 file quá lớn, 422 body sai, project chưa đủ để dựng, hoặc slug/đường dẫn file không hợp lệ, 503 thiếu FFmpeg/ffprobe.

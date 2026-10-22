@@ -156,6 +156,9 @@ flowchart LR
 | 21/10/2026 | Thiếu FFmpeg: `/health` báo thiếu, `POST /render` và tải âm thanh trả 503 kèm lời nhắn cài, không tạo job, server không sập (IMPLEMENT 9) | Lỗi rõ ràng thay vì job treo hoặc lỗi 500 |
 | 21/10/2026 | Slug project chỉ `[a-z0-9-]`, ≤ 60 ký tự, không tên Windows dành riêng; mọi nơi kiểm tra và trả 422 (IMPLEMENT 9) | Chặn `..`, dấu `/`, tên thư mục không tạo được trên Windows |
 | 21/10/2026 | CLAUDE.md: không commit khi lint/test đỏ; chuỗi kiểm tra dùng `&&` và `set -o pipefail` | Hai commit từng đi qua dù kiểm tra thất bại vì `;` và `\| tail` |
+| 22/10/2026 | `/health` nhận diện dòng của `ffmpeg -encoders/-filters` theo dạng (cờ + tên), không dựa vào dòng `------` | CI (FFmpeg 6.1.1) không có dòng đó nên đọc ra 0 filter và từ chối mọi lần dựng; test dùng đầu ra thật |
+| 22/10/2026 | `compose()` luôn `wait()` bộ mã hoá, kể cả khi bị huỷ lúc đang ghi khung | Trên Linux tiến trình bị kill mà không wait thành zombie; có test kiểm tra mọi tiến trình con đã được thu dọn |
+| 22/10/2026 | CI đưa test lỗi và phiên bản FFmpeg/Python/OS ra chú thích công khai (`scripts/ci_annotate.py`) | Nhật ký job cần quyền admin nên CI đỏ không chẩn đoán được từ ngoài |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -174,6 +177,6 @@ flowchart LR
 |---|---|---|
 | M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
 | M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
-| M2 | ☐ | Làm xong trên nhánh `feat/m2-api`, chờ chủ dự án kiểm tra. toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s. Quyết định kỹ thuật: IMPLEMENT mục 9 |
+| M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☐ | |
 | M4 | ☐ | |
