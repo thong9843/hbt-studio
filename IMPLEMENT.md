@@ -8,18 +8,33 @@
 
 ---
 
-## 0. Môi trường (Windows 10/11, RTX 2060 Super 8 GB)
+## 0. Môi trường (Windows 10/11)
+
+### Hồ sơ máy
+
+Chủ dự án dùng hai máy và sẽ cho biết đang dùng máy nào ở đầu mỗi lần mở chat.
+
+| Máy | CPU | GPU | RAM |
+|---|---|---|---|
+| **Máy cũ** | Intel i5-10400 | không có GPU rời | 16 GB |
+| **Máy mới** | Intel i5-14400F | NVIDIA RTX 2060 Super, 8 GB VRAM | 32 GB |
+
+**Quy tắc:** không giả định có GPU. Mọi tính năng cần GPU phải có đường dự phòng chạy bằng CPU (Whisper: mục 5.2).
+
+### Phần mềm
 
 | Thành phần | Phiên bản | Cài |
 |---|---|---|
 | Git | mới nhất | `winget install Git.Git` |
-| Python | 3.11.x | `winget install Python.Python.3.11` |
+| Python | **3.11.x (ghim)** | `winget install Python.Python.3.11` |
 | Node.js | 20 LTS trở lên | `winget install OpenJS.NodeJS.LTS` |
 | FFmpeg | ≥ 6.0, có `libx264`, `zoompan`, `xfade`, `sidechaincompress`, `loudnorm` | `winget install Gyan.FFmpeg` (thêm vào PATH) |
-| Driver NVIDIA | hỗ trợ CUDA 12 | GeForce Experience / trang NVIDIA |
-| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper` + thư viện CUDA (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
+| Driver NVIDIA | hỗ trợ CUDA 12 (chỉ máy có GPU) | GeForce Experience / trang NVIDIA |
+| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
 
-Lần chạy Whisper đầu tiên sẽ tải model `large-v3` (~3 GB) về `models/` (đã ignore). Nếu không có GPU hoặc lỗi CUDA → tự rơi về CPU, rồi về chế độ căn theo khoảng lặng.
+**Python:** dự án ghim **Python 3.11.x**. Máy nào đã có Python mới hơn thì cài thêm 3.11 **song song** (không gỡ bản cũ), gọi bằng `py -3.11`, và tạo `backend\.venv` đúng bằng bản 3.11 (`py -3.11 -m venv backend\.venv`). Kiểm tra bằng `py -3.11 --version` (README có bước này). Claude Code phải **hỏi chủ dự án trước khi cài** Python hay bất kỳ phần mềm cấp hệ thống nào.
+
+Model Whisper tải lần chạy đầu về `models/` (đã ignore); chọn model và thiết bị theo phần cứng: mục 5.2. Lỗi CUDA, không có GPU hoặc Whisper không dùng được → rơi về CPU, rồi về căn theo khoảng lặng.
 
 ---
 
@@ -77,10 +92,11 @@ npm run dev                         # chạy song song: uvicorn 127.0.0.1:8000 +
 ```
 WORKSPACE_DIR=./workspace
 LIBRARY_DIR=./library
-WHISPER_MODEL=large-v3
+WHISPER_MODEL=auto         # auto | small | medium | large-v3 (mục 5.2)
 WHISPER_DEVICE=auto        # auto | cuda | cpu
 DEFAULT_FPS=50
 ```
+(`WHISPER_MODEL=auto` là trạng thái đích; M4 cập nhật `.env.example` và `config.py` cho khớp. Hiện `.env.example` còn `large-v3`.)
 
 Backend chỉ bind `127.0.0.1`. Không có đăng nhập.
 
@@ -261,6 +277,17 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.2 Căn thời gian (`align.align`)
 1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
+   - **Chọn cấu hình theo phần cứng** (chủ dự án chốt 22/10/2026). `.env`: `WHISPER_DEVICE=auto`, `WHISPER_MODEL=auto`.
+
+     | Phần cứng | Thiết bị | Kiểu tính | Model |
+     |---|---|---|---|
+     | Có CUDA (máy mới, RTX 2060 Super 8 GB) | `cuda` | `int8_float16` | `large-v3` (cần thư viện CUDA 12 theo README của faster-whisper) |
+     | Không có GPU (máy cũ) | `cpu` | `int8` | `small` |
+
+     Trong **Cài đặt** cho đổi sang `medium` hoặc `large-v3` trên CPU, kèm cảnh báo "sẽ chậm". Không giả định có GPU: `auto` kiểm tra CUDA lúc chạy (`/health.gpu`).
+   - **Cache:** kết quả căn chữ lưu ở `build/timing.json`, khoá theo **hash file giọng** và **hash kịch bản** (kèm phương pháp, model, mã nguồn); chỉ căn lại khi một trong hai đổi.
+   - **Dự phòng khi lỗi hoặc chậm:** Whisper lỗi (không cài, lỗi CUDA, thiếu RAM) hoặc quá chậm (vượt **giới hạn thời gian** đặt trong Cài đặt) thì tự rơi về căn theo khoảng lặng (mục dưới) và ghi log lý do; kết quả ghi rõ phương pháp đã dùng.
+   - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
    - **Điểm lệch khỏi mô tả ban đầu** (chủ dự án duyệt 21/10/2026): thêm vào chi phí cấp 1 một **số hạng phạt khoảng nghỉ**. Nếu cảnh kết thúc bằng dấu cuối câu (`.` `?` `!`) thì ranh giới sau cảnh đó phải rơi vào khoảng nghỉ dài: phạt `4,0 × max(0, ngưỡng − độ dài khoảng nghỉ)`, với ngưỡng = 0,85 × phân vị 75 của các khoảng nghỉ trong chính file (nên không phụ thuộc giọng cụ thể). Cảnh không kết thúc bằng dấu cuối câu thì không bị phạt. Không có số hạng này, trên tập "muỗi" ranh giới cảnh 6→7 và 7→8 trôi sang đoạn kế bên (lệch hàng giây); có nó thì 7 mốc cắt khớp bản đã đăng trong 4 ms. Test: `test_scene_boundary_follows_the_long_pause_when_the_scene_ends_a_sentence` (đã kiểm tra bằng cách tắt số hạng này thì test fail).
@@ -527,6 +554,8 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 
 ### M4 · Hoàn thiện
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
+- [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
+- [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
 - [ ] Lint nội dung + trang chỉnh danh sách từ
 - [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
 - [ ] `publish.txt` + nút sao chép

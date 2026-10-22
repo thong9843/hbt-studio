@@ -24,6 +24,8 @@ node --version        # v20 trở lên
 ffmpeg -version       # 6.0 trở lên
 ```
 
+Dự án ghim **Python 3.11.x**. Nếu máy đã có Python mới hơn, cài thêm 3.11 song song (không gỡ bản cũ) và luôn gọi bằng `py -3.11`; `py -3.11 --version` phải in `Python 3.11.x`. Nếu đang dùng Claude Code, hãy để nó hỏi bạn trước khi cài bất kỳ phần mềm nào.
+
 ### 2. Cài thư viện của dự án
 
 Tại thư mục gốc repo:

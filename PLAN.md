@@ -159,6 +159,7 @@ flowchart LR
 | 22/10/2026 | `/health` nhận diện dòng của `ffmpeg -encoders/-filters` theo dạng (cờ + tên), không dựa vào dòng `------` | CI (FFmpeg 6.1.1) không có dòng đó nên đọc ra 0 filter và từ chối mọi lần dựng; test dùng đầu ra thật |
 | 22/10/2026 | `compose()` luôn `wait()` bộ mã hoá, kể cả khi bị huỷ lúc đang ghi khung | Trên Linux tiến trình bị kill mà không wait thành zombie; có test kiểm tra mọi tiến trình con đã được thu dọn |
 | 22/10/2026 | CI đưa test lỗi và phiên bản FFmpeg/Python/OS ra chú thích công khai (`scripts/ci_annotate.py`) | Nhật ký job cần quyền admin nên CI đỏ không chẩn đoán được từ ngoài |
+| 22/10/2026 | Quy trình mốc (CLAUDE.md): một nhánh mỗi mốc, kết thúc theo 6 bước, chưa xong thì không sang mốc sau; hồ sơ hai máy (cũ: i5-10400, không GPU, 16 GB; mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB); Whisper chọn model/thiết bị theo phần cứng, có cache, timeout và rơi về khoảng lặng (IMPLEMENT 0 và 5.2) | Hai máy khác nhau: không giả định có GPU; mặc định Whisper chốt theo số đo thật (`bench-align`, M4) |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
