@@ -42,6 +42,19 @@ def describe_ffmpeg_processes() -> str:
     return "tiến trình ffmpeg còn sót:\n" + "\n".join(lines)
 
 
+def record_subprocesses(monkeypatch) -> list:
+    """Ghi lại mọi tiến trình con được tạo trong test (kể cả do thư viện khác tạo)."""
+    made: list = []
+
+    class Recording(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            made.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", Recording)
+    return made
+
+
 def wait_until(predicate, timeout=10.0):
     end = time.time() + timeout
     while time.time() < end:
@@ -155,7 +168,8 @@ def test_run_ffmpeg_is_interrupted_by_cancel():
 # ---------------------------------------------------------------- dựng đầu-cuối bị huỷ
 @needs_ffmpeg
 @pytest.mark.parametrize("step", ["Clip từng cảnh", "Ghép cuối"])
-def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step):
+def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step, monkeypatch):
+    recorder = record_subprocesses(monkeypatch)
     pdir, opts = make_project(tmp_path, n=8)
     token = CancelToken()
     reached = threading.Event()
@@ -186,6 +200,10 @@ def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step):
     assert not (renders[0] / "meta.json").exists()
     assert not list(renders[0].glob("*.mp4")), "để lại video dang dở"
     assert wait_until(lambda: ffmpeg_process_count() <= before, 10), describe_ffmpeg_processes()
+    # Mọi tiến trình con đã được thu dọn (wait): chưa wait thì trên Linux thành zombie "<defunct>".
+    # `returncode` chỉ được đặt khi wait()/poll() đã chạy, nên kiểm tra được trên cả Windows.
+    unreaped = [p.args[:1] for p in recorder if p.returncode is None]
+    assert not unreaped, f"tiến trình con chưa được thu dọn: {unreaped}"
 
 
 @needs_ffmpeg

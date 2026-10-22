@@ -328,12 +328,14 @@ def compose(
             outro_reader.close()
         if not finished:  # bị huỷ hoặc lỗi giữa chừng: không để bộ mã hoá treo chờ dữ liệu
             enc.kill()
-            enc.wait()
+        # Luôn wait() để thu dọn tiến trình, kể cả khi nó bị kill lúc đang ghi (BrokenPipeError):
+        # bỏ sót thì trên Linux nó thành zombie `[ffmpeg] <defunct>`.
+        enc.wait()
         if token is not None:
             token.untrack(enc)
     try:
         cancel.check_current()  # bộ mã hoá chết vì bị huỷ thì không phải lỗi mã hoá
-        code = enc.wait()
+        code = enc.returncode
         if code != 0:
             err.seek(0)
             detail = err.read().decode("utf-8", errors="replace").strip()[-800:]
