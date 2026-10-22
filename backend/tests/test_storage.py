@@ -532,3 +532,17 @@ def test_cleanup_only_removes_app_named_unreferenced_images(store, tmp_path, cap
     names = {f.name for f in images_dir.iterdir()}
     assert names == {Path(rel).name, "ghi-chu.txt", "anh-cua-toi.png"}
     assert "ghi-chu.txt" in caplog.text and "anh-cua-toi.png" in caplog.text
+
+
+def test_upload_normalises_extension_so_load_does_not_rehash(store, tmp_path, monkeypatch):
+    p = store.create("Đuôi hoa", scene_count=3)
+    Image.new("RGB", (32, 32), (9, 9, 9)).save(tmp_path / "x.bin", format="JPEG")
+    rel_jpg, _ = store.save_asset(p.slug, "image", tmp_path / "x.bin", "ANH.JPEG", scene_index=0)
+    rel_png, _ = store.save_asset(
+        p.slug, "image", png(tmp_path / "y.bin"), "ANH.PNG", scene_index=1
+    )
+    assert rel_jpg.endswith(".jpg") and rel_png.endswith(".png")
+
+    monkeypatch.setattr("hbt.storage.content_hash_16", lambda data: pytest.fail("đã băm lại ảnh"))
+    loaded = store.load(p.slug)
+    assert [s.image for s in loaded.scenes][:2] == [rel_jpg, rel_png]
