@@ -262,7 +262,8 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 ### 5.2 Căn thời gian (`align.align`)
 1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
-   - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh. Thêm số hạng phạt: nếu cảnh kết thúc bằng dấu cuối câu (`.` `?` `!`) thì ranh giới cảnh phải rơi vào khoảng nghỉ dài (ngưỡng = 0,85 × phân vị 75 của các khoảng nghỉ trong chính file). Không có số hạng này thì ranh giới cảnh có thể trôi sang đoạn kế bên.
+   - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
+   - **Điểm lệch khỏi mô tả ban đầu** (chủ dự án duyệt 21/10/2026): thêm vào chi phí cấp 1 một **số hạng phạt khoảng nghỉ**. Nếu cảnh kết thúc bằng dấu cuối câu (`.` `?` `!`) thì ranh giới sau cảnh đó phải rơi vào khoảng nghỉ dài: phạt `4,0 × max(0, ngưỡng − độ dài khoảng nghỉ)`, với ngưỡng = 0,85 × phân vị 75 của các khoảng nghỉ trong chính file (nên không phụ thuộc giọng cụ thể). Cảnh không kết thúc bằng dấu cuối câu thì không bị phạt. Không có số hạng này, trên tập "muỗi" ranh giới cảnh 6→7 và 7→8 trôi sang đoạn kế bên (lệch hàng giây); có nó thì 7 mốc cắt khớp bản đã đăng trong 4 ms. Test: `test_scene_boundary_follows_the_long_pause_when_the_scene_ends_a_sentence` (đã kiểm tra bằng cách tắt số hạng này thì test fail).
    - Cấp 2: trong từng cảnh, ghép các cụm câu với các đoạn tiếng của cảnh đó bằng quy hoạch động của reference (`align_silence`).
    - Nếu một cảnh có ít đoạn tiếng hơn số cụm câu, hạ dần ngưỡng khoảng lặng **chỉ trong phạm vi cảnh đó**: (0,25 s, −38 dB) → (0,18 s, −36 dB) → (0,12 s, −35 dB) → (0,08 s, −34 dB), dừng khi đủ đoạn. Nếu số đoạn toàn file ít hơn số cảnh thì hạ ngưỡng toàn cục.
    - Nếu cả khi đó vẫn ít đoạn hơn cụm (hai cụm nói liền không có khoảng nghỉ), các cụm chia nhau đoạn theo trọng số, nên có thể lệch nửa giây trong cảnh đó; Whisper khắc phục.
@@ -366,8 +367,8 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | POST | `/projects` | `{title, series?, scene_count=8}` → tạo project rỗng |
 | GET / PUT / DELETE | `/projects/{slug}` | đọc / lưu toàn bộ `project.json` / xoá |
 | POST | `/projects/{slug}/duplicate` | nhân bản làm template |
-| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene` (với ảnh) |
-| GET | `/projects/{slug}/scenes/{i}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
+| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
+| GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
@@ -382,6 +383,27 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - `missing`: các mục bắt buộc còn thiếu. Encoder: `libx264` (theo `ffmpeg -encoders`). Filter: `zoompan`, `xfade`, `sidechaincompress`, `loudnorm`, `silencedetect` (theo `ffmpeg -filters`). Nếu FFmpeg không chạy được thì `missing = ["ffmpeg"]`.
 - `ok`: `true` khi và chỉ khi `missing` rỗng. Whisper và GPU **không** ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
 - `whisper`: import được `faster_whisper`. `gpu`: CTranslate2 thấy ít nhất 1 thiết bị CUDA.
+- Cách đọc: mỗi dòng của `ffmpeg -encoders` / `-filters` được nhận diện theo dạng "2–6 ký tự cờ rồi tên", bỏ dòng chú thích; **không** dựa vào dòng `------` (FFmpeg 6.1 không in dòng này cho `-filters`, bản 9.0 có; số cờ cũng khác nhau). Đã thử trên 6.1.1 (Ubuntu, CI) và 9.0.2 (Windows).
+
+**Chi tiết triển khai M2** (chủ dự án duyệt 21/10/2026):
+- **Lỗi** luôn là `{"detail": "<chuỗi>"}`: 404 không có project/job/file (slug đúng dạng mà chưa có), 409 xung đột (đang dựng, job đã kết thúc), 400 dữ liệu sai (file hỏng, `scene_index` sai), 413 file quá lớn, 422 body sai, project chưa đủ để dựng, hoặc slug/đường dẫn file không hợp lệ, 503 thiếu FFmpeg/ffprobe.
+- **Đánh số cảnh** (chủ dự án chốt 21/10/2026): ba nơi, hai cách đếm, một quy tắc đổi.
+  - **API dùng chỉ số từ 0**, tham số tên `scene_index`: trong đường dẫn `/projects/{slug}/scenes/{scene_index}/preview.png`, trường form `scene_index` khi tải ảnh, và trường `scene_index` trong kết quả lint (`null` nếu áp dụng cho cả video). Chỉ số ngoài khoảng → 404 (preview) hoặc 400 (tải ảnh).
+  - **Người dùng thấy số thứ tự từ 1** ("Cảnh 1"), và trường `thumbnail.scene` trong project.json cũng tính từ 1 (mục 4e).
+  - **Tên file ảnh** do backend đặt, đánh số từ 1: `scene_index` 0 → `images/scene-01.<ext>` (`storage.scene_image_stem` / `scene_index_from_stem`, có test hai chiều).
+  - **Giao diện** hiển thị số từ 1 qua **một chỗ duy nhất**: `frontend/src/utils/scene.ts` (`sceneNumber`: từ 0 → từ 1; `sceneIndex`: từ 1 → từ 0). Không được tự cộng/trừ 1 ở nơi khác. Có test ép hai chiều đổi luôn ngược nhau (Vitest).
+- **Project nháp:** `POST /projects` tạo project chưa có ảnh/lời/giọng (mô hình cho phép rỗng). `POST /render` trả 422 kèm danh sách còn thiếu (`Project chưa đủ để dựng: Cảnh 1: chưa có ảnh; …`).
+- **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
+- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
+- **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
+- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
+- **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
+- **Job:** một luồng dựng, job nằm trong bộ nhớ (giữ 200 job; mất khi khởi động lại server, file đã xuất vẫn còn). `GET /jobs/{id}` → `{id, project, status, progress, step, log_tail, output, error, needs_confirmation, …}`; `output` có URL `/api/files/...`. **SSE** `GET /jobs/{id}/events`: `event: progress` (`{progress, step, message}`) rồi `event: end` (`{status, error, output}`); người nối sau nhận lại từ đầu. **Huỷ**: job xếp hàng huỷ ngay và không bao giờ chạy; job đang chạy bị kill ffmpeg, đợi tối đa 5 s cho luồng dừng, không để lại video dở. Đuôi giọng cần cắt > 8 s: job `failed` với `needs_confirmation = true` (gửi lại với `allow_long_trim`).
+- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu `library/music/<slug-tiêu-đề>.<ext>` và thêm vào `index.json`.
+- **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
+- **Slug project** (chủ dự án chốt 21/10/2026): chỉ `[a-z0-9-]` (không bắt đầu/kết thúc/đôi dấu gạch), tối đa 60 ký tự, và không trùng tên thiết bị dành riêng của Windows (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Mọi nơi dùng slug đều kiểm tra và trả **422** `Slug không hợp lệ: …` (đọc, sửa, xoá, nhân bản, tải file, xem trước, lint, dựng, và `/files/projects/<slug>/…`; slug trong thân `PUT` cũng vậy). Đường dẫn `/files` có `..`, đường dẫn tuyệt đối, ổ đĩa hoặc thư mục ẩn cũng 422; đường dẫn đúng dạng mà không có file thì 404. Tiêu đề trùng tên thiết bị Windows ("Con", "NUL"…) được thêm hậu tố `-video`; hậu tố chống trùng (`-2`, `-3`…) không làm slug vượt 60 ký tự.
+- **Thiếu FFmpeg** (chủ dự án chốt 21/10/2026): server không sập. `/health` báo `ffmpeg: false`, `missing: ["ffmpeg"]`. `POST /render` trả **503** kèm lời nhắn cài (`winget install Gyan.FFmpeg`, mở lại terminal, xem README.md) và **không tạo job**; cũng trả 503 nếu FFmpeg thiếu encoder/filter bắt buộc hoặc thiếu ffprobe. Tải giọng/nhạc và `POST /music` trả 503 (cần ffprobe để kiểm tra file). Project chưa đủ vẫn nhận 422 trước 503. Những việc không cần FFmpeg (CRUD, ảnh, xem trước, lint, `/files`, từ nhạy cảm) vẫn chạy.
+- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`), phát nhạc thư viện cho nút nghe thử (cần cho M3).
 
 ---
 
@@ -492,9 +514,9 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Outro không có lời:** mix bắt đầu từ nền im lặng dài đúng 4,0 s (`amix duration=first`); cách `apad=whole_dur` đôi khi chỉ ra 2,05 s.
 
 ### M2 · API
-- [ ] Models Pydantic + storage + toàn bộ endpoint mục 9
-- [ ] Job runner 1 luồng, SSE, huỷ job
-- [ ] `preview.png` từng cảnh (dùng chung code `visual.py` + `captions.render_caption`)
+- [x] Models Pydantic + storage + toàn bộ endpoint mục 9
+- [x] Job runner 1 luồng, SSE, huỷ job
+- [x] `preview.png` từng cảnh (dùng chung code `visual.py` + `captions.render_caption`)
 - **Xong khi:** tạo project, tải file, dựng video hoàn toàn bằng `curl`.
 
 ### M3 · Giao diện

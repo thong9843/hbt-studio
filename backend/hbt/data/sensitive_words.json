@@ -1,0 +1,16 @@
+{
+  "categories": [
+    { "id": "alcohol", "level": "warn", "words": ["bia", "rượu", "say xỉn", "nhậu"] },
+    { "id": "blood", "level": "warn", "words": ["máu me", "đổ máu", "túi máu"] },
+    { "id": "chemical", "level": "warn", "words": ["axit", "chất độc", "hoá chất"] },
+    { "id": "violence", "level": "warn", "words": ["giết", "đâm chém", "súng"] },
+    { "id": "drugs", "level": "block", "words": ["ma tuý", "cần sa"] },
+    { "id": "politics", "level": "warn", "words": ["đảng", "chính phủ", "biểu tình"] },
+    {
+      "id": "map",
+      "level": "warn",
+      "words": ["bản đồ", "hoàng sa", "trường sa"],
+      "hint": "Kiểm tra ảnh bản đồ có đủ Hoàng Sa, Trường Sa"
+    }
+  ]
+}

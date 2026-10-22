@@ -275,6 +275,19 @@ def test_missing_files_are_reported(tmp_path):
 
 
 @needs_ffmpeg
+def test_incomplete_draft_is_rejected_with_a_list(tmp_path):
+    pdir, opts = make_project(tmp_path)
+    data = json.loads((pdir / "project.json").read_text(encoding="utf-8"))
+    data["scenes"][1]["image"] = ""
+    data["scenes"][2]["voice"] = ""
+    (pdir / "project.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(RenderError) as e:
+        render_project(pdir, opts)
+    assert "Project chưa đủ để dựng" in str(e.value)
+    assert "Cảnh 2: chưa có ảnh" in str(e.value) and "Cảnh 3: lời đọc đang trống" in str(e.value)
+
+
+@needs_ffmpeg
 def test_rejects_unsupported_fps(tmp_path):
     pdir, opts = make_project(tmp_path)
     opts.fps = 45
@@ -293,3 +306,14 @@ def test_ffmpeg_missing_is_a_clear_error(monkeypatch):
     monkeypatch.setattr(ffutil.shutil, "which", lambda _: None)
     with pytest.raises(ffutil.FFmpegError, match="FFmpeg"):
         ffutil.ffmpeg_exe()
+
+
+def test_ffmpeg_not_found_error_carries_the_install_hint(monkeypatch, tmp_path):
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    for call in (lambda: ffutil.run_ffmpeg(["-version"]), lambda: ffutil.probe("x.mp4")):
+        with pytest.raises(ffutil.FFmpegNotFound) as e:
+            call()
+        assert "winget install Gyan.FFmpeg" in str(e.value) and "README.md" in str(e.value)
+    assert issubclass(ffutil.FFmpegNotFound, ffutil.FFmpegError)

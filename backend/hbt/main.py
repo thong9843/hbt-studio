@@ -2,18 +2,85 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from hbt.api import health
-
-app = FastAPI(title="HBT Studio", version="0.1.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+from hbt.api import assets, files, health, lint, music, projects
+from hbt.api import render as render_api
+from hbt.config import BRAND_DIR, Settings, load_settings
+from hbt.jobs import JobManager
+from hbt.library import MusicLibrary
+from hbt.sensitive import SensitiveStore
+from hbt.state import AppState
+from hbt.storage import (
+    BadRequest,
+    Conflict,
+    NotFound,
+    ServiceUnavailable,
+    Storage,
+    StorageError,
+    Unprocessable,
 )
 
-app.include_router(health.router, prefix="/api")
+STATUS_BY_ERROR = {
+    NotFound: 404,
+    Conflict: 409,
+    BadRequest: 400,
+    Unprocessable: 422,
+    ServiceUnavailable: 503,
+}
+
+
+def create_app(settings: Settings | None = None, brand_dir: Path | None = None) -> FastAPI:
+    settings = settings or load_settings()
+    brand_dir = brand_dir or BRAND_DIR
+    storage = Storage(settings.workspace_dir, settings.default_fps)
+    state = AppState(
+        settings=settings,
+        storage=storage,
+        jobs=JobManager(storage, settings.library_dir, brand_dir),
+        library=MusicLibrary(settings.library_dir),
+        sensitive=SensitiveStore(settings.workspace_dir),
+        brand_dir=brand_dir,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        state.jobs.shutdown()  # huỷ việc đang dựng khi tắt server
+
+    app = FastAPI(title="HBT Studio", version="0.3.0", lifespan=lifespan)
+    app.state.hbt = state
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.exception_handler(StorageError)
+    async def storage_error(_: Request, exc: StorageError) -> JSONResponse:
+        code = next((c for t, c in STATUS_BY_ERROR.items() if isinstance(exc, t)), 400)
+        return JSONResponse({"detail": exc.message}, status_code=code)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Lỗi theo dạng {detail}: một chuỗi dễ đọc thay vì danh sách lồng nhau
+        parts = [
+            f"{'.'.join(str(p) for p in e['loc'] if p != 'body')}: {e['msg']}" for e in exc.errors()
+        ]
+        return JSONResponse({"detail": "; ".join(parts) or "Dữ liệu không hợp lệ"}, status_code=422)
+
+    for module in (health, projects, assets, lint, render_api, music, files):
+        app.include_router(module.router, prefix="/api")
+    return app
+
+
+app = create_app()

@@ -13,17 +13,28 @@ from typing import Any
 _file_digests: dict[tuple[str, int, int], str] = {}
 
 
+MEMO_MIN_SIZE = 16 << 20  # chỉ nhớ hash của file lớn
+
+
+def _sha1_of(p: Path) -> str:
+    h = hashlib.sha1()
+    with p.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def file_digest(path: str | Path) -> str:
-    """SHA-1 nội dung file (nhớ tạm theo đường dẫn + kích thước + thời điểm sửa)."""
+    """SHA-1 nội dung file. File lớn được nhớ theo (đường dẫn, kích thước, thời điểm sửa); file
+    nhỏ luôn băm lại vì thời điểm sửa trên Windows thô (~15 ms), hai lần ghi nhanh cùng kích thước
+    có thể trùng khoá và trả về hash cũ."""
     p = Path(path)
     st = p.stat()
+    if st.st_size < MEMO_MIN_SIZE:
+        return _sha1_of(p)
     memo = (str(p.resolve()), st.st_size, st.st_mtime_ns)
     if memo not in _file_digests:
-        h = hashlib.sha1()
-        with p.open("rb") as f:
-            for block in iter(lambda: f.read(1 << 20), b""):
-                h.update(block)
-        _file_digests[memo] = h.hexdigest()
+        _file_digests[memo] = _sha1_of(p)
     return _file_digests[memo]
 
 

@@ -8,6 +8,7 @@ REQUIRED_ENCODERS + REQUIRED_FILTERS; `missing` liệt kê thứ còn thiếu. W
 from __future__ import annotations
 
 import importlib
+import re
 import shutil
 import subprocess
 
@@ -39,17 +40,21 @@ def _ffmpeg_stdout(*args: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+# Một dòng của bảng: cột cờ (2–6 ký tự gồm chữ, `.` hoặc `|`), rồi tên. Không dựa vào dòng phân cách
+# `------` vì FFmpeg 6.1 không in nó cho `-filters` (bản 9.0 có), và số cờ mỗi bản một khác.
+ENTRY = re.compile(r"^\s*[A-Za-z.|]{2,6}\s+(\S+)")
+
+
 def parse_names(listing: str) -> set[str]:
-    """Lấy tên từ bảng `ffmpeg -encoders` / `-filters`: cột thứ 2, sau dòng `------`."""
+    """Lấy tên từ bảng `ffmpeg -encoders` / `-filters`.
+
+    Dòng chú thích ("T.. = Timeline support", "A = Audio input/output") có tên là `=` hoặc không có
+    cột cờ, nên bị loại."""
     names: set[str] = set()
-    started = False
     for line in listing.splitlines():
-        if not started:
-            started = line.strip().startswith("------")
-            continue
-        parts = line.split()
-        if len(parts) >= 2:
-            names.add(parts[1])
+        m = ENTRY.match(line)
+        if m and m.group(1) != "=":
+            names.add(m.group(1))
     return names
 
 

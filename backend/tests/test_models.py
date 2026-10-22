@@ -58,12 +58,30 @@ def test_accepts_allowed_fps(fps):
     assert Project.model_validate(project(settings={"fps": fps})).settings.fps == fps
 
 
-def test_empty_voice_rejected():
-    with pytest.raises(ValidationError):
-        Project.model_validate(project(scenes=[scene(voice=" | "), scene(), scene()]))
+def test_draft_may_have_no_image_voice_or_script():
+    p = Project.model_validate({"slug": "demo", "title": "T", "scenes": [{} for _ in range(3)]})
+    assert p.voice is None and p.scenes[0].image == "" and p.scenes[0].voice == ""
+    assert p.model_dump()["voice"] is None
 
 
-@pytest.mark.parametrize("slug", ["Muoi", "muoi dot", "-a", "a--b", ""])
+def test_render_problems_lists_everything_missing():
+    p = Project.model_validate({"slug": "demo", "title": "T", "scenes": [{}, {}, {}]})
+    problems = p.render_problems()
+    assert problems[0] == "Chưa có file giọng đọc"
+    assert "Cảnh 1: chưa có ảnh" in problems and "Cảnh 3: lời đọc đang trống" in problems
+    assert len(problems) == 1 + 3 * 2
+
+
+def test_render_problems_empty_when_complete_and_markup_only_script_counts_as_empty():
+    full = project()
+    assert Project.model_validate(full).render_problems() == []
+    markup_only = project(scenes=[scene(voice=" | "), scene(), scene()])
+    assert Project.model_validate(markup_only).render_problems() == ["Cảnh 1: lời đọc đang trống"]
+
+
+@pytest.mark.parametrize(
+    "slug", ["Muoi", "muoi dot", "-a", "a--b", "", "../x", "a/b", "con", "nul", "com1", "a" * 61]
+)
 def test_bad_slug(slug):
     with pytest.raises(ValidationError):
         Project.model_validate(project(slug=slug))

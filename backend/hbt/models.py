@@ -20,10 +20,41 @@ from hbt.config import ALLOWED_FPS, DEFAULT_FPS
 
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SLUG_MAX = 60
+# Tên thiết bị dành riêng của Windows: không tạo được thư mục tên này
+WINDOWS_RESERVED = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+)
 MIN_SCENES, MAX_SCENES = 3, 12
 
 LineSize = Literal["s", "m", "l", "xl"]
 CardY = Literal["top", "upper", "middle", "lower"]
+
+
+def check_slug(slug: str) -> str:
+    """Trả về `slug` nếu hợp lệ; ngược lại ném ValueError với lý do (tiếng Việt)."""
+    if len(slug) > SLUG_MAX:
+        raise ValueError(f"slug dài tối đa {SLUG_MAX} ký tự")
+    if not SLUG.match(slug):
+        raise ValueError("slug chỉ gồm chữ thường a-z, số và dấu gạch ngang (không đầu/cuối/đôi)")
+    if slug in WINDOWS_RESERVED:
+        raise ValueError(f"'{slug}' là tên dành riêng của Windows")
+    return slug
+
+
+def is_valid_slug(slug: str) -> bool:
+    try:
+        check_slug(slug)
+    except ValueError:
+        return False
+    return True
 
 
 def _check_color(value: str, *, allow_names: bool) -> str:
@@ -75,19 +106,14 @@ class Label(_Model):
 
 
 class Scene(_Model):
-    image: str
+    # Bản nháp (project mới tạo) được phép chưa có ảnh / lời đọc; `Project.render_problems()` kiểm
+    # tra đủ chưa trước khi dựng.
+    image: str = ""
     card: Card = Field(default_factory=Card)
     labels: list[Label] = Field(default_factory=list)
-    voice: str = Field(min_length=1)
+    voice: str = ""
     punch: bool = False
     caption_y: int | None = None
-
-    @field_validator("voice")
-    @classmethod
-    def _voice(cls, v: str) -> str:
-        if not v.replace("|", " ").strip():
-            raise ValueError("Lời đọc của cảnh đang trống")
-        return v
 
 
 class Voice(_Model):
@@ -153,7 +179,7 @@ class Project(_Model):
     title: str
     series: str = ""
     theme: Theme = Field(default_factory=Theme)
-    voice: Voice
+    voice: Voice | None = None
     music: Music | None = None
     settings: Settings = Field(default_factory=Settings)
     scenes: list[Scene] = Field(min_length=MIN_SCENES, max_length=MAX_SCENES)
@@ -166,21 +192,33 @@ class Project(_Model):
         return {"file": v} if isinstance(v, str) else v  # "voice": "voice.mp3" vẫn hợp lệ
 
     @field_serializer("voice")
-    def _voice_out(self, v: Voice):
+    def _voice_out(self, v: Voice | None):
+        if v is None:
+            return None
         return v.file if v.trim_end is None else {"file": v.file, "trim_end": v.trim_end}
 
     @field_validator("slug")
     @classmethod
     def _slug(cls, v: str) -> str:
-        if not SLUG.match(v):
-            raise ValueError("slug chỉ gồm chữ thường, số và dấu gạch ngang")
-        return v
+        return check_slug(v)
 
     @model_validator(mode="after")
     def _thumbnail_scene(self) -> Project:
         if self.thumbnail and self.thumbnail.scene > len(self.scenes):
             raise ValueError("thumbnail.scene vượt quá số cảnh")
         return self
+
+    def render_problems(self) -> list[str]:
+        """Những thứ còn thiếu để dựng được video (rỗng nếu đủ)."""
+        problems = []
+        if self.voice is None or not self.voice.file:
+            problems.append("Chưa có file giọng đọc")
+        for i, scene in enumerate(self.scenes, 1):
+            if not scene.image:
+                problems.append(f"Cảnh {i}: chưa có ảnh")
+            if not re.sub(r"[|{}\s]", "", scene.voice):
+                problems.append(f"Cảnh {i}: lời đọc đang trống")
+        return problems
 
 
 def load_project(project_dir: Path | str) -> Project:

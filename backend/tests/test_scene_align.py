@@ -219,3 +219,28 @@ def test_levels_go_from_coarse_to_fine():
     noise = [float(n.removesuffix("dB")) for _, n in scene_align.LEVELS]
     assert durs == sorted(durs, reverse=True) and durs[0] == 0.25 and durs[-1] == 0.08
     assert noise == sorted(noise) and noise[0] == -38 and noise[-1] == -34
+
+
+TWO_SENTENCES = ("Một hai. Ba bốn.", "Năm sáu. Bảy tám.")  # mỗi cảnh 2 cụm, kết thúc bằng dấu chấm
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("long_after, scene1_starts_at_segment", [(1, 2), (2, 3)])
+def test_scene_boundary_follows_the_long_pause_when_the_scene_ends_a_sentence(
+    tmp_path, long_after, scene1_starts_at_segment
+):
+    """5 đoạn bằng nhau cho 2 cảnh bằng nhau: chia 2+3 hay 3+2 có chi phí thời lượng như nhau,
+    nên chỉ khoảng nghỉ dài (nơi kết thúc câu) quyết định cảnh 2 bắt đầu ở đoạn nào."""
+    tokens, scene_of = tokens_of(*TWO_SENTENCES)
+    gaps = [0.3, 0.3, 0.3, 0.3]
+    gaps[long_after] = 0.55
+    parts = [("gap", 0.3)]
+    for i in range(5):
+        parts += [("tone", 0.5), ("gap", gaps[i] if i < 4 else 0.4)]
+    wav, total, spans = timeline(parts, tmp_path)
+    res = align_scenes(tokens, scene_of, wav, total)
+    first_of_scene1 = next(i for i, s in enumerate(scene_of) if s == 1)
+    assert res.times[first_of_scene1][0] == pytest.approx(
+        spans[scene1_starts_at_segment][0], abs=0.1
+    )
+    assert res.dropped == 0

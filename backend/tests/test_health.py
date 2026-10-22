@@ -110,3 +110,71 @@ def test_cors_allows_vite_only():
     assert ok.headers.get("access-control-allow-origin") == "http://localhost:5173"
     bad = client.get("/api/health", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in bad.headers
+
+
+# Đầu ra thật của FFmpeg 6.1.1 (Ubuntu 24.04, lấy từ CI): `-filters` KHÔNG có dòng `------`,
+# cờ có 3 ký tự. Bản 9.0 (Windows) có dòng đó và cờ 2 ký tự.
+FILTERS_61 = """Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  ..C = Command support
+  A = Audio input/output
+  V = Video input/output
+  N = Dynamic number and/or type of input/output
+  | = Source or sink filter
+ ... abench            A->A       Benchmark part of a filtergraph.
+ ..C acompressor       A->A       Audio compressor.
+ ... acrossfade        AA->A      Cross fade two input audio streams.
+ T.C loudnorm          A->A       EBU R128 loudness normalization
+ ..C sidechaincompress AA->A      Sidechain compressor.
+ ... silencedetect     A->A       Detect silence.
+ .S. xfade             VV->V      Cross fade one video with another video.
+ .SC zoompan           V->V       Apply Zoom & Pan effect.
+ ... anullsrc          |->A       Null audio source.
+"""
+ENCODERS_61 = """Encoders:
+ V..... = Video
+ A..... = Audio
+ S..... = Subtitle
+ .F.... = Frame-level multithreading
+ ------
+ V....D a64multi             Multicolor charset for Commodore 64 (codec a64_multi)
+ V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
+"""
+
+
+def test_parse_names_handles_ffmpeg_61_filters_without_a_separator():
+    names = health.parse_names(FILTERS_61)
+    assert {"zoompan", "xfade", "sidechaincompress", "loudnorm", "silencedetect"} <= names
+    assert {"abench", "acompressor", "anullsrc"} <= names
+    assert "=" not in names and "Filters:" not in names and "A" not in names and "|" not in names
+
+
+def test_parse_names_ignores_legend_lines_of_both_tables():
+    assert health.parse_names(ENCODERS_61) == {"a64multi", "libx264"}
+
+
+def test_parse_names_handles_two_and_three_character_flags():
+    assert health.parse_names(
+        " .. loudnorm  A->A  x\n TS aap  AA->A  y\n ..C xfade  VV->V  z\n"
+    ) == {
+        "loudnorm",
+        "aap",
+        "xfade",
+    }
+
+
+def test_check_ffmpeg_with_the_real_61_listings_finds_nothing_missing(monkeypatch):
+    outputs = {"-version": "ffmpeg version 6.1.1", "-encoders": ENCODERS_61, "-filters": FILTERS_61}
+    monkeypatch.setattr(health, "_ffmpeg_stdout", lambda arg: outputs[arg])
+    assert health.check_ffmpeg() == []
+
+
+def test_check_ffmpeg_still_reports_a_missing_filter_in_the_61_format(monkeypatch):
+    outputs = {
+        "-version": "ffmpeg version 6.1.1",
+        "-encoders": ENCODERS_61,
+        "-filters": FILTERS_61.replace(" xfade ", " xfadx "),
+    }
+    monkeypatch.setattr(health, "_ffmpeg_stdout", lambda arg: outputs[arg])
+    assert health.check_ffmpeg() == ["xfade"]

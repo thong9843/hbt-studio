@@ -1,3 +1,4 @@
+import os
 import types
 
 from hbt.models import Project
@@ -88,3 +89,13 @@ def test_pipeline_version_follows_the_pipeline_code():
     from hbt.pipeline import render
 
     assert len(render.PIPELINE_VERSION) == 12 and render.PIPELINE_VERSION.isalnum()
+
+
+def test_small_files_are_rehashed_even_if_size_and_mtime_match(tmp_path):
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"x")
+    before = cache.file_digest(f)
+    stat = f.stat()
+    f.write_bytes(b"y")  # cùng kích thước
+    os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns))  # và cùng thời điểm sửa
+    assert cache.file_digest(f) != before

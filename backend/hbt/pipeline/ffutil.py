@@ -9,17 +9,29 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from . import cancel
+
 LUFS_RE = re.compile(r"I:\s+(-?inf|-?\d+(?:\.\d+)?)\s+LUFS")
+
+
+INSTALL_HINT = (
+    "Hãy cài FFmpeg 6 trở lên (winget install Gyan.FFmpeg), mở lại terminal để PATH nhận, "
+    "rồi thử lại. Xem README.md."
+)
 
 
 class FFmpegError(RuntimeError):
     """Lệnh FFmpeg/ffprobe lỗi; thông báo chứa phần cuối stderr."""
 
 
+class FFmpegNotFound(FFmpegError):
+    """Không có ffmpeg/ffprobe trên PATH."""
+
+
 def _exe(name: str) -> str:
     path = shutil.which(name)
     if path is None:
-        raise FFmpegError(f"Không tìm thấy {name} trên PATH. Hãy cài FFmpeg (xem README.md).")
+        raise FFmpegNotFound(f"Không tìm thấy {name} trên PATH. {INSTALL_HINT}")
     return path
 
 
@@ -32,11 +44,32 @@ def _tail(text: str, lines: int = 12) -> str:
 
 
 def run_ffmpeg(args: Sequence[str | Path]) -> None:
-    """Chạy `ffmpeg -y -v error <args>`; lỗi thì ném FFmpegError kèm stderr."""
+    """Chạy `ffmpeg -y -v error <args>`; lỗi thì ném FFmpegError kèm stderr.
+
+    Nếu lần dựng bị huỷ (`cancel.use_token`), tiến trình bị kill và ném RenderCancelled."""
     cmd = [_exe("ffmpeg"), "-hide_banner", "-v", "error", "-y", *map(str, args)]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if result.returncode != 0:
-        raise FFmpegError(f"ffmpeg lỗi (mã {result.returncode}):\n{_tail(result.stderr)}")
+    token = cancel.current()
+    if token is not None:
+        token.check()
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if token is not None:
+        token.track(proc)
+    try:
+        _, stderr = proc.communicate()
+    finally:
+        if token is not None:
+            token.untrack(proc)
+    if token is not None:
+        token.check()  # bị kill vì huỷ: mã thoát khác 0 không phải lỗi của FFmpeg
+    if proc.returncode != 0:
+        raise FFmpegError(f"ffmpeg lỗi (mã {proc.returncode}):\n{_tail(stderr)}")
 
 
 def probe(path: str | Path) -> dict:
