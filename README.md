@@ -64,6 +64,7 @@ API chạy ở <http://127.0.0.1:8000> (chỉ máy này truy cập được), t�
 | `npm run test`   | pytest + Vitest                            |
 | `npm run format` | Tự định dạng code Python và TypeScript     |
 | `npm run build`  | Đóng gói frontend vào `frontend/dist/`     |
+| `npm run e2e`    | Kiểm thử trình duyệt (Playwright), xem dưới |
 
 ## Thư mục
 
@@ -75,3 +76,13 @@ API chạy ở <http://127.0.0.1:8000> (chỉ máy này truy cập được), t�
 | `library/`    | Thư viện nhạc (`index.json` lên Git, file mp3 thì không)    |
 | `reference/`  | Code dựng video đã chạy thật — chỉ để đối chiếu khi port    |
 | `workspace/`  | Project và video của bạn — **không** lên Git                |
+
+## Kiểm thử trình duyệt (e2e)
+
+Chỉ chạy trên máy cá nhân, không nằm trong CI. Dùng trình duyệt **Microsoft Edge** có sẵn của Windows (không phải tải trình duyệt). Kịch bản: mở trang chủ, tạo project, thêm 3 cảnh, lưu, tải lại trang và kiểm tra dữ liệu còn đủ; project thử được xoá sau khi chạy.
+
+```powershell
+npm run e2e
+```
+
+Lệnh tự bật `npm run dev` nếu chưa chạy (nếu đang chạy sẵn thì dùng luôn). Kịch bản nằm ở `e2e/`, cấu hình ở `playwright.config.ts`.
