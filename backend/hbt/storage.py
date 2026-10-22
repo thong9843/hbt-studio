@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -32,6 +33,7 @@ from hbt.models import (
 )
 from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 
+log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 COPY_EXCLUDE = ("build", "renders")  # nhân bản không chép file trung gian và các lần xuất
@@ -75,18 +77,28 @@ def content_hash_16(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
+# Chỉ những tên do app tự đặt mới được dọn: dạng hash, hoặc dạng cũ scene-NN.<đuôi>
+_OURS = re.compile(r"^([0-9a-f]{16}|scene-[0-9]{2,})\.(png|jpg|webp)$")
+
+
 def _cleanup_unused_images(folder: Path, project: Project) -> None:
-    """Xoá file trong images/ không còn cảnh nào tham chiếu."""
+    """Xoá file ảnh do app đặt tên mà không còn cảnh nào tham chiếu.
+
+    File khác trong images/ được giữ nguyên (chỉ ghi log cảnh báo)."""
     images_dir = folder / "images"
     if not images_dir.is_dir():
         return
     referenced = {Path(s.image).name for s in project.scenes if s.image}
     for f in images_dir.iterdir():
-        if f.is_file() and not f.name.startswith(".") and f.name not in referenced:
-            try:
-                f.unlink()
-            except OSError:
-                pass
+        if not f.is_file() or f.name.startswith(".") or f.name in referenced:
+            continue
+        if not _OURS.match(f.name):
+            log.warning("Giữ nguyên file lạ trong %s: %s", images_dir, f.name)
+            continue
+        try:
+            f.unlink()
+        except OSError:
+            pass
 
 
 def scene_image_stem(scene_index: int) -> str:

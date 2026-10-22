@@ -514,3 +514,21 @@ def test_load_still_migrates_a_scene_name_image(store, tmp_path):
     loaded = store.load(p.slug)
     assert loaded.scenes[0].image != "images/scene-01.png"
     assert (folder / loaded.scenes[0].image).is_file()
+
+
+def test_cleanup_only_removes_app_named_unreferenced_images(store, tmp_path, caplog):
+    p = store.create("Dọn", scene_count=3)
+    keep = png(tmp_path / "k.png", color=(10, 20, 30))
+    rel, _ = store.save_asset(p.slug, "image", keep, "k.png", scene_index=0)
+    images_dir = store.project_dir(p.slug) / "images"
+    (images_dir / "0123456789abcdef.png").write_bytes(b"x")  # tên hash, không ai dùng
+    (images_dir / "scene-02.jpg").write_bytes(b"x")  # dạng cũ, không ai dùng
+    (images_dir / "ghi-chu.txt").write_text("của tôi", encoding="utf-8")
+    (images_dir / "anh-cua-toi.png").write_bytes(b"x")
+
+    with caplog.at_level("WARNING"):
+        store.save(p.slug, store.load(p.slug))
+
+    names = {f.name for f in images_dir.iterdir()}
+    assert names == {Path(rel).name, "ghi-chu.txt", "anh-cua-toi.png"}
+    assert "ghi-chu.txt" in caplog.text and "anh-cua-toi.png" in caplog.text
