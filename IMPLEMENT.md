@@ -569,6 +569,14 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
 - **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
 
+**Backlog sau M3 (chưa làm, không thuộc mốc nào):**
+- Chuyển sang `lucide-react` (cần chủ dự án duyệt thêm thư viện, xem quyết định Biểu tượng ở trên).
+- Thêm font độ đậm 400 và 600 thật (hiện dùng 500 và 700 thay thế).
+- Ảnh chụp màn hình giao diện cho README/tài liệu.
+- Hiệu ứng chuyển trang trượt 200 ms (mục 7 của bản nháp lời chủ dự án).
+
+**Mục theo dõi:** một test pytest từng rớt đúng một lần khi máy đang bận, chưa tái hiện được. CI đã in tên test rớt (`scripts/ci_annotate.py`); nếu rớt lại thì ghi tên test và điều kiện vào đây rồi điều tra.
+
 ### M4 · Hoàn thiện
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
 - [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
