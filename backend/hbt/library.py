@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
 
-from hbt.storage import AUDIO_EXTENSIONS, BadRequest, _audio_extension, slugify
+from hbt.storage import (
+    AUDIO_EXTENSIONS,
+    BadRequest,
+    NotFound,
+    Unprocessable,
+    _audio_extension,
+    slugify,
+)
+
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class MusicEntry(BaseModel):
@@ -21,6 +31,11 @@ class MusicEntry(BaseModel):
     license: str = Field(min_length=1)
     moods: list[str] = Field(default_factory=list)
     bpm: int | None = Field(default=None, ge=30, le=300)
+
+    @property
+    def credit(self) -> str:
+        """Dòng ghi công, ví dụ "The Wacky Sprint – nkbloom (Pixabay)"."""
+        return f"{self.title} – {self.artist} ({self.source})"
 
 
 class MusicLibrary:
@@ -39,6 +54,17 @@ class MusicLibrary:
             return [MusicEntry.model_validate(e) for e in raw]
         except (json.JSONDecodeError, ValueError) as e:
             raise BadRequest(f"library/music/index.json không hợp lệ: {e}") from e
+
+    def find(self, file: str) -> tuple[MusicEntry, Path]:
+        """Bài trong thư viện theo tên file. Unprocessable nếu tên không hợp lệ (chặn `..`, `/`),
+        NotFound nếu không có trong index hoặc thiếu file."""
+        if not SAFE_NAME.match(file) or ".." in file:
+            raise Unprocessable("Tên file nhạc không hợp lệ")
+        entry = next((e for e in self.list() if e.file == file), None)
+        path = self.root / file
+        if entry is None or not path.is_file():
+            raise NotFound(f"Không có bài '{file}' trong thư viện nhạc")
+        return entry, path
 
     def add(self, src: Path, filename: str, meta: dict) -> MusicEntry:
         """Thêm một bài: kiểm tra âm thanh, đặt file vào thư viện và ghi vào index."""

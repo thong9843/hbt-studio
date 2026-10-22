@@ -7,12 +7,14 @@ import os
 import re
 import shutil
 import unicodedata
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
+from hbt.app_settings import AppSettingsStore
 from hbt.config import DEFAULT_FPS
 from hbt.models import (
     MAX_SCENES,
@@ -23,6 +25,7 @@ from hbt.models import (
     Project,
     Scene,
     Settings,
+    Theme,
     Voice,
     check_slug,
     is_valid_slug,
@@ -62,6 +65,9 @@ class Unprocessable(StorageError):
     """Yêu cầu hợp lệ về cú pháp nhưng project chưa đủ điều kiện (ví dụ thiếu ảnh để dựng)."""
 
 
+CANONICAL_IMAGE = re.compile(r"^images/scene-[0-9]{2,}(\.[a-z0-9]+)$")
+
+
 def scene_image_stem(scene_index: int) -> str:
     """Chỉ số cảnh của API (từ 0) → tên file ảnh đánh số từ 1: 0 → 'scene-01'."""
     return f"scene-{scene_index + 1:02d}"
@@ -99,9 +105,15 @@ def _write_json_atomic(path: Path, data: object) -> None:
 
 
 class Storage:
-    def __init__(self, workspace_dir: Path, default_fps: int = DEFAULT_FPS):
+    def __init__(
+        self,
+        workspace_dir: Path,
+        default_fps: int = DEFAULT_FPS,
+        app_settings: AppSettingsStore | None = None,
+    ):
         self.workspace_dir = Path(workspace_dir)
         self.default_fps = default_fps
+        self.app_settings = app_settings
 
     @property
     def projects_dir(self) -> Path:
@@ -114,6 +126,14 @@ class Storage:
         except ValueError as e:
             raise Unprocessable(f"Slug không hợp lệ: {e}") from e
         return self.projects_dir / slug
+
+    def project_file(self, slug: str, rel: str) -> Path:
+        """Đường dẫn tuyệt đối của `rel` trong thư mục project; Unprocessable nếu thoát ra ngoài."""
+        folder = self.project_dir(slug).resolve()
+        target = (folder / rel).resolve()
+        if not rel or not target.is_relative_to(folder):
+            raise Unprocessable("Đường dẫn file không hợp lệ")
+        return target
 
     def exists(self, slug: str) -> bool:
         try:
@@ -140,12 +160,14 @@ class Storage:
         if not MIN_SCENES <= scene_count <= MAX_SCENES:
             raise BadRequest(f"Số cảnh phải từ {MIN_SCENES} đến {MAX_SCENES}")
         slug = self.unique_slug(slugify(title))
+        defaults = self.app_settings.load() if self.app_settings else None  # màn Cài đặt
         project = Project(
             slug=slug,
             title=title.strip(),
             series=series.strip(),
             scenes=[Scene() for _ in range(scene_count)],
-            settings=Settings(fps=self.default_fps),
+            settings=Settings(fps=defaults.default_fps if defaults else self.default_fps),
+            theme=Theme(**defaults.theme.model_dump()) if defaults else Theme(),
         )
         (self.projects_dir / slug / "images").mkdir(parents=True)
         return self.save(slug, project)
@@ -184,6 +206,90 @@ class Storage:
         )
         copy = source.model_copy(update={"slug": new_slug, "title": new_title})
         return self.save(new_slug, copy)
+
+    # ---------------------------------------------------------------- thứ tự cảnh
+    def reorder_scenes(self, slug: str, order: list[int]) -> Project:
+        """Đổi thứ tự cảnh: cảnh mới thứ i là cảnh cũ `order[i]`.
+
+        Ảnh có tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để NN luôn bằng
+        chỉ số + 1 (nếu không, tải ảnh cho cảnh 0 sau này sẽ ghi đè ảnh của cảnh khác)."""
+        project = self.load(slug)
+        n = len(project.scenes)
+        if sorted(order) != list(range(n)):
+            raise BadRequest(f"`order` phải là một hoán vị của 0..{n - 1}")
+        folder = self.project_dir(slug)
+        scenes = [project.scenes[k] for k in order]
+        staged = []
+        for i, scene in enumerate(scenes):
+            m = CANONICAL_IMAGE.match(scene.image)
+            if not m:
+                continue  # tên tuỳ ý: giữ nguyên
+            new_rel = f"images/{scene_image_stem(i)}{m.group(1)}"
+            if new_rel == scene.image:
+                continue
+            # hai pha (qua tên tạm) để hai ảnh đổi chỗ cho nhau không ghi đè nhau
+            src = folder / scene.image
+            tmp = None
+            if src.is_file():
+                tmp = folder / "images" / f".reorder-{uuid.uuid4().hex[:8]}{m.group(1)}"
+                os.replace(src, tmp)
+            staged.append((scene, tmp, new_rel))
+        for scene, tmp, new_rel in staged:
+            if tmp is not None:
+                os.replace(tmp, folder / new_rel)
+            scene.image = new_rel
+        project.scenes = scenes
+        return self.save(slug, project)
+
+    # ---------------------------------------------------------------- lịch sử xuất, nhạc thư viện
+    def list_renders(self, slug: str) -> list[dict]:
+        """Các lần xuất của project (mới nhất trước); đường dẫn tương đối so với workspace."""
+        renders = self.project_dir(slug) / "renders"
+        out: list[dict] = []
+        if not renders.is_dir():
+            return out
+        for d in renders.iterdir():
+            video = d / "video.mp4"
+            if not video.is_file():
+                continue
+            meta: dict = {}
+            if (d / "meta.json").is_file():
+                try:
+                    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    pass
+            item = {
+                "job_id": d.name,
+                "preview": bool(meta.get("preview", False)),
+                "fps": meta.get("fps"),
+                "width": meta.get("width"),
+                "height": meta.get("height"),
+                "duration": meta.get("duration"),
+                "lufs": meta.get("lufs"),
+                "aligner": meta.get("aligner"),
+                "created_at": meta.get("created_at") or _now_iso(video.stat().st_mtime),
+                "size": video.stat().st_size,
+                "video": self.rel(video),
+            }
+            for key, name in (
+                ("srt", "captions.srt"),
+                ("publish", "publish.txt"),
+                ("log", "log.txt"),
+            ):
+                item[key] = self.rel(d / name) if (d / name).is_file() else None
+            out.append(item)
+        return sorted(out, key=lambda r: r["created_at"], reverse=True)
+
+    def attach_music(self, slug: str, src: Path, credit: str) -> tuple[str, Project]:
+        """Chép một file nhạc có sẵn (từ thư viện) vào project và đặt ghi công."""
+        project = self.load(slug)
+        folder = self.project_dir(slug)
+        rel = f"music{src.suffix.lower()}"
+        _remove_siblings(folder, "music")
+        shutil.copyfile(src, folder / rel)
+        project.music = Music(file=rel, credit=credit)
+        self.save(slug, project)
+        return rel, project
 
     # ---------------------------------------------------------------- danh sách
     def last_render(self, slug: str) -> dict | None:

@@ -430,7 +430,14 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
 - **Slug project** (chủ dự án chốt 21/10/2026): chỉ `[a-z0-9-]` (không bắt đầu/kết thúc/đôi dấu gạch), tối đa 60 ký tự, và không trùng tên thiết bị dành riêng của Windows (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Mọi nơi dùng slug đều kiểm tra và trả **422** `Slug không hợp lệ: …` (đọc, sửa, xoá, nhân bản, tải file, xem trước, lint, dựng, và `/files/projects/<slug>/…`; slug trong thân `PUT` cũng vậy). Đường dẫn `/files` có `..`, đường dẫn tuyệt đối, ổ đĩa hoặc thư mục ẩn cũng 422; đường dẫn đúng dạng mà không có file thì 404. Tiêu đề trùng tên thiết bị Windows ("Con", "NUL"…) được thêm hậu tố `-video`; hậu tố chống trùng (`-2`, `-3`…) không làm slug vượt 60 ký tự.
 - **Thiếu FFmpeg** (chủ dự án chốt 21/10/2026): server không sập. `/health` báo `ffmpeg: false`, `missing: ["ffmpeg"]`. `POST /render` trả **503** kèm lời nhắn cài (`winget install Gyan.FFmpeg`, mở lại terminal, xem README.md) và **không tạo job**; cũng trả 503 nếu FFmpeg thiếu encoder/filter bắt buộc hoặc thiếu ffprobe. Tải giọng/nhạc và `POST /music` trả 503 (cần ffprobe để kiểm tra file). Project chưa đủ vẫn nhận 422 trước 503. Những việc không cần FFmpeg (CRUD, ảnh, xem trước, lint, `/files`, từ nhạy cảm) vẫn chạy.
-- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`), phát nhạc thư viện cho nút nghe thử (cần cho M3).
+- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`).
+
+**Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
+- `GET /library/music/{file}` phát bài trong thư viện (nghe thử); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
+- `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
+- `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
+- `GET|PUT /settings/app`: `{default_fps, theme{primary,accent}, whisper_model, whisper_timeout_seconds}` lưu ở `workspace/settings/app.json`. `default_fps` và `theme` áp dụng cho project tạo mới; hai trường Whisper chỉ được lưu, M4 mới dùng.
 
 ---
 

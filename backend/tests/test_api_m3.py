@@ -1,0 +1,138 @@
+"""API bổ sung cho giao diện M3: sắp xếp cảnh, xem trước bản nháp, nhạc thư viện, cài đặt app."""
+
+import io
+import json
+
+from PIL import Image
+
+from tests.helpers import write_wav
+from tests.test_api import client, complete_project, upload_image  # noqa: F401
+
+
+def test_reorder_scenes_renames_images_and_keeps_content(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Sắp xếp", "scene_count": 3}).json()["slug"]
+    for i, color in enumerate([(200, 0, 0), (0, 200, 0), (0, 0, 200)]):
+        assert upload_image(client, slug, i, color).status_code == 200
+    p = client.get(f"/api/projects/{slug}").json()
+    for i, s in enumerate(p["scenes"]):
+        s["voice"] = f"Câu {i}"
+    client.put(f"/api/projects/{slug}", json=p)
+
+    r = client.post(f"/api/projects/{slug}/scenes/reorder", json={"order": [2, 0, 1]})
+    assert r.status_code == 200
+    scenes = r.json()["scenes"]
+    assert [s["voice"] for s in scenes] == ["Câu 2", "Câu 0", "Câu 1"]
+    assert [s["image"] for s in scenes] == [f"images/scene-0{i}.png" for i in (1, 2, 3)]
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    reds = [Image.open(folder / s["image"]).convert("RGB").getpixel((5, 5)) for s in scenes]
+    assert reds == [(0, 0, 200), (200, 0, 0), (0, 200, 0)]
+    assert not list((folder / "images").glob(".reorder-*"))
+
+
+def test_reorder_rejects_non_permutations(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Sắp xếp", "scene_count": 3}).json()["slug"]
+    for order in ([0, 1], [0, 0, 1], [0, 1, 3]):
+        r = client.post(f"/api/projects/{slug}/scenes/reorder", json={"order": order})
+        assert r.status_code == 400 and "hoán vị" in r.json()["detail"]
+    assert (
+        client.post("/api/projects/khong-co/scenes/reorder", json={"order": [0]}).status_code == 404
+    )
+
+
+def test_draft_preview_uses_unsaved_text(client):  # noqa: F811
+    slug = complete_project(client)
+    p = client.get(f"/api/projects/{slug}").json()
+    saved = client.get(f"/api/projects/{slug}/scenes/0/preview.png").content
+    draft = p["scenes"][0]
+    draft["card"]["lines"] = [{"text": "Bản nháp chưa lưu", "size": "xl"}]
+    r = client.post(f"/api/projects/{slug}/scenes/0/preview.png?w=270", json={"scene": draft})
+    assert r.status_code == 200
+    assert Image.open(io.BytesIO(r.content)).size == (270, 480)
+    full = client.post(f"/api/projects/{slug}/scenes/0/preview.png", json={"scene": draft}).content
+    assert full != saved
+    # chưa lưu gì vào project
+    assert (
+        client.get(f"/api/projects/{slug}").json()["scenes"][0]["card"]["lines"][0]["text"]
+        == "Cảnh 1"
+    )
+
+
+def test_draft_preview_rejects_paths_outside_the_project(client):  # noqa: F811
+    slug = complete_project(client)
+    scene = client.get(f"/api/projects/{slug}").json()["scenes"][0]
+    for bad in ("../../x.png", "..", "/etc/passwd"):
+        scene["image"] = bad
+        r = client.post(f"/api/projects/{slug}/scenes/0/preview.png", json={"scene": scene})
+        assert r.status_code == 422, bad
+    assert (
+        client.post(
+            "/api/projects/khong-co/scenes/0/preview.png", json={"scene": scene}
+        ).status_code
+        == 404
+    )
+
+
+def seed_library(client):  # noqa: F811
+    lib = client.app.state.hbt.library
+    src = client.tmp / "t.wav"
+    write_wav(src, [("tone", 1.0)])
+    meta = {"title": "Bài thử", "artist": "Ai Đó", "source": "Pixabay", "license": "CC0"}
+    lib.add(src, "t.wav", meta)
+    return lib.list()[0].file
+
+
+def test_library_audio_and_attach(client):  # noqa: F811
+    name = seed_library(client)
+    got = client.get(f"/api/library/music/{name}")
+    assert got.status_code == 200
+    assert client.get("/api/library/music/khong-co.wav").status_code == 404
+    assert client.get("/api/library/music/..%2Findex.json").status_code in (404, 422)
+
+    slug = client.post("/api/projects", json={"title": "Nhạc"}).json()["slug"]
+    r = client.post(f"/api/projects/{slug}/music/from-library", json={"file": name})
+    assert r.status_code == 200
+    music = r.json()["music"]
+    assert music["file"].startswith("music.") and music["credit"] == "Bài thử – Ai Đó (Pixabay)"
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    assert (folder / music["file"]).is_file()
+    missing = client.post(f"/api/projects/{slug}/music/from-library", json={"file": "x.wav"})
+    assert missing.status_code == 404
+    gone = client.post("/api/projects/khong-co/music/from-library", json={"file": name})
+    assert gone.status_code == 404
+
+
+def test_renders_history_lists_newest_first(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Lịch sử"}).json()["slug"]
+    assert client.get(f"/api/projects/{slug}/renders").json() == []
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    for job, created in (("a1", "2026-10-01T10:00:00+00:00"), ("b2", "2026-10-02T10:00:00+00:00")):
+        d = folder / "renders" / job
+        d.mkdir(parents=True)
+        (d / "video.mp4").write_bytes(b"x")
+        meta = json.dumps({"created_at": created, "fps": 50})
+        (d / "meta.json").write_text(meta, encoding="utf-8")
+    items = client.get(f"/api/projects/{slug}/renders").json()
+    assert [i["job_id"] for i in items] == ["b2", "a1"]
+    assert items[0]["video"] == f"/api/files/projects/{slug}/renders/b2/video.mp4"
+    assert items[0]["srt"] is None
+    assert client.get("/api/projects/khong-co/renders").status_code == 404
+
+
+def test_app_settings_roundtrip_and_defaults_for_new_projects(client):  # noqa: F811
+    first = client.get("/api/settings/app").json()
+    assert first["default_fps"] == 50 and first["whisper_model"] == "auto"
+    body = {**first, "default_fps": 30, "theme": {"primary": "#112233", "accent": "#445566"}}
+    assert client.put("/api/settings/app", json=body).json() == body
+    assert client.get("/api/settings/app").json() == body
+    p = client.post("/api/projects", json={"title": "Mặc định"}).json()
+    assert p["settings"]["fps"] == 30 and p["theme"] == {"primary": "#112233", "accent": "#445566"}
+
+
+def test_app_settings_validation_and_corrupt_file(client):  # noqa: F811
+    bad = {"default_fps": 45}
+    assert client.put("/api/settings/app", json=bad).status_code == 422
+    assert client.put("/api/settings/app", json={"theme": {"primary": "đỏ"}}).status_code == 422
+    path = client.app.state.hbt.app_settings.path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{hỏng", encoding="utf-8")
+    assert client.get("/api/settings/app").json()["default_fps"] == 50
