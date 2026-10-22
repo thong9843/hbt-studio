@@ -65,6 +65,8 @@ class Unprocessable(StorageError):
     """Yêu cầu hợp lệ về cú pháp nhưng project chưa đủ điều kiện (ví dụ thiếu ảnh để dựng)."""
 
 
+# Tên ảnh đã đúng dạng images/<16 ký tự hex>.<đuôi hợp lệ>: không đọc lại file khi mở project
+HASHED_IMAGE = re.compile(r"^images/[0-9a-f]{16}\.(png|jpg|webp)$")
 CANONICAL_IMAGE = re.compile(r"^images/scene-[0-9]{2,}(\.[a-z0-9]+)$")
 
 
@@ -207,7 +209,7 @@ class Storage:
         changed = False
         if images_dir.is_dir():
             for scene in project.scenes:
-                if not scene.image:
+                if not scene.image or HASHED_IMAGE.match(scene.image):
                     continue
                 img_path = folder / scene.image
                 if not img_path.is_file():

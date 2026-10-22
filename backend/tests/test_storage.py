@@ -480,3 +480,37 @@ def test_legacy_scene_01_migrates_on_load(store, tmp_path):
     # Đọc lại ảnh xem đúng màu không
     pix = Image.open(images_dir / f"{content_hash}.png").getpixel((0, 0))
     assert pix == (123, 45, 67)
+
+
+def test_load_does_not_read_images_that_are_already_hash_named(store, tmp_path, monkeypatch):
+    p = store.create("Mười hai", scene_count=12)
+    for i in range(12):
+        img = png(tmp_path / f"m{i}.png", color=(i * 20, 90, 140))
+        store.save_asset(p.slug, "image", img, f"m{i}.png", scene_index=i)
+    images_dir = store.project_dir(p.slug) / "images"
+    assert len(list(images_dir.iterdir())) == 12
+
+    reads = []
+    real_read_bytes = Path.read_bytes
+
+    def spy(self):
+        if images_dir in self.parents:
+            reads.append(self.name)
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", spy)
+    monkeypatch.setattr("hbt.storage.content_hash_16", lambda data: pytest.fail("đã băm ảnh"))
+    loaded = store.load(p.slug)
+    assert len(loaded.scenes) == 12 and reads == []
+
+
+def test_load_still_migrates_a_scene_name_image(store, tmp_path):
+    p = store.create("Cũ", scene_count=3)
+    folder = store.project_dir(p.slug)
+    (folder / "images").mkdir(exist_ok=True)
+    png(folder / "images" / "scene-01.png")
+    p.scenes[0].image = "images/scene-01.png"
+    (folder / "project.json").write_text(p.model_dump_json(), encoding="utf-8")
+    loaded = store.load(p.slug)
+    assert loaded.scenes[0].image != "images/scene-01.png"
+    assert (folder / loaded.scenes[0].image).is_file()
