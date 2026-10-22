@@ -83,10 +83,13 @@ def seed_library(client):  # noqa: F811
 
 def test_library_audio_and_attach(client):  # noqa: F811
     name = seed_library(client)
-    got = client.get(f"/api/library/music/{name}")
+    got = client.get(f"/api/music/{name}/audio")
     assert got.status_code == 200
-    assert client.get("/api/library/music/khong-co.wav").status_code == 404
-    assert client.get("/api/library/music/..%2Findex.json").status_code in (404, 422)
+    part = client.get(f"/api/music/{name}/audio", headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206 and len(part.content) == 100
+    assert part.headers["content-range"].startswith("bytes 0-99/")
+    assert client.get("/api/music/khong-co.wav/audio").status_code == 404
+    assert client.get("/api/music/..%2Findex.json/audio").status_code in (404, 422)
 
     slug = client.post("/api/projects", json={"title": "Nhạc"}).json()["slug"]
     r = client.post(f"/api/projects/{slug}/music/from-library", json={"file": name})

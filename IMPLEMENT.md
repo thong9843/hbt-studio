@@ -433,7 +433,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`).
 
 **Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
-- `GET /library/music/{file}` phát bài trong thư viện (nghe thử); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- `GET /music/{file}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `file` là tên file trong `GET /music`); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
 - `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.

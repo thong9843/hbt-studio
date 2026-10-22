@@ -53,9 +53,9 @@ def add_music(
         tmp.unlink(missing_ok=True)
 
 
-@router.get("/library/music/{file}")
+@router.get("/music/{file}/audio")
 def get_library_music(file: str, state: State) -> FileResponse:
-    """Nghe thử một bài trong thư viện."""
+    """Phát một bài trong thư viện để nghe thử (có Range). `file` là tên file trong `GET /music`."""
     _, path = state.library.find(file)
     return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
