@@ -161,6 +161,9 @@ flowchart LR
 | 22/10/2026 | `compose()` luôn `wait()` bộ mã hoá, kể cả khi bị huỷ lúc đang ghi khung | Trên Linux tiến trình bị kill mà không wait thành zombie; có test kiểm tra mọi tiến trình con đã được thu dọn |
 | 22/10/2026 | CI đưa test lỗi và phiên bản FFmpeg/Python/OS ra chú thích công khai (`scripts/ci_annotate.py`) | Nhật ký job cần quyền admin nên CI đỏ không chẩn đoán được từ ngoài |
 | 22/10/2026 | Quy trình mốc (CLAUDE.md): một nhánh mỗi mốc, kết thúc theo 6 bước, chưa xong thì không sang mốc sau; hồ sơ hai máy (cũ: i5-10400, không GPU, 16 GB; mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB); Whisper chọn model/thiết bị theo phần cứng, có cache, timeout và rơi về khoảng lặng (IMPLEMENT 0 và 5.2) | Hai máy khác nhau: không giả định có GPU; mặc định Whisper chốt theo số đo thật (`bench-align`, M4) |
+| 22/10/2026 | Chuyển lại người code từ Gemini về Claude Code | Gemini chỉ làm giai đoạn khép M3; `GEMINI.md` và `HANDOFF-GEMINI.md` chuyển vào `docs/archive/` |
+| 22/10/2026 | Xem nhanh dùng `veryfast`, CRF 30, AAC 96 kbps (bản đẹp không đổi) | 3,7 MB cho video 50 giây, trước đó 39,8 MB; thời gian dựng không đổi |
+| 22/10/2026 | A4: dựng bản đẹp "muỗi" mất 143 s trên máy cũ khi rảnh (M1: 145 s) | Không suy giảm hiệu năng; 261 s ở M3 do trình duyệt và máy chủ dev đang chạy |
 | 22/10/2026 | Chuyển người code sang Gemini; eb3842c đánh dấu M3 xong quá sớm, trạng thái đúng là đang khép | Tránh coi M3 đã xong khi chưa làm A1–A6 và chưa CI |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
@@ -181,6 +184,6 @@ flowchart LR
 | M0 | ☑ | Chủ dự án duyệt 20/10/2026 · tag `v0.1.1` |
 | M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
-| M3 | ☐ | Đang khép (A1-A6, chưa CI) |
+| M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
 | M4 | ☐ | |
 
