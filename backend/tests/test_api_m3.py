@@ -127,6 +127,30 @@ def test_library_audio_and_attach(client):  # noqa: F811
     assert gone.status_code == 404
 
 
+def test_library_audio_security_and_extension_checks(client):  # noqa: F811
+    # 1. Chặn "/"
+    assert client.get("/api/music/sub/test.mp3/audio").status_code == 422
+
+    # 2. Chặn "\"
+    assert client.get("/api/music/sub\\test.mp3/audio").status_code == 422
+
+    # 3. Chặn ".."
+    assert client.get("/api/music/..%2Findex.json/audio").status_code == 422
+
+    # 4. Chặn đường dẫn tuyệt đối
+    assert client.get("/api/music/C:%5Ctest.mp3/audio").status_code == 422
+    assert client.get("/api/music/%2Fetc%2Ftest.mp3/audio").status_code == 422
+
+    # 5. Chặn đuôi ngoài mp3/wav/m4a/ogg
+    for bad_ext in ("track.flac", "track.aac", "track.exe", "track.txt", "track.mp4", "track"):
+        r = client.get(f"/api/music/{bad_ext}/audio")
+        assert r.status_code == 422 and "Đuôi file nhạc" in r.json()["detail"]
+
+    # 6. Cho phép các đuôi hợp lệ: mp3, wav, m4a, ogg (404 khi không tồn tại, không phải 422)
+    for ok_ext in ("track.mp3", "track.wav", "track.m4a", "track.ogg"):
+        assert client.get(f"/api/music/{ok_ext}/audio").status_code == 404
+
+
 def test_renders_history_lists_newest_first(client):  # noqa: F811
     slug = client.post("/api/projects", json={"title": "Lịch sử"}).json()["slug"]
     assert client.get(f"/api/projects/{slug}/renders").json() == []

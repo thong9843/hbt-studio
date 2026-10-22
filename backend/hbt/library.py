@@ -19,6 +19,7 @@ from hbt.storage import (
     slugify,
 )
 
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -56,15 +57,27 @@ class MusicLibrary:
             raise BadRequest(f"library/music/index.json không hợp lệ: {e}") from e
 
     def find(self, file: str) -> tuple[MusicEntry, Path]:
-        """Bài trong thư viện theo tên file. Unprocessable nếu tên không hợp lệ (chặn `..`, `/`),
-        NotFound nếu không có trong index hoặc thiếu file."""
-        if not SAFE_NAME.match(file) or ".." in file:
+        """Bài trong thư viện theo tên file. Chỉ nhận tên nằm trong thư mục thư viện;
+        chặn '/', '\\', '..', đường dẫn tuyệt đối; chỉ đuôi mp3/wav/m4a/ogg.
+        """
+        if not file or "/" in file or "\\" in file or ".." in file:
+            raise Unprocessable("Tên file nhạc không hợp lệ")
+        p = Path(file)
+        if p.is_absolute() or re.match(r"^[A-Za-z]:", file) or file.startswith(("/", "\\")):
+            raise Unprocessable("Tên file nhạc không hợp lệ: không được là đường dẫn tuyệt đối")
+        ext = p.suffix.lower()
+        if ext not in ALLOWED_AUDIO_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_AUDIO_EXTENSIONS))
+            raise Unprocessable(f"Đuôi file nhạc không hợp lệ: chỉ chấp nhận {allowed}")
+        if not SAFE_NAME.match(file):
+            raise Unprocessable("Tên file nhạc không hợp lệ")
+        target = (self.root / file).resolve()
+        if not target.is_relative_to(self.root.resolve()) or target.parent != self.root.resolve():
             raise Unprocessable("Tên file nhạc không hợp lệ")
         entry = next((e for e in self.list() if e.file == file), None)
-        path = self.root / file
-        if entry is None or not path.is_file():
+        if entry is None or not target.is_file():
             raise NotFound(f"Không có bài '{file}' trong thư viện nhạc")
-        return entry, path
+        return entry, target
 
     def add(self, src: Path, filename: str, meta: dict) -> MusicEntry:
         """Thêm một bài: kiểm tra âm thanh, đặt file vào thư viện và ghi vào index."""
