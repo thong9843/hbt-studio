@@ -363,6 +363,15 @@ Tất cả tổng hợp bằng FFmpeg, không dùng file ngoài. Xuất stereo 4
 - Người dùng chỉnh danh sách ngay trong trang Cài đặt.
 - Thêm cảnh báo khi lời đọc có chữ số mà không ghi cách đọc (`100` thay vì `100{một trăm}`): mức `info`.
 
+**Quyết định M4 Đợt 2 (chủ dự án chốt 23/10/2026):**
+- **Nguồn danh sách:** `hbt/data/sensitive_words.json` (mặc định, nằm trên Git) và bản riêng `workspace/settings/sensitive_words.json` (ưu tiên khi có). Không có file `.txt` riêng trong `library/`.
+- **Mức xử lý:** `block` chặn xuất (nút Xem nhanh và Xuất bị khoá); `warn` và `info` chỉ nhắc, không chặn và không có nút "Vẫn dựng".
+- **So khớp** (`pipeline/textmatch.py`): chuẩn hoá NFC, không phân biệt hoa thường, theo ranh giới từ (ký tự chữ, số, `_` ở hai bên thì không khớp), cụm nhiều từ khớp với một hay nhiều khoảng trắng. **Không bỏ dấu**: "bia" không khớp "bìa". Riêng dấu thanh ở cụm `oa`, `oe`, `uy` có hai cách đặt, nên cả văn bản lẫn từ khoá được đưa về cách đặt ở nguyên âm thứ hai trước khi so: "hoá"="hóa", "tuý"="túy", "thuỷ"="thủy", "khoẻ"="khỏe".
+- **Vùng quét** (`field` trong kết quả): `card.lines` (nối các dòng thẻ), `labels`, `voice`, `publish.hook`, `thumbnail.lines` (4e). Mỗi từ báo một lần cho mỗi vùng và cảnh. `publish.hook` và `thumbnail.lines` có `scene` là `null`. Không quét `title` và `hashtags`.
+- **Lời đọc:** quét **cả chữ hiển thị lẫn chữ đọc trong `{…}`**; `|`, `{`, `}` được đổi thành dấu cách trước khi so (để "nhậu|rượu" không dính thành một từ).
+- **Số chưa ghi cách đọc** (`category = "number_reading"`, mức `info`, `field = "voice"`): báo **mọi** số trần không có `{cách đọc}` đi kèm, kể cả số một chữ số và năm; số có phân cách (`1.000`, `3,5`) tính là một số; mỗi số báo một lần cho mỗi cảnh.
+- `POST /projects/{slug}/lint` dùng danh sách hiện hành (bản riêng nếu có). Test: `test_textmatch.py`, `test_lint.py`, `test_api.py`.
+
 ---
 
 Thêm vào lint: tổng ký tự lời đọc > 750 → `warn` (mục 4d); lời đọc có chữ số chưa ghi cách đọc → `info`.
@@ -427,7 +436,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
 - **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
 - **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
-- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
+- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. Từ M4: độ dài lời đọc, từ nhạy cảm (mục 7) và số chưa ghi cách đọc. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
 - **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
 - **Job:** một luồng dựng, job nằm trong bộ nhớ (giữ 200 job; mất khi khởi động lại server, file đã xuất vẫn còn). `GET /jobs/{id}` → `{id, project, status, progress, step, log_tail, output, error, needs_confirmation, …}`; `output` có URL `/api/files/...`. **SSE** `GET /jobs/{id}/events`: `event: progress` (`{progress, step, message}`) rồi `event: end` (`{status, error, output}`); người nối sau nhận lại từ đầu. **Huỷ**: job xếp hàng huỷ ngay và không bao giờ chạy; job đang chạy bị kill ffmpeg, đợi tối đa 5 s cho luồng dừng, không để lại video dở. Đuôi giọng cần cắt > 8 s: job `failed` với `needs_confirmation = true` (gửi lại với `allow_long_trim`).
 - **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu phẳng `library/music/<slug-tiêu-đề>.<ext>`, tạo `id` (slug từ tiêu đề, bỏ dấu tiếng Việt kể cả `đ`, trùng thì `-2`, tạo một lần, không đổi) và thêm vào `index.json`. `file` trong index là đường dẫn tương đối trong `library/music/` (cho thư mục con, dùng `/`; từ chối tuyệt đối, ổ đĩa, `..`, `\`, đuôi ngoài các đuôi âm thanh của mục 9). Bài thiếu `id` trong `index.json` được gán id từ tiêu đề theo thứ tự trong file rồi ghi lại một lần. Thư mục con chỉ dành cho file đặt tay rồi khai vào `index.json`.
@@ -587,7 +596,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
 - [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
 - [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
-- [ ] Lint nội dung + trang chỉnh danh sách từ
+- [x] Lint nội dung + trang chỉnh danh sách từ
 - [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
 - [ ] `publish.txt` + nút sao chép
 - [ ] `thumbnail.py` (mục 4e)
