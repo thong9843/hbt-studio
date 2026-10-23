@@ -175,6 +175,7 @@ describe('Compose page', () => {
       aligner: 'silence',
       music_start: 12,
       music_start_source: 'auto',
+      music_matches_current: true,
       size: 1,
       srt: null,
       publish: null,
@@ -224,6 +225,13 @@ describe('Compose page', () => {
     it('explains that nothing is known before the first render', async () => {
       openAudio([]);
       expect(await screen.findByText(/Chưa có lần dựng nào/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
+    });
+
+    it('hides the stale second and says the music changed', async () => {
+      openAudio([render({ music_matches_current: false })]);
+      expect(await screen.findByText(/Nhạc đã đổi sau lần dựng gần nhất/)).toBeInTheDocument();
+      expect(screen.queryByText(/app chọn giây/)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
     });
 

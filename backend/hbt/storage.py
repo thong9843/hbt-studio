@@ -31,6 +31,7 @@ from hbt.models import (
     check_slug,
     is_valid_slug,
 )
+from hbt.pipeline.cache import sha256_file
 from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 
 log = logging.getLogger(__name__)
@@ -301,6 +302,7 @@ class Storage:
         out: list[dict] = []
         if not renders.is_dir():
             return out
+        current_music = self._music_sha256(slug)
         for d in renders.iterdir():
             video = d / "video.mp4"
             if not video.is_file():
@@ -322,6 +324,9 @@ class Storage:
                 "aligner": meta.get("aligner"),
                 "music_start": meta.get("music_start"),
                 "music_start_source": meta.get("music_start_source"),
+                # nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này không
+                "music_matches_current": current_music is not None
+                and meta.get("music_sha256") == current_music,
                 "created_at": meta.get("created_at") or _now_iso(video.stat().st_mtime),
                 "size": video.stat().st_size,
                 "video": self.rel(video),
@@ -347,6 +352,12 @@ class Storage:
         return rel, project
 
     # ---------------------------------------------------------------- danh sách
+    def _music_sha256(self, slug: str) -> str | None:
+        """SHA-256 của file nhạc hiện tại trong project; None nếu không có nhạc."""
+        music = self.load(slug).music
+        path = self.project_dir(slug) / music.file if music and music.file else None
+        return sha256_file(path) if path is not None and path.is_file() else None
+
     def last_render(self, slug: str) -> dict | None:
         best = None
         renders = self.project_dir(slug) / "renders"

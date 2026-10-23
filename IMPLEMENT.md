@@ -312,7 +312,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 ### 6.1 Tự chọn đoạn nhạc (`music.start = null`)
 Tính độ lớn theo cửa sổ 1 s; bỏ 2 s đầu; chọn thời điểm đầu tiên có độ lớn ≥ (trung vị − 3 dB) để bỏ phần dạo đầu quá nhỏ; nếu đoạn còn lại ngắn hơn video thì lùi điểm bắt đầu. Ghi điểm đã chọn vào log để người dùng chỉnh tay.
 
-**Quyết định P3 (chủ dự án chốt 23/10/2026):** mỗi lần dựng (xem nhanh và bản đẹp) ghi vào `renders/<job>/meta.json` hai khoá `music_start` (giây thật đã dùng, `null` nếu không có nhạc) và `music_start_source` (`"manual"` khi `music.start` đặt tay, `"auto"` khi app tự chọn). `GET /projects/{slug}/renders` trả cả hai khoá; không thêm route, không thêm trường vào `project.json`. Khi `music.start + độ dài phần có lời` vượt độ dài nhạc, log ghi CẢNH BÁO (không chặn). Thư viện nhạc không có điểm bắt đầu riêng.
+**Quyết định P3 (chủ dự án chốt 23/10/2026):** mỗi lần dựng (xem nhanh và bản đẹp) ghi vào `renders/<job>/meta.json` hai khoá `music_start` (giây thật đã dùng, `null` nếu không có nhạc) và `music_start_source` (`"manual"` khi `music.start` đặt tay, `"auto"` khi app tự chọn). `GET /projects/{slug}/renders` trả cả hai khoá; không thêm route, không thêm trường vào `project.json`. Khi `music.start + độ dài phần có lời` vượt độ dài nhạc, log ghi CẢNH BÁO (không chặn). `meta.json` còn có `music_sha256` (SHA-256 file nhạc đã dùng, `null` khi không nhạc); `GET /renders` thêm `music_matches_current` (hash file nhạc hiện tại == `music_sha256`). Tab Âm thanh chỉ hiện "app chọn giây X" và nút **Dùng giá trị này** khi cờ này là `true`; `false` thì hiện ghi chú nhạc đã đổi. Thư viện nhạc không có điểm bắt đầu riêng.
 
 ### 6.2 Thư viện `library/music/index.json`
 ```json

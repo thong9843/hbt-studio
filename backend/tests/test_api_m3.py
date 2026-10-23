@@ -191,6 +191,45 @@ def test_renders_history_lists_newest_first(client):  # noqa: F811
     assert client.get("/api/projects/khong-co/renders").status_code == 404
 
 
+def test_renders_flag_whether_music_is_still_the_one_used(client):  # noqa: F811
+    import hashlib
+
+    slug = client.post("/api/projects", json={"title": "Nhạc đổi"}).json()["slug"]
+    store = client.app.state.hbt.storage
+    folder = store.project_dir(slug)
+    (folder / "music.wav").write_bytes(b"nhac-cu")
+    project = store.load(slug)
+    project.music = Music(file="music.wav")
+    store.save(slug, project)
+    for job, sha in (
+        ("a1", hashlib.sha256(b"nhac-cu").hexdigest()),
+        ("b2", hashlib.sha256(b"nhac-khac").hexdigest()),
+        ("c3", None),
+    ):
+        d = folder / "renders" / job
+        d.mkdir(parents=True)
+        (d / "video.mp4").write_bytes(b"x")
+        meta = {"created_at": f"2026-10-0{ord(job[0]) - 96}T10:00:00+00:00", "music_sha256": sha}
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    flags = {
+        i["job_id"]: i["music_matches_current"]
+        for i in client.get(f"/api/projects/{slug}/renders").json()
+    }
+    assert flags == {"a1": True, "b2": False, "c3": False}
+    (folder / "music.wav").write_bytes(b"nhac-khac")  # đổi nhạc → cờ đổi theo
+    flags = {
+        i["job_id"]: i["music_matches_current"]
+        for i in client.get(f"/api/projects/{slug}/renders").json()
+    }
+    assert flags == {"a1": False, "b2": True, "c3": False}
+    project = store.load(slug)
+    project.music = None
+    store.save(slug, project)
+    assert not any(
+        i["music_matches_current"] for i in client.get(f"/api/projects/{slug}/renders").json()
+    )
+
+
 def test_app_settings_roundtrip_and_defaults_for_new_projects(client):  # noqa: F811
     first = client.get("/api/settings/app").json()
     assert first["default_fps"] == 50 and first["whisper_model"] == "auto"

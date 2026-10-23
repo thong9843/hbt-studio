@@ -97,6 +97,8 @@ export interface RenderRecord extends RenderSummary {
   aligner: string | null;
   music_start: number | null;
   music_start_source: 'manual' | 'auto' | null;
+  /** Nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này. */
+  music_matches_current: boolean;
   size: number;
   srt: string | null;
   publish: string | null;

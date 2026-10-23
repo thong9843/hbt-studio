@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 _file_digests: dict[tuple[str, int, int], str] = {}
+_sha256s: dict[tuple[str, int, int], str] = {}
 
 
 MEMO_MIN_SIZE = 16 << 20  # chỉ nhớ hash của file lớn
@@ -21,6 +22,22 @@ def _sha1_of(p: Path) -> str:
     with p.open("rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
+    return h.hexdigest()
+
+
+def sha256_file(path: str | Path) -> str:
+    """SHA-256 nội dung file; file lớn được nhớ theo (đường dẫn, kích thước, thời điểm sửa)."""
+    p = Path(path)
+    st = p.stat()
+    memo = (str(p.resolve()), st.st_size, st.st_mtime_ns)
+    if st.st_size >= MEMO_MIN_SIZE and memo in _sha256s:
+        return _sha256s[memo]
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    if st.st_size >= MEMO_MIN_SIZE:
+        _sha256s[memo] = h.hexdigest()
     return h.hexdigest()
 
 

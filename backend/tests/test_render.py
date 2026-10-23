@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import numpy as np
@@ -278,6 +279,7 @@ def test_manual_music_start_is_used_and_recorded(tmp_path):
     res = render_project(pdir, opts)
     meta = read_meta(res)
     assert meta["music_start"] == 3.0 and meta["music_start_source"] == "manual"
+    assert meta["music_sha256"] == hashlib.sha256((pdir / "music.wav").read_bytes()).hexdigest()
     assert "Nhạc bắt đầu từ 3.0 s (đặt tay)" in res.log.read_text(encoding="utf-8")
     assert not res.warnings
 
@@ -297,6 +299,7 @@ def test_no_music_records_no_music_start(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     meta = read_meta(render_project(pdir, opts))
     assert meta["music_start"] is None and meta["music_start_source"] is None
+    assert meta["music_sha256"] is None
 
 
 @needs_ffmpeg

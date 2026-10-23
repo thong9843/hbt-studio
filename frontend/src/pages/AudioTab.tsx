@@ -231,10 +231,10 @@ function MusicSection() {
   });
   // Lần dựng gần nhất (mới nhất đứng đầu) cho biết giây app đã tự chọn.
   const latest = renders.data?.[0];
-  const autoStart =
-    latest?.music_start_source === 'auto' && latest.music_start !== null
-      ? latest.music_start
-      : null;
+  const lastWasAuto = latest?.music_start_source === 'auto' && latest.music_start !== null;
+  // Chỉ tin giây đó khi nhạc hiện tại vẫn là nhạc đã dùng cho lần dựng ấy.
+  const musicChanged = lastWasAuto && !latest.music_matches_current;
+  const autoStart = lastWasAuto && latest.music_matches_current ? latest.music_start : null;
   const start = music?.start ?? autoStart ?? 0;
 
   const attach = useMutation({
@@ -291,7 +291,9 @@ function MusicSection() {
                   </p>
                 ) : (
                   renders.isSuccess && (
-                    <p className="mt-1 text-small text-text-muted">{A.music.noRenderYet}</p>
+                    <p className="mt-1 text-small text-text-muted">
+                      {musicChanged ? A.music.musicChanged : A.music.noRenderYet}
+                    </p>
                   )
                 ))}
             </div>

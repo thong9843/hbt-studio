@@ -731,6 +731,7 @@ def _render_project(
         "aligner": aligner,
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
+        "music_sha256": cache.sha256_file(music_src) if music_src is not None else None,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
