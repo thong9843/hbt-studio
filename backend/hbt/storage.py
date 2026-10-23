@@ -320,6 +320,8 @@ class Storage:
                 "duration": meta.get("duration"),
                 "lufs": meta.get("lufs"),
                 "aligner": meta.get("aligner"),
+                "music_start": meta.get("music_start"),
+                "music_start_source": meta.get("music_start_source"),
                 "created_at": meta.get("created_at") or _now_iso(video.stat().st_mtime),
                 "size": video.stat().st_size,
                 "video": self.rel(video),

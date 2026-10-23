@@ -627,13 +627,21 @@ def _render_project(
     # ---- 7. Âm thanh (70–75)
     rep.at(70, "Âm thanh")
     music_start = 0.0
+    music_start_source = None  # "manual" | "auto"; ghi vào meta.json cho tab Âm thanh
     if music_src is not None:
         if project.music.start is not None:
-            music_start = project.music.start
+            music_start, music_start_source = project.music.start, "manual"
             rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s (đặt tay)")
         else:
             music_start = audio.pick_music_start(music_src, total)
+            music_start_source = "auto"
             rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s (tự chọn; chỉnh music.start nếu muốn)")
+        music_len = media_duration(music_src)
+        if music_start + total > music_len:
+            warn(
+                f"Nhạc ngắn hơn video: từ giây {music_start:.1f} chỉ còn "
+                f"{max(music_len - music_start, 0.0):.1f} s, video cần {total:.1f} s"
+            )
     sfx = []
     if project.settings.sfx_on_punch and any(s.punch for s in project.scenes):
         whoosh = build / "whoosh.wav"
@@ -721,6 +729,8 @@ def _render_project(
         "duration": round(duration, 3),
         "lufs": round(lufs, 2),
         "aligner": aligner,
+        "music_start": round(music_start, 3) if music_src is not None else None,
+        "music_start_source": music_start_source,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

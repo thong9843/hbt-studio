@@ -258,6 +258,56 @@ def test_voice_trim_end_beyond_the_file_is_an_error(tmp_path):
         render_project(pdir, opts)
 
 
+def add_music(pdir, parts, start=None):
+    """Gắn nhạc giả `music.wav` (parts như write_wav) vào project.json."""
+    write_wav(pdir / "music.wav", parts)
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["music"] = {"file": "music.wav", "start": start, "credit": "Bài thử"}
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def read_meta(res):
+    return json.loads((res.job_dir / "meta.json").read_text(encoding="utf-8"))
+
+
+@needs_ffmpeg
+def test_manual_music_start_is_used_and_recorded(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)], start=3.0)
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert meta["music_start"] == 3.0 and meta["music_start_source"] == "manual"
+    assert "Nhạc bắt đầu từ 3.0 s (đặt tay)" in res.log.read_text(encoding="utf-8")
+    assert not res.warnings
+
+
+@needs_ffmpeg
+def test_auto_music_start_is_picked_and_recorded(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)])
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert meta["music_start"] == 5.0 and meta["music_start_source"] == "auto"
+    assert "Nhạc bắt đầu từ 5.0 s (tự chọn" in res.log.read_text(encoding="utf-8")
+
+
+@needs_ffmpeg
+def test_no_music_records_no_music_start(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    meta = read_meta(render_project(pdir, opts))
+    assert meta["music_start"] is None and meta["music_start_source"] is None
+
+
+@needs_ffmpeg
+def test_warns_when_music_is_shorter_than_video_but_still_renders(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.4)], start=0.0)  # video dài khoảng 7 s
+    res = render_project(pdir, opts)
+    assert any(w.startswith("Nhạc ngắn hơn video") for w in res.warnings)
+    assert res.video.is_file()
+
+
 @needs_ffmpeg
 def test_second_render_reuses_cache(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
