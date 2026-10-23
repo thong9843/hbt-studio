@@ -5,8 +5,9 @@ import json
 
 from PIL import Image
 
+from hbt.models import Music
 from tests.helpers import write_wav
-from tests.test_api import client, complete_project, upload_image  # noqa: F401
+from tests.test_api import client, complete_project, upload_image, upload_wav  # noqa: F401
 
 
 def test_reorder_scenes_preserves_image_names_and_content(client):  # noqa: F811
@@ -127,6 +128,30 @@ def test_library_audio_and_attach(client):  # noqa: F811
     assert bad.status_code == 422
     gone = client.post("/api/projects/khong-co/music/from-library", json={"id": music_id})
     assert gone.status_code == 404
+
+
+def set_old_music(client, slug):  # noqa: F811
+    store = client.app.state.hbt.storage
+    project = store.load(slug)
+    project.music = Music(file="old.wav", start=5.0, credit="Cũ")
+    store.save(slug, project)
+
+
+def test_from_library_resets_start_and_sets_credit(client):  # noqa: F811
+    music_id = seed_library(client)
+    slug = client.post("/api/projects", json={"title": "Đặt lại"}).json()["slug"]
+    set_old_music(client, slug)
+    music = client.post(f"/api/projects/{slug}/music/from-library", json={"id": music_id}).json()[
+        "music"
+    ]
+    assert music["start"] is None and music["credit"] == "Bài thử – Ai Đó (Pixabay)"
+
+
+def test_new_music_upload_resets_start_and_credit(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Tải mới"}).json()["slug"]
+    set_old_music(client, slug)
+    music = upload_wav(client, slug, "music", [("tone", 1.0)]).json()["project"]["music"]
+    assert music["file"] == "music.wav" and music["start"] is None and music["credit"] == ""
 
 
 def test_library_audio_rejects_bad_ids_and_old_file_route(client):  # noqa: F811

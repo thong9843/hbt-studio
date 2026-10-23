@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from hbt.models import Project, Voice, load_project
+from hbt.models import Music, Project, Voice, load_project
 
 
 def scene(**kw):
@@ -147,3 +147,14 @@ def test_voice_serializes_back_to_a_plain_string_when_untrimmed():
     assert Project.model_validate(project()).model_dump()["voice"] == "voice.mp3"
     trimmed = Project.model_validate(project(voice={"file": "v.wav", "trim_end": 3.5}))
     assert trimmed.model_dump()["voice"] == {"file": "v.wav", "trim_end": 3.5}
+
+
+@pytest.mark.parametrize("start", [None, 0, 12.5])
+def test_music_start_accepts_null_and_non_negative(start):
+    assert Music(file="m.mp3", start=start).start == start
+
+
+@pytest.mark.parametrize("start", [-1, "abc"])
+def test_music_start_rejects_negative_and_non_numbers(start):
+    with pytest.raises(ValidationError):
+        Music(file="m.mp3", start=start)
