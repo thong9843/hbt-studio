@@ -314,7 +314,7 @@ Tính độ lớn theo cửa sổ 1 s; bỏ 2 s đầu; chọn thời điểm đ
 
 ### 6.2 Thư viện `library/music/index.json`
 ```json
-[{ "file": "funny/the-wacky-sprint.mp3", "title": "The Wacky Sprint", "artist": "nkbloom",
+[{ "id": "the-wacky-sprint", "file": "funny/the-wacky-sprint.mp3", "title": "The Wacky Sprint", "artist": "nkbloom",
    "source": "Pixabay", "url": "https://pixabay.com/…", "license": "Pixabay Content License",
    "moods": ["vui", "tinh nghịch"], "bpm": null }]
 ```
@@ -401,7 +401,9 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
 | GET | `/jobs/{id}/events` | SSE: `event: progress` `data: {progress, step, message}` |
 | POST | `/jobs/{id}/cancel` | huỷ (kill tiến trình ffmpeg con) |
-| GET | `/music` · POST `/music` | thư viện nhạc |
+| GET | `/music` · POST `/music` | thư viện nhạc (mỗi bài có `id`) |
+| GET | `/music/{id}/audio` | nghe thử bài trong thư viện (Range) |
+| POST | `/projects/{slug}/music/from-library` | `{id}` → chép bài vào project, đặt ghi công |
 | GET | `/settings/sensitive-words` · PUT | danh sách từ nhạy cảm |
 | GET | `/files/{path}` | phục vụ file trong workspace (chặn `..`) |
 
@@ -426,14 +428,14 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
 - **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
 - **Job:** một luồng dựng, job nằm trong bộ nhớ (giữ 200 job; mất khi khởi động lại server, file đã xuất vẫn còn). `GET /jobs/{id}` → `{id, project, status, progress, step, log_tail, output, error, needs_confirmation, …}`; `output` có URL `/api/files/...`. **SSE** `GET /jobs/{id}/events`: `event: progress` (`{progress, step, message}`) rồi `event: end` (`{status, error, output}`); người nối sau nhận lại từ đầu. **Huỷ**: job xếp hàng huỷ ngay và không bao giờ chạy; job đang chạy bị kill ffmpeg, đợi tối đa 5 s cho luồng dừng, không để lại video dở. Đuôi giọng cần cắt > 8 s: job `failed` với `needs_confirmation = true` (gửi lại với `allow_long_trim`).
-- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu `library/music/<slug-tiêu-đề>.<ext>` và thêm vào `index.json`.
+- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu phẳng `library/music/<slug-tiêu-đề>.<ext>`, tạo `id` (slug từ tiêu đề, bỏ dấu tiếng Việt kể cả `đ`, trùng thì `-2`, tạo một lần, không đổi) và thêm vào `index.json`. `file` trong index là đường dẫn tương đối trong `library/music/` (cho thư mục con, dùng `/`; từ chối tuyệt đối, ổ đĩa, `..`, `\`, đuôi ngoài các đuôi âm thanh của mục 9). Bài thiếu `id` trong `index.json` được gán id từ tiêu đề theo thứ tự trong file rồi ghi lại một lần. Thư mục con chỉ dành cho file đặt tay rồi khai vào `index.json`.
 - **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
 - **Slug project** (chủ dự án chốt 21/10/2026): chỉ `[a-z0-9-]` (không bắt đầu/kết thúc/đôi dấu gạch), tối đa 60 ký tự, và không trùng tên thiết bị dành riêng của Windows (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Mọi nơi dùng slug đều kiểm tra và trả **422** `Slug không hợp lệ: …` (đọc, sửa, xoá, nhân bản, tải file, xem trước, lint, dựng, và `/files/projects/<slug>/…`; slug trong thân `PUT` cũng vậy). Đường dẫn `/files` có `..`, đường dẫn tuyệt đối, ổ đĩa hoặc thư mục ẩn cũng 422; đường dẫn đúng dạng mà không có file thì 404. Tiêu đề trùng tên thiết bị Windows ("Con", "NUL"…) được thêm hậu tố `-video`; hậu tố chống trùng (`-2`, `-3`…) không làm slug vượt 60 ký tự.
 - **Thiếu FFmpeg** (chủ dự án chốt 21/10/2026): server không sập. `/health` báo `ffmpeg: false`, `missing: ["ffmpeg"]`. `POST /render` trả **503** kèm lời nhắn cài (`winget install Gyan.FFmpeg`, mở lại terminal, xem README.md) và **không tạo job**; cũng trả 503 nếu FFmpeg thiếu encoder/filter bắt buộc hoặc thiếu ffprobe. Tải giọng/nhạc và `POST /music` trả 503 (cần ffprobe để kiểm tra file). Project chưa đủ vẫn nhận 422 trước 503. Những việc không cần FFmpeg (CRUD, ảnh, xem trước, lint, `/files`, từ nhạy cảm) vẫn chạy.
 - Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`).
 
 **Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
-- `GET /music/{file}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `file` là tên file trong `GET /music`); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- `GET /music/{id}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `id` là `id` trong `GET /music`; sai định dạng → 422, không có → 404; M4 đổi từ tên file sang id, route cũ đã bỏ); `POST /projects/{slug}/music/from-library` `{id}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
 - `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
@@ -564,7 +566,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Font:** chỉ có ba bản (500/700/800) trong `backend/hbt/fonts/`; đổi sang `.woff2` bằng fontTools (cài trong `backend/.venv`). Độ đậm 400 dùng bản 500, 600 dùng bản 700.
 - **Lưu tự động:** giữ bản nháp trên máy, `PUT` sau 1 s; trước khi tải file, đổi thứ tự cảnh hoặc dựng thì lưu ngay. Ctrl+S lưu ngay, Alt+↑/↓ chuyển cảnh.
 - **Xoá cảnh:** API không có thao tác xoá cảnh. Giao diện đưa cảnh cần xoá xuống cuối bằng `POST /scenes/reorder` (máy chủ đổi tên ảnh) rồi `PUT` bỏ cảnh cuối; ảnh mồ côi của cảnh bị xoá vẫn nằm trong `images/` và bị ghi đè khi thêm cảnh mới.
-- **Nghe thử nhạc thư viện:** `GET /music/{file}/audio` (`file` là tên file, bảng `GET /music` chưa có trường `id`).
+- **Nghe thử nhạc thư viện:** `GET /music/{id}/audio` (M3 dùng tên file; M4 đổi sang `id`, bảng `GET /music` có trường `id`).
 - **Bản đẹp:** chọn 30/50/60 fps, mặc định theo fps của project; nút "Xem nhanh" là nút đen duy nhất, "Xuất bản đẹp" là nút vàng duy nhất.
 - **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
 - **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
