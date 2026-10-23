@@ -30,6 +30,7 @@ OUTRO_VOICE_DELAY = 0.5
 OUTRO_TINGS = ((0.15, 0.22), (1.15, 0.18))  # (giây, âm lượng)
 OUTRO_FADE_OUT = 0.3
 OUTRO_CROSSFADE = 0.5
+PREVIEW_FADE = 0.3  # fade ra ở cuối bản Xem nhanh 10 s đầu
 OUTRO_LIMITER = "alimiter=limit=0.89:level=0"  # level=0: không tự nâng mức lên −13 LUFS
 
 # Whoosh (6.3)
@@ -265,6 +266,15 @@ def build_outro_audio(
     af = f"volume={gain:.3f}dB,{OUTRO_LIMITER},afade=t=out:st={fade_start}:d={OUTRO_FADE_OUT}"
     run_ffmpeg(["-i", raw, "-af", af, "-c:a", "pcm_s16le", out])
     return measured
+
+
+def trim_with_fade(src: str | Path, seconds: float, out: str | Path, fade: float = PREVIEW_FADE):
+    """Giữ `seconds` giây đầu của `src`, fade ra `fade` giây ở cuối (bản Xem nhanh 10 s đầu)."""
+    run_ffmpeg([
+        "-i", src, "-af",
+        f"atrim=0:{seconds:.3f},afade=t=out:st={max(seconds - fade, 0):.3f}:d={fade}",
+        "-c:a", "pcm_s16le", out,
+    ])  # fmt: skip
 
 
 def join_audio(body: str | Path, outro: str | Path, out: str | Path) -> float:

@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--fps", type=int, choices=ALLOWED_FPS, help="ghi đè settings.fps (mặc định theo project)"
     )
+    r.add_argument(
+        "--seconds",
+        type=float,
+        metavar="N",
+        help="với --preview: chỉ dựng N giây đầu (căn chữ và điểm nhạc vẫn tính trên cả video)",
+    )
     r.add_argument("--no-outro", action="store_true", help="không thêm outro")
     r.add_argument(
         "--allow-long-trim",
@@ -71,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         fps=args.fps,
         outro=False if args.no_outro else None,
         allow_long_trim=args.allow_long_trim,
+        preview_seconds=args.seconds,
     )
     try:
         options.sensitive_words = current_sensitive_words(args.project_dir)
@@ -88,12 +95,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nLỖI: {e}", file=sys.stderr)
         return 1
 
+    loudness = f"{result.lufs:.1f} LUFS" if result.lufs is not None else "(không đo)"
     print(
         f"\nXong trong {result.seconds:.0f} giây\n"
         f"  video   : {result.video}\n"
         f"  kích cỡ : {result.width}x{result.height} @ {result.fps} fps, "
         f"{result.duration:.2f} giây\n"
-        f"  độ lớn  : {result.lufs:.1f} LUFS\n"
+        f"  độ lớn  : {loudness}\n"
         f"  aligner : {result.aligner}\n"
         f"  phụ đề  : {result.srt or '(tắt)'}\n"
         f"  đăng bài: {result.publish}\n"

@@ -178,3 +178,25 @@ def test_cli_still_renders_with_warn_and_info_words(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0 and "CẢNH BÁO" in out
     assert len(list(pdir.rglob("video.mp4"))) == 1
+
+
+def test_seconds_flag_is_passed_as_preview_seconds(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_render(project_dir, options, progress):
+        seen["seconds"] = options.preview_seconds
+        return fake_result(tmp_path)
+
+    monkeypatch.setattr(cli, "render_project", fake_render)
+    folder = project_folder(tmp_path)
+    assert cli.build_parser().parse_args(["render", "p"]).seconds is None
+    assert cli.main(["render", str(folder), "--preview", "--seconds", "10"]) == 0
+    assert seen["seconds"] == 10.0
+
+
+def test_summary_without_lufs_for_the_head_preview(monkeypatch, tmp_path, capsys):
+    result = fake_result(tmp_path)
+    result.lufs = None
+    monkeypatch.setattr(cli, "render_project", lambda *a, **k: result)
+    assert cli.main(["render", str(project_folder(tmp_path))]) == 0
+    assert "(không đo)" in capsys.readouterr().out

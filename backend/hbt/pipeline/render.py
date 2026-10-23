@@ -8,12 +8,13 @@ ghép bằng numpy (không dùng `xfade`), clip cảnh `crf 12`, bản cuối `c
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
 import tempfile
 import time
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ PIPELINE_VERSION = cache.code_digest(
     _text, _align, _scene_align, audio, _captions, _visual, cache, sys.modules[__name__]
 )
 MAX_PARALLEL_CLIPS = 3
+MAX_PREVIEW_SECONDS = 60  # giới hạn trên của `preview_seconds`
 
 ProgressFn = Callable[[float, str, str], None]
 
@@ -88,6 +90,9 @@ class RenderOptions:
     fps: int | None = None  # None → settings.fps của project
     outro: bool | None = None  # None → settings.outro của project
     allow_long_trim: bool = False  # cho phép cắt đuôi giọng > 8 s (đã được chủ dự án xác nhận)
+    # Xem nhanh chỉ dựng chừng này giây đầu (căn chữ, điểm nhạc vẫn tính trên cả video).
+    # None = cả video.
+    preview_seconds: float | None = None
     sensitive_words: SensitiveWords | None = None  # None → không kiểm từ nhạy cảm
     library_dir: Path | None = None
     brand_dir: Path | None = None
@@ -106,10 +111,11 @@ class RenderResult:
     width: int
     height: int
     duration: float
-    lufs: float
+    lufs: float | None  # None ở bản Xem nhanh 10 s đầu (không đo)
     aligner: str
     seconds: float
     warnings: list[str] = field(default_factory=list)
+    preview_seconds: float | None = None  # có giá trị khi chỉ dựng đoạn đầu
 
 
 # ---------------------------------------------------------------- toán học chuyển động
@@ -158,12 +164,22 @@ def clip_durations(offsets: list[float], total: float) -> list[float]:
 
 # ---------------------------------------------------------------- clip từng cảnh
 def scene_clip(
-    base_png: Path, card_png: Path, dur: float, index1: int, q: Quality, punch: bool, out: Path
+    base_png: Path,
+    card_png: Path,
+    dur: float,
+    index1: int,
+    q: Quality,
+    punch: bool,
+    out: Path,
+    keep_frames: int | None = None,
 ) -> int:
     """Một cảnh: ảnh nền phóng/thu chậm (zoompan) + thẻ chữ hiện dần. Trả về số khung.
 
     Luồng thẻ chữ được ép chạy cùng fps (`-framerate`); mặc định 25 fps làm `overlay=shortest=1`
-    cắt mất khung cuối (clip 1,0 s ở 50 fps chỉ ra 49 khung)."""
+    cắt mất khung cuối (clip 1,0 s ở 50 fps chỉ ra 49 khung).
+
+    `keep_frames`: chỉ giữ chừng này khung đầu (bản Xem nhanh 10 s); chuyển động vẫn tính trên
+    độ dài đầy đủ của cảnh nên các khung đầu giống hệt bản dựng cả video."""
     n = int(round(dur * q.fps))
     z, card_start = zoom_expr(index1, n, q.fps, punch)
     pan = (
@@ -180,7 +196,8 @@ def scene_clip(
     tmp = out.with_name(out.stem + ".tmp.mp4")
     run_ffmpeg([
         "-i", base_png, "-framerate", str(q.fps), "-loop", "1", "-t", f"{dur:.3f}", "-i", card_png,
-        "-filter_complex", fc, "-map", "[out]", "-frames:v", str(n), "-r", str(q.fps),
+        "-filter_complex", fc, "-map", "[out]", "-frames:v", str(keep_frames or n),
+        "-r", str(q.fps),
         "-c:v", "libx264", "-preset", q.clip_preset, "-crf", str(q.clip_crf), tmp,
     ])  # fmt: skip
     cache.publish_atomic(tmp, out)
@@ -448,6 +465,11 @@ def _render_project(
     use_outro = project.settings.outro if opts.outro is None else opts.outro
     if opts.preview and opts.fps:
         rep.say("Chế độ Xem nhanh luôn dùng 30 fps, bỏ qua --fps")
+    if opts.preview_seconds is not None:
+        if not opts.preview:
+            raise RenderError("preview_seconds chỉ dùng với chế độ Xem nhanh")
+        if not 0 < opts.preview_seconds <= MAX_PREVIEW_SECONDS:
+            raise RenderError(f"preview_seconds phải trong (0, {MAX_PREVIEW_SECONDS}] giây")
 
     problems = project.render_problems()
     if problems:
@@ -566,9 +588,19 @@ def _render_project(
     if offsets[0] <= 0 or any(b <= a for a, b in zip(offsets, offsets[1:], strict=False)):
         raise RenderError("Mốc chuyển cảnh không hợp lệ: có cảnh quá ngắn so với lời đọc")
     durs = clip_durations(offsets, total)
+    # Xem nhanh 10 s đầu: video ngắn hơn giới hạn thì dựng cả video như thường (có outro nếu bật)
+    partial = (
+        opts.preview_seconds if opts.preview_seconds and opts.preview_seconds < total else None
+    )
+    if partial:
+        use_outro = False
     if min(durs) <= X:
         raise RenderError(f"Cảnh {durs.index(min(durs)) + 1} quá ngắn ({min(durs):.2f} giây)")
     rep.say("Mốc bắt đầu trượt: " + ", ".join(f"{o:.2f}" for o in offsets))
+    starts = [0.0, *offsets]
+    n_build = bisect_left(starts, partial) if partial else n_scenes  # cảnh bắt đầu trước giây T
+    if partial:
+        rep.say(f"Xem nhanh {partial:g} s đầu: dựng {n_build}/{n_scenes} cảnh, không outro")
 
     # ---- 5. Lớp hình (20–25)
     rep.at(20, "Lớp hình")
@@ -597,19 +629,25 @@ def _render_project(
     rep.at(25, "Clip từng cảnh")
     clips: list[Path] = []
     todo: list[tuple[int, Path]] = []
-    for si, scene in enumerate(project.scenes):
+    keep: dict[int, int | None] = {}
+    for si, scene in enumerate(project.scenes[:n_build]):
         i = si + 1
+        keep[si] = None
+        if partial and si == n_build - 1:  # cảnh cuối của đoạn: chỉ giữ các khung trước giây T
+            frames = int(math.ceil((partial - starts[si]) * q.fps)) + 2
+            keep[si] = frames if frames < int(round(durs[si] * q.fps)) else None
         key = cache.digest(
             "clip", build / "layers" / f"b{i}.png", build / "layers" / f"t{i}.png",
             round(durs[si], 3), i % 2, scene.punch, q, PIPELINE_VERSION,
+            *([keep[si]] if keep[si] else []),
         )  # fmt: skip
         clip = build / "clips" / f"c{i}-{key[:10]}.mp4"
         clips.append(clip)
         if clip.exists():
             continue
         todo.append((si, clip))
-    if len(todo) < n_scenes:
-        rep.say(f"Dùng lại {n_scenes - len(todo)} clip đã có")
+    if len(todo) < n_build:
+        rep.say(f"Dùng lại {n_build - len(todo)} clip đã có")
     workers = max(1, min(MAX_PARALLEL_CLIPS, (os.cpu_count() or 2) // 2))
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -618,7 +656,7 @@ def _render_project(
                 scene_clip,
                 build / "layers" / f"b{si + 1}.png",
                 build / "layers" / f"t{si + 1}.png",
-                durs[si], si + 1, q, project.scenes[si].punch, clip,
+                durs[si], si + 1, q, project.scenes[si].punch, clip, keep[si],
             ): si
             for si, clip in todo
         }  # fmt: skip
@@ -663,7 +701,11 @@ def _render_project(
         audio.mix_audio(voice_final, music_src, music_start, total, mix, build, sfx)
         cache.mark(mix, key)
     final_audio, out_total, outro_clip = mix, total, None
-    if use_outro:
+    if partial:  # giữ T giây đầu của bản trộn cả video, fade ra ngắn
+        out_total = partial
+        final_audio = build / "preview_audio.wav"
+        audio.trim_with_fade(mix, partial, final_audio)
+    elif use_outro:
         outro_clip = brand_dir / "outro" / OUTRO_FILE
         if not outro_clip.is_file():
             raise RenderError(f"Thiếu clip outro: {outro_clip}")
@@ -692,7 +734,7 @@ def _render_project(
     concat = build / "captions.ffconcat"
     write_ffconcat(timeline, concat)
     srt = None
-    if phrases:
+    if phrases and not partial:  # bản 10 s đầu không kèm phụ đề .srt
         srt = job_dir / "captions.srt"
         write_srt(phrases, srt)
     rep.say(f"{len(phrases)} cụm phụ đề, {len(timeline)} trạng thái")
@@ -719,9 +761,11 @@ def _render_project(
         raise RenderError("Video đầu ra không có tiếng")
     if abs(duration - out_total) > 0.25:
         raise RenderError(f"Độ dài đầu ra {duration:.2f} s lệch dự kiến {out_total:.2f} s")
-    lufs = measure_lufs(video)
-    if not -15.0 <= lufs <= -13.0:
-        warn(f"Độ lớn tổng {lufs:.1f} LUFS nằm ngoài khoảng −15…−13")
+    lufs = None  # bản 10 s đầu không đo độ lớn (đoạn cắt không đại diện cho cả video)
+    if not partial:
+        lufs = measure_lufs(video)
+        if not -15.0 <= lufs <= -13.0:
+            warn(f"Độ lớn tổng {lufs:.1f} LUFS nằm ngoài khoảng −15…−13")
     publish = job_dir / "publish.txt"
     publish.write_text(build_publish_text(project), encoding="utf-8")
     meta = {
@@ -731,23 +775,26 @@ def _render_project(
         "width": q.width,
         "height": q.height,
         "duration": round(duration, 3),
-        "lufs": round(lufs, 2),
+        "lufs": round(lufs, 2) if lufs is not None else None,
         "aligner": aligner,
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
+        "preview_seconds": partial,
         "music_sha256": cache.sha256_file(music_src) if music_src is not None else None,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     (job_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     rep.at(100, "Xong")
     rep.say(
-        f"Xong: {video} — {duration:.2f} s, {q.fps} fps, {lufs:.1f} LUFS, "
+        f"Xong: {video} — {duration:.2f} s, {q.fps} fps, "
+        f"{f'{lufs:.1f} LUFS, ' if lufs is not None else ''}"
         f"{video.stat().st_size / 1e6:.1f} MB, aligner {aligner}"
     )
     return RenderResult(
         job_dir=job_dir, video=video, srt=srt, publish=publish, log=job_dir / "log.txt",
         fps=q.fps, width=q.width, height=q.height, duration=duration, lufs=lufs,
         aligner=aligner, seconds=time.time() - t_start, warnings=warnings,
+        preview_seconds=partial,
     )  # fmt: skip
 
 
