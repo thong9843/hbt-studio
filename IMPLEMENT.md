@@ -312,6 +312,8 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 ### 6.1 Tự chọn đoạn nhạc (`music.start = null`)
 Tính độ lớn theo cửa sổ 1 s; bỏ 2 s đầu; chọn thời điểm đầu tiên có độ lớn ≥ (trung vị − 3 dB) để bỏ phần dạo đầu quá nhỏ; nếu đoạn còn lại ngắn hơn video thì lùi điểm bắt đầu. Ghi điểm đã chọn vào log để người dùng chỉnh tay.
 
+**Quyết định P3 (chủ dự án chốt 23/10/2026):** mỗi lần dựng (xem nhanh và bản đẹp) ghi vào `renders/<job>/meta.json` hai khoá `music_start` (giây thật đã dùng, `null` nếu không có nhạc) và `music_start_source` (`"manual"` khi `music.start` đặt tay, `"auto"` khi app tự chọn). `GET /projects/{slug}/renders` trả cả hai khoá; không thêm route, không thêm trường vào `project.json`. Khi `music.start + độ dài phần có lời` vượt độ dài nhạc, log ghi CẢNH BÁO (không chặn). Thư viện nhạc không có điểm bắt đầu riêng.
+
 ### 6.2 Thư viện `library/music/index.json`
 ```json
 [{ "id": "the-wacky-sprint", "file": "funny/the-wacky-sprint.mp3", "title": "The Wacky Sprint", "artist": "nkbloom",
@@ -474,7 +476,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 |---|---|
 | **Dự án** (`/`) | Lưới thẻ project (ảnh cảnh 1, tiêu đề, ngày, trạng thái xuất). Nút **Tạo video mới**, **Nhân bản**. Thanh trạng thái môi trường từ `/health` (FFmpeg ✓, Whisper ✓, GPU ✓) |
 | **Soạn video** (`/p/:slug`) | Cột trái: danh sách cảnh, kéo để đổi thứ tự. Giữa: trình sửa cảnh đang chọn — ô thả ảnh, các dòng thẻ chữ (chữ, cỡ, màu), vị trí thẻ, nhãn cố định, lời đọc (có đếm số chữ và gợi ý cú pháp `|`, `{}`), công tắc **Cú lật**. Phải: **ảnh xem trước** cảnh (gọi `preview.png`, cập nhật sau 600 ms ngừng gõ) |
-| **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn |
+| **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn (P3, mục 6.1: nếu `music.start` trống và lần dựng gần nhất có `music_start_source = "auto"` thì hiện "Lần dựng gần nhất app chọn giây X", nghe thử phát từ X và có nút **Dùng giá trị này** điền X vào `music.start`; chưa có lần dựng nào thì phát từ giây 0 kèm ghi chú bấm Xem nhanh) |
 | **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất |
 | **Cài đặt** | Danh sách từ nhạy cảm, model Whisper, fps mặc định, màu chủ đề mặc định |
 
