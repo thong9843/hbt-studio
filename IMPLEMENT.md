@@ -272,7 +272,14 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
   - Viền tối bằng 11% cỡ chữ, cộng bóng đổ lệch (10, 12).
 - **Vùng an toàn:** khối tiêu đề nằm trong y=600..1320 (vừa khung cắt 3:2 của YouTube Shorts). Nhãn series (cao 84 px, y=330) và logo HBT (rộng 300 px, y=1385) nằm trong y=240..1680 (vừa khung cắt 3:4 của lưới hồ sơ TikTok).
 - **Quy tắc chung:** chữ luôn vẽ bằng Pillow. Áp dụng lint từ nhạy cảm (mục 7) cho các dòng bìa.
-- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` thêm khối `[Thumbnail]` gồm 3 dòng (mục 8): `Dòng chữ bìa: <các dòng cách nhau bằng dấu />`, `TikTok: cover_9x16.jpg`, `YouTube Shorts: youtube_3x2.jpg`.
+- **Quyết định M4 Đợt 3** (chủ dự án chốt 23/10/2026):
+  - **Font:** `backend/hbt/fonts/BricolageGrotesque-Variable.ttf` (bản variable từ kho `google/fonts`, trục `opsz` 12–96, `wght` 200–800, `wdth` 75–100), giấy phép `OFL-BricolageGrotesque.txt`; giấy phép Be Vietnam Pro đổi tên `OFL-BeVietnamPro.txt`. Pillow đặt `set_variation_by_axes([96, 800, 78])` (thứ tự trục của file là opsz, wght, wdth). Thiếu file thì dự phòng Be Vietnam Pro ExtraBold. Cố định, không chỉnh trong Cài đặt.
+  - **Chữ:** mỗi dòng chuẩn hoá NFC rồi `.upper()` khi vẽ ("đ"→"Đ", "ư"→"Ư", "ỷ"→"Ỷ"); `project.json` giữ nguyên chữ người dùng nhập. Nhãn series lấy `thumbnail.series`, trống thì `project.series`, trống cả hai thì bỏ nhãn.
+  - **Khi nào vẽ:** cùng lúc với video ở bản đẹp và Xem nhanh cả video; **bỏ qua** ở Xem nhanh 10 s đầu. Project không có khối `thumbnail` thì không vẽ (và `publish.txt` không có khối `[Thumbnail]`).
+  - **Lỗi vẽ bìa** (thiếu logo, ảnh nền hỏng…) chỉ là cảnh báo: log `Không vẽ được ảnh bìa: …`, `result.warnings`, video vẫn xuất; `meta.json` để `cover_9x16` và `youtube_3x2` là `null`; tab Xuất video hiện cảnh báo ở khối "Cảnh báo khi dựng".
+  - **`meta.json`** thêm `cover_9x16` và `youtube_3x2` (tên file hoặc `null`); `GET /renders` và `output` của job trả `cover` và `youtube_cover` (URL hoặc `null`).
+  - JPG chất lượng 93 (`subsampling=0`); nếu quá 5 MB thì hạ dần chất lượng (tối thiểu 70).
+- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` có khối `[Thumbnail]` gồm 3 dòng (mục 8, đã làm từ M1; M4 chỉ thêm file ảnh thật): `Dòng chữ bìa: <các dòng cách nhau bằng dấu />`, `TikTok: cover_9x16.jpg`, `YouTube Shorts: youtube_3x2.jpg`.
 
 **Vùng an toàn TikTok:** nội dung quan trọng (thẻ, phụ đề) trong khoảng y = 100…1500, tránh mép phải 120 px.
 
@@ -401,7 +408,7 @@ Dòng chữ bìa: {thumbnail.lines cách nhau bằng dấu /}
 TikTok: cover_9x16.jpg
 YouTube Shorts: youtube_3x2.jpg
 ```
-Hiện trong UI với nút **Sao chép** từng khối.
+Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` chỉ có khi project có `thumbnail`; hai tên file trỏ tới `cover_9x16.jpg` và `youtube_3x2.jpg` trong cùng thư mục `renders/<job>/` (có thể vắng nếu vẽ bìa lỗi, xem 4e).
 
 ---
 
@@ -417,6 +424,8 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
 | GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
+| POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
+| POST | `/projects/{slug}/build/clean` | dọn `build/` → `{before_bytes, after_bytes, freed_bytes, kept, failed}` |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
 | GET | `/jobs/{id}/events` | SSE: `event: progress` `data: {progress, step, message}` |
@@ -456,6 +465,8 @@ Hiện trong UI với nút **Sao chép** từng khối.
 
 **Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
 - `GET /music/{id}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `id` là `id` trong `GET /music`; sai định dạng → 422, không có → 404; M4 đổi từ tên file sang id, route cũ đã bỏ); `POST /projects/{slug}/music/from-library` `{id}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- **`POST /projects/{slug}/thumbnail/preview.jpg`** (chủ dự án chốt 23/10/2026): dùng đúng bộ vẽ của video (`pipeline/thumbnail.py`), JPEG 1080×1920; giao diện tự cắt khung 3:4 (y=240..1680) và 3:2 (y=600..1320). 404 nếu không có project; 422 nếu chưa có khối `thumbnail` (cả bản nháp lẫn đã lưu), cảnh nền vượt số cảnh hoặc chưa có ảnh, hoặc không vẽ được (thiếu logo…); `lines` phải 2–3 dòng (sai thì 422).
+- **`POST /projects/{slug}/build/clean`** (chủ dự án chốt 23/10/2026): xoá mọi thứ trong `build/` **trừ `timing.json` và `timing.json.key`** (căn chữ là bước đắt nhất); không động `renders/`, ảnh, giọng, nhạc, `project.json`. Trả dung lượng trước/sau/giải phóng, danh sách file giữ lại và số mục không xoá được (`failed`). 404 nếu không có project; **409** khi project đang được dựng (không xoá gì). Không có lệnh CLI tương ứng.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
 - `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
@@ -495,7 +506,7 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | **Dự án** (`/`) | Lưới thẻ project (ảnh cảnh 1, tiêu đề, ngày, trạng thái xuất). Nút **Tạo video mới**, **Nhân bản**. Thanh trạng thái môi trường từ `/health` (FFmpeg ✓, Whisper ✓, GPU ✓) |
 | **Soạn video** (`/p/:slug`) | Cột trái: danh sách cảnh, kéo để đổi thứ tự. Giữa: trình sửa cảnh đang chọn — ô thả ảnh, các dòng thẻ chữ (chữ, cỡ, màu), vị trí thẻ, nhãn cố định, lời đọc (có đếm số chữ và gợi ý cú pháp `|`, `{}`), công tắc **Cú lật**. Phải: **ảnh xem trước** cảnh (gọi `preview.png`, cập nhật sau 600 ms ngừng gõ) |
 | **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn (P3, mục 6.1: nếu `music.start` trống và lần dựng gần nhất có `music_start_source = "auto"` thì hiện "Lần dựng gần nhất app chọn giây X", nghe thử phát từ X và có nút **Dùng giá trị này** điền X vào `music.start`; chưa có lần dựng nào thì phát từ giây 0 kèm ghi chú bấm Xem nhanh) |
-| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** (dựng 10 giây đầu), nút phụ **Xem nhanh cả video** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất (bản 10 s ghi "Xem nhanh 10 giây đầu"); khối kết quả hiện độ lớn "—" khi không đo |
+| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** (dựng 10 giây đầu), nút phụ **Xem nhanh cả video** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất (bản 10 s ghi "Xem nhanh 10 giây đầu"); khối kết quả hiện độ lớn "—" khi không đo; **Ảnh bìa** (nhập 2–3 dòng, chọn cảnh nền, chữ series, màu dòng cuối, xem trước hai khung 3:4 và 3:2 sau 600 ms ngừng gõ, nút tải `cover_9x16.jpg` và `youtube_3x2.jpg` từ lần xuất gần nhất có bìa, nút Bỏ ảnh bìa); nút **Dọn file tạm** (hỏi xác nhận, báo dung lượng đã giải phóng, khoá khi đang dựng; mục 9) |
 | **Cài đặt** | Danh sách từ nhạy cảm, model Whisper, fps mặc định, màu chủ đề mặc định |
 
 Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
@@ -607,8 +618,8 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
 - [x] Lint nội dung + trang chỉnh danh sách từ
 - [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
-- [ ] `publish.txt` + nút sao chép
-- [ ] `thumbnail.py` (mục 4e)
+- [x] `publish.txt` + nút sao chép (khối `[Thumbnail]` đủ 3 dòng)
+- [x] `thumbnail.py` (mục 4e): ảnh bìa, API xem trước, UI tab Xuất video; dọn `build/` bằng nút trong UI
 - **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
 
 **Kế hoạch M4 (chủ dự án chốt 23/10/2026):**
