@@ -95,6 +95,8 @@ export interface RenderRecord extends RenderSummary {
   height: number | null;
   lufs: number | null;
   aligner: string | null;
+  music_start: number | null;
+  music_start_source: 'manual' | 'auto' | null;
   size: number;
   srt: string | null;
   publish: string | null;

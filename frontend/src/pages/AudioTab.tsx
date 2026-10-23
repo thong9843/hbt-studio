@@ -224,7 +224,18 @@ function MusicSection() {
   const queryClient = useQueryClient();
   const library = useQuery({ queryKey: ['music'], queryFn: api.listMusic });
   const music = project.music;
-  const start = music?.start ?? 0;
+  const renders = useQuery({
+    queryKey: ['renders', project.slug],
+    queryFn: () => api.listRenders(project.slug),
+    enabled: Boolean(music?.file),
+  });
+  // Lần dựng gần nhất (mới nhất đứng đầu) cho biết giây app đã tự chọn.
+  const latest = renders.data?.[0];
+  const autoStart =
+    latest?.music_start_source === 'auto' && latest.music_start !== null
+      ? latest.music_start
+      : null;
+  const start = music?.start ?? autoStart ?? 0;
 
   const attach = useMutation({
     mutationFn: async (id: string) => {
@@ -266,6 +277,23 @@ function MusicSection() {
                 onChange={(e) => patchMusic({ start: numberOrNull(e.target.value) })}
               />
               <p className="mt-1 text-small text-text-muted">{A.music.startHelp}</p>
+              {music.start === null &&
+                (autoStart !== null ? (
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-small">
+                    <span>{A.music.autoStart(autoStart)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => patchMusic({ start: autoStart })}
+                    >
+                      {A.music.useAutoStart}
+                    </button>
+                  </p>
+                ) : (
+                  renders.isSuccess && (
+                    <p className="mt-1 text-small text-text-muted">{A.music.noRenderYet}</p>
+                  )
+                ))}
             </div>
             <div>
               <label className="label" htmlFor="music-credit">

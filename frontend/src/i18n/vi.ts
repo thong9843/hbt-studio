@@ -195,6 +195,10 @@ export const vi = {
       used: 'Đang dùng',
       start: 'Bắt đầu nhạc tại giây',
       startHelp: 'Để trống để app tự chọn đoạn nhạc.',
+      autoStart: (seconds: number) => `Lần dựng gần nhất app chọn giây ${seconds}.`,
+      useAutoStart: 'Dùng giá trị này',
+      noRenderYet:
+        'Chưa có lần dựng nào để biết app chọn giây nào. Nghe thử phát từ giây 0; bấm Xem nhanh ở tab Xuất video để app chọn đoạn.',
       credit: 'Ghi công',
       creditHelp: 'Dòng này được thêm vào publish.txt.',
       remove: 'Bỏ nhạc nền',
