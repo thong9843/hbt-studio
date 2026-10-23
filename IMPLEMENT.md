@@ -607,6 +607,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - (a) Thư viện nhạc có id: slug từ tiêu đề, bỏ dấu tiếng Việt, trùng thì `-2`, tạo một lần. `file` là đường dẫn tương đối trong `library/music/`, cho thư mục con; từ chối tuyệt đối, ổ đĩa, `..`, `\`. Bỏ route `/music/{file}/audio` (dùng `/music/{id}/audio`). `.gitignore`: `library/music/**` + `!library/music/index.json` + chặn `*.mp3 *.m4a *.ogg *.flac *.aac`.
   - (b) Tự chọn đoạn nhạc theo 6.1 (đã có) + `music.start`; ghi công từ thư viện; không thêm trường mới.
   - (c) Lint từ nhạy cảm theo mục 7 (`sensitive_words.json`, warn/block theo danh mục), trang Cài đặt, áp cả dòng chữ bìa.
+  - (d) Xem nhanh 10 s đầu (chủ dự án chốt 23/10/2026): nút Xem nhanh mặc định chỉ dựng 10 s đầu (540×960, 30 fps như cũ), giữ tuỳ chọn xem nhanh cả video; căn chữ và điểm nhạc (`music_start`) vẫn tính trên cả video; thời gian dựng tuỳ máy. Chi tiết kỹ thuật ghi vào mục 4 và 9 khi làm.
 - **Đợt 1 (máy mới):** Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper.
 - **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
