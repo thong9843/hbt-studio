@@ -302,7 +302,7 @@ export const vi = {
     },
     words: {
       title: 'Từ nhạy cảm',
-      help: 'Mỗi dòng một từ hoặc cụm từ. Kiểm tra từ khoá sẽ bật ở mốc M4; danh sách được lưu ngay từ bây giờ.',
+      help: 'Mỗi dòng một từ hoặc cụm từ. Không phân biệt hoa thường nhưng phân biệt dấu ("bia" khác "bìa"). Nhóm Chặn không cho xuất video; nhóm Cảnh báo và Lưu ý chỉ nhắc ở tab Xuất video.',
       levels: { info: 'Lưu ý', warn: 'Cảnh báo', block: 'Chặn' },
       level: 'Mức',
       id: 'Mã nhóm',
