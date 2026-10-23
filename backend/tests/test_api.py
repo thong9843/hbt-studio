@@ -375,11 +375,14 @@ def test_music_library(client):
         "/api/music", data=form, files={"file": ("x.wav", path.read_bytes(), "audio/wav")}
     )
     assert r.status_code == 201
+    assert r.json()["id"] == "the-wacky-sprint"
     assert r.json()["file"] == "the-wacky-sprint.wav" and r.json()["moods"] == [
         "vui",
         "tinh nghịch",
     ]
-    assert [e["title"] for e in client.get("/api/music").json()] == ["The Wacky Sprint"]
+    assert [(e["id"], e["title"]) for e in client.get("/api/music").json()] == [
+        ("the-wacky-sprint", "The Wacky Sprint")
+    ]
     bad = client.post(
         "/api/music", data={**form, "title": "  "}, files={"file": ("x.wav", b"x", "audio/wav")}
     )

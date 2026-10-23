@@ -101,54 +101,43 @@ def seed_library(client):  # noqa: F811
     write_wav(src, [("tone", 1.0)])
     meta = {"title": "Bài thử", "artist": "Ai Đó", "source": "Pixabay", "license": "CC0"}
     lib.add(src, "t.wav", meta)
-    return lib.list()[0].file
+    return lib.list()[0].id
 
 
 def test_library_audio_and_attach(client):  # noqa: F811
-    name = seed_library(client)
-    got = client.get(f"/api/music/{name}/audio")
+    music_id = seed_library(client)
+    assert music_id == "bai-thu"
+    got = client.get(f"/api/music/{music_id}/audio")
     assert got.status_code == 200
-    part = client.get(f"/api/music/{name}/audio", headers={"Range": "bytes=0-99"})
+    part = client.get(f"/api/music/{music_id}/audio", headers={"Range": "bytes=0-99"})
     assert part.status_code == 206 and len(part.content) == 100
     assert part.headers["content-range"].startswith("bytes 0-99/")
-    assert client.get("/api/music/khong-co.wav/audio").status_code == 404
-    assert client.get("/api/music/..%2Findex.json/audio").status_code in (404, 422)
+    assert client.get("/api/music/khong-co/audio").status_code == 404
 
     slug = client.post("/api/projects", json={"title": "Nhạc"}).json()["slug"]
-    r = client.post(f"/api/projects/{slug}/music/from-library", json={"file": name})
+    r = client.post(f"/api/projects/{slug}/music/from-library", json={"id": music_id})
     assert r.status_code == 200
     music = r.json()["music"]
     assert music["file"].startswith("music.") and music["credit"] == "Bài thử – Ai Đó (Pixabay)"
     folder = client.app.state.hbt.storage.project_dir(slug)
     assert (folder / music["file"]).is_file()
-    missing = client.post(f"/api/projects/{slug}/music/from-library", json={"file": "x.wav"})
+    missing = client.post(f"/api/projects/{slug}/music/from-library", json={"id": "khong-co"})
     assert missing.status_code == 404
-    gone = client.post("/api/projects/khong-co/music/from-library", json={"file": name})
+    bad = client.post(f"/api/projects/{slug}/music/from-library", json={"id": "Bad_Id"})
+    assert bad.status_code == 422
+    gone = client.post("/api/projects/khong-co/music/from-library", json={"id": music_id})
     assert gone.status_code == 404
 
 
-def test_library_audio_security_and_extension_checks(client):  # noqa: F811
-    # 1. Chặn "/"
-    assert client.get("/api/music/sub/test.mp3/audio").status_code == 422
-
-    # 2. Chặn "\"
-    assert client.get("/api/music/sub\\test.mp3/audio").status_code == 422
-
-    # 3. Chặn ".."
-    assert client.get("/api/music/..%2Findex.json/audio").status_code == 422
-
-    # 4. Chặn đường dẫn tuyệt đối
-    assert client.get("/api/music/C:%5Ctest.mp3/audio").status_code == 422
-    assert client.get("/api/music/%2Fetc%2Ftest.mp3/audio").status_code == 422
-
-    # 5. Chặn đuôi ngoài mp3/wav/m4a/ogg
-    for bad_ext in ("track.flac", "track.aac", "track.exe", "track.txt", "track.mp4", "track"):
-        r = client.get(f"/api/music/{bad_ext}/audio")
-        assert r.status_code == 422 and "Đuôi file nhạc" in r.json()["detail"]
-
-    # 6. Cho phép các đuôi hợp lệ: mp3, wav, m4a, ogg (404 khi không tồn tại, không phải 422)
-    for ok_ext in ("track.mp3", "track.wav", "track.m4a", "track.ogg"):
-        assert client.get(f"/api/music/{ok_ext}/audio").status_code == 404
+def test_library_audio_rejects_bad_ids_and_old_file_route(client):  # noqa: F811
+    seed_library(client)
+    # Route cũ theo tên file đã bỏ: tên file không phải id hợp lệ → 422
+    assert client.get("/api/music/bai-thu.wav/audio").status_code == 422
+    for bad in ("Bai_Thu", "bai thu", "-bai", "bai--thu", "C:", "x.mp3"):
+        assert client.get(f"/api/music/{bad}/audio").status_code == 422, bad
+    # Không khớp route (có dấu '/') → không bao giờ phát file ngoài thư viện
+    for bad in ("..%2Findex.json", "sub%2Ftest", "%2Fetc%2Fx"):
+        assert client.get(f"/api/music/{bad}/audio").status_code in (404, 422), bad
 
 
 def test_renders_history_lists_newest_first(client):  # noqa: F811

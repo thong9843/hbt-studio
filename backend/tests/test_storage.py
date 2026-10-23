@@ -299,13 +299,109 @@ def test_music_library_add_and_list(tmp_path):
         "moods": ["vui", "tinh nghịch"],
     }
     e = lib.add(tmp_path / "a.tmp", "x.wav", meta)
+    assert e.id == "the-wacky-sprint"
     assert e.file == "the-wacky-sprint.wav" and (lib.root / e.file).is_file()
     write_wav(tmp_path / "b.tmp", [("tone", 1.0)])
     e2 = lib.add(tmp_path / "b.tmp", "y.wav", meta)
-    assert e2.file == "the-wacky-sprint-2.wav"
+    assert e2.file == "the-wacky-sprint-2.wav" and e2.id == "the-wacky-sprint-2"
     assert [i.file for i in lib.list()] == [e.file, e2.file]
     raw = json.loads(lib.index_path.read_text(encoding="utf-8"))
     assert raw[0]["moods"] == ["vui", "tinh nghịch"] and raw[0]["bpm"] is None
+
+
+def _entry(**over):
+    base = {"id": "a", "file": "a.mp3", "title": "A", "artist": "B", "source": "S", "license": "L"}
+    return {**base, **over}
+
+
+def _lib_with_index(tmp_path, data):
+    lib = MusicLibrary(tmp_path / "library")
+    lib.root.mkdir(parents=True)
+    lib.index_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return lib
+
+
+def test_music_id_strips_vietnamese_marks_and_d(tmp_path):
+    item = _entry(title="Đường về nhà")
+    del item["id"]
+    lib = _lib_with_index(tmp_path, [item])
+    assert [e.id for e in lib.list()] == ["duong-ve-nha"]
+
+
+def test_music_missing_ids_assigned_in_order_and_saved_once(tmp_path):
+    items = [_entry(file=f"{i}.mp3", title="Bài hay") for i in range(3)]
+    for it in items:
+        del it["id"]
+    lib = _lib_with_index(tmp_path, items)
+    assert [e.id for e in lib.list()] == ["bai-hay", "bai-hay-2", "bai-hay-3"]
+    saved = json.loads(lib.index_path.read_text(encoding="utf-8"))
+    assert [e["id"] for e in saved] == ["bai-hay", "bai-hay-2", "bai-hay-3"]
+    before = lib.index_path.read_text(encoding="utf-8")
+    assert [e.id for e in lib.list()] == ["bai-hay", "bai-hay-2", "bai-hay-3"]
+    assert lib.index_path.read_text(encoding="utf-8") == before  # lần sau không ghi lại
+
+
+def test_music_assigned_id_avoids_existing_ids(tmp_path):
+    keep = _entry(id="bai-hay", file="k.mp3", title="Khác")
+    new = _entry(file="n.mp3", title="Bài hay")
+    del new["id"]
+    lib = _lib_with_index(tmp_path, [new, keep])
+    assert [e.id for e in lib.list()] == ["bai-hay-2", "bai-hay"]
+
+
+def test_music_duplicate_ids_rejected(tmp_path):
+    lib = _lib_with_index(tmp_path, [_entry(), _entry(file="b.mp3")])
+    with pytest.raises(BadRequest, match="trùng"):
+        lib.list()
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["funny/the-wacky-sprint.mp3", "a/b/c.ogg", "x.flac", "x.aac", "x.opus"],
+)
+def test_music_file_relative_paths_allowed(tmp_path, file):
+    lib = _lib_with_index(tmp_path, [_entry(file=file)])
+    assert lib.list()[0].file == file
+
+
+@pytest.mark.parametrize(
+    "file",
+    [
+        "/etc/x.mp3",
+        "\\x.mp3",
+        "C:\\x.mp3",
+        "C:/x.mp3",
+        "C:x.mp3",
+        "../x.mp3",
+        "a/../x.mp3",
+        "a\\b.mp3",
+        "a//b.mp3",
+        "./x.mp3",
+        "x.exe",
+        "x",
+        "",
+    ],
+)
+def test_music_file_rejects_absolute_drive_dotdot_backslash(tmp_path, file):
+    lib = _lib_with_index(tmp_path, [_entry(file=file)])
+    with pytest.raises(BadRequest, match="index.json"):
+        lib.list()
+
+
+def test_music_find_by_id(tmp_path):
+    lib = _lib_with_index(tmp_path, [_entry(id="a", file="sub/a.mp3")])
+    (lib.root / "sub").mkdir()
+    (lib.root / "sub" / "a.mp3").write_bytes(b"x")
+    entry, path = lib.find("a")
+    assert entry.id == "a" and path == (lib.root / "sub" / "a.mp3").resolve()
+    with pytest.raises(NotFound):
+        lib.find("khong-co")
+    for bad in ("A", "a.mp3", "../a", "a/b", "C:", ""):
+        with pytest.raises(Unprocessable):
+            lib.find(bad)
+    (lib.root / "sub" / "a.mp3").unlink()
+    with pytest.raises(NotFound):
+        lib.find("a")
 
 
 @needs_ffmpeg
