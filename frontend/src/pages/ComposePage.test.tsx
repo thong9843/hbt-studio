@@ -176,6 +176,7 @@ describe('Compose page', () => {
       music_start: 12,
       music_start_source: 'auto',
       music_matches_current: true,
+      preview_seconds: null,
       size: 1,
       srt: null,
       publish: null,

@@ -17,6 +17,7 @@ import { sceneNumber } from '../utils/scene';
 const X = vi.export;
 const LEVEL_CHIP = { block: 'chip-danger', warn: 'chip-warn', info: 'chip-muted' } as const;
 const FPS: Fps[] = [30, 50, 60];
+export const HEAD_PREVIEW_SECONDS = 10;
 
 function issueScope(issue: LintIssue): string {
   return issue.scene_index === null
@@ -157,7 +158,7 @@ function ResultView({ job }: { job: Job }) {
         {[
           [R.duration, formatDuration(out.duration)],
           [R.fps, String(out.fps)],
-          [R.lufs, `${out.lufs.toFixed(1)} LUFS`],
+          [R.lufs, out.lufs === null ? '—' : `${out.lufs.toFixed(1)} LUFS`],
           [R.aligner, out.aligner],
           [R.seconds, `${out.seconds} ${vi.common.seconds}`],
         ].map(([k, v]) => (
@@ -217,7 +218,7 @@ function History({
             className="flex flex-wrap items-center gap-3 border-b border-border py-3 text-small"
           >
             <span className={`chip ${r.preview ? 'chip-muted' : 'chip-warn'}`}>
-              {r.preview ? H.fast : H.final}
+              {r.preview ? (r.preview_seconds ? H.fastHead(r.preview_seconds) : H.fast) : H.final}
             </span>
             <span className="num">{formatDateTime(r.created_at)}</span>
             <span className="num text-text-muted">
@@ -329,7 +330,7 @@ export function ExportTab() {
             className="btn btn-primary"
             disabled={cannotStart}
             title={reason}
-            onClick={() => launch({ preview: true })}
+            onClick={() => launch({ preview: true, preview_seconds: HEAD_PREVIEW_SECONDS })}
           >
             {start.isPending ? (
               <span className="spinner" aria-hidden="true" />
@@ -337,6 +338,15 @@ export function ExportTab() {
               <PlayIcon size={20} />
             )}
             {X.fast}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={cannotStart}
+            title={reason}
+            onClick={() => launch({ preview: true })}
+          >
+            {X.fastFull}
           </button>
           <div className="flex items-end gap-2">
             <div>

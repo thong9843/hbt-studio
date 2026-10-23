@@ -97,6 +97,8 @@ export interface RenderRecord extends RenderSummary {
   aligner: string | null;
   music_start: number | null;
   music_start_source: 'manual' | 'auto' | null;
+  /** null = dựng cả video. */
+  preview_seconds: number | null;
   /** Nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này. */
   music_matches_current: boolean;
   size: number;
@@ -145,7 +147,8 @@ export interface JobOutput {
   width: number;
   height: number;
   duration: number;
-  lufs: number;
+  lufs: number | null;
+  preview_seconds: number | null;
   aligner: string;
   seconds: number;
   warnings: string[];
@@ -162,10 +165,13 @@ export interface Job {
   error: string | null;
   needs_confirmation: boolean;
   preview: boolean;
+  preview_seconds: number | null;
 }
 
 export interface RenderOptions {
   preview?: boolean;
+  /** Xem nhanh chỉ dựng chừng này giây đầu; bỏ trống = cả video. */
+  preview_seconds?: number;
   fps?: Fps;
   outro?: boolean;
   allow_long_trim?: boolean;
