@@ -786,3 +786,29 @@ def test_slug_length_limit_holds_through_the_api(client):
     ]
     assert len(set(slugs)) == 3 and all(len(s) <= 60 for s in slugs)
     assert all(client.get(f"/api/projects/{s}").status_code == 200 for s in slugs)
+
+
+def test_lint_endpoint_reports_sensitive_words_and_blocks_on_block_level(client):
+    slug = client.post("/api/projects", json={"title": "Từ nhạy cảm"}).json()["slug"]
+    p = client.get(f"/api/projects/{slug}").json()
+    p["scenes"][0]["voice"] = "Quán bia, còn bìa sách thì không."
+    client.put(f"/api/projects/{slug}", json=p)
+    r = client.post(f"/api/projects/{slug}/lint").json()
+    assert [(i["word"], i["level"], i["scene_index"]) for i in r["issues"]] == [("bia", "warn", 0)]
+    assert r["counts"] == {"info": 0, "warn": 1, "block": 0} and r["blocked"] is False
+
+    p["scenes"][0]["voice"] = "Bàn về ma tuý."
+    client.put(f"/api/projects/{slug}", json=p)
+    r = client.post(f"/api/projects/{slug}/lint").json()
+    assert r["counts"]["block"] == 1 and r["blocked"] is True
+
+
+def test_lint_uses_the_users_own_word_list(client):
+    slug = client.post("/api/projects", json={"title": "Danh sách riêng"}).json()["slug"]
+    p = client.get(f"/api/projects/{slug}").json()
+    p["scenes"][0]["voice"] = "Quán bia và con muỗi."
+    client.put(f"/api/projects/{slug}", json=p)
+    mine = {"categories": [{"id": "rieng", "level": "info", "words": ["muỗi"]}]}
+    assert client.put("/api/settings/sensitive-words", json=mine).status_code == 200
+    issues = client.post(f"/api/projects/{slug}/lint").json()["issues"]
+    assert [(i["word"], i["level"]) for i in issues] == [("muỗi", "info")]

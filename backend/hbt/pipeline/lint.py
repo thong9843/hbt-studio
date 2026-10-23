@@ -1,7 +1,7 @@
-"""Kiểm tra nội dung trước khi xuất.
+"""Kiểm tra nội dung trước khi xuất (IMPLEMENT.md mục 4d và 7).
 
-M1 chỉ có quy tắc độ dài lời đọc (IMPLEMENT.md 4d). Từ nhạy cảm (mục 7) làm ở M4:
-`lint_project` là chỗ để gắn thêm.
+`lint_project` gom: độ dài lời đọc (warn), từ nhạy cảm theo danh sách (mức của từng nhóm) và số
+chưa ghi cách đọc (info). Từ nhạy cảm chỉ được kiểm khi truyền `words`.
 """
 
 from __future__ import annotations
@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from hbt.models import Project
+from hbt.pipeline.text import RAW_TOKEN_RE
+from hbt.pipeline.textmatch import Matcher, compile_words, find_hits
+from hbt.sensitive import SensitiveWords
 
 VOICE_CHAR_LIMIT = 750  # gói Vbee giới hạn 3.000 ký tự/ngày
 
@@ -38,7 +41,37 @@ def voice_char_count(project: Project) -> int:
     return len(" ".join(voice_text(s.voice) for s in project.scenes))
 
 
-def lint_project(project: Project) -> list[LintIssue]:
+NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _sensitive_issues(
+    scene_index: int | None, field: str, label: str, text: str, matchers: list[Matcher]
+) -> list[LintIssue]:
+    return [
+        LintIssue(
+            scene_index=scene_index,
+            field=field,
+            category=m.category,
+            level=m.level,  # type: ignore[arg-type]
+            message=f'Có từ nhạy cảm "{m.word}" trong {label}.',
+            word=m.word,
+            hint=m.hint,
+        )
+        for m in find_hits(text, matchers)
+    ]
+
+
+def _unread_numbers(voice: str) -> list[str]:
+    """Số trần trong lời đọc: token có chữ số mà không có `{cách đọc}` đi kèm."""
+    found: list[str] = []
+    for token in RAW_TOKEN_RE.findall(voice):
+        if "{" in token:
+            continue
+        found += [n for n in NUMBER_RE.findall(token) if n not in found]
+    return found
+
+
+def lint_project(project: Project, words: SensitiveWords | None = None) -> list[LintIssue]:
     issues: list[LintIssue] = []
     count = voice_char_count(project)
     if count > VOICE_CHAR_LIMIT:
@@ -52,4 +85,32 @@ def lint_project(project: Project) -> list[LintIssue]:
                 hint="Gói Vbee giới hạn 3.000 ký tự mỗi ngày.",
             )
         )
+    matchers = compile_words(words) if words is not None else []
+    for i, scene in enumerate(project.scenes):
+        if matchers:
+            card = "\n".join(line.text for line in scene.card.lines)
+            issues += _sensitive_issues(i, "card.lines", "thẻ chữ", card, matchers)
+            labels = "\n".join(label.text for label in scene.labels)
+            issues += _sensitive_issues(i, "labels", "nhãn", labels, matchers)
+            # Quét cả chữ hiển thị lẫn chữ đọc trong {…}; `|` `{}` thành dấu cách.
+            spoken = re.sub(r"[|{}]", " ", scene.voice)
+            issues += _sensitive_issues(i, "voice", "lời đọc", spoken, matchers)
+        for number in _unread_numbers(scene.voice):
+            issues.append(
+                LintIssue(
+                    scene_index=i,
+                    field="voice",
+                    category="number_reading",
+                    level="info",
+                    message=f'Số "{number}" chưa ghi cách đọc; viết {number}{{cách đọc}}.',
+                    word=number,
+                    hint="Ví dụ: 100{một trăm}.",
+                )
+            )
+    if matchers:
+        hook = project.publish.hook
+        issues += _sensitive_issues(None, "publish.hook", "lời dẫn đăng", hook, matchers)
+        if project.thumbnail:
+            thumb = "\n".join(project.thumbnail.lines)
+            issues += _sensitive_issues(None, "thumbnail.lines", "dòng chữ bìa", thumb, matchers)
     return issues
