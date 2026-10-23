@@ -8,6 +8,7 @@ library/music/**
 *.ogg
 *.flac
 *.aac
+*.opus
 *.mp4
 *.wav
 .env

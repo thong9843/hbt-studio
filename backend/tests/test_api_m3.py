@@ -140,6 +140,12 @@ def test_library_audio_rejects_bad_ids_and_old_file_route(client):  # noqa: F811
         assert client.get(f"/api/music/{bad}/audio").status_code in (404, 422), bad
 
 
+def test_library_audio_dotdot_never_serves(client):  # noqa: F811
+    seed_library(client)
+    for bad in ("%2e%2e", "..", "%2e%2e%2findex.json"):
+        assert client.get(f"/api/music/{bad}/audio").status_code != 200, bad
+
+
 def test_renders_history_lists_newest_first(client):  # noqa: F811
     slug = client.post("/api/projects", json={"title": "Lịch sử"}).json()["slug"]
     assert client.get(f"/api/projects/{slug}/renders").json() == []
