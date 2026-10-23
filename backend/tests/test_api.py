@@ -812,3 +812,34 @@ def test_lint_uses_the_users_own_word_list(client):
     assert client.put("/api/settings/sensitive-words", json=mine).status_code == 200
     issues = client.post(f"/api/projects/{slug}/lint").json()["issues"]
     assert [(i["word"], i["level"]) for i in issues] == [("muỗi", "info")]
+
+
+# ---------------------------------------------------- từ bị chặn: 422, không tạo job
+def set_voice(client, slug, text):
+    project = client.get(f"/api/projects/{slug}").json()
+    project["scenes"][1]["voice"] = text
+    assert client.put(f"/api/projects/{slug}", json=project).status_code == 200
+
+
+def test_render_with_a_blocked_word_is_422_lists_it_and_creates_no_job(client):
+    fake = FakeRender()
+    client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None
+    slug = complete_project(client)
+    set_voice(client, slug, "Bàn về ma túy ở đây.")  # biến thể dấu thanh vẫn bị chặn
+    r = client.post(f"/api/projects/{slug}/render", json={"preview": True})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "Có từ bị chặn" in detail and "Cảnh 2" in detail and '"ma tuý"' in detail
+    assert client.app.state.hbt.jobs._jobs == {} and not fake.started.is_set()
+
+
+def test_render_with_only_warn_or_info_words_still_starts(client):
+    fake = FakeRender()
+    client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None
+    slug = complete_project(client)
+    set_voice(client, slug, "Quán bia có 3 người.")  # warn (bia) + info (số 3)
+    r = client.post(f"/api/projects/{slug}/render", json={"preview": True})
+    assert r.status_code == 202 and fake.started.wait(5)
+    fake.gate.set()

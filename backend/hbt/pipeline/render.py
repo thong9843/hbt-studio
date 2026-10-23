@@ -23,6 +23,7 @@ import numpy as np
 
 from hbt.config import ALLOWED_FPS, BRAND_DIR, load_settings
 from hbt.models import load_project
+from hbt.sensitive import SensitiveWords
 
 from . import align as _align
 from . import audio, cache, cancel
@@ -34,7 +35,7 @@ from .align import align_whisper
 from .cancel import CancelToken, RenderCancelled
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
-from .lint import lint_project
+from .lint import describe_issue, lint_project
 from .publish import build_publish_text
 from .scene_align import AlignError, align_scenes
 from .text import parse_voice
@@ -87,6 +88,7 @@ class RenderOptions:
     fps: int | None = None  # None → settings.fps của project
     outro: bool | None = None  # None → settings.outro của project
     allow_long_trim: bool = False  # cho phép cắt đuôi giọng > 8 s (đã được chủ dự án xác nhận)
+    sensitive_words: SensitiveWords | None = None  # None → không kiểm từ nhạy cảm
     library_dir: Path | None = None
     brand_dir: Path | None = None
     whisper_model: str | None = None
@@ -461,9 +463,11 @@ def _render_project(
     if missing:
         listing = "\n  ".join(missing)
         raise RenderError(f"Thiếu file:\n  {listing}")
-    for issue in lint_project(project):
-        if issue.level == "block":
-            raise RenderError(f"Chặn xuất: {issue.message}")
+    issues = lint_project(project, opts.sensitive_words)
+    blocked = [describe_issue(i) for i in issues if i.level == "block"]
+    if blocked:
+        raise RenderError("Chặn xuất: " + "; ".join(blocked))
+    for issue in issues:
         warn(issue.message) if issue.level == "warn" else rep.say(issue.message)
     build = project_dir / "build"
     for sub in ("layers", "clips", "captions"):

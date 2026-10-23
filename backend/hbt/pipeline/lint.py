@@ -71,6 +71,12 @@ def _unread_numbers(voice: str) -> list[str]:
     return found
 
 
+def describe_issue(issue: LintIssue) -> str:
+    """Một dòng cho người dùng: "Cảnh 2: Có từ nhạy cảm …" hoặc "Cả video: …"."""
+    where = f"Cảnh {issue.scene_index + 1}" if issue.scene_index is not None else "Cả video"
+    return f"{where}: {issue.message}"
+
+
 def lint_project(project: Project, words: SensitiveWords | None = None) -> list[LintIssue]:
     issues: list[LintIssue] = []
     count = voice_char_count(project)

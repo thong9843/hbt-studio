@@ -19,7 +19,9 @@ from hbt.config import ALLOWED_FPS
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
+from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import RenderOptions, render_project
+from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
@@ -127,12 +129,14 @@ class JobManager:
         brand_dir: Path | None = None,
         render_fn=render_project,
         tool_check=check_render_tools,
+        sensitive: SensitiveStore | None = None,
     ):
         self.storage = storage
         self.library_dir = library_dir
         self.brand_dir = brand_dir
         self._render = render_fn
         self._tool_check = tool_check
+        self.sensitive = sensitive
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -165,6 +169,14 @@ class JobManager:
         problems = project.render_problems()
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
+        if self.sensitive is not None:  # từ mức `block` chặn xuất, không tạo job (mục 7)
+            blocked = [
+                describe_issue(i)
+                for i in lint_project(project, self.sensitive.load())
+                if i.level == "block"
+            ]
+            if blocked:
+                raise Unprocessable("Có từ bị chặn, sửa rồi dựng lại: " + "; ".join(blocked))
         if self._tool_check is not None:
             self._tool_check()
         job = Job(uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim)
@@ -210,6 +222,7 @@ class JobManager:
             fps=job.fps,
             outro=job.outro,
             allow_long_trim=job.allow_long_trim,
+            sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
             library_dir=self.library_dir,
             brand_dir=self.brand_dir,
             job_id=job.id,

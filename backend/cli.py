@@ -12,6 +12,7 @@ from hbt.config import ALLOWED_FPS
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.ffutil import FFmpegError
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
+from hbt.sensitive import SensitiveStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +46,14 @@ def _progress_printer():
     return show
 
 
+def current_sensitive_words(project_dir: Path):
+    """Danh sách từ nhạy cảm hiện hành: bản riêng `workspace/settings/` nếu có, không thì bản
+    mặc định. Thư mục project nằm ngoài `workspace/projects/` thì dùng bản mặc định."""
+    parent = project_dir.resolve().parent
+    workspace = parent.parent if parent.name == "projects" else parent
+    return SensitiveStore(workspace).load()
+
+
 def _describe(err: ValidationError) -> str:
     return "\n".join(
         f"  {'.'.join(str(p) for p in e['loc']) or '(gốc)'}: {e['msg']}" for e in err.errors()
@@ -64,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         allow_long_trim=args.allow_long_trim,
     )
     try:
+        options.sensitive_words = current_sensitive_words(args.project_dir)
         result = render_project(args.project_dir, options, progress=_progress_printer())
     except TailTrimNeedsConfirmation as e:
         print(

@@ -6,6 +6,7 @@ import pytest
 import cli
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.render import RenderError, RenderResult
+from tests.helpers import needs_ffmpeg
 
 
 def fake_result(tmp_path):
@@ -105,3 +106,75 @@ def test_main_missing_project(tmp_path, capsys):
     assert cli.main(["render", str(tmp_path / "nope")]) == 1
     assert "project.json" in capsys.readouterr().err
     assert not (tmp_path / "nope").exists()  # không để lại thư mục renders/ rác
+
+
+# ---------------------------------------------------------------- từ nhạy cảm
+def project_folder(tmp_path):
+    folder = tmp_path / "workspace" / "projects" / "demo"
+    folder.mkdir(parents=True)
+    return folder
+
+
+def test_main_loads_the_default_word_list_and_passes_it(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_render(project_dir, options, progress):
+        seen["words"] = options.sensitive_words
+        return fake_result(tmp_path)
+
+    monkeypatch.setattr(cli, "render_project", fake_render)
+    folder = project_folder(tmp_path)
+    assert cli.main(["render", str(folder)]) == 0
+    ids = [c.id for c in seen["words"].categories]
+    assert "drugs" in ids and "alcohol" in ids
+
+
+def test_main_prefers_the_users_own_word_list(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_render(project_dir, options, progress):
+        seen["words"] = options.sensitive_words
+        return fake_result(tmp_path)
+
+    monkeypatch.setattr(cli, "render_project", fake_render)
+    folder = project_folder(tmp_path)
+    mine = tmp_path / "workspace" / "settings"
+    mine.mkdir()
+    (mine / "sensitive_words.json").write_text(
+        json.dumps({"categories": [{"id": "rieng", "level": "block", "words": ["muỗi"]}]}),
+        encoding="utf-8",
+    )
+    assert cli.main(["render", str(folder)]) == 0
+    assert [c.id for c in seen["words"].categories] == ["rieng"]
+
+
+def edit_voices(pdir, voices):
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for i, text in voices.items():
+        data["scenes"][i]["voice"] = text
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+@needs_ffmpeg
+def test_cli_stops_on_a_blocked_word_before_rendering(tmp_path, capsys):
+    from tests.test_render import make_project
+
+    pdir, _ = make_project(tmp_path, outro=False)
+    edit_voices(pdir, {1: "Chuyện ma túy."})
+    code = cli.main(["render", str(pdir), "--preview", "--no-outro"])
+    err = capsys.readouterr().err
+    assert code == 1 and "Chặn xuất" in err and "Cảnh 2" in err and "ma tuý" in err
+    assert not list(pdir.rglob("video.mp4"))  # dừng ở bước 1, chưa dựng gì
+
+
+@needs_ffmpeg
+def test_cli_still_renders_with_warn_and_info_words(tmp_path, capsys):
+    from tests.test_render import make_project
+
+    pdir, _ = make_project(tmp_path, outro=False)
+    edit_voices(pdir, {0: "Quán bia có 3 người."})  # warn (bia) + info (số 3)
+    code = cli.main(["render", str(pdir), "--preview", "--no-outro"])
+    out = capsys.readouterr().out
+    assert code == 0 and "CẢNH BÁO" in out
+    assert len(list(pdir.rglob("video.mp4"))) == 1
