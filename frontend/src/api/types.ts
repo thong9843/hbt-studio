@@ -58,6 +58,22 @@ export interface ProjectSettings {
   outro: boolean;
 }
 
+export interface Thumbnail {
+  /** Cảnh làm nền, đếm từ 1. */
+  scene: number;
+  lines: string[];
+  series: string;
+  accent: string;
+}
+
+export interface BuildClean {
+  before_bytes: number;
+  after_bytes: number;
+  freed_bytes: number;
+  kept: string[];
+  failed: number;
+}
+
 export interface Project {
   version: 1;
   slug: string;
@@ -69,7 +85,7 @@ export interface Project {
   settings: ProjectSettings;
   scenes: Scene[];
   publish: { hook: string; hashtags: string[] };
-  thumbnail: unknown;
+  thumbnail: Thumbnail | null;
 }
 
 export interface RenderSummary {
@@ -105,6 +121,8 @@ export interface RenderRecord extends RenderSummary {
   srt: string | null;
   publish: string | null;
   log: string | null;
+  cover: string | null;
+  youtube_cover: string | null;
 }
 
 export interface LintIssue {
@@ -141,6 +159,8 @@ export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface JobOutput {
   video: string;
   srt: string | null;
+  cover: string | null;
+  youtube_cover: string | null;
   publish: string;
   log: string;
   fps: number;

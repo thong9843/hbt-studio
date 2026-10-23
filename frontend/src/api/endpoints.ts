@@ -3,6 +3,8 @@ import type {
   AppSettings,
   Job,
   LintResult,
+  BuildClean,
+  Thumbnail,
   MusicEntry,
   NewMusicInput,
   Project,
@@ -51,6 +53,12 @@ export const api = {
       { scene, theme },
       signal,
     ),
+
+  /** Ảnh bìa 9:16 theo bản nháp (chưa lưu); giao diện tự cắt khung 3:4 và 3:2. */
+  previewThumbnail: (slug: string, thumbnail: Thumbnail, signal?: AbortSignal) =>
+    apiPostBlob(`/projects/${enc(slug)}/thumbnail/preview.jpg?w=360`, { thumbnail }, signal),
+  cleanBuild: (slug: string) =>
+    apiRequest<BuildClean>('POST', `/projects/${enc(slug)}/build/clean`),
 
   uploadAsset: (
     slug: string,

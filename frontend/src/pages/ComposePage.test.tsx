@@ -181,6 +181,8 @@ describe('Compose page', () => {
       srt: null,
       publish: null,
       log: null,
+      cover: null,
+      youtube_cover: null,
       ...over,
     });
 

@@ -34,6 +34,8 @@ const record = (over: Partial<RenderRecord> = {}): RenderRecord => ({
   srt: null,
   publish: null,
   log: null,
+  cover: null,
+  youtube_cover: null,
   ...over,
 });
 

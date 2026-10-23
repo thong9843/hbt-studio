@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { fetchHealth, fetchText } from '../api/client';
 import { api } from '../api/endpoints';
 import type { Fps, Job, LintIssue, LintResult, RenderOptions, RenderRecord } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
+import { ThumbnailEditor } from '../components/ThumbnailEditor';
 import { AlertIcon, CopyIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
 import { ProgressBar } from '../components/ProgressBar';
 import { useProjectEditor } from '../hooks/projectEditor';
@@ -192,8 +194,61 @@ function ResultView({ job }: { job: Job }) {
             {R.srt}
           </a>
         )}
+        {out.cover && (
+          <a className="btn btn-secondary" href={out.cover} download="cover_9x16.jpg">
+            <DownloadIcon size={20} />
+            {R.cover}
+          </a>
+        )}
+        {out.youtube_cover && (
+          <a className="btn btn-secondary" href={out.youtube_cover} download="youtube_3x2.jpg">
+            <DownloadIcon size={20} />
+            {R.youtubeCover}
+          </a>
+        )}
       </div>
       <PublishBox url={out.publish} />
+    </section>
+  );
+}
+
+function CleanBuild({ slug, disabled }: { slug: string; disabled: boolean }) {
+  const C = X.clean;
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const clean = useMutation({
+    mutationFn: () => api.cleanBuild(slug),
+    onSuccess: (r) => {
+      setConfirming(false);
+      toast.info(C.done(formatBytes(r.freed_bytes)));
+    },
+    onError: (e) => {
+      setConfirming(false);
+      toast.error(e);
+    },
+  });
+  return (
+    <section className="space-y-3">
+      <h2>{C.title}</h2>
+      <p className="text-small text-text-muted">{C.help}</p>
+      <button
+        type="button"
+        className="btn btn-outline"
+        disabled={disabled || clean.isPending}
+        onClick={() => setConfirming(true)}
+      >
+        {C.button}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title={C.confirmTitle}
+          message={C.confirmMessage}
+          confirmLabel={clean.isPending ? C.busy : C.confirm}
+          busy={clean.isPending}
+          onConfirm={() => clean.mutate()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </section>
   );
 }
@@ -242,6 +297,22 @@ function History({
                 <a className="btn btn-outline btn-sm" href={r.srt} download="captions.srt">
                   <DownloadIcon size={18} />
                   {H.srt}
+                </a>
+              )}
+              {r.cover && (
+                <a className="btn btn-outline btn-sm" href={r.cover} download="cover_9x16.jpg">
+                  <DownloadIcon size={18} />
+                  {H.cover}
+                </a>
+              )}
+              {r.youtube_cover && (
+                <a
+                  className="btn btn-outline btn-sm"
+                  href={r.youtube_cover}
+                  download="youtube_3x2.jpg"
+                >
+                  <DownloadIcon size={18} />
+                  {H.youtubeCover}
                 </a>
               )}
             </span>
@@ -302,6 +373,11 @@ export function ExportTab() {
   const reason = blocked ? X.blocked : noFfmpeg ? X.missingFfmpeg : undefined;
   const launch = (options: RenderOptions) => start.mutate({ ...options, outro });
   const failure = finished?.status === 'failed' ? finished : null;
+  const withCovers = renders.data?.find((r) => r.cover && r.youtube_cover);
+  const latestCovers =
+    withCovers?.cover && withCovers.youtube_cover
+      ? { cover: withCovers.cover, youtube: withCovers.youtube_cover }
+      : null;
   const pct = job?.progress ?? progress.progress;
 
   return (
@@ -443,7 +519,11 @@ export function ExportTab() {
         </section>
       )}
 
+      <ThumbnailEditor covers={latestCovers} />
+
       <History renders={renders.data ?? []} onPlay={setPlayed} />
+
+      <CleanBuild slug={slug} disabled={running} />
     </div>
   );
 }

@@ -31,11 +31,8 @@ function setup(initial: Project, extra: Record<string, unknown> = {}) {
     routes[`DELETE /api/projects/muoi/scenes/${i}`] = () => {
       const p = saved.length > 0 ? saved[saved.length - 1] : initial;
       const scenes = p.scenes.filter((_, idx) => idx !== i);
-      const t = p.thumbnail as { scene?: number } | null;
-      const thumbnail =
-        t && typeof t.scene === 'number'
-          ? { ...t, scene: Math.min(t.scene, scenes.length) }
-          : p.thumbnail;
+      const t = p.thumbnail;
+      const thumbnail = t ? { ...t, scene: Math.min(t.scene, scenes.length) } : null;
       const next = { ...p, scenes, thumbnail };
       saved.push(next);
       return ok(next);
