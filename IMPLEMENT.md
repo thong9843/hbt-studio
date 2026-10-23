@@ -369,7 +369,7 @@ Tất cả tổng hợp bằng FFmpeg, không dùng file ngoài. Xuất stereo 4
 - **So khớp** (`pipeline/textmatch.py`): chuẩn hoá NFC, không phân biệt hoa thường, theo ranh giới từ (ký tự chữ, số, `_` ở hai bên thì không khớp), cụm nhiều từ khớp với một hay nhiều khoảng trắng. **Không bỏ dấu**: "bia" không khớp "bìa". Riêng dấu thanh ở cụm `oa`, `oe`, `uy` có hai cách đặt, nên cả văn bản lẫn từ khoá được đưa về cách đặt ở nguyên âm thứ hai trước khi so: "hoá"="hóa", "tuý"="túy", "thuỷ"="thủy", "khoẻ"="khỏe".
 - **Vùng quét** (`field` trong kết quả): `card.lines` (nối các dòng thẻ), `labels`, `voice`, `publish.hook`, `thumbnail.lines` (4e). Mỗi từ báo một lần cho mỗi vùng và cảnh. `publish.hook` và `thumbnail.lines` có `scene` là `null`. Không quét `title` và `hashtags`.
 - **Lời đọc:** quét **cả chữ hiển thị lẫn chữ đọc trong `{…}`**; `|`, `{`, `}` được đổi thành dấu cách trước khi so (để "nhậu|rượu" không dính thành một từ).
-- **Số chưa ghi cách đọc** (`category = "number_reading"`, mức `info`, `field = "voice"`): báo **mọi** số trần không có `{cách đọc}` đi kèm, kể cả số một chữ số và năm; số có phân cách (`1.000`, `3,5`) tính là một số; mỗi số báo một lần cho mỗi cảnh.
+- **Số chưa ghi cách đọc** (`category = "number_reading"`, mức `info`, `field = "voice"`): báo **mọi** số trần không có `{cách đọc}` đi kèm, kể cả số một chữ số và năm; số có phân cách (`1.000`, `3,5`) tính là một số; **mỗi cảnh một dòng** liệt kê các số theo thứ tự xuất hiện, không lặp (ví dụ cảnh 3: `Số chưa ghi cách đọc: 1, 100.`; `word` là chuỗi `1, 100`).
 - `POST /projects/{slug}/lint` dùng danh sách hiện hành (bản riêng nếu có). Test: `test_textmatch.py`, `test_lint.py`, `test_api.py`.
 
 ---

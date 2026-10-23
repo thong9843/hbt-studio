@@ -95,16 +95,18 @@ def lint_project(project: Project, words: SensitiveWords | None = None) -> list[
             # Quét cả chữ hiển thị lẫn chữ đọc trong {…}; `|` `{}` thành dấu cách.
             spoken = re.sub(r"[|{}]", " ", scene.voice)
             issues += _sensitive_issues(i, "voice", "lời đọc", spoken, matchers)
-        for number in _unread_numbers(scene.voice):
+        numbers = _unread_numbers(scene.voice)
+        if numbers:  # một dòng cho mỗi cảnh, liệt kê các số
+            listed = ", ".join(numbers)
             issues.append(
                 LintIssue(
                     scene_index=i,
                     field="voice",
                     category="number_reading",
                     level="info",
-                    message=f'Số "{number}" chưa ghi cách đọc; viết {number}{{cách đọc}}.',
-                    word=number,
-                    hint="Ví dụ: 100{một trăm}.",
+                    message=f"Số chưa ghi cách đọc: {listed}.",
+                    word=listed,
+                    hint="Viết số{cách đọc}, ví dụ 100{một trăm}.",
                 )
             )
     if matchers:

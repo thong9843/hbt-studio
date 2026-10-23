@@ -154,6 +154,7 @@ def test_each_word_once_per_field_and_scene():
 
 # ---------------------------------------------------------------- số chưa ghi cách đọc
 def numbers(*voices):
+    """Mỗi cảnh có số chưa ghi cách đọc cho đúng một dòng: (cảnh, "1, 100")."""
     return [
         (i.scene_index, i.word)
         for i in lint.lint_project(project_with_voices(list(voices)))
@@ -161,12 +162,13 @@ def numbers(*voices):
     ]
 
 
-def test_bare_numbers_are_info_for_every_length():
+def test_bare_numbers_are_one_info_line_per_scene_listing_the_numbers():
     p = project_with_voices(["Có 1 con muỗi, 100 con kiến, năm 2026."])
-    got = [i for i in lint.lint_project(p) if i.category == "number_reading"]
-    assert [i.word for i in got] == ["1", "100", "2026"]
-    assert all(i.level == "info" and i.field == "voice" and i.scene_index == 0 for i in got)
-    assert "100{" in got[1].message
+    (issue,) = [i for i in lint.lint_project(p) if i.category == "number_reading"]
+    assert issue.level == "info" and issue.field == "voice" and issue.scene_index == 0
+    assert issue.word == "1, 100, 2026"
+    assert issue.message == "Số chưa ghi cách đọc: 1, 100, 2026."
+    assert "100{một trăm}" in issue.hint
 
 
 def test_numbers_with_spoken_form_are_fine():
@@ -174,11 +176,15 @@ def test_numbers_with_spoken_form_are_fine():
 
 
 def test_number_with_separators_is_one_number_and_repeats_are_collapsed():
-    assert numbers("Giá 1.000 đồng, rồi 3,5 kg, lại 1.000") == [(0, "1.000"), (0, "3,5")]
+    assert numbers("Giá 1.000 đồng, rồi 3,5 kg, lại 1.000") == [(0, "1.000, 3,5")]
 
 
-def test_numbers_are_reported_per_scene():
-    assert numbers("hai 2", "ba 3 và 2") == [(0, "2"), (1, "3"), (1, "2")]
+def test_numbers_are_reported_once_per_scene():
+    assert numbers("hai 2", "ba 3 và 2", "bốn") == [(0, "2"), (1, "3, 2")]
+
+
+def test_only_bare_numbers_are_listed_when_a_scene_mixes_both():
+    assert numbers("100{một trăm} và 7 và 8{tám}") == [(0, "7")]
 
 
 def test_number_inside_braces_is_not_double_reported():
