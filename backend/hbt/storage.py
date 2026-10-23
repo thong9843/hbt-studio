@@ -37,6 +37,7 @@ from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
+KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
 COPY_EXCLUDE = ("build", "renders")  # nhân bản không chép file trung gian và các lần xuất
 
 
@@ -168,6 +169,34 @@ class Storage:
         if not rel or not target.is_relative_to(folder):
             raise Unprocessable("Đường dẫn file không hợp lệ")
         return target
+
+    def clean_build(self, slug: str) -> dict:
+        """Xoá file trung gian trong `build/`, luôn giữ `timing.json` và `timing.json.key`
+        (căn chữ là bước đắt nhất). Không động tới renders/, ảnh, giọng, nhạc, project.json."""
+        build = self.project_dir(slug) / "build"
+        keep = set(KEEP_IN_BUILD)
+        before = _tree_size(build)
+        failed = 0
+        if build.is_dir() and not build.is_symlink():
+            for entry in build.iterdir():
+                if entry.name in keep:
+                    continue
+                try:
+                    if entry.is_dir() and not entry.is_symlink():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                except OSError:
+                    failed += 1
+        after = _tree_size(build)
+        kept = sorted(n for n in keep if (build / n).is_file())
+        return {
+            "before_bytes": before,
+            "after_bytes": after,
+            "freed_bytes": before - after,
+            "kept": kept,
+            "failed": failed,
+        }
 
     def exists(self, slug: str) -> bool:
         try:
@@ -448,6 +477,12 @@ class Storage:
             raise BadRequest("`kind` phải là image, voice hoặc music")
         self.save(slug, project)
         return rel, project
+
+
+def _tree_size(folder: Path) -> int:
+    if not folder.is_dir():
+        return 0
+    return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file() and not p.is_symlink())
 
 
 def _remove_siblings(folder: Path, stem: str) -> None:

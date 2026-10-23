@@ -7,7 +7,13 @@ from PIL import Image
 
 from hbt.models import Music
 from tests.helpers import write_wav
-from tests.test_api import client, complete_project, upload_image, upload_wav  # noqa: F401
+from tests.test_api import (  # noqa: F401
+    FakeRender,
+    client,
+    complete_project,
+    upload_image,
+    upload_wav,
+)
 
 
 def test_reorder_scenes_preserves_image_names_and_content(client):  # noqa: F811
@@ -261,3 +267,111 @@ def test_app_settings_validation_and_corrupt_file(client):  # noqa: F811
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{hỏng", encoding="utf-8")
     assert client.get("/api/settings/app").json()["default_fps"] == 50
+
+
+# ---------------------------------------------------------------- ảnh bìa: xem trước bản nháp
+def with_thumbnail(client, lines=("bạn có phải", "người được", "muỗi yêu?")):  # noqa: F811
+    import shutil
+
+    from hbt.config import BRAND_DIR
+
+    shutil.copy(BRAND_DIR / "hbt-logo-mark.png", client.app.state.hbt.brand_dir)
+    slug = client.post("/api/projects", json={"title": "Bìa"}).json()["slug"]
+    assert upload_image(client, slug, 0).status_code == 200
+    project = client.get(f"/api/projects/{slug}").json()
+    project["thumbnail"] = {"scene": 1, "lines": list(lines), "series": "Loạt thử"}
+    assert client.put(f"/api/projects/{slug}", json=project).status_code == 200
+    return slug
+
+
+def test_thumbnail_preview_uses_the_saved_block_or_a_draft(client):  # noqa: F811
+    slug = with_thumbnail(client)
+    r = client.post(f"/api/projects/{slug}/thumbnail/preview.jpg", json={})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(r.content)).size == (1080, 1920)
+    draft = {"thumbnail": {"scene": 1, "lines": ["một", "hai"], "accent": "#00FF00"}}
+    r = client.post(f"/api/projects/{slug}/thumbnail/preview.jpg?w=270", json=draft)
+    assert r.status_code == 200 and Image.open(io.BytesIO(r.content)).size == (270, 480)
+    saved = client.get(f"/api/projects/{slug}").json()
+    assert saved["thumbnail"]["lines"] == ["bạn có phải", "người được", "muỗi yêu?"]  # không lưu
+
+
+def test_thumbnail_preview_errors(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Chưa có bìa"}).json()["slug"]
+    url = f"/api/projects/{slug}/thumbnail/preview.jpg"
+    assert client.post(url, json={}).status_code == 422  # chưa có khối thumbnail
+    assert client.post("/api/projects/khong-co/thumbnail/preview.jpg", json={}).status_code == 404
+    draft = {"thumbnail": {"scene": 1, "lines": ["một", "hai"]}}
+    r = client.post(url, json=draft)
+    assert r.status_code == 422 and "chưa có ảnh" in r.json()["detail"]
+    far = {"thumbnail": {"scene": 99, "lines": ["một", "hai"]}}
+    assert client.post(url, json=far).status_code == 422
+    one = {"thumbnail": {"scene": 1, "lines": ["chỉ một dòng"]}}
+    assert client.post(url, json=one).status_code == 422  # cần 2–3 dòng
+    assert upload_image(client, slug, 0).status_code == 200
+    r = client.post(url, json=draft)  # thiếu logo trong thư mục brand của test
+    assert r.status_code == 422 and "ảnh bìa" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------- dọn build/
+def fill_build(client, slug):  # noqa: F811
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    build = folder / "build"
+    (build / "clips").mkdir(parents=True)
+    (build / "layers").mkdir()
+    (build / "clips" / "c1.mp4").write_bytes(b"x" * 1000)
+    (build / "layers" / "b1.png").write_bytes(b"y" * 500)
+    (build / "voice.wav").write_bytes(b"z" * 300)
+    (build / "mix.wav.key").write_text("k", encoding="utf-8")
+    (build / "timing.json").write_text("{" + " " * 99 + "}", encoding="utf-8")
+    (build / "timing.json.key").write_text("key", encoding="utf-8")
+    renders = folder / "renders" / "j1"
+    renders.mkdir(parents=True)
+    (renders / "video.mp4").write_bytes(b"v" * 700)
+    return folder, build
+
+
+def test_clean_build_keeps_timing_and_everything_else(client):  # noqa: F811
+    slug = complete_project(client)
+    folder, build = fill_build(client, slug)
+    before = sum(p.stat().st_size for p in build.rglob("*") if p.is_file())
+    r = client.post(f"/api/projects/{slug}/build/clean")
+    assert r.status_code == 200
+    body = r.json()
+    timing = (build / "timing.json").stat().st_size + (build / "timing.json.key").stat().st_size
+    assert body["before_bytes"] == before and body["after_bytes"] == timing
+    assert body["freed_bytes"] == before - timing and body["failed"] == 0
+    assert body["kept"] == ["timing.json", "timing.json.key"]
+    assert sorted(p.name for p in build.iterdir()) == ["timing.json", "timing.json.key"]
+    assert (folder / "renders" / "j1" / "video.mp4").is_file()  # không động renders/
+    assert (folder / "project.json").is_file() and (folder / "voice.wav").is_file()
+    assert (folder / "images").is_dir() and list((folder / "images").iterdir())
+    again = client.post(f"/api/projects/{slug}/build/clean").json()
+    assert again["freed_bytes"] == 0 and again["failed"] == 0
+
+
+def test_clean_build_without_a_build_folder(client):  # noqa: F811
+    slug = client.post("/api/projects", json={"title": "Chưa dựng"}).json()["slug"]
+    body = client.post(f"/api/projects/{slug}/build/clean").json()
+    assert body == {
+        "before_bytes": 0,
+        "after_bytes": 0,
+        "freed_bytes": 0,
+        "kept": [],
+        "failed": 0,
+    }
+    assert client.post("/api/projects/khong-co/build/clean").status_code == 404
+
+
+def test_clean_build_is_refused_while_rendering(client):  # noqa: F811
+    fake = FakeRender()
+    client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None
+    slug = complete_project(client)
+    _, build = fill_build(client, slug)
+    job = client.post(f"/api/projects/{slug}/render", json={"preview": True}).json()["job_id"]
+    assert fake.started.wait(5)
+    r = client.post(f"/api/projects/{slug}/build/clean")
+    assert r.status_code == 409 and (build / "voice.wav").is_file()  # không xoá gì
+    client.post(f"/api/jobs/{job}/cancel")
+    assert client.post(f"/api/projects/{slug}/build/clean").status_code == 200
