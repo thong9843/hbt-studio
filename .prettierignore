@@ -6,3 +6,5 @@ backend/.venv
 /*.md
 # Tài liệu lưu trữ, giữ nguyên bản gốc
 docs/archive
+# Lệnh slash của chủ dự án, giữ nguyên định dạng gốc
+.claude/commands

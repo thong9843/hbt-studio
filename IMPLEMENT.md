@@ -76,7 +76,7 @@ hbt-studio/
 └─ workspace/                # ignore toàn bộ: projects/<slug>/…
 ```
 
-`.gitignore` bắt buộc có: `workspace/`, `models/`, `library/music/**/*.mp3`, `*.mp4`, `*.wav`, `.env`, `node_modules/`, `.venv/`, `__pycache__/`.
+`.gitignore` bắt buộc có: `workspace/`, `models/`, `library/music/**` (kèm `!library/music/index.json`), `*.mp3`, `*.m4a`, `*.ogg`, `*.flac`, `*.aac`, `*.mp4`, `*.wav`, `.env`, `node_modules/`, `.venv/`, `__pycache__/`. Ngoại lệ: `brand/outro/*.mp4`, `library/outro/voice.wav`.
 
 ---
 
@@ -588,6 +588,14 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] `publish.txt` + nút sao chép
 - [ ] `thumbnail.py` (mục 4e)
 - **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
+
+**Kế hoạch M4 (chủ dự án chốt 23/10/2026):**
+- **Đợt 2 (máy cũ):**
+  - (a) Thư viện nhạc có id: slug từ tiêu đề, bỏ dấu tiếng Việt, trùng thì `-2`, tạo một lần. `file` là đường dẫn tương đối trong `library/music/`, cho thư mục con; từ chối tuyệt đối, ổ đĩa, `..`, `\`. Bỏ route `/music/{file}/audio` (dùng `/music/{id}/audio`). `.gitignore`: `library/music/**` + `!library/music/index.json` + chặn `*.mp3 *.m4a *.ogg *.flac *.aac`.
+  - (b) Tự chọn đoạn nhạc theo 6.1 (đã có) + `music.start`; ghi công từ thư viện; không thêm trường mới.
+  - (c) Lint từ nhạy cảm theo mục 7 (`sensitive_words.json`, warn/block theo danh mục), trang Cài đặt, áp cả dòng chữ bìa.
+- **Đợt 1 (máy mới):** Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper.
+- **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
 ---
 
