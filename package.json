@@ -17,9 +17,11 @@
     "format": "node scripts/py.mjs -m ruff format backend && prettier --write .",
     "test": "npm run test:py && npm run test:web",
     "test:py": "node scripts/py.mjs -m pytest backend",
-    "test:web": "npm -w frontend run test"
+    "test:web": "npm -w frontend run test",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "concurrently": "^9.2.5",
     "prettier": "^3.9.10"
   },

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from hbt.models import Project
+from hbt.models import Project, Scene, Theme
 
 from . import cache
 from . import captions as _captions
@@ -37,12 +37,22 @@ def first_phrase_words(voice: str) -> list[str]:
 def scene_preview_png(
     project: Project, project_dir: Path, scene_index: int, brand_dir: Path
 ) -> bytes:
-    """PNG 1080×1920 của cảnh `scene_index` (từ 0). Có cache trong `build/previews/`."""
-    scene = project.scenes[scene_index]
+    """PNG 1080×1920 của cảnh `scene_index` (từ 0) theo project đã lưu."""
+    return scene_preview_for(
+        project.scenes[scene_index], project.theme, project_dir, scene_index, brand_dir
+    )
+
+
+def scene_preview_for(
+    scene: Scene, theme_model: Theme, project_dir: Path, scene_index: int, brand_dir: Path
+) -> bytes:
+    """PNG 1080×1920 của một cảnh (có thể là bản nháp chưa lưu). Có cache trong `build/previews/`.
+
+    `scene.image` phải là đường dẫn tương đối nằm trong `project_dir` (đã được kiểm tra ở API)."""
     image = project_dir / scene.image if scene.image else None
     if image is None or not image.is_file():
         image = brand_dir / AVATAR
-    theme = project.theme.model_dump()
+    theme = theme_model.model_dump()
     words = first_phrase_words(scene.voice)
     key = cache.digest(
         "preview", image, scene.model_dump(exclude={"punch", "image"}), theme, words, _CODE

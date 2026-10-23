@@ -1,9 +1,12 @@
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
 
 from hbt.library import MusicLibrary
+from hbt.models import Thumbnail
 from hbt.sensitive import SensitiveStore, SensitiveWords
 from hbt.storage import BadRequest, Conflict, NotFound, Storage, Unprocessable, slugify
 from tests.helpers import needs_ffmpeg, write_wav
@@ -139,35 +142,30 @@ def test_delete(store):
         store.delete(p.slug)
 
 
-def test_duplicate_copies_media_but_not_build_or_renders(store):
+def test_duplicate_copies_media_but_not_build_or_renders(store, tmp_path):
     p = store.create("Muỗi")
+    rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "img.png"), "a.png", scene_index=0)
     d = store.project_dir(p.slug)
-    png(d / "images" / "scene-01.png")
     (d / "build").mkdir()
     (d / "build" / "voice.wav").write_bytes(b"x")
     (d / "renders" / "j1").mkdir(parents=True)
     (d / "renders" / "j1" / "video.mp4").write_bytes(b"x")
-    p.scenes[0].image = "images/scene-01.png"
-    store.save(p.slug, p)
 
     copy = store.duplicate(p.slug)
     assert copy.slug == "muoi-ban-sao" and copy.title == "Muỗi (bản sao)"
     cd = store.project_dir(copy.slug)
-    assert (cd / "images" / "scene-01.png").is_file()
+    assert (cd / rel).is_file()
     assert not (cd / "build").exists() and not (cd / "renders").exists()
-    assert store.load(copy.slug).scenes[0].image == "images/scene-01.png"
+    assert store.load(copy.slug).scenes[0].image == rel
     assert store.load(p.slug).slug == p.slug  # bản gốc không đổi
     assert store.duplicate(p.slug, title="Muỗi 2").slug == "muoi-2"
 
 
 # ---------------------------------------------------------------- danh sách
-def test_list_projects_fields_and_order(store):
+def test_list_projects_fields_and_order(store, tmp_path):
     a = store.create("Một")
     b = store.create("Hai")
-    d = store.project_dir(a.slug)
-    png(d / "images" / "scene-01.png")
-    a.scenes[0].image = "images/scene-01.png"
-    store.save(a.slug, a)  # a sửa sau cùng → lên đầu
+    rel, _ = store.save_asset(a.slug, "image", png(tmp_path / "img.png"), "a.png", scene_index=0)
     (store.project_dir(b.slug) / "renders" / "job1").mkdir(parents=True)
     (store.project_dir(b.slug) / "renders" / "job1" / "video.mp4").write_bytes(b"x")
     (store.project_dir(b.slug) / "renders" / "job1" / "meta.json").write_text(
@@ -180,7 +178,7 @@ def test_list_projects_fields_and_order(store):
     items = store.list_projects()
     by = {i["slug"]: i for i in items}
     assert [i["slug"] for i in items] == sorted(by, key=lambda s: by[s]["updated_at"], reverse=True)
-    assert by["mot"]["thumb"] == "projects/mot/images/scene-01.png"
+    assert by["mot"]["thumb"] == f"projects/mot/{rel}"
     assert by["hai"]["thumb"] is None and by["mot"]["last_render"] is None
     assert by["hai"]["last_render"] == {
         "job_id": "job1",
@@ -209,10 +207,10 @@ def test_list_projects_empty_workspace(tmp_path):
 # ---------------------------------------------------------------- tài sản
 def test_image_upload_renames_and_updates_project(store, tmp_path):
     p = store.create("Muỗi")
-    rel, project = store.save_asset(
-        p.slug, "image", png(tmp_path / "up.bin"), "a.png", scene_index=1
-    )
-    assert rel == "images/scene-02.png" and project.scenes[1].image == rel
+    f = png(tmp_path / "up.bin")
+    expected_hash = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
+    rel, project = store.save_asset(p.slug, "image", f, "a.png", scene_index=1)
+    assert rel == f"images/{expected_hash}.png" and project.scenes[1].image == rel
     assert (store.project_dir(p.slug) / rel).is_file() and not (tmp_path / "up.bin").exists()
     assert store.load(p.slug).scenes[1].image == rel
 
@@ -220,11 +218,11 @@ def test_image_upload_renames_and_updates_project(store, tmp_path):
 def test_image_replacement_removes_the_old_file_with_another_extension(store, tmp_path):
     p = store.create("Muỗi")
     Image.new("RGB", (32, 32)).save(tmp_path / "a.jpg", format="JPEG")
-    store.save_asset(p.slug, "image", tmp_path / "a.jpg", "a.jpg", scene_index=0)
+    rel_a, _ = store.save_asset(p.slug, "image", tmp_path / "a.jpg", "a.jpg", scene_index=0)
     folder = store.project_dir(p.slug) / "images"
-    assert (folder / "scene-01.jpg").is_file()
-    store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene_index=0)
-    assert [f.name for f in folder.iterdir()] == ["scene-01.png"]
+    assert (folder / Path(rel_a).name).is_file()
+    rel_b, _ = store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene_index=0)
+    assert [f.name for f in folder.iterdir()] == [Path(rel_b).name]
 
 
 @pytest.mark.parametrize("scene_index", [None, -1, 3, 99])
@@ -373,9 +371,178 @@ def test_scene_index_from_stem_rejects_other_names(bad):
         scene_index_from_stem(bad)
 
 
-def test_scene_index_zero_is_stored_as_scene_01(store, tmp_path):
+def test_scene_image_is_named_by_content_hash(store, tmp_path):
     p = store.create("Muỗi")
-    rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "a.png"), "a.png", scene_index=0)
-    assert rel == "images/scene-01.png"
-    rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "b.png"), "b.png", scene_index=7)
-    assert rel == "images/scene-08.png"
+    img_a = png(tmp_path / "a.png", color=(10, 20, 30))
+    ha = hashlib.sha256(img_a.read_bytes()).hexdigest()[:16]
+    rel_a, _ = store.save_asset(p.slug, "image", img_a, "a.png", scene_index=0)
+    assert rel_a == f"images/{ha}.png"
+
+    img_b = png(tmp_path / "b.png", color=(40, 50, 60))
+    hb = hashlib.sha256(img_b.read_bytes()).hexdigest()[:16]
+    rel_b, _ = store.save_asset(p.slug, "image", img_b, "b.png", scene_index=7)
+    assert rel_b == f"images/{hb}.png"
+
+
+def test_reorder_and_upload_preserves_other_image_hashes(store, tmp_path):
+    p = store.create("Muỗi", scene_count=3)
+    imgs = [png(tmp_path / f"c{i}.png", color=(i * 50 + 10, 100, 150)) for i in range(3)]
+    rels = []
+    for i, img in enumerate(imgs):
+        r, _ = store.save_asset(p.slug, "image", img, f"c{i}.png", scene_index=i)
+        rels.append(r)
+
+    images_dir = store.project_dir(p.slug) / "images"
+
+    def content_hash(rel):
+        return hashlib.sha256((images_dir / Path(rel).name).read_bytes()).hexdigest()
+
+    before = {r: content_hash(r) for r in rels}  # băm NỘI DUNG file trên đĩa
+
+    # Đổi thứ tự: [2, 0, 1]
+    p_reordered = store.reorder_scenes(p.slug, [2, 0, 1])
+    assert [s.image for s in p_reordered.scenes] == [rels[2], rels[0], rels[1]]
+
+    # Tải ảnh mới cho cảnh 0 (vốn là cảnh 2 cũ)
+    new_img = png(tmp_path / "new.png", color=(255, 255, 255))
+    new_hash = hashlib.sha256(new_img.read_bytes()).hexdigest()[:16]
+    new_rel, p_updated = store.save_asset(p.slug, "image", new_img, "new.png", scene_index=0)
+    assert new_rel == f"images/{new_hash}.png"
+
+    # Hash ảnh của cảnh 1 và cảnh 2 không đổi
+    assert p_updated.scenes[1].image == rels[0]
+    assert p_updated.scenes[2].image == rels[1]
+    # ...và nội dung file trên đĩa của hai cảnh đó đúng bằng trước khi đổi thứ tự
+    assert content_hash(p_updated.scenes[1].image) == before[rels[0]]
+    assert content_hash(p_updated.scenes[2].image) == before[rels[1]]
+    # tên file khớp với hash nội dung thật (không chỉ được đặt lúc lưu)
+    for scene in p_updated.scenes:
+        assert Path(scene.image).stem == content_hash(scene.image)[:16]
+
+
+def test_delete_scene_removes_unreferenced_image_and_keeps_others(store, tmp_path):
+    p = store.create("Muỗi", scene_count=4)
+    imgs = [png(tmp_path / f"img{i}.png", color=(i * 40 + 20, 80, 120)) for i in range(4)]
+    rels = []
+    for i, img in enumerate(imgs):
+        r, _ = store.save_asset(p.slug, "image", img, f"img{i}.png", scene_index=i)
+        rels.append(r)
+
+    images_dir = store.project_dir(p.slug) / "images"
+    assert (images_dir / Path(rels[1]).name).is_file()
+
+    # Xoá cảnh 1
+    p_after = store.delete_scene(p.slug, 1)
+    assert len(p_after.scenes) == 3
+
+    # Ảnh của cảnh bị xoá bị dọn khỏi thư mục images/
+    assert not (images_dir / Path(rels[1]).name).exists()
+
+    # Ảnh của các cảnh khác còn nguyên
+    for idx in (0, 2, 3):
+        assert (images_dir / Path(rels[idx]).name).is_file()
+
+
+def test_delete_scene_clamps_thumbnail_and_enforces_limits(store):
+    p = store.create("Muỗi", scene_count=4)
+    p.thumbnail = Thumbnail(scene=4, lines=["A", "B"], series="", accent="#FFD43B")
+    store.save(p.slug, p)
+
+    # Xoá cảnh 0 -> thumbnail.scene giảm từ 4 xuống 3
+    p = store.delete_scene(p.slug, 0)
+    assert len(p.scenes) == 3
+    assert p.thumbnail.scene == 3
+
+    # Số cảnh hiện tại là 3 (MIN_SCENES = 3), xoá tiếp sẽ báo lỗi
+    with pytest.raises(BadRequest, match="ít nhất 3 cảnh"):
+        store.delete_scene(p.slug, 0)
+
+
+def test_legacy_scene_01_migrates_on_load(store, tmp_path):
+    p = store.create("Muỗi", scene_count=3)
+    folder = store.project_dir(p.slug)
+    images_dir = folder / "images"
+
+    img_file = png(images_dir / "scene-01.png", color=(123, 45, 67))
+    content_hash = hashlib.sha256(img_file.read_bytes()).hexdigest()[:16]
+
+    # Ghi đè project.json với dạng cũ "images/scene-01.png"
+    p.scenes[0].image = "images/scene-01.png"
+    # Ghi trực tiếp vào file json mà không qua save() để giữ nguyên tên cũ
+    (folder / "project.json").write_text(json.dumps(p.model_dump(mode="json")), encoding="utf-8")
+
+    # Mở project: tự chuyển sang hash
+    loaded = store.load(p.slug)
+    assert loaded.scenes[0].image == f"images/{content_hash}.png"
+    assert (images_dir / f"{content_hash}.png").is_file()
+    assert not (images_dir / "scene-01.png").exists()
+
+    # Đọc lại ảnh xem đúng màu không
+    pix = Image.open(images_dir / f"{content_hash}.png").getpixel((0, 0))
+    assert pix == (123, 45, 67)
+
+
+def test_load_does_not_read_images_that_are_already_hash_named(store, tmp_path, monkeypatch):
+    p = store.create("Mười hai", scene_count=12)
+    for i in range(12):
+        img = png(tmp_path / f"m{i}.png", color=(i * 20, 90, 140))
+        store.save_asset(p.slug, "image", img, f"m{i}.png", scene_index=i)
+    images_dir = store.project_dir(p.slug) / "images"
+    assert len(list(images_dir.iterdir())) == 12
+
+    reads = []
+    real_read_bytes = Path.read_bytes
+
+    def spy(self):
+        if images_dir in self.parents:
+            reads.append(self.name)
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", spy)
+    monkeypatch.setattr("hbt.storage.content_hash_16", lambda data: pytest.fail("đã băm ảnh"))
+    loaded = store.load(p.slug)
+    assert len(loaded.scenes) == 12 and reads == []
+
+
+def test_load_still_migrates_a_scene_name_image(store, tmp_path):
+    p = store.create("Cũ", scene_count=3)
+    folder = store.project_dir(p.slug)
+    (folder / "images").mkdir(exist_ok=True)
+    png(folder / "images" / "scene-01.png")
+    p.scenes[0].image = "images/scene-01.png"
+    (folder / "project.json").write_text(p.model_dump_json(), encoding="utf-8")
+    loaded = store.load(p.slug)
+    assert loaded.scenes[0].image != "images/scene-01.png"
+    assert (folder / loaded.scenes[0].image).is_file()
+
+
+def test_cleanup_only_removes_app_named_unreferenced_images(store, tmp_path, caplog):
+    p = store.create("Dọn", scene_count=3)
+    keep = png(tmp_path / "k.png", color=(10, 20, 30))
+    rel, _ = store.save_asset(p.slug, "image", keep, "k.png", scene_index=0)
+    images_dir = store.project_dir(p.slug) / "images"
+    (images_dir / "0123456789abcdef.png").write_bytes(b"x")  # tên hash, không ai dùng
+    (images_dir / "scene-02.jpg").write_bytes(b"x")  # dạng cũ, không ai dùng
+    (images_dir / "ghi-chu.txt").write_text("của tôi", encoding="utf-8")
+    (images_dir / "anh-cua-toi.png").write_bytes(b"x")
+
+    with caplog.at_level("WARNING"):
+        store.save(p.slug, store.load(p.slug))
+
+    names = {f.name for f in images_dir.iterdir()}
+    assert names == {Path(rel).name, "ghi-chu.txt", "anh-cua-toi.png"}
+    assert "ghi-chu.txt" in caplog.text and "anh-cua-toi.png" in caplog.text
+
+
+def test_upload_normalises_extension_so_load_does_not_rehash(store, tmp_path, monkeypatch):
+    p = store.create("Đuôi hoa", scene_count=3)
+    Image.new("RGB", (32, 32), (9, 9, 9)).save(tmp_path / "x.bin", format="JPEG")
+    rel_jpg, _ = store.save_asset(p.slug, "image", tmp_path / "x.bin", "ANH.JPEG", scene_index=0)
+    rel_png, _ = store.save_asset(
+        p.slug, "image", png(tmp_path / "y.bin"), "ANH.PNG", scene_index=1
+    )
+    assert rel_jpg.endswith(".jpg") and rel_png.endswith(".png")
+
+    monkeypatch.setattr("hbt.storage.content_hash_16", lambda data: pytest.fail("đã băm lại ảnh"))
+    loaded = store.load(p.slug)
+    assert [s.image for s in loaded.scenes][:2] == [rel_jpg, rel_png]

@@ -6,9 +6,9 @@ from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State, file_url
-from hbt.models import MAX_SCENES, MIN_SCENES, Project
-from hbt.pipeline.preview import resize_png, scene_preview_png
-from hbt.storage import Conflict, NotFound
+from hbt.models import MAX_SCENES, MIN_SCENES, Project, Scene, Theme
+from hbt.pipeline.preview import resize_png, scene_preview_for, scene_preview_png
+from hbt.storage import BadRequest, Conflict, NotFound
 
 router = APIRouter(tags=["projects"])
 
@@ -89,3 +89,64 @@ def scene_preview(
     if w and w < 1080:
         png = resize_png(png, w)
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+class SceneReorder(BaseModel):
+    order: list[int] = Field(description="cảnh mới thứ i là cảnh cũ order[i] (hoán vị của 0..n-1)")
+
+
+@router.post("/projects/{slug}/scenes/reorder", response_model=Project)
+def reorder_scenes(slug: str, body: SceneReorder, state: State):
+    if state.jobs.is_busy(slug):
+        raise Conflict("Project đang được dựng, hãy đợi xong rồi mới đổi thứ tự cảnh")
+    return state.storage.reorder_scenes(slug, body.order)
+
+
+@router.delete("/projects/{slug}/scenes/{scene_index}", response_model=Project)
+def delete_scene(slug: str, scene_index: int, state: State):
+    """Xoá một cảnh trong project (`scene_index` từ 0), giữ ràng buộc 3–12 cảnh."""
+    if state.jobs.is_busy(slug):
+        raise Conflict("Project đang được dựng, hãy huỷ job trước khi xoá cảnh")
+    return state.storage.delete_scene(slug, scene_index)
+
+
+class DraftPreview(BaseModel):
+    scene: Scene
+    theme: Theme | None = None  # bỏ trống → dùng theme đã lưu của project
+
+
+@router.post("/projects/{slug}/scenes/{scene_index}/preview.png")
+def draft_scene_preview(
+    slug: str,
+    scene_index: int,
+    body: DraftPreview,
+    state: State,
+    w: int | None = Query(default=None, ge=16, le=1080),
+) -> Response:
+    """Xem trước một cảnh bản nháp (chưa lưu) để thấy kết quả ngay khi đang gõ."""
+    project = state.storage.load(slug)
+    if scene_index < 0:
+        raise BadRequest("scene_index phải >= 0")
+    if body.scene.image:
+        state.storage.project_file(slug, body.scene.image)  # 422 nếu thoát khỏi thư mục project
+    png = scene_preview_for(
+        body.scene,
+        body.theme or project.theme,
+        state.storage.project_dir(slug),
+        scene_index,
+        state.brand_dir,
+    )
+    if w and w < 1080:
+        png = resize_png(png, w)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/projects/{slug}/renders")
+def list_renders(slug: str, state: State):
+    """Lịch sử các lần xuất (mới nhất trước); đường dẫn file đã đổi thành URL."""
+    state.storage.load(slug)
+    items = state.storage.list_renders(slug)
+    for item in items:
+        for key in ("video", "srt", "publish", "log"):
+            item[key] = file_url(item[key])
+    return items

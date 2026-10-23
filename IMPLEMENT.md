@@ -8,18 +8,33 @@
 
 ---
 
-## 0. Môi trường (Windows 10/11, RTX 2060 Super 8 GB)
+## 0. Môi trường (Windows 10/11)
+
+### Hồ sơ máy
+
+Chủ dự án dùng hai máy và sẽ cho biết đang dùng máy nào ở đầu mỗi lần mở chat.
+
+| Máy | CPU | GPU | RAM |
+|---|---|---|---|
+| **Máy cũ** | Intel i5-10400 | không có GPU rời | 16 GB |
+| **Máy mới** | Intel i5-14400F | NVIDIA RTX 2060 Super, 8 GB VRAM | 32 GB |
+
+**Quy tắc:** không giả định có GPU. Mọi tính năng cần GPU phải có đường dự phòng chạy bằng CPU (Whisper: mục 5.2).
+
+### Phần mềm
 
 | Thành phần | Phiên bản | Cài |
 |---|---|---|
 | Git | mới nhất | `winget install Git.Git` |
-| Python | 3.11.x | `winget install Python.Python.3.11` |
+| Python | **3.11.x (ghim)** | `winget install Python.Python.3.11` |
 | Node.js | 20 LTS trở lên | `winget install OpenJS.NodeJS.LTS` |
 | FFmpeg | ≥ 6.0, có `libx264`, `zoompan`, `xfade`, `sidechaincompress`, `loudnorm` | `winget install Gyan.FFmpeg` (thêm vào PATH) |
-| Driver NVIDIA | hỗ trợ CUDA 12 | GeForce Experience / trang NVIDIA |
-| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper` + thư viện CUDA (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
+| Driver NVIDIA | hỗ trợ CUDA 12 (chỉ máy có GPU) | GeForce Experience / trang NVIDIA |
+| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
 
-Lần chạy Whisper đầu tiên sẽ tải model `large-v3` (~3 GB) về `models/` (đã ignore). Nếu không có GPU hoặc lỗi CUDA → tự rơi về CPU, rồi về chế độ căn theo khoảng lặng.
+**Python:** dự án ghim **Python 3.11.x**. Máy nào đã có Python mới hơn thì cài thêm 3.11 **song song** (không gỡ bản cũ), gọi bằng `py -3.11`, và tạo `backend\.venv` đúng bằng bản 3.11 (`py -3.11 -m venv backend\.venv`). Kiểm tra bằng `py -3.11 --version` (README có bước này). Claude Code phải **hỏi chủ dự án trước khi cài** Python hay bất kỳ phần mềm cấp hệ thống nào.
+
+Model Whisper tải lần chạy đầu về `models/` (đã ignore); chọn model và thiết bị theo phần cứng: mục 5.2. Lỗi CUDA, không có GPU hoặc Whisper không dùng được → rơi về CPU, rồi về căn theo khoảng lặng.
 
 ---
 
@@ -77,10 +92,11 @@ npm run dev                         # chạy song song: uvicorn 127.0.0.1:8000 +
 ```
 WORKSPACE_DIR=./workspace
 LIBRARY_DIR=./library
-WHISPER_MODEL=large-v3
+WHISPER_MODEL=auto         # auto | small | medium | large-v3 (mục 5.2)
 WHISPER_DEVICE=auto        # auto | cuda | cpu
 DEFAULT_FPS=50
 ```
+(`WHISPER_MODEL=auto` là trạng thái đích; M4 cập nhật `.env.example` và `config.py` cho khớp. Hiện `.env.example` còn `large-v3`.)
 
 Backend chỉ bind `127.0.0.1`. Không có đăng nhập.
 
@@ -178,7 +194,7 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 | 9 | Ghép cuối | `assemble` (reference): xfade `slideleft` 0,4 s + phủ phụ đề + tiếng; H.264 `crf 18 medium`, `-r {fps}`, yuv420p, AAC 192k, `+faststart` | 80–98 |
 | 10 | Kiểm tra đầu ra | ffprobe đúng fps, 1080×1920, độ dài; đo `ebur128` trong khoảng −15…−13 LUFS; sinh `publish.txt` | 98–100 |
 
-**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, `ultrafast`. Dùng để duyệt trước khi xuất bản đẹp.
+**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
 
 **FPS:** mặc định **50** (cho phép 30, 50, 60). Không cho chọn số lạ như 45 (nền tảng dễ chuyển đổi lại gây giật). Xem mục 4b.
 
@@ -261,6 +277,17 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.2 Căn thời gian (`align.align`)
 1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
+   - **Chọn cấu hình theo phần cứng** (chủ dự án chốt 22/10/2026). `.env`: `WHISPER_DEVICE=auto`, `WHISPER_MODEL=auto`.
+
+     | Phần cứng | Thiết bị | Kiểu tính | Model |
+     |---|---|---|---|
+     | Có CUDA (máy mới, RTX 2060 Super 8 GB) | `cuda` | `int8_float16` | `large-v3` (cần thư viện CUDA 12 theo README của faster-whisper) |
+     | Không có GPU (máy cũ) | `cpu` | `int8` | `small` |
+
+     Trong **Cài đặt** cho đổi sang `medium` hoặc `large-v3` trên CPU, kèm cảnh báo "sẽ chậm". Không giả định có GPU: `auto` kiểm tra CUDA lúc chạy (`/health.gpu`).
+   - **Cache:** kết quả căn chữ lưu ở `build/timing.json`, khoá theo **hash file giọng** và **hash kịch bản** (kèm phương pháp, model, mã nguồn); chỉ căn lại khi một trong hai đổi.
+   - **Dự phòng khi lỗi hoặc chậm:** Whisper lỗi (không cài, lỗi CUDA, thiếu RAM) hoặc quá chậm (vượt **giới hạn thời gian** đặt trong Cài đặt) thì tự rơi về căn theo khoảng lặng (mục dưới) và ghi log lý do; kết quả ghi rõ phương pháp đã dùng.
+   - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
    - **Điểm lệch khỏi mô tả ban đầu** (chủ dự án duyệt 21/10/2026): thêm vào chi phí cấp 1 một **số hạng phạt khoảng nghỉ**. Nếu cảnh kết thúc bằng dấu cuối câu (`.` `?` `!`) thì ranh giới sau cảnh đó phải rơi vào khoảng nghỉ dài: phạt `4,0 × max(0, ngưỡng − độ dài khoảng nghỉ)`, với ngưỡng = 0,85 × phân vị 75 của các khoảng nghỉ trong chính file (nên không phụ thuộc giọng cụ thể). Cảnh không kết thúc bằng dấu cuối câu thì không bị phạt. Không có số hạng này, trên tập "muỗi" ranh giới cảnh 6→7 và 7→8 trôi sang đoạn kế bên (lệch hàng giây); có nó thì 7 mốc cắt khớp bản đã đăng trong 4 ms. Test: `test_scene_boundary_follows_the_long_pause_when_the_scene_ends_a_sentence` (đã kiểm tra bằng cách tắt số hạng này thì test fail).
@@ -403,7 +430,14 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
 - **Slug project** (chủ dự án chốt 21/10/2026): chỉ `[a-z0-9-]` (không bắt đầu/kết thúc/đôi dấu gạch), tối đa 60 ký tự, và không trùng tên thiết bị dành riêng của Windows (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Mọi nơi dùng slug đều kiểm tra và trả **422** `Slug không hợp lệ: …` (đọc, sửa, xoá, nhân bản, tải file, xem trước, lint, dựng, và `/files/projects/<slug>/…`; slug trong thân `PUT` cũng vậy). Đường dẫn `/files` có `..`, đường dẫn tuyệt đối, ổ đĩa hoặc thư mục ẩn cũng 422; đường dẫn đúng dạng mà không có file thì 404. Tiêu đề trùng tên thiết bị Windows ("Con", "NUL"…) được thêm hậu tố `-video`; hậu tố chống trùng (`-2`, `-3`…) không làm slug vượt 60 ký tự.
 - **Thiếu FFmpeg** (chủ dự án chốt 21/10/2026): server không sập. `/health` báo `ffmpeg: false`, `missing: ["ffmpeg"]`. `POST /render` trả **503** kèm lời nhắn cài (`winget install Gyan.FFmpeg`, mở lại terminal, xem README.md) và **không tạo job**; cũng trả 503 nếu FFmpeg thiếu encoder/filter bắt buộc hoặc thiếu ffprobe. Tải giọng/nhạc và `POST /music` trả 503 (cần ffprobe để kiểm tra file). Project chưa đủ vẫn nhận 422 trước 503. Những việc không cần FFmpeg (CRUD, ảnh, xem trước, lint, `/files`, từ nhạy cảm) vẫn chạy.
-- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`), phát nhạc thư viện cho nút nghe thử (cần cho M3).
+- Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`).
+
+**Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
+- `GET /music/{file}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `file` là tên file trong `GET /music`); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
+- `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
+- `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
+- `GET|PUT /settings/app`: `{default_fps, theme{primary,accent}, whisper_model, whisper_timeout_seconds}` lưu ở `workspace/settings/app.json`. `default_fps` và `theme` áp dụng cho project tạo mới; hai trường Whisper chỉ được lưu, M4 mới dùng.
 
 ---
 
@@ -520,13 +554,35 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Xong khi:** tạo project, tải file, dựng video hoàn toàn bằng `curl`.
 
 ### M3 · Giao diện
-- [ ] Áp `DESIGN.md` → tokens.css + màu HBT; gắn logo, favicon, icon từ `brand/` (theo mục 10.1)
-- [ ] 4 màn hình mục 10.2, kéo thả ảnh/cảnh, lưu tự động
-- [ ] Theo dõi tiến độ bằng SSE, trình phát video, tải file
+- [x] Áp `DESIGN-HBT.md` → tokens.css + màu HBT; gắn logo, favicon, icon từ `brand/` (không dùng `DESIGN.md` của getdesign)
+- [x] 4 màn hình mục 10.2, kéo thả ảnh/cảnh, lưu tự động
+- [x] Theo dõi tiến độ bằng SSE, trình phát video, tải file
 - **Xong khi:** làm trọn 1 video chỉ bằng giao diện, không mở terminal.
+
+**Quyết định kỹ thuật khi làm M3** (23/10/2026, chờ chủ dự án duyệt):
+- **Biểu tượng:** `DESIGN-HBT.md` mục 6 ghi `lucide-react`, nhưng danh sách thư viện được phép không có. Đã vẽ bộ biểu tượng SVG riêng (`components/icons.tsx`, nét 1,8). Nếu muốn dùng `lucide-react`, chủ dự án duyệt rồi đổi.
+- **Font:** chỉ có ba bản (500/700/800) trong `backend/hbt/fonts/`; đổi sang `.woff2` bằng fontTools (cài trong `backend/.venv`). Độ đậm 400 dùng bản 500, 600 dùng bản 700.
+- **Lưu tự động:** giữ bản nháp trên máy, `PUT` sau 1 s; trước khi tải file, đổi thứ tự cảnh hoặc dựng thì lưu ngay. Ctrl+S lưu ngay, Alt+↑/↓ chuyển cảnh.
+- **Xoá cảnh:** API không có thao tác xoá cảnh. Giao diện đưa cảnh cần xoá xuống cuối bằng `POST /scenes/reorder` (máy chủ đổi tên ảnh) rồi `PUT` bỏ cảnh cuối; ảnh mồ côi của cảnh bị xoá vẫn nằm trong `images/` và bị ghi đè khi thêm cảnh mới.
+- **Nghe thử nhạc thư viện:** `GET /music/{file}/audio` (`file` là tên file, bảng `GET /music` chưa có trường `id`).
+- **Bản đẹp:** chọn 30/50/60 fps, mặc định theo fps của project; nút "Xem nhanh" là nút đen duy nhất, "Xuất bản đẹp" là nút vàng duy nhất.
+- **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
+- **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
+
+- **Thời gian dựng bản đẹp (đo 22/10/2026, i5-10400, không GPU, máy rảnh, tập "muỗi" 8 cảnh 50 s, 1080×1920 50 fps):** 143 s, tương đương M1 (145 s). Lần 261 s ở M3 đo khi trình duyệt và máy chủ dev đang chạy; không có lỗi hiệu năng trong bộ dựng. Khi đo thời gian, tắt `npm run dev` và trình duyệt.
+
+**Backlog sau M3 (chưa làm, không thuộc mốc nào):**
+- Chuyển sang `lucide-react` (cần chủ dự án duyệt thêm thư viện, xem quyết định Biểu tượng ở trên).
+- Thêm font độ đậm 400 và 600 thật (hiện dùng 500 và 700 thay thế).
+- Ảnh chụp màn hình giao diện cho README/tài liệu.
+- Hiệu ứng chuyển trang trượt 200 ms (mục 7 của bản nháp lời chủ dự án).
+
+**Mục theo dõi:** một test pytest từng rớt đúng một lần khi máy đang bận, chưa tái hiện được. CI đã in tên test rớt (`scripts/ci_annotate.py`); nếu rớt lại thì ghi tên test và điều kiện vào đây rồi điều tra.
 
 ### M4 · Hoàn thiện
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
+- [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
+- [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
 - [ ] Lint nội dung + trang chỉnh danh sách từ
 - [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
 - [ ] `publish.txt` + nút sao chép

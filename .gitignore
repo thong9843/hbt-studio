@@ -20,3 +20,5 @@ __pycache__/
 frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
+test-results
+playwright-report

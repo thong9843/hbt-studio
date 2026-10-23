@@ -63,7 +63,9 @@ def test_quality_modes():
         16,
     )
     prev = render.quality_for(True, 50)
-    assert (prev.width, prev.height, prev.fps, prev.final_preset) == (540, 960, 30, "ultrafast")
+    assert (prev.width, prev.height, prev.fps, prev.final_preset) == (540, 960, 30, "veryfast")
+    assert (prev.final_crf, prev.audio_bitrate) == (30, "96k")
+    assert (full.final_crf, full.audio_bitrate) == (16, "192k")
 
 
 def test_slide_frame_moves_from_a_to_b():

@@ -1,22 +1,66 @@
-/* Token giao diện. Màu HBT theo IMPLEMENT.md mục 10.1.
-   Token phong cách từ DESIGN.md sẽ thêm ở M3, sau khi chủ dự án duyệt file. */
+/* Token giao diện theo DESIGN-HBT.md mục 2-4. Sáng/tối theo hệ thống (prefers-color-scheme). */
 :root {
-  --hbt-red: #b22228;
-  --hbt-cream: #f7eeda;
-  --hbt-mustard: #f4b630;
-  --hbt-ink: #1e1816;
+  /* Màu (mục 2) */
+  --bg: #ffffff;
+  --surface: #f5f5f5;
+  --surface-2: #ebebeb;
+  --text: #111111;
+  --text-muted: #5c5c5c;
+  --border: #e0e0e0;
+  --primary: #111111;
+  --on-primary: #ffffff;
+  --accent: #f4b630;
+  --on-accent: #111111;
+  --brand-red: #b22228;
+  --brand-cream: #f7eeda;
+  --brand-ink: #1e1816;
+  --danger: #b3261e;
+  --focus: #111111;
 
-  --color-bg: #ffffff;
-  --color-fg: #111111;
-  --color-muted: #6b6b6b;
-  --color-surface: #f5f5f5;
+  /* Khoảng cách: thang 4 px (mục 4) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* Bo góc (mục 4) */
+  --radius-pill: 999px;
+  --radius-input: 12px;
+  --radius-card: 20px;
+  --radius-preview: 16px;
+  --radius-frame: 24px;
+
+  /* Chuyển động (mục 7) */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 180ms;
+
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #111111;
-    --color-fg: #ffffff;
-    --color-muted: #a3a3a3;
-    --color-surface: #1f1f1f;
+    --bg: #0e0e0e;
+    --surface: #171717;
+    --surface-2: #222222;
+    --text: #f5f5f5;
+    --text-muted: #a3a3a3;
+    --border: #2e2e2e;
+    --primary: #f5f5f5;
+    --on-primary: #111111;
+    --danger: #ff6b6b;
+    --focus: #f4b630;
+
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
   }
 }

@@ -141,8 +141,8 @@ def test_list_projects(client):
     slug = client.post("/api/projects", json={"title": "Hai"}).json()["slug"]
     upload_image(client, slug, 0)
     items = {i["slug"]: i for i in client.get("/api/projects").json()}
-    assert set(items) == {"mot", "hai"}
-    assert items["hai"]["thumb"] == "/api/files/projects/hai/images/scene-01.png"
+    thumb = items["hai"]["thumb"]
+    assert thumb.startswith("/api/files/projects/hai/images/") and thumb.endswith(".png")
     assert items["mot"]["thumb"] is None and items["mot"]["last_render"] is None
     assert items["hai"]["updated_at"].endswith("Z")
     assert client.get(items["hai"]["thumb"]).status_code == 200
@@ -210,9 +210,10 @@ def test_image_upload_updates_the_project(client):
     r = upload_image(client, slug, 2)
     assert r.status_code == 200
     body = r.json()
-    assert body["kind"] == "image" and body["path"] == "images/scene-03.png"
-    assert body["project"]["scenes"][2]["image"] == "images/scene-03.png"
-    got = client.get(f"/api/files/projects/{slug}/images/scene-03.png")
+    path = body["path"]
+    assert body["kind"] == "image" and path.startswith("images/") and path.endswith(".png")
+    assert body["project"]["scenes"][2]["image"] == path
+    got = client.get(f"/api/files/projects/{slug}/{path}")
     assert got.status_code == 200 and got.headers["content-type"] == "image/png"
 
 
@@ -393,7 +394,8 @@ def test_music_library(client):
 # ---------------------------------------------------------------- file
 def test_files_serving_and_range(client):
     slug = complete_project(client)
-    url = f"/api/files/projects/{slug}/images/scene-01.png"
+    img = client.get(f"/api/projects/{slug}").json()["scenes"][0]["image"]
+    url = f"/api/files/projects/{slug}/{img}"
     full = client.get(url)
     assert full.status_code == 200 and len(full.content) > 100
     part = client.get(url, headers={"Range": "bytes=0-9"})
@@ -555,12 +557,14 @@ def test_openapi_names_the_zero_based_index_scene_index(client):
     assert "scene_index" in body and "scene" not in body
 
 
-def test_scene_index_zero_is_the_first_scene_and_file_is_numbered_from_one(client):
+def test_scene_index_zero_is_the_first_scene_and_file_is_named_by_hash(client):
     slug = client.post("/api/projects", json={"title": "Muỗi"}).json()["slug"]
     first = upload_image(client, slug, 0).json()
     last = upload_image(client, slug, 7).json()
-    assert first["path"] == "images/scene-01.png" and first["project"]["scenes"][0]["image"]
-    assert last["path"] == "images/scene-08.png" and last["project"]["scenes"][7]["image"]
+    assert first["path"].startswith("images/")
+    assert first["project"]["scenes"][0]["image"] == first["path"]
+    assert last["path"].startswith("images/")
+    assert last["project"]["scenes"][7]["image"] == last["path"]
     assert client.get(f"/api/projects/{slug}/scenes/0/preview.png").status_code == 200
     assert client.get(f"/api/projects/{slug}/scenes/8/preview.png").status_code == 404
 
@@ -635,10 +639,12 @@ def test_incomplete_project_still_gets_the_422_list_before_the_ffmpeg_check(
 def test_features_that_do_not_need_ffmpeg_keep_working(client, monkeypatch, tmp_path):
     slug = ready_without_ffmpeg(client)
     no_ffmpeg(monkeypatch, tmp_path)
-    assert upload_image(client, slug, 0, (10, 20, 30)).status_code == 200
+    up = upload_image(client, slug, 0, (10, 20, 30))
+    assert up.status_code == 200
+    img_path = up.json()["path"]
     assert client.get(f"/api/projects/{slug}/scenes/0/preview.png").status_code == 200
     assert client.post(f"/api/projects/{slug}/lint").status_code == 200
-    assert client.get(f"/api/files/projects/{slug}/images/scene-01.png").status_code == 200
+    assert client.get(f"/api/files/projects/{slug}/{img_path}").status_code == 200
     assert client.get("/api/music").status_code == 200
     assert client.get("/api/settings/sensitive-words").status_code == 200
     assert client.get("/api/projects").status_code == 200

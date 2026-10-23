@@ -19,6 +19,17 @@
 - Không tự push. Chỉ push khi chủ dự án yêu cầu.
 - Không commit khi lint hoặc test đang đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
 
+## Quy trình mốc
+- Mỗi mốc một nhánh riêng `feat/mX-…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`), mỗi commit đều có lint và test xanh.
+- Kết thúc mốc theo **đúng thứ tự**:
+  1. Lint và test xanh.
+  2. Commit cuối `chore(Mx): done`, chỉ cập nhật bảng Tiến độ trong `PLAN.md` và Nhật ký quyết định.
+  3. CI trên GitHub xanh.
+  4. Báo cáo cho chủ dự án duyệt.
+  5. Chỉ sau khi chủ dự án duyệt: merge `--no-ff` vào `main`, gắn tag `v0.x.0`, push.
+  6. Báo hash commit cuối của `main` và tag.
+- Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
+
 ## Lệnh hay dùng
 ```
 npm run dev                                   # chạy backend + frontend

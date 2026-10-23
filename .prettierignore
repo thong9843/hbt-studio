@@ -4,3 +4,5 @@ package-lock.json
 backend/.venv
 # Tài liệu của chủ dự án (và DESIGN.md bên thứ ba) — giữ nguyên định dạng gốc
 /*.md
+# Tài liệu lưu trữ, giữ nguyên bản gốc
+docs/archive

@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from hbt.api.assets import MAX_BYTES, save_upload
 from hbt.api.deps import State
 from hbt.library import MusicEntry
+from hbt.models import Project
 from hbt.storage import BadRequest
 
 router = APIRouter(tags=["music"])
@@ -48,3 +51,23 @@ def add_music(
         return state.library.add(tmp, file.filename or "", meta)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+@router.get("/music/{file:path}/audio")
+def get_library_music(file: str, state: State) -> FileResponse:
+    """Phát một bài trong thư viện để nghe thử (có Range). `file` là tên file trong `GET /music`."""
+    _, path = state.library.find(file)
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
+class FromLibrary(BaseModel):
+    file: str
+
+
+@router.post("/projects/{slug}/music/from-library", response_model=Project)
+def attach_library_music(slug: str, body: FromLibrary, state: State):
+    """Dùng một bài trong thư viện cho project: chép file và đặt ghi công theo thư viện."""
+    state.storage.load(slug)  # 404 trước nếu project không có
+    entry, path = state.library.find(body.file)
+    _, project = state.storage.attach_music(slug, path, entry.credit)
+    return project

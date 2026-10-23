@@ -36,6 +36,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Build web
+        run: npm run build
+
       # Không cần GPU. Test cần FFmpeg sẽ THẤT BẠI (không bỏ qua) nếu runner thiếu FFmpeg vì CI=true.
       - name: Test
         run: npm run test

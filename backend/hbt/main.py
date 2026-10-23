@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 
 from hbt.api import assets, files, health, lint, music, projects
 from hbt.api import render as render_api
+from hbt.api import settings as settings_api
+from hbt.app_settings import AppSettingsStore
 from hbt.config import BRAND_DIR, Settings, load_settings
 from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
@@ -40,13 +42,15 @@ STATUS_BY_ERROR = {
 def create_app(settings: Settings | None = None, brand_dir: Path | None = None) -> FastAPI:
     settings = settings or load_settings()
     brand_dir = brand_dir or BRAND_DIR
-    storage = Storage(settings.workspace_dir, settings.default_fps)
+    app_settings = AppSettingsStore(settings.workspace_dir, settings.default_fps)
+    storage = Storage(settings.workspace_dir, settings.default_fps, app_settings)
     state = AppState(
         settings=settings,
         storage=storage,
         jobs=JobManager(storage, settings.library_dir, brand_dir),
         library=MusicLibrary(settings.library_dir),
         sensitive=SensitiveStore(settings.workspace_dir),
+        app_settings=app_settings,
         brand_dir=brand_dir,
     )
 
@@ -78,7 +82,7 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
         ]
         return JSONResponse({"detail": "; ".join(parts) or "Dữ liệu không hợp lệ"}, status_code=422)
 
-    for module in (health, projects, assets, lint, render_api, music, files):
+    for module in (health, projects, assets, lint, settings_api, render_api, music, files):
         app.include_router(module.router, prefix="/api")
     return app
 
