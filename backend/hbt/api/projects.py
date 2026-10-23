@@ -147,6 +147,6 @@ def list_renders(slug: str, state: State):
     state.storage.load(slug)
     items = state.storage.list_renders(slug)
     for item in items:
-        for key in ("video", "srt", "publish", "log"):
+        for key in ("video", "srt", "publish", "log", "cover", "youtube_cover"):
             item[key] = file_url(item[key])
     return items

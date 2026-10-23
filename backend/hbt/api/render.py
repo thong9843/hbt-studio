@@ -15,7 +15,7 @@ from hbt.jobs import Job
 
 router = APIRouter(tags=["render"])
 
-URL_KEYS = ("video", "srt", "publish", "log")
+URL_KEYS = ("video", "srt", "publish", "log", "cover", "youtube_cover")
 POLL_SECONDS = 0.2
 
 

@@ -40,6 +40,7 @@ from .lint import describe_issue, lint_project
 from .publish import build_publish_text
 from .scene_align import AlignError, align_scenes
 from .text import parse_voice
+from .thumbnail import LOGO_FILE, render_cover, save_covers
 from .visual import build_scene_layers
 
 X = 0.4  # thời lượng chuyển cảnh (giây)
@@ -116,6 +117,8 @@ class RenderResult:
     seconds: float
     warnings: list[str] = field(default_factory=list)
     preview_seconds: float | None = None  # có giá trị khi chỉ dựng đoạn đầu
+    cover: Path | None = None  # cover_9x16.jpg; None nếu không có khối thumbnail hoặc vẽ lỗi
+    youtube_cover: Path | None = None  # youtube_3x2.jpg
 
 
 # ---------------------------------------------------------------- toán học chuyển động
@@ -365,6 +368,17 @@ def compose(
     except BaseException:
         partial.unlink(missing_ok=True)  # không để lại video dang dở
         raise
+
+
+# ---------------------------------------------------------------- ảnh bìa
+def make_covers(project, project_dir: Path, out_dir: Path, brand_dir: Path) -> tuple[Path, Path]:
+    """Vẽ `cover_9x16.jpg` và `youtube_3x2.jpg` từ `project.thumbnail` (mục 4e)."""
+    thumb = project.thumbnail
+    bg = project_dir / project.scenes[thumb.scene - 1].image
+    image = render_cover(
+        bg, thumb.lines, thumb.series or project.series, thumb.accent, brand_dir / LOGO_FILE
+    )
+    return save_covers(image, out_dir)
 
 
 # ---------------------------------------------------------------- căn chữ
@@ -766,6 +780,15 @@ def _render_project(
         lufs = measure_lufs(video)
         if not -15.0 <= lufs <= -13.0:
             warn(f"Độ lớn tổng {lufs:.1f} LUFS nằm ngoài khoảng −15…−13")
+    cover = youtube_cover = None
+    if project.thumbnail and not partial:  # ảnh bìa đi cùng video (4e); bản 10 s đầu thì bỏ
+        try:
+            cover, youtube_cover = make_covers(project, project_dir, job_dir, brand_dir)
+            rep.say(f"Ảnh bìa: {cover.name}, {youtube_cover.name}")
+        except RenderCancelled:
+            raise
+        except Exception as e:  # noqa: BLE001 — lỗi vẽ bìa không làm hỏng video
+            warn(f"Không vẽ được ảnh bìa: {e}")
     publish = job_dir / "publish.txt"
     publish.write_text(build_publish_text(project), encoding="utf-8")
     meta = {
@@ -780,6 +803,8 @@ def _render_project(
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
         "preview_seconds": partial,
+        "cover_9x16": cover.name if cover else None,
+        "youtube_3x2": youtube_cover.name if youtube_cover else None,
         "music_sha256": cache.sha256_file(music_src) if music_src is not None else None,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -794,7 +819,7 @@ def _render_project(
         job_dir=job_dir, video=video, srt=srt, publish=publish, log=job_dir / "log.txt",
         fps=q.fps, width=q.width, height=q.height, duration=duration, lufs=lufs,
         aligner=aligner, seconds=time.time() - t_start, warnings=warnings,
-        preview_seconds=partial,
+        preview_seconds=partial, cover=cover, youtube_cover=youtube_cover,
     )  # fmt: skip
 
 

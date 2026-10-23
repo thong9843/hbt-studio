@@ -336,6 +336,8 @@ class Storage:
                 ("srt", "captions.srt"),
                 ("publish", "publish.txt"),
                 ("log", "log.txt"),
+                ("cover", "cover_9x16.jpg"),
+                ("youtube_cover", "youtube_3x2.jpg"),
             ):
                 item[key] = self.rel(d / name) if (d / name).is_file() else None
             out.append(item)

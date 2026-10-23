@@ -1,11 +1,13 @@
 import hashlib
 import json
+import shutil
 import subprocess
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from hbt.config import BRAND_DIR
 from hbt.pipeline import ffutil, render
 from hbt.pipeline.ffutil import measure_lufs, media_duration, probe, run_ffmpeg
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
@@ -464,3 +466,61 @@ def test_preview_seconds_is_validated(tmp_path, preview, seconds):
     opts.preview, opts.preview_seconds = preview, seconds
     with pytest.raises(RenderError, match="preview_seconds"):
         render_project(pdir, opts)
+
+
+# ---------------------------------------------------------------- ảnh bìa (4e)
+def add_thumbnail(pdir, brand_dir, with_logo=True):
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["thumbnail"] = {"scene": 2, "lines": ["bạn có phải", "người được", "muỗi yêu?"]}
+    data["series"] = "Loạt thử"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if with_logo:
+        shutil.copy(BRAND_DIR / "hbt-logo-mark.png", brand_dir / "hbt-logo-mark.png")
+
+
+@needs_ffmpeg
+def test_render_writes_both_covers_and_records_them(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_thumbnail(pdir, opts.brand_dir)
+    res = render_project(pdir, opts)
+    assert res.cover.name == "cover_9x16.jpg" and res.youtube_cover.name == "youtube_3x2.jpg"
+    assert Image.open(res.cover).size == (1080, 1920)
+    assert Image.open(res.youtube_cover).size == (1080, 720)
+    meta = read_meta(res)
+    assert (meta["cover_9x16"], meta["youtube_3x2"]) == ("cover_9x16.jpg", "youtube_3x2.jpg")
+    text = res.publish.read_text(encoding="utf-8")
+    assert "Dòng chữ bìa: bạn có phải / người được / muỗi yêu?" in text
+    assert "TikTok: cover_9x16.jpg\nYouTube Shorts: youtube_3x2.jpg" in text
+    assert "Ảnh bìa: cover_9x16.jpg" in res.log.read_text(encoding="utf-8")
+
+
+@needs_ffmpeg
+def test_no_thumbnail_block_means_no_cover(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert res.cover is None and meta["cover_9x16"] is None and meta["youtube_3x2"] is None
+    assert not list(res.job_dir.glob("*.jpg"))
+
+
+@needs_ffmpeg
+def test_cover_failure_is_a_warning_and_the_video_still_renders(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_thumbnail(pdir, opts.brand_dir, with_logo=False)  # thiếu logo → không vẽ được bìa
+    res = render_project(pdir, opts)
+    assert res.video.is_file() and res.cover is None and res.youtube_cover is None
+    assert any(w.startswith("Không vẽ được ảnh bìa") for w in res.warnings)
+    meta = read_meta(res)
+    assert meta["cover_9x16"] is None and meta["youtube_3x2"] is None
+    assert not list(res.job_dir.glob("*.jpg"))
+
+
+@needs_ffmpeg
+def test_head_preview_skips_the_covers(tmp_path):
+    pdir, opts = make_project(tmp_path, n=8, outro=False)
+    add_thumbnail(pdir, opts.brand_dir)
+    opts.preview_seconds = 10
+    res = render_project(pdir, opts)
+    assert res.cover is None and read_meta(res)["cover_9x16"] is None
+    assert not list(res.job_dir.glob("*.jpg"))

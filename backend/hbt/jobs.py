@@ -252,6 +252,8 @@ class JobManager:
                 "publish": rel(result.publish),
                 "log": rel(result.log),
                 "srt": rel(result.srt) if result.srt else None,
+                "cover": rel(result.cover) if result.cover else None,
+                "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
                 "fps": result.fps,
                 "width": result.width,
                 "height": result.height,

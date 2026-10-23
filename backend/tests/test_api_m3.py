@@ -179,6 +179,9 @@ def test_renders_history_lists_newest_first(client):  # noqa: F811
         d = folder / "renders" / job
         d.mkdir(parents=True)
         (d / "video.mp4").write_bytes(b"x")
+        if job == "b2":
+            (d / "cover_9x16.jpg").write_bytes(b"x")
+            (d / "youtube_3x2.jpg").write_bytes(b"x")
         meta = json.dumps(
             {
                 "created_at": created,
@@ -195,6 +198,9 @@ def test_renders_history_lists_newest_first(client):  # noqa: F811
     assert items[0]["srt"] is None
     assert items[0]["music_start"] == 4.5 and items[0]["music_start_source"] == "auto"
     assert items[0]["preview_seconds"] == 10
+    assert items[0]["cover"] == f"/api/files/projects/{slug}/renders/b2/cover_9x16.jpg"
+    assert items[0]["youtube_cover"].endswith("/renders/b2/youtube_3x2.jpg")
+    assert items[1]["cover"] is None and items[1]["youtube_cover"] is None
     assert client.get("/api/projects/khong-co/renders").status_code == 404
 
 
