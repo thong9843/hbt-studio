@@ -119,6 +119,7 @@ export interface LintResult {
 }
 
 export interface MusicEntry {
+  id: string;
   file: string;
   title: string;
   artist: string;

@@ -227,9 +227,9 @@ function MusicSection() {
   const start = music?.start ?? 0;
 
   const attach = useMutation({
-    mutationFn: async (file: string) => {
+    mutationFn: async (id: string) => {
       await editor.flush();
-      return api.attachLibraryMusic(project.slug, file);
+      return api.attachLibraryMusic(project.slug, id);
     },
     onSuccess: (res) => editor.applyServer((p) => ({ ...p, music: res.music })),
   });
@@ -302,7 +302,7 @@ function MusicSection() {
         )}
         <ul className="space-y-2">
           {library.data?.map((entry) => (
-            <li key={entry.file} className="card flex flex-wrap items-center gap-3 p-3">
+            <li key={entry.id} className="card flex flex-wrap items-center gap-3 p-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-bold">{entry.title}</p>
                 <p className="truncate text-small text-text-muted">
@@ -310,17 +310,12 @@ function MusicSection() {
                   {entry.bpm ? ` · ${entry.bpm} BPM` : ''}
                 </p>
               </div>
-              <audio
-                controls
-                preload="none"
-                src={api.libraryMusicUrl(entry.file)}
-                className="h-9"
-              />
+              <audio controls preload="none" src={api.libraryMusicUrl(entry.id)} className="h-9" />
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
                 disabled={attach.isPending}
-                onClick={() => attach.mutate(entry.file)}
+                onClick={() => attach.mutate(entry.id)}
               >
                 {A.music.use}
               </button>
@@ -333,7 +328,7 @@ function MusicSection() {
       <NewTrackForm
         onAdded={(entry) => {
           void queryClient.invalidateQueries({ queryKey: ['music'] });
-          attach.mutate(entry.file);
+          attach.mutate(entry.id);
         }}
       />
     </section>
