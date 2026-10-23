@@ -20,7 +20,7 @@ from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.lint import describe_issue, lint_project
-from hbt.pipeline.render import RenderOptions, render_project
+from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
@@ -40,6 +40,7 @@ class Job:
     fps: int | None
     outro: bool | None
     allow_long_trim: bool
+    preview_seconds: float | None = None
     status: str = QUEUED
     progress: float = 0.0
     step: str = ""
@@ -162,10 +163,16 @@ class JobManager:
         fps: int | None = None,
         outro: bool | None = None,
         allow_long_trim: bool = False,
+        preview_seconds: float | None = None,
     ) -> Job:
         project = self.storage.load(slug)  # NotFound / BadRequest nếu project hỏng
         if fps is not None and fps not in ALLOWED_FPS:
             raise Unprocessable(f"fps phải là một trong {ALLOWED_FPS}")
+        if preview_seconds is not None:
+            if not preview:
+                raise Unprocessable("preview_seconds chỉ dùng với chế độ Xem nhanh (preview=true)")
+            if not 0 < preview_seconds <= MAX_PREVIEW_SECONDS:
+                raise Unprocessable(f"preview_seconds phải trong (0, {MAX_PREVIEW_SECONDS}] giây")
         problems = project.render_problems()
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
@@ -179,7 +186,9 @@ class JobManager:
                 raise Unprocessable("Có từ bị chặn, sửa rồi dựng lại: " + "; ".join(blocked))
         if self._tool_check is not None:
             self._tool_check()
-        job = Job(uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim)
+        job = Job(
+            uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim, preview_seconds
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -222,6 +231,7 @@ class JobManager:
             fps=job.fps,
             outro=job.outro,
             allow_long_trim=job.allow_long_trim,
+            preview_seconds=job.preview_seconds,
             sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
             library_dir=self.library_dir,
             brand_dir=self.brand_dir,
@@ -246,7 +256,8 @@ class JobManager:
                 "width": result.width,
                 "height": result.height,
                 "duration": round(result.duration, 3),
-                "lufs": round(result.lufs, 2),
+                "lufs": round(result.lufs, 2) if result.lufs is not None else None,
+                "preview_seconds": result.preview_seconds,
                 "aligner": result.aligner,
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,

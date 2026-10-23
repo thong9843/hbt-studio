@@ -79,6 +79,21 @@ def test_submit_rejects_odd_fps(env, fps):
         manager(env).submit("demo", fps=fps)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"preview": False, "preview_seconds": 10}, "Xem nhanh"),
+        ({"preview": True, "preview_seconds": 0}, "preview_seconds"),
+        ({"preview": True, "preview_seconds": 61}, "preview_seconds"),
+    ],
+)
+def test_submit_rejects_bad_preview_seconds(env, kwargs, message):
+    m = manager(env)
+    with pytest.raises(Unprocessable, match=message):
+        m.submit("demo", **kwargs)
+    assert m._jobs == {}
+
+
 # ---------------------------------------------------------------- hàng đợi, huỷ, lỗi (render giả)
 def test_second_job_waits_in_queue_and_can_be_cancelled_without_running(env):
     fake = FakeRender()
@@ -230,5 +245,21 @@ def test_real_preview_job_end_to_end(env):
     percents = [d["progress"] for k, d in events if k == "progress"]
     assert percents == sorted(percents) and percents[0] == 0 and percents[-1] == 100
     assert events[-1][1]["output"]["video"] == out["video"] and job.progress == 100
+    assert store.last_render("demo")["job_id"] == job.id
+    m.shutdown()
+
+
+@needs_ffmpeg
+def test_real_head_preview_job_reports_seconds_and_no_srt(tmp_path):
+    pdir, opts = make_project(tmp_path / "src", n=8)
+    store = Storage(tmp_path / "workspace")
+    shutil.copytree(pdir, store.projects_dir / "demo")
+    m = JobManager(store, opts.library_dir, opts.brand_dir)
+    job = m.submit("demo", preview=True, preview_seconds=10)
+    assert job.wait(180)
+    assert job.status == DONE, job.error
+    out = job.output
+    assert out["preview_seconds"] == 10 and out["srt"] is None and out["lufs"] is None
+    assert out["duration"] == pytest.approx(10.0, abs=0.2)
     assert store.last_render("demo")["job_id"] == job.id
     m.shutdown()

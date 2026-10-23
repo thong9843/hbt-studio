@@ -322,6 +322,7 @@ class Storage:
                 "duration": meta.get("duration"),
                 "lufs": meta.get("lufs"),
                 "aligner": meta.get("aligner"),
+                "preview_seconds": meta.get("preview_seconds"),
                 "music_start": meta.get("music_start"),
                 "music_start_source": meta.get("music_start_source"),
                 # nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này không

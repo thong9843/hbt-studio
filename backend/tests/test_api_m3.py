@@ -180,7 +180,13 @@ def test_renders_history_lists_newest_first(client):  # noqa: F811
         d.mkdir(parents=True)
         (d / "video.mp4").write_bytes(b"x")
         meta = json.dumps(
-            {"created_at": created, "fps": 50, "music_start": 4.5, "music_start_source": "auto"}
+            {
+                "created_at": created,
+                "fps": 50,
+                "music_start": 4.5,
+                "music_start_source": "auto",
+                "preview_seconds": 10,
+            }
         )
         (d / "meta.json").write_text(meta, encoding="utf-8")
     items = client.get(f"/api/projects/{slug}/renders").json()
@@ -188,6 +194,7 @@ def test_renders_history_lists_newest_first(client):  # noqa: F811
     assert items[0]["video"] == f"/api/files/projects/{slug}/renders/b2/video.mp4"
     assert items[0]["srt"] is None
     assert items[0]["music_start"] == 4.5 and items[0]["music_start_source"] == "auto"
+    assert items[0]["preview_seconds"] == 10
     assert client.get("/api/projects/khong-co/renders").status_code == 404
 
 

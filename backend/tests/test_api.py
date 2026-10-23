@@ -843,3 +843,47 @@ def test_render_with_only_warn_or_info_words_still_starts(client):
     r = client.post(f"/api/projects/{slug}/render", json={"preview": True})
     assert r.status_code == 202 and fake.started.wait(5)
     fake.gate.set()
+
+
+# ---------------------------------------------------- Xem nhanh 10 s đầu: tham số preview_seconds
+def capture_options(client):
+    seen = []
+
+    def fake(folder, opts, progress=None, cancel_token=None):
+        seen.append(opts.preview_seconds)
+        raise RuntimeError("dừng sau khi ghi tuỳ chọn")
+
+    client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None
+    return seen
+
+
+def test_preview_seconds_defaults_to_null_and_is_passed_through(client):
+    seen = capture_options(client)
+    slug = complete_project(client)
+    a = client.post(f"/api/projects/{slug}/render", json={"preview": True}).json()["job_id"]
+    wait_job(client, a)
+    b = client.post(f"/api/projects/{slug}/render", json={"preview": True, "preview_seconds": 10})
+    job = wait_job(client, b.json()["job_id"])
+    assert seen == [None, 10]
+    assert job["preview"] is True and job["preview_seconds"] == 10
+    assert client.get(f"/api/jobs/{a}").json()["preview_seconds"] is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"preview": False, "preview_seconds": 10},
+        {"preview_seconds": 10},
+        {"preview": True, "preview_seconds": 0},
+        {"preview": True, "preview_seconds": -5},
+        {"preview": True, "preview_seconds": 61},
+        {"preview": True, "preview_seconds": "mười"},
+    ],
+)
+def test_preview_seconds_is_validated_and_creates_no_job(client, body):
+    capture_options(client)
+    slug = complete_project(client)
+    r = client.post(f"/api/projects/{slug}/render", json=body)
+    assert r.status_code == 422
+    assert client.app.state.hbt.jobs._jobs == {}
