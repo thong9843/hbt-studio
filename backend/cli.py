@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="danh sách cách nhau bằng dấu phẩy: auto,small,medium,large-v3 (mặc định auto)",
     )
     b.add_argument(
+        "--prompt",
+        choices=("on", "off", "both"),
+        default="on",
+        help="đo có initial_prompt (on, như đường dựng), không có (off), hoặc cả hai (both); "
+        "chỉ để đo, đường dựng không đổi",
+    )
+    b.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
@@ -94,7 +101,13 @@ def _bench_align(args, parser: argparse.ArgumentParser) -> int:
         device=settings.whisper_device, timeout=args.timeout, models_dir=settings.models_dir
     )
     try:
-        rows = bench_align(args.project_dir, models, cfg, log=lambda m: print(f"  {m}", flush=True))
+        rows = bench_align(
+            args.project_dir,
+            models,
+            cfg,
+            log=lambda m: print(f"  {m}", flush=True),
+            prompts={"on": (True,), "off": (False,), "both": (True, False)}[args.prompt],
+        )
     except (ValidationError, ValueError, FileNotFoundError, FFmpegError) as e:
         print(f"\nLỖI: {e}", file=sys.stderr)
         return 1
