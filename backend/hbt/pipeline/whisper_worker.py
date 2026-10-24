@@ -65,7 +65,7 @@ def run(req: dict) -> list[list]:
             language="vi",
             word_timestamps=True,
             beam_size=5,
-            initial_prompt=req["prompt"][:220],
+            initial_prompt=req["prompt"][:220] or None,  # rỗng: không dùng prompt (5.2)
             condition_on_previous_text=False,
         )
         return syllables_of(segments, progress_reporter(req.get("progress"), info.duration))

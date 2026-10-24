@@ -63,12 +63,15 @@ class FakeWhisper:
 
     def __init__(self, extra=(), drop_last=False, fail=None):
         self.calls = []
+        self.prompts = []
         self.extra, self.drop_last, self.fail = extra, drop_last, fail
 
     progress = ()  # các giá trị on_progress sẽ gọi
+    prompts: list  # initial_prompt của từng lần gọi
 
     def __call__(self, wav, prompt, cfg, log=print, *, steps=None, on_progress=None):
         self.calls.append(cfg)
+        self.prompts.append(prompt)
         for f in self.progress:
             if on_progress is not None:
                 on_progress(f)
@@ -279,3 +282,11 @@ def test_progress_bar_runs_6_to_20_percent_while_whisper_listens(tmp_path, monke
     assert in_step == sorted(in_step) and max(in_step) <= 20.0
     percents = [p for p, _ in seen]
     assert percents == sorted(percents)  # cả thanh tiến độ không lùi
+
+
+@needs_ffmpeg
+def test_render_path_sends_no_initial_prompt(tmp_path, fake_whisper):
+    """Đo 24/10/2026: initial_prompt làm Whisper bỏ sót nửa đầu ở small/medium/large-v3."""
+    pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
+    render_project(pdir, opts)
+    assert fake_whisper.prompts == [""]

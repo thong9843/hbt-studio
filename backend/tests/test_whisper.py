@@ -267,3 +267,29 @@ def test_worker_writes_one_progress_line_per_segment(tmp_path):
     syllables_of(segs, progress_reporter(str(path), 20.0))
     assert path.read_text("utf-8").split() == ["0.2500", "0.5000", "1.0000"]  # chặn ở 1
     assert progress_reporter(None, 20.0) is None and progress_reporter(str(path), 0) is None
+
+
+def test_worker_passes_initial_prompt_only_when_asked(tmp_path, monkeypatch):
+    from types import ModuleType, SimpleNamespace
+
+    from hbt.pipeline import whisper_worker
+
+    seen = []
+
+    class Model:
+        def __init__(self, *a, **k):
+            pass
+
+        def transcribe(self, *a, **k):
+            seen.append(k["initial_prompt"])
+            return [], SimpleNamespace(duration=1.0)
+
+    fake_mod = ModuleType("faster_whisper")
+    fake_mod.WhisperModel = Model
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_mod)
+    base = {"model": "small", "device": "cpu", "compute_type": "int8", "models_dir": "m",
+            "local_only": True, "wav": "v.wav"}  # fmt: skip
+    whisper_worker.run({**base, "prompt": ""})
+    whisper_worker.run({**base, "prompt": "Xin chào " * 40})
+    assert seen[0] is None  # không prompt: faster-whisper không nhận chuỗi rỗng làm prompt
+    assert seen[1] == ("Xin chào " * 40)[:220]

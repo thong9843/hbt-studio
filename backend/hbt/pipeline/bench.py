@@ -54,9 +54,9 @@ def bench_align(
     models: list[str],
     cfg: WhisperConfig,
     log: Callable[[str], None] = print,
-    prompts: tuple[bool, ...] = (True,),
+    prompts: tuple[bool, ...] = (False,),
 ) -> list[BenchRow]:
-    """Đo từng (model, có/không initial_prompt). Chỉ để đo: đường dựng luôn dùng prompt (5.2)."""
+    """Đo từng (model, có/không initial_prompt); đường dựng không dùng prompt (5.2)."""
     project_dir = Path(project_dir).resolve()
     project = load_project(project_dir)
     problems = project.render_problems()

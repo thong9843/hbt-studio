@@ -123,7 +123,7 @@ def test_bench_can_measure_with_and_without_the_initial_prompt(bench_project, mo
 
 
 @needs_ffmpeg
-def test_bench_default_is_prompt_on_like_the_render_path(bench_project, monkeypatch):
+def test_bench_default_is_prompt_off_like_the_render_path(bench_project, monkeypatch):
     seen = []
 
     def fake(wav, prompt, cfg, log=print, *, steps=None, on_progress=None):
@@ -133,7 +133,7 @@ def test_bench_default_is_prompt_on_like_the_render_path(bench_project, monkeypa
 
     monkeypatch.setattr(bench, "run_whisper", fake)
     bench.bench_align(bench_project, ["small"], bench.WhisperConfig(device="cpu"))
-    assert seen == [True]
+    assert seen == [False]
 
 
 def test_format_rows_lists_prompt_per_mark_offsets_and_timeouts():
@@ -164,6 +164,8 @@ def test_cli_bench_align_prompt_option(monkeypatch, tmp_path, capsys):
         return [BenchRow("small", True, "small (cpu, int8)", 1.0, 1.0, 0.0, 0.0)]
 
     monkeypatch.setattr(cli, "bench_align", fake_bench)
+    assert cli.main(["bench-align", str(tmp_path)]) == 0
+    assert got["prompts"] == (False,)  # mặc định: như đường dựng, không prompt
     for flag, expected in (("on", (True,)), ("off", (False,)), ("both", (True, False))):
         assert cli.main(["bench-align", str(tmp_path), "--prompt", flag]) == 0
         assert got["prompts"] == expected

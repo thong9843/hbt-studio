@@ -51,9 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--prompt",
         choices=("on", "off", "both"),
-        default="on",
-        help="đo có initial_prompt (on, như đường dựng), không có (off), hoặc cả hai (both); "
-        "chỉ để đo, đường dựng không đổi",
+        default="off",
+        help="đo không có initial_prompt (off, như đường dựng; mặc định), có (on), hoặc cả hai "
+        "(both); chỉ để so sánh",
     )
     b.add_argument(
         "--timeout",

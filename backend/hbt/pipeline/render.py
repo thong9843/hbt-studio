@@ -442,8 +442,9 @@ def whisper_alignment(
     tokens, scene_of, wav, cfg: WhisperConfig, log, on_progress=None
 ) -> Alignment:
     """Căn bằng Whisper (tiến trình con). Lỗi thì ném WhisperFailed / RuntimeError."""
-    prompt = " ".join(t["disp"] for t in tokens)
-    run = run_whisper(wav, prompt, cfg, log, on_progress=on_progress)
+    # Không dùng initial_prompt (điểm lệch tham số reference đã duyệt 24/10/2026, IMPLEMENT 5.2):
+    # đo trên "muỗi", prompt làm Whisper bỏ sót nửa đầu ở cả small, medium và large-v3.
+    run = run_whisper(wav, "", cfg, log, on_progress=on_progress)
     m = match_script(tokens, run.syllables)
     n_scenes = max(scene_of) + 1 if scene_of else 0
     if n_scenes > 1 and not offsets_valid(scene_offsets(m.times, scene_of, n_scenes)):
