@@ -57,7 +57,10 @@ hbt-studio/
 │  │  ├─ api/                # projects.py, assets.py, render.py, music.py, lint.py, publish.py
 │  │  ├─ pipeline/
 │  │  │  ├─ text.py          # = reference/pipeline/text.py
-│  │  │  ├─ align.py         # = reference/pipeline/align.py
+│  │  │  ├─ align.py         # reference/pipeline/align.py + `match_script` (khớp âm tiết Whisper với kịch bản)
+│  │  │  ├─ whisper.py       # chạy Whisper ở tiến trình con, bậc rơi, timeout, huỷ (5.2)
+│  │  │  ├─ whisper_worker.py # tiến trình con: nạp faster-whisper, nhận dạng, ghi JSON
+│  │  │  ├─ bench.py         # `cli bench-align`
 │  │  │  ├─ visual.py        # = reference/pipeline/visual.py
 │  │  │  ├─ audio.py         # chuẩn hoá giọng, chọn đoạn nhạc, ducking, whoosh
 │  │  │  ├─ captions.py      # chia cụm, vẽ trạng thái karaoke, file concat, xuất .srt
@@ -185,7 +188,7 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 |---|---|---|---|
 | 1 | Kiểm tra | Validate project, đủ ảnh/giọng, chạy `lint` với danh sách từ hiện hành (mục 7). Có mức `block` → dừng, báo `Chặn xuất: Cảnh N: …` (CLI lấy danh sách như app: bản riêng ở `workspace/settings/` nếu có, không thì bản mặc định) | 0–3 |
 | 2 | Chuẩn hoá giọng | `prep_voice` (reference): highpass 70 Hz, trễ 0,2 s, đệm 1,6 s, loudnorm −14 LUFS, mono 44,1 kHz → `build/voice.wav` | 3–6 |
-| 3 | Căn chữ | Ghép token mọi cảnh (giữ chỉ số cảnh) → `align.align()` (mục 5). Lưu `build/timing.json` | 6–20 |
+| 3 | Căn chữ | Ghép token mọi cảnh (giữ chỉ số cảnh) → `render.run_alignment()` (Whisper qua `whisper.run_whisper` + `align.match_script`, rơi về `scene_align.align_scenes`; mục 5). Lưu `build/timing.json` | 6–20 |
 | 4 | Mốc chuyển cảnh | cut_k = (kết thúc chữ cuối cảnh k−1 + bắt đầu chữ đầu cảnh k)/2; offset xfade = cut − 0,2; thời lượng theo `durations()` (reference) | 20 |
 | 5 | Lớp hình | `visual.build_scene_layers`: ảnh fit 1080×1920 + nhãn cố định; lớp thẻ chữ PNG trong suốt | 20–25 |
 | 6 | Clip từng cảnh | `render_scene` (reference): zoompan trên ảnh phóng 2160×3840, cảnh lẻ 1.00→1.08, chẵn 1.08→1.00; `punch`: 1.18→1.00 trong 0,4 s rồi 1.00→1.05; thẻ hiện dần sau 0,3 s (punch: 0,15 s). Encode trung gian `crf 16 veryfast` | 25–70 |
@@ -255,6 +258,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
      Ngược lại giữ nguyên và ghi cảnh báo `Có thể có đoạn thừa ở cuối file giọng (x,xx giây), chưa cắt` (nếu bỏ đoạn đó vẫn làm chi phí giảm). Kịch bản ngắn (khoảng 3 cảnh) thường không đạt ngưỡng 1,0 nên chỉ cảnh báo.
   3. **Tự cắt tay bằng `voice.trim_end`:** trong `project.json`, `voice` có thể là `"voice.mp3"` hoặc `{"file": "voice.mp3", "trim_end": 41.5}`. `trim_end` là giây trên **file giọng gốc** (nghe file gốc để chọn điểm cắt). Có `trim_end` thì cắt **trước khi căn chữ** (để đoạn thừa không làm lệch căn), không chạy cắt tự động và không cần xác nhận, fade ra 80 ms, đệm lại 1,6 s. `trim_end` nằm sau hết file giọng thì báo lỗi.
   4. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
+     - **Chốt M4 Đợt 1a (24/10/2026):** phần bị cắt lưu ở `renders/<job_id>/trimmed_tail.wav` (không ở `build/`, vì nút Dọn file tạm xoá `build/`), cho cả đường Whisper, khoảng lặng và `voice.trim_end`. `meta.json` có `trimmed_tail` (tên file hoặc `null`) và `trimmed_tail_seconds`; `GET /renders` và `output` của job trả `trimmed_tail` (URL hoặc `null`). Job `needs_confirmation` cũng lưu file này và trả URL ở trường `cut_audio` để nghe trong hộp xác nhận. Phát qua `GET /files` sẵn có, không thêm endpoint.
   5. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
 
 ### 4e. Ảnh bìa (thumbnail)
@@ -292,7 +296,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 - Tách theo khoảng trắng; `|` đánh dấu cụm mới; token kết thúc bằng `, . ! ? : ; …` cũng kết thúc cụm.
 - Mỗi token có `disp` (hiển thị) và `syl` (danh sách âm tiết đã bỏ dấu, dùng để so khớp).
 
-### 5.2 Căn thời gian (`align.align`)
+### 5.2 Căn thời gian (`render.run_alignment`)
 1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
    - **Chọn cấu hình theo phần cứng** (chủ dự án chốt 22/10/2026). `.env`: `WHISPER_DEVICE=auto`, `WHISPER_MODEL=auto`.
 
@@ -303,6 +307,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
      Trong **Cài đặt** cho đổi sang `medium` hoặc `large-v3` trên CPU, kèm cảnh báo "sẽ chậm". Không giả định có GPU: `auto` kiểm tra CUDA lúc chạy (`/health.gpu`).
    - **Cache:** kết quả căn chữ lưu ở `build/timing.json`, khoá theo **hash file giọng** và **hash kịch bản** (kèm phương pháp, model, mã nguồn); chỉ căn lại khi một trong hai đổi.
+   - **Điểm lệch đã duyệt (24/10/2026):** khoá còn gồm thêm `whisper_timeout_seconds`, "đã cài faster-whisper chưa" và "có CUDA không" (`WhisperConfig.key_parts`). Nhờ vậy tăng giới hạn thời gian, cài Whisper hoặc đổi máy thì căn lại, không dùng nhầm kết quả khoảng lặng cũ.
    - **Dự phòng khi lỗi hoặc chậm:** Whisper lỗi (không cài, lỗi CUDA, thiếu RAM) hoặc quá chậm (vượt **giới hạn thời gian** đặt trong Cài đặt) thì tự rơi về căn theo khoảng lặng (mục dưới) và ghi log lý do; kết quả ghi rõ phương pháp đã dùng.
    - **Chốt M4 Đợt 1a (chủ dự án duyệt 24/10/2026):**
      - **Bậc rơi theo mục 0:** CUDA lỗi (lúc nạp hoặc lúc chạy) hoặc không có GPU → CPU `small` `int8` → khoảng lặng. Mỗi bậc ghi log lý do.
