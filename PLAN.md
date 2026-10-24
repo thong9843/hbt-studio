@@ -165,6 +165,9 @@ flowchart LR
 | 22/10/2026 | Xem nhanh dùng `veryfast`, CRF 30, AAC 96 kbps (bản đẹp không đổi) | 3,7 MB cho video 50 giây, trước đó 39,8 MB; thời gian dựng không đổi |
 | 22/10/2026 | A4: dựng bản đẹp "muỗi" mất 143 s trên máy cũ khi rảnh (M1: 145 s) | Không suy giảm hiệu năng; 261 s ở M3 do trình duyệt và máy chủ dev đang chạy |
 | 22/10/2026 | Chuyển người code sang Gemini; eb3842c đánh dấu M3 xong quá sớm, trạng thái đúng là đang khép | Tránh coi M3 đã xong khi chưa làm A1–A6 và chưa CI |
+| 24/10/2026 | M4 Đợt 1 chia 1a (máy cũ, mọi code, chạy thật đường CPU) và 1b (máy mới: kiểm CUDA thật, `bench-align`, chốt mặc định); máy mới đang hỏng | Không chờ máy mới; đường CUDA chỉ kiểm bằng test giả lập tới khi có máy |
+| 24/10/2026 | Whisper chạy trong tiến trình con; `whisper_timeout_seconds` cố định, mặc định 900 s; bậc rơi CUDA → CPU `small` `int8` → khoảng lặng, mỗi bậc ghi log lý do (IMPLEMENT 5.2) | Kill được khi hết giờ hoặc huỷ job; model tự giải phóng khi tiến trình thoát |
+| 24/10/2026 | Cắt đuôi giọng bằng Whisper: chỉ khi token cuối khớp thật, cắt tại `end + 0,35 s`, đệm để tổng 1,6 s sau chữ cuối; không khớp thì chỉ cảnh báo; > 8 s dùng `needs_confirmation` (IMPLEMENT 4d) | Token cuối chỉ nội suy thì mốc `end` không đáng tin, tránh cắt nhầm lời |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |

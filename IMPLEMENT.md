@@ -30,7 +30,7 @@ Chủ dự án dùng hai máy và sẽ cho biết đang dùng máy nào ở đ�
 | Node.js | 20 LTS trở lên | `winget install OpenJS.NodeJS.LTS` |
 | FFmpeg | ≥ 6.0, có `libx264`, `zoompan`, `xfade`, `sidechaincompress`, `loudnorm` | `winget install Gyan.FFmpeg` (thêm vào PATH) |
 | Driver NVIDIA | hỗ trợ CUDA 12 (chỉ máy có GPU) | GeForce Experience / trang NVIDIA |
-| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
+| faster-whisper | bản ổn định mới nhất (đã cài và chạy thử trên máy cũ 24/10/2026: `faster-whisper 1.2.1`, `ctranslate2 4.8.3`, `onnxruntime 1.31.0`, `av 18.1.0`) | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
 
 **Python:** dự án ghim **Python 3.11.x**. Máy nào đã có Python mới hơn thì cài thêm 3.11 **song song** (không gỡ bản cũ), gọi bằng `py -3.11`, và tạo `backend\.venv` đúng bằng bản 3.11 (`py -3.11 -m venv backend\.venv`). Kiểm tra bằng `py -3.11 --version` (README có bước này). Claude Code phải **hỏi chủ dự án trước khi cài** Python hay bất kỳ phần mềm cấp hệ thống nào.
 
@@ -246,6 +246,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 - **Giới hạn ký tự:** lời đọc mỗi video **≤ 750 ký tự** (tính cả dấu cách; bỏ ký hiệu `|` và `{}`), vì gói Vbee giới hạn 3.000 ký tự mỗi ngày. Hiển thị bộ đếm cạnh ô lời đọc, cảnh báo vàng khi > 750 (mức `warn`, vẫn cho xuất).
 - **Cắt quảng cáo cuối file Vbee:** file giọng từ Vbee có thể kèm câu giới thiệu hoặc quảng cáo ở cuối. Sau khi căn chữ (bước 3), mọi âm thanh nằm **sau chữ cuối của kịch bản** đều bị cắt:
   1. Với Whisper (M4): `voice_end = end(token cuối) + 0,35 s`, cắt đuôi, fade ra 80 ms.
+     - **Chốt M4 Đợt 1a (24/10/2026):** cắt sau bước 3, trên `build/voice.wav`. Sau `voice_end` đệm sao cho tổng **1,6 s sau chữ cuối** (nghĩa là đệm `1,6 − 0,35 = 1,25 s`), rồi chuẩn hoá lại −14 LUFS. Chỉ cắt khi token cuối của kịch bản **khớp thật** với âm tiết Whisper nghe được; token cuối chỉ được nội suy thì **không cắt**, chỉ cảnh báo `Có thể có đoạn thừa ở cuối file giọng…`. Cắt > 8 s: job `failed` + `needs_confirmation`, gửi lại với `allow_long_trim` (cơ chế M2, mục 9), không thêm API.
   2. Với chế độ khoảng lặng (chưa có Whisper), căn 2 cấp: cấp 1 ghép cảnh ↔ nhóm đoạn tiếng, cấp 2 ghép cụm câu ↔ đoạn tiếng trong từng cảnh (mục 5.2). Chỉ **tự động** bỏ đoạn cuối khi đủ **cả ba** điều kiện:
      - điều kiện bảo vệ: tối đa `số đoạn tiếng − số cụm câu` đoạn cuối (và không quá 3);
      - bỏ đoạn đó làm chi phí ghép **giảm từ 1,0 trở lên**;
@@ -303,6 +304,17 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
      Trong **Cài đặt** cho đổi sang `medium` hoặc `large-v3` trên CPU, kèm cảnh báo "sẽ chậm". Không giả định có GPU: `auto` kiểm tra CUDA lúc chạy (`/health.gpu`).
    - **Cache:** kết quả căn chữ lưu ở `build/timing.json`, khoá theo **hash file giọng** và **hash kịch bản** (kèm phương pháp, model, mã nguồn); chỉ căn lại khi một trong hai đổi.
    - **Dự phòng khi lỗi hoặc chậm:** Whisper lỗi (không cài, lỗi CUDA, thiếu RAM) hoặc quá chậm (vượt **giới hạn thời gian** đặt trong Cài đặt) thì tự rơi về căn theo khoảng lặng (mục dưới) và ghi log lý do; kết quả ghi rõ phương pháp đã dùng.
+   - **Chốt M4 Đợt 1a (chủ dự án duyệt 24/10/2026):**
+     - **Bậc rơi theo mục 0:** CUDA lỗi (lúc nạp hoặc lúc chạy) hoặc không có GPU → CPU `small` `int8` → khoảng lặng. Mỗi bậc ghi log lý do.
+     - **Tiến trình con:** Whisper chạy trong tiến trình con (`python -m hbt.pipeline.whisper_worker`), không chạy trong tiến trình app. Hết giờ hoặc huỷ job thì kill tiến trình con; model được giải phóng khi tiến trình thoát (bước 3 bên dưới).
+     - **Giới hạn thời gian:** một giá trị cố định `whisper_timeout_seconds` (Cài đặt, mặc định **900 s**), tính cho cả bước Whisper (mọi bậc cộng lại). Hết giờ thì rơi thẳng về khoảng lặng.
+     - **Ưu tiên cấu hình:** `whisper_model` trong `workspace/settings/app.json` (Cài đặt) ghi đè `.env`; giá trị `auto` thì xét `WHISPER_MODEL` trong `.env`, vẫn `auto` thì chọn theo phần cứng (bảng trên).
+     - **Model:** đã có trong `models/` thì nạp thẳng từ đó (`local_files_only`), không tải lại; chưa có thì tải về `models/` (`download_root`). `faster_whisper` chỉ được import khi dùng.
+     - **Dữ liệu vào:** Whisper chạy trên `build/voice.wav` (kết quả bước 2).
+     - **Tỉ lệ khớp** (âm tiết kịch bản khớp âm tiết nghe được) chỉ ghi vào log và `meta.json`, không có ngưỡng chặn.
+     - **Phương pháp đã dùng** (kèm model, thiết bị, lý do nếu rơi bậc) ghi ở `meta.json`, log và khối kết quả tab Xuất video.
+     - **`bench-align`** chỉ có 3 chỉ số: thời gian, tỉ lệ khớp, độ lệch mốc cắt cảnh so với căn khoảng lặng. Việc đối chiếu với bản đã đăng thuộc golden test.
+     - Không đạt phụ đề lệch < 0,05 s thì chỉ báo số đo, **không** tự đổi mặc định.
    - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
@@ -617,7 +629,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
 - [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
 - [x] Lint nội dung + trang chỉnh danh sách từ
-- [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
+- [x] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động (Đợt 2a/2b)
 - [x] `publish.txt` + nút sao chép (khối `[Thumbnail]` đủ 3 dòng)
 - [x] `thumbnail.py` (mục 4e): ảnh bìa, API xem trước, UI tab Xuất video; dọn `build/` bằng nút trong UI
 - **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
@@ -628,7 +640,9 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - (b) Tự chọn đoạn nhạc theo 6.1 (đã có) + `music.start`; ghi công từ thư viện; không thêm trường mới.
   - (c) Lint từ nhạy cảm theo mục 7 (`sensitive_words.json`, warn/block theo danh mục), trang Cài đặt, áp cả dòng chữ bìa.
   - [x] (d) Xem nhanh 10 s đầu (chủ dự án chốt 23/10/2026): nút Xem nhanh mặc định chỉ dựng 10 s đầu (540×960, 30 fps như cũ), giữ tuỳ chọn xem nhanh cả video; căn chữ và điểm nhạc (`music_start`) vẫn tính trên cả video; thời gian dựng tuỳ máy. Chi tiết kỹ thuật ghi vào mục 4 và 9 khi làm.
-- **Đợt 1 (máy mới):** Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper.
+- **Đợt 1 (Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper)** — chia đôi (chủ dự án chốt 24/10/2026, vì máy mới đang hỏng):
+  - **1a (máy cũ, không GPU):** toàn bộ code Đợt 1; đường CPU chạy thật (`small`, `int8`); đường CUDA viết theo đặc tả nhưng chỉ kiểm bằng test giả lập.
+  - **1b (máy mới, khi sửa xong):** kiểm đường CUDA thật (`large-v3`, `int8_float16`), chạy `bench-align`, chốt mặc định theo số đo.
 - **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
 ---
