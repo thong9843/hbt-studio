@@ -47,6 +47,7 @@ class Job:
     step: str = ""
     error: str | None = None
     needs_confirmation: bool = False
+    cut_audio: str | None = None  # phần giọng sẽ bị cắt (rel), để nghe trước khi xác nhận
     output: dict[str, Any] | None = None
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -248,7 +249,8 @@ class JobManager:
         except RenderCancelled:
             job._finish(CANCELLED)
         except TailTrimNeedsConfirmation as e:
-            job._finish(FAILED, error=str(e), needs_confirmation=True)
+            cut = self.storage.rel(e.cut_file) if e.cut_file else None
+            job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
         else:
@@ -268,6 +270,10 @@ class JobManager:
                 "preview_seconds": result.preview_seconds,
                 "aligner": result.aligner,
                 "aligner_info": result.aligner_info,
+                "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
+                "trimmed_tail_seconds": (
+                    round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
+                ),
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,
             }

@@ -368,6 +368,7 @@ class Storage:
                 ("log", "log.txt"),
                 ("cover", "cover_9x16.jpg"),
                 ("youtube_cover", "youtube_3x2.jpg"),
+                ("trimmed_tail", "trimmed_tail.wav"),
             ):
                 item[key] = self.rel(d / name) if (d / name).is_file() else None
             out.append(item)

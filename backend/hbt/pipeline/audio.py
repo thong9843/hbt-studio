@@ -53,7 +53,18 @@ def prep_voice(src: str | Path, dst: str | Path) -> None:
 
 
 class TailTrimNeedsConfirmation(RuntimeError):
-    """Đuôi thừa quá dài (> 8 s): dừng lại, hỏi chủ dự án trước khi cắt (4d.3)."""
+    """Đuôi thừa quá dài (> 8 s): dừng lại, hỏi chủ dự án trước khi cắt (4d.3).
+
+    `voice_end`/`content_end` (giây trên voice.wav) cho biết phần sẽ bị cắt; bộ dựng lưu phần đó
+    vào `cut_file` để chủ dự án nghe trước khi xác nhận (4d.4)."""
+
+    def __init__(
+        self, message: str, voice_end: float | None = None, content_end: float | None = None
+    ):
+        super().__init__(message)
+        self.voice_end = voice_end
+        self.content_end = content_end
+        self.cut_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -88,9 +99,23 @@ def plan_tail_trim(
         raise TailTrimNeedsConfirmation(
             f"Đuôi thừa dài {cut:.2f} giây (> {MAX_TRIM_SECONDS:.0f} giây) "
             "sau chữ cuối của kịch bản. "
-            "Hãy nghe lại file giọng; nếu đúng là phần cần cắt thì chạy lại với xác nhận."
+            "Hãy nghe lại file giọng; nếu đúng là phần cần cắt thì chạy lại với xác nhận.",
+            voice_end=voice_end,
+            content_end=content_end,
         )
     return TailTrim(voice_end=voice_end, cut_seconds=cut, segments_cut=len(extra))
+
+
+CUT_PART_NAME = "trimmed_tail.wav"
+
+
+def save_cut_part(voice_wav: str | Path, start: float, end: float, dst: str | Path) -> Path:
+    """Lưu phần giọng bị cắt (từ `start` đến `end`, giây trên voice.wav) để chủ dự án nghe lại."""
+    run_ffmpeg([
+        "-i", voice_wav, "-af", f"atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS",
+        "-ac", "1", dst,
+    ])  # fmt: skip
+    return Path(dst)
 
 
 def trim_voice_tail(src: str | Path, dst: str | Path, voice_end: float, pad: float = TAIL) -> None:

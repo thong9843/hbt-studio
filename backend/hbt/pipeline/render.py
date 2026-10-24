@@ -35,6 +35,7 @@ from . import visual as _visual
 from . import whisper as _whisper
 from . import whisper_worker as _whisper_worker
 from .align import match_script
+from .audio import TailTrimNeedsConfirmation
 from .cancel import CancelToken, RenderCancelled
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
@@ -132,6 +133,10 @@ class RenderResult:
     preview_seconds: float | None = None  # có giá trị khi chỉ dựng đoạn đầu
     cover: Path | None = None  # cover_9x16.jpg; None nếu không có khối thumbnail hoặc vẽ lỗi
     youtube_cover: Path | None = None  # youtube_3x2.jpg
+    trimmed_tail: Path | None = (
+        None  # trimmed_tail.wav: phần giọng đã cắt (4d.4); None nếu không cắt
+    )
+    trimmed_tail_seconds: float | None = None
     aligner_info: dict = field(default_factory=dict)  # model/thiết bị/tỉ lệ khớp/lý do rơi bậc
 
 
@@ -582,6 +587,7 @@ def _render_project(
     # đoạn thừa không làm lệch căn (IMPLEMENT.md 4d.3)
     manual_trim = project.voice.trim_end
     voice_align = voice_wav
+    manual_cut: tuple[float, float] | None = None
     if manual_trim is not None:
         voice_end = manual_trim + audio.VOICE_DELAY
         content_end = prepped_total - audio.TAIL
@@ -590,6 +596,7 @@ def _render_project(
                 f"voice.trim_end = {_sec(manual_trim)} giây nằm sau hết file giọng "
                 f"({_sec(content_end - audio.VOICE_DELAY)} giây)"
             )
+        manual_cut = (voice_end, content_end)
         voice_align = build / "voice_cut.wav"
         key = cache.digest("cut", voice_wav, round(voice_end, 3), PIPELINE_VERSION)
         if not cache.is_fresh(voice_align, key):
@@ -640,18 +647,30 @@ def _render_project(
     rep.say(f"Aligner đã dùng: {aligner}" + (f" (bỏ {dropped} đoạn cuối)" if dropped else ""))
 
     # cắt đuôi giọng thừa (4d); đã cắt tay bằng voice.trim_end thì thôi
-    if manual_trim is not None:
-        voice_final = voice_align
-    elif aligner == "whisper":
-        voice_final, trim = audio.trim_tail_whisper(
-            voice_wav, times[-1][1], alignment.info, build / "voice_trimmed.wav", rep.say, warn,
-            allow_long=opts.allow_long_trim,
-        )  # fmt: skip
-    else:
-        voice_final, trim = audio.trim_tail_if_needed(
-            voice_wav, times[-1][1], build / "voice_trimmed.wav", rep.say,
-            allow_long=opts.allow_long_trim,
-        )  # fmt: skip
+    trim, cut_span = None, manual_cut
+    cut_path = job_dir / audio.CUT_PART_NAME
+    try:
+        if manual_trim is not None:
+            voice_final = voice_align
+        elif aligner == "whisper":
+            voice_final, trim = audio.trim_tail_whisper(
+                voice_wav, times[-1][1], alignment.info, build / "voice_trimmed.wav", rep.say,
+                warn, allow_long=opts.allow_long_trim,
+            )  # fmt: skip
+        else:
+            voice_final, trim = audio.trim_tail_if_needed(
+                voice_wav, times[-1][1], build / "voice_trimmed.wav", rep.say,
+                allow_long=opts.allow_long_trim,
+            )  # fmt: skip
+    except TailTrimNeedsConfirmation as e:
+        if e.voice_end is not None and e.content_end is not None:
+            e.cut_file = audio.save_cut_part(voice_wav, e.voice_end, e.content_end, cut_path)
+        raise
+    if trim is not None:
+        cut_span = (trim.voice_end, trim.voice_end + trim.cut_seconds)
+    trimmed_tail = None
+    if cut_span is not None:  # lưu phần đã cắt để nghe lại (4d.4)
+        trimmed_tail = audio.save_cut_part(voice_wav, cut_span[0], cut_span[1], cut_path)
     total = media_duration(voice_final)
     rep.say(f"Phần có lời dài {total:.2f} giây")
 
@@ -865,6 +884,8 @@ def _render_project(
         "lufs": round(lufs, 2) if lufs is not None else None,
         "aligner": aligner,
         "aligner_info": alignment.info,
+        "trimmed_tail": trimmed_tail.name if trimmed_tail else None,
+        "trimmed_tail_seconds": round(cut_span[1] - cut_span[0], 3) if trimmed_tail else None,
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
         "preview_seconds": partial,
@@ -886,6 +907,8 @@ def _render_project(
         aligner=aligner, aligner_info=alignment.info, seconds=time.time() - t_start,
         warnings=warnings,
         preview_seconds=partial, cover=cover, youtube_cover=youtube_cover,
+        trimmed_tail=trimmed_tail,
+        trimmed_tail_seconds=(cut_span[1] - cut_span[0]) if trimmed_tail else None,
     )  # fmt: skip
 
 
