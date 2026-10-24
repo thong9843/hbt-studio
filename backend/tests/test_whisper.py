@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -216,3 +217,13 @@ def test_worker_reports_the_stage_of_a_failure(tmp_path, monkeypatch):
         results[device] = json.loads(out.read_text("utf-8"))
     assert results["cuda"]["stage"] == "load" and "insufficient" in results["cuda"]["error"]
     assert results["cpu"]["stage"] == "run" and "cublas" in results["cpu"]["error"]
+
+
+def test_relative_paths_are_made_absolute_for_the_child(fake, tmp_path, monkeypatch):
+    """Tiến trình con chạy ở thư mục khác: đường dẫn tương đối của người gọi phải được đổi."""
+    (tmp_path / "v.wav").write_bytes(b"x")
+    monkeypatch.chdir(tmp_path)
+    whisper.run_whisper("v.wav", "p", WhisperConfig(models_dir=Path("models")), steps=[CPU])
+    req = fake.requests()[0]
+    assert Path(req["wav"]) == tmp_path / "v.wav"
+    assert Path(req["models_dir"]) == tmp_path / "models"

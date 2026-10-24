@@ -217,3 +217,45 @@ def test_job_passes_whisper_settings_from_app_settings(tmp_path):
     job = mgr.submit("demo", preview=True)
     assert wait_for(lambda: job.finished)
     assert seen == [("medium", 321)]
+
+
+# ---------------------------------------------------------------- mốc cảnh không dùng được
+@pytest.mark.parametrize(
+    ("offsets", "ok"),
+    [
+        ([1.0, 2.0], True),
+        ([0.0, 2.0], False),
+        ([1.0, 1.0], False),
+        ([2.0, 1.0], False),
+        ([], False),
+    ],
+)
+def test_offsets_valid(offsets, ok):
+    assert render.offsets_valid(offsets) is ok
+
+
+class ZeroWidthWhisper(FakeWhisper):
+    """Whisper cho mọi âm tiết ở mốc 0,0 (như small CPU bỏ sót nửa đầu kịch bản)."""
+
+    def __call__(self, wav, prompt, cfg, log=print, *, steps=None):
+        run = super().__call__(wav, prompt, cfg, log, steps=steps)
+        run.syllables = [(s, 0.0, 0.0) for s, _, _ in run.syllables]
+        return run
+
+
+@needs_ffmpeg
+def test_unusable_scene_marks_fall_back_to_silence_instead_of_failing(tmp_path, monkeypatch):
+    monkeypatch.setattr(render, "run_whisper", ZeroWidthWhisper())
+    pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
+    res = render_project(pdir, opts)
+    assert res.aligner == "silence"
+    assert "mốc chuyển cảnh từ Whisper không hợp lệ" in res.aligner_info["whisper_error"]
+    assert "khớp" in res.log.read_text("utf-8")
+
+
+@needs_ffmpeg
+def test_unusable_scene_marks_fail_when_whisper_is_forced(tmp_path, monkeypatch):
+    monkeypatch.setattr(render, "run_whisper", ZeroWidthWhisper())
+    pdir, opts = make_project(tmp_path, aligner="whisper", outro=False)
+    with pytest.raises(RenderError, match="mốc chuyển cảnh từ Whisper không hợp lệ"):
+        render_project(pdir, opts)

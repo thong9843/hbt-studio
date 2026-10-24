@@ -133,9 +133,10 @@ def _run_step(
     out_path.unlink(missing_ok=True)
     request = {
         **asdict(step),
-        "wav": str(wav),
+        # tiến trình con chạy ở thư mục backend/: đường dẫn tương đối của người gọi sẽ sai
+        "wav": str(Path(wav).resolve()),
         "prompt": prompt,
-        "models_dir": str(cfg.models_dir),
+        "models_dir": str(Path(cfg.models_dir).resolve()),
         "local_only": model_cached(cfg.models_dir, step.model),
         "out": str(out_path),
     }

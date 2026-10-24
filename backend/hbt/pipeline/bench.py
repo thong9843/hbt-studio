@@ -17,7 +17,7 @@ from hbt.models import load_project
 from . import audio, cache
 from .align import match_script
 from .ffutil import media_duration
-from .render import PIPELINE_VERSION, compute_offsets, tokens_of
+from .render import PIPELINE_VERSION, scene_offsets, tokens_of
 from .scene_align import AlignError, align_scenes
 from .whisper import WhisperConfig, WhisperFailed, plan_steps, run_whisper
 from .whisper import detect_cuda as _detect_cuda
@@ -32,15 +32,6 @@ class BenchRow:
     mean_offset_ms: float | None = None  # trung bình |mốc cắt cảnh Whisper − khoảng lặng|
     max_offset_ms: float | None = None
     error: str | None = None
-
-
-def scene_offsets(times: list, scene_of: list[int], n_scenes: int) -> list[float]:
-    """Mốc bắt đầu chuyển cảnh (như bước 4 của render) từ mốc thời gian từng token."""
-    first, last = [0.0] * n_scenes, [0.0] * n_scenes
-    for si in range(n_scenes):
-        idx = [i for i, s in enumerate(scene_of) if s == si]
-        first[si], last[si] = times[idx[0]][0], times[idx[-1]][1]
-    return compute_offsets(first, last)
 
 
 def prepared_voice(project_dir: Path, project) -> Path:

@@ -174,6 +174,23 @@ def compute_offsets(first_start: list[float], last_end: list[float]) -> list[flo
     return [(last_end[k - 1] + first_start[k]) / 2 - X / 2 for k in range(1, len(first_start))]
 
 
+def scene_offsets(times: list, scene_of: list[int], n_scenes: int) -> list[float]:
+    """Mốc bắt đầu trượt của cảnh 2..n từ mốc thời gian từng token."""
+    first_start, last_end = [0.0] * n_scenes, [0.0] * n_scenes
+    for si in range(n_scenes):
+        idx = [i for i, s in enumerate(scene_of) if s == si]
+        first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
+    return compute_offsets(first_start, last_end)
+
+
+def offsets_valid(offsets: list[float]) -> bool:
+    return (
+        bool(offsets)
+        and offsets[0] > 0
+        and all(b > a for a, b in zip(offsets, offsets[1:], strict=False))
+    )
+
+
 def transition_frames(fps: int) -> int:
     """Số khung của một lần chuyển cảnh (0,4 s → 20 khung ở 50 fps)."""
     return int(round(X * fps))
@@ -420,11 +437,19 @@ def tokens_of(project) -> tuple[list, list[int]]:
     return tokens, scene_of
 
 
-def whisper_alignment(tokens, wav, cfg: WhisperConfig, log) -> Alignment:
+def whisper_alignment(tokens, scene_of, wav, cfg: WhisperConfig, log) -> Alignment:
     """Căn bằng Whisper (tiến trình con). Lỗi thì ném WhisperFailed / RuntimeError."""
     prompt = " ".join(t["disp"] for t in tokens)
     run = run_whisper(wav, prompt, cfg, log)
     m = match_script(tokens, run.syllables)
+    n_scenes = max(scene_of) + 1 if scene_of else 0
+    if n_scenes > 1 and not offsets_valid(scene_offsets(m.times, scene_of, n_scenes)):
+        # Không phải ngưỡng chất lượng: mốc cảnh không dựng được thì dùng khoảng lặng thay vì lỗi
+        raise WhisperFailed(
+            f"mốc chuyển cảnh từ Whisper không hợp lệ (khớp {m.matched_ratio:.1%} âm tiết)".replace(
+                ".", ","
+            )
+        )
     info = {
         **run.info(),
         "match_ratio": round(m.matched_ratio, 3),
@@ -444,7 +469,7 @@ def run_alignment(tokens, scene_of, wav, total, method, cfg: WhisperConfig, log)
     info: dict = {}
     if method in ("auto", "whisper"):
         try:
-            return whisper_alignment(tokens, wav, cfg, log)
+            return whisper_alignment(tokens, scene_of, wav, cfg, log)
         except (WhisperFailed, RuntimeError, ImportError) as e:
             if method == "whisper":
                 raise RenderError(f"Whisper không chạy được: {e}") from e
@@ -677,12 +702,8 @@ def _render_project(
     # ---- 4. Mốc chuyển cảnh (20)
     rep.at(20, "Mốc chuyển cảnh")
     n_scenes = len(project.scenes)
-    first_start, last_end = [0.0] * n_scenes, [0.0] * n_scenes
-    for si in range(n_scenes):
-        idx = [i for i, s in enumerate(scene_of) if s == si]
-        first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
-    offsets = compute_offsets(first_start, last_end)
-    if offsets[0] <= 0 or any(b <= a for a, b in zip(offsets, offsets[1:], strict=False)):
+    offsets = scene_offsets(times, scene_of, n_scenes)
+    if not offsets_valid(offsets):
         raise RenderError("Mốc chuyển cảnh không hợp lệ: có cảnh quá ngắn so với lời đọc")
     durs = clip_durations(offsets, total)
     # Xem nhanh 10 s đầu: video ngắn hơn giới hạn thì dựng cả video như thường (có outro nếu bật)
