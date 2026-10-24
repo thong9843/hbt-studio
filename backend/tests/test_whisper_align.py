@@ -65,8 +65,13 @@ class FakeWhisper:
         self.calls = []
         self.extra, self.drop_last, self.fail = extra, drop_last, fail
 
-    def __call__(self, wav, prompt, cfg, log=print, *, steps=None):
+    progress = ()  # các giá trị on_progress sẽ gọi
+
+    def __call__(self, wav, prompt, cfg, log=print, *, steps=None, on_progress=None):
         self.calls.append(cfg)
+        for f in self.progress:
+            if on_progress is not None:
+                on_progress(f)
         if self.fail:
             raise self.fail
         syl = []
@@ -237,7 +242,7 @@ def test_offsets_valid(offsets, ok):
 class ZeroWidthWhisper(FakeWhisper):
     """Whisper cho mọi âm tiết ở mốc 0,0 (như small CPU bỏ sót nửa đầu kịch bản)."""
 
-    def __call__(self, wav, prompt, cfg, log=print, *, steps=None):
+    def __call__(self, wav, prompt, cfg, log=print, *, steps=None, on_progress=None):
         run = super().__call__(wav, prompt, cfg, log, steps=steps)
         run.syllables = [(s, 0.0, 0.0) for s, _, _ in run.syllables]
         return run
@@ -259,3 +264,18 @@ def test_unusable_scene_marks_fail_when_whisper_is_forced(tmp_path, monkeypatch)
     pdir, opts = make_project(tmp_path, aligner="whisper", outro=False)
     with pytest.raises(RenderError, match="mốc chuyển cảnh từ Whisper không hợp lệ"):
         render_project(pdir, opts)
+
+
+@needs_ffmpeg
+def test_progress_bar_runs_6_to_20_percent_while_whisper_listens(tmp_path, monkeypatch):
+    fake = FakeWhisper()
+    fake.progress = (0.25, 0.5, 1.0)
+    monkeypatch.setattr(render, "run_whisper", fake)
+    pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
+    seen = []
+    render_project(pdir, opts, progress=lambda p, s, m: seen.append((p, s)))
+    in_step = [p for p, s in seen if s == "Căn chữ"]
+    assert in_step[:1] == [6] and 9.5 in in_step and 13.0 in in_step and 20.0 in in_step
+    assert in_step == sorted(in_step) and max(in_step) <= 20.0
+    percents = [p for p, _ in seen]
+    assert percents == sorted(percents)  # cả thanh tiến độ không lùi

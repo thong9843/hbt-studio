@@ -16,10 +16,14 @@ from pathlib import Path
 from .text import norm
 
 
-def syllables_of(segments) -> list[list]:
-    """Mỗi từ Whisper nghe được → các âm tiết đã chuẩn hoá, chia đều thời gian của từ."""
+def syllables_of(segments, on_segment=None) -> list[list]:
+    """Mỗi từ Whisper nghe được → các âm tiết đã chuẩn hoá, chia đều thời gian của từ.
+
+    `on_segment(seg)` được gọi sau mỗi đoạn (để báo tiến độ)."""
     out: list[list] = []
     for seg in segments:
+        if on_segment is not None:
+            on_segment(seg)
         for w in seg.words or []:
             parts = [p for p in (norm(x) for x in w.word.split()) if p]
             if not parts:
@@ -28,6 +32,19 @@ def syllables_of(segments) -> list[list]:
             for i, p in enumerate(parts):
                 out.append([p, w.start + i * step, w.start + (i + 1) * step])
     return out
+
+
+def progress_reporter(path, duration):
+    """Mỗi đoạn nhận dạng xong thì thêm một dòng "phần giọng đã nghe" (0…1) vào file tiến độ."""
+    if not path or not duration:
+        return None
+
+    def report(seg) -> None:
+        frac = max(0.0, min(1.0, float(seg.end) / float(duration)))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{frac:.4f}\n")
+
+    return report
 
 
 def run(req: dict) -> list[list]:
@@ -43,7 +60,7 @@ def run(req: dict) -> list[list]:
             local_files_only=req["local_only"],
         )
         stage = "run"
-        segments, _ = model.transcribe(
+        segments, info = model.transcribe(
             req["wav"],
             language="vi",
             word_timestamps=True,
@@ -51,7 +68,7 @@ def run(req: dict) -> list[list]:
             initial_prompt=req["prompt"][:220],
             condition_on_previous_text=False,
         )
-        return syllables_of(segments)
+        return syllables_of(segments, progress_reporter(req.get("progress"), info.duration))
     except Exception as e:
         e.stage = stage  # type: ignore[attr-defined]
         raise

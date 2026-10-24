@@ -23,6 +23,10 @@ with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as f:
 mode = os.environ.get("FAKE_" + req["device"].upper(), "ok")
 def write(data):
     open(req["out"], "w", encoding="utf-8").write(json.dumps(data))
+if mode == "progress":
+    for f in (0.25, 0.5, 0.5, 1.0):
+        open(req["progress"], "a").write(str(f) + "\n"); time.sleep(0.6)
+    write({"ok": True, "syllables": [["xin", 0.5, 0.8]]}); sys.exit(0)
 if mode == "ok":
     write({"ok": True, "syllables": [["xin", 0.5, 0.8], ["chao", 0.8, 1.1]]}); sys.exit(0)
 if mode == "empty":
@@ -227,3 +231,39 @@ def test_relative_paths_are_made_absolute_for_the_child(fake, tmp_path, monkeypa
     req = fake.requests()[0]
     assert Path(req["wav"]) == tmp_path / "v.wav"
     assert Path(req["models_dir"]) == tmp_path / "models"
+
+
+def test_progress_reports_the_heard_part_while_the_child_runs(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_CPU", "progress")
+    seen: list[float] = []
+    whisper.run_whisper("v.wav", "p", cfg(tmp_path), steps=[CPU], on_progress=seen.append)
+    assert seen and seen == sorted(seen) and len(set(seen)) == len(seen)  # tăng dần, không lặp
+    assert 0 < seen[0] <= seen[-1] <= 1.0
+
+
+def test_progress_is_optional(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_CPU", "progress")
+    assert whisper.run_whisper("v.wav", "p", cfg(tmp_path), steps=[CPU]).step == CPU
+
+
+def test_read_progress_ignores_missing_and_half_written_lines(tmp_path):
+    f = tmp_path / "p.txt"
+    assert whisper._read_progress(f) is None
+    f.write_text("0.1\n0.4\n", "utf-8")
+    assert whisper._read_progress(f) == 0.4
+    f.write_text("0.1\n0.4", "utf-8")  # dòng cuối chưa xong vẫn đọc được
+    assert whisper._read_progress(f) == 0.4
+    f.write_text("0.1\nabc", "utf-8")
+    assert whisper._read_progress(f) is None
+
+
+def test_worker_writes_one_progress_line_per_segment(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from hbt.pipeline.whisper_worker import progress_reporter, syllables_of
+
+    path = tmp_path / "progress.txt"
+    segs = [NS(end=5.0, words=None), NS(end=10.0, words=None), NS(end=40.0, words=None)]
+    syllables_of(segs, progress_reporter(str(path), 20.0))
+    assert path.read_text("utf-8").split() == ["0.2500", "0.5000", "1.0000"]  # chặn ở 1
+    assert progress_reporter(None, 20.0) is None and progress_reporter(str(path), 0) is None

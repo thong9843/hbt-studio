@@ -65,6 +65,7 @@ PIPELINE_VERSION = cache.code_digest(
     _whisper_worker,
     sys.modules[__name__],
 )
+ALIGN_START, ALIGN_END = 6.0, 20.0  # khung tiến độ của bước 3 (Căn chữ) trong mục 4
 MAX_PARALLEL_CLIPS = 3
 MAX_PREVIEW_SECONDS = 60  # giới hạn trên của `preview_seconds`
 
@@ -437,10 +438,12 @@ def tokens_of(project) -> tuple[list, list[int]]:
     return tokens, scene_of
 
 
-def whisper_alignment(tokens, scene_of, wav, cfg: WhisperConfig, log) -> Alignment:
+def whisper_alignment(
+    tokens, scene_of, wav, cfg: WhisperConfig, log, on_progress=None
+) -> Alignment:
     """Căn bằng Whisper (tiến trình con). Lỗi thì ném WhisperFailed / RuntimeError."""
     prompt = " ".join(t["disp"] for t in tokens)
-    run = run_whisper(wav, prompt, cfg, log)
+    run = run_whisper(wav, prompt, cfg, log, on_progress=on_progress)
     m = match_script(tokens, run.syllables)
     n_scenes = max(scene_of) + 1 if scene_of else 0
     if n_scenes > 1 and not offsets_valid(scene_offsets(m.times, scene_of, n_scenes)):
@@ -464,12 +467,14 @@ def whisper_alignment(tokens, scene_of, wav, cfg: WhisperConfig, log) -> Alignme
     return Alignment(m.times, "whisper", 0, None, info)
 
 
-def run_alignment(tokens, scene_of, wav, total, method, cfg: WhisperConfig, log) -> Alignment:
+def run_alignment(
+    tokens, scene_of, wav, total, method, cfg: WhisperConfig, log, on_progress=None
+) -> Alignment:
     """Whisper (nếu method auto/whisper), lỗi hoặc quá giờ thì rơi về khoảng lặng kèm log lý do."""
     info: dict = {}
     if method in ("auto", "whisper"):
         try:
-            return whisper_alignment(tokens, scene_of, wav, cfg, log)
+            return whisper_alignment(tokens, scene_of, wav, cfg, log, on_progress)
         except (WhisperFailed, RuntimeError, ImportError) as e:
             if method == "whisper":
                 raise RenderError(f"Whisper không chạy được: {e}") from e
@@ -502,6 +507,7 @@ class _Reporter:
             self.progress(pct, step, "")
 
     def tick(self, pct: float) -> None:
+        self.pct = pct
         if self.progress:
             self.progress(pct, self.step, "")
 
@@ -651,7 +657,7 @@ def _render_project(
     else:
         alignment = run_alignment(
             tokens, scene_of, str(voice_align), prepped_total, project.settings.aligner,
-            whisper_cfg, rep.say,
+            whisper_cfg, rep.say, lambda f: rep.tick(ALIGN_START + (ALIGN_END - ALIGN_START) * f),
         )  # fmt: skip
         timing_path.write_text(
             json.dumps(

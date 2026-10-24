@@ -125,12 +125,29 @@ def _kill(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
+def _read_progress(path: Path) -> float | None:
+    """Dòng tiến độ cuối cùng của tiến trình con (phần giọng đã nghe, 0…1)."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return float(lines[-1]) if lines else None
+    except (OSError, ValueError):
+        return None  # chưa có file, hoặc đang ghi dở dòng cuối
+
+
 def _run_step(
-    step: Step, wav: str, prompt: str, cfg: WhisperConfig, deadline: float, work: Path
+    step: Step,
+    wav: str,
+    prompt: str,
+    cfg: WhisperConfig,
+    deadline: float,
+    work: Path,
+    on_progress: Callable[[float], None] | None = None,
 ) -> list:
     """Chạy một bậc; trả về danh sách âm tiết hoặc ném WhisperFailed / WhisperTimeout."""
     req_path, out_path, err_path = work / "req.json", work / "out.json", work / "err.txt"
+    progress_path = work / "progress.txt"
     out_path.unlink(missing_ok=True)
+    progress_path.unlink(missing_ok=True)
     request = {
         **asdict(step),
         # tiến trình con chạy ở thư mục backend/: đường dẫn tương đối của người gọi sẽ sai
@@ -139,6 +156,7 @@ def _run_step(
         "models_dir": str(Path(cfg.models_dir).resolve()),
         "local_only": model_cached(cfg.models_dir, step.model),
         "out": str(out_path),
+        "progress": str(progress_path),
     }
     req_path.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
     token = cancel.current()
@@ -149,6 +167,7 @@ def _run_step(
         if token is not None:
             token.track(proc)
         try:
+            last = 0.0
             while True:
                 try:
                     proc.wait(timeout=POLL_SECONDS)
@@ -156,6 +175,11 @@ def _run_step(
                 except subprocess.TimeoutExpired:
                     pass
                 cancel.check_current()
+                if on_progress is not None:
+                    frac = _read_progress(progress_path)
+                    if frac is not None and frac > last:
+                        last = frac
+                        on_progress(frac)
                 if time.monotonic() >= deadline:
                     raise WhisperTimeout(f"quá giới hạn {cfg.timeout} giây")
         finally:
@@ -180,8 +204,11 @@ def run_whisper(
     log: Callable[[str], None] = print,
     *,
     steps: list[Step] | None = None,
+    on_progress: Callable[[float], None] | None = None,
 ) -> WhisperRun:
-    """Thử lần lượt các bậc đến khi một bậc cho kết quả. Mọi bậc lỗi → WhisperFailed."""
+    """Thử lần lượt các bậc đến khi một bậc cho kết quả. Mọi bậc lỗi → WhisperFailed.
+
+    `on_progress(f)`: phần giọng đã nghe (0…1, tăng dần trong mỗi bậc)."""
     steps = steps or plan_steps(cfg.model, cfg.device, detect_cuda())
     deadline = time.monotonic() + cfg.timeout
     skipped: list[str] = []
@@ -190,7 +217,7 @@ def run_whisper(
             log(f"Whisper {step.label}…")
             t0 = time.monotonic()
             try:
-                syllables = _run_step(step, str(wav), prompt, cfg, deadline, Path(tmp))
+                syllables = _run_step(step, str(wav), prompt, cfg, deadline, Path(tmp), on_progress)
             except RenderCancelled:
                 raise
             except WhisperTimeout as e:
