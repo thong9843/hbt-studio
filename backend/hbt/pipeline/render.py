@@ -640,13 +640,18 @@ def _render_project(
     rep.say(f"Aligner đã dùng: {aligner}" + (f" (bỏ {dropped} đoạn cuối)" if dropped else ""))
 
     # cắt đuôi giọng thừa (4d); đã cắt tay bằng voice.trim_end thì thôi
-    if manual_trim is None:
+    if manual_trim is not None:
+        voice_final = voice_align
+    elif aligner == "whisper":
+        voice_final, trim = audio.trim_tail_whisper(
+            voice_wav, times[-1][1], alignment.info, build / "voice_trimmed.wav", rep.say, warn,
+            allow_long=opts.allow_long_trim,
+        )  # fmt: skip
+    else:
         voice_final, trim = audio.trim_tail_if_needed(
             voice_wav, times[-1][1], build / "voice_trimmed.wav", rep.say,
             allow_long=opts.allow_long_trim,
         )  # fmt: skip
-    else:
-        voice_final = voice_align
     total = media_duration(voice_final)
     rep.say(f"Phần có lời dài {total:.2f} giây")
 

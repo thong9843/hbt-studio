@@ -23,6 +23,7 @@ TARGET_LUFS = -14.0
 VOICE_END_MARGIN = 0.35
 TAIL_FADE = 0.08
 MAX_TRIM_SECONDS = 8.0
+HEARD_MARGIN = 0.05  # Whisper nghe thêm chữ sau voice_end quá chừng này mới tính là đoạn thừa
 
 # Outro (4c)
 OUTRO_DURATION = 4.0
@@ -68,12 +69,16 @@ def plan_tail_trim(
     content_end: float,
     *,
     allow_long: bool = False,
+    heard_end: float | None = None,
 ) -> TailTrim | None:
     """Có đoạn tiếng nói nào *sau* chữ cuối của kịch bản không? Có thì trả kế hoạch cắt.
 
-    `content_end` = hết phần giọng thật (trước đoạn đệm TAIL). Không có đoạn thừa → None."""
+    `content_end` = hết phần giọng thật (trước đoạn đệm TAIL). Không có đoạn thừa → None.
+    `heard_end` (Whisper): Whisper còn nghe thấy chữ sau `voice_end` thì cũng là đoạn thừa."""
     voice_end = last_token_end + VOICE_END_MARGIN
     extra = [s for s in speech_segs if s[0] >= voice_end]
+    if not extra and heard_end is not None and heard_end > voice_end + HEARD_MARGIN:
+        extra = [(voice_end, heard_end)]
     if not extra:
         return None
     cut = content_end - voice_end
@@ -88,14 +93,14 @@ def plan_tail_trim(
     return TailTrim(voice_end=voice_end, cut_seconds=cut, segments_cut=len(extra))
 
 
-def trim_voice_tail(src: str | Path, dst: str | Path, voice_end: float) -> None:
-    """Cắt đuôi tại voice_end, fade ra 80 ms, đệm lại TAIL, chuẩn hoá lại −14 LUFS.
+def trim_voice_tail(src: str | Path, dst: str | Path, voice_end: float, pad: float = TAIL) -> None:
+    """Cắt đuôi tại voice_end, fade ra 80 ms, đệm lại `pad` (mặc định TAIL), chuẩn hoá −14 LUFS.
 
     Chuẩn hoá lại sau khi cắt để độ lớn (và ducking) chỉ tính trên phần giọng giữ lại (4d.4)."""
     fade_start = max(voice_end - TAIL_FADE, 0)
     af = (
         f"atrim=end={voice_end:.3f},afade=t=out:st={fade_start:.3f}:d={TAIL_FADE},"
-        f"apad=pad_dur={TAIL},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100"
+        f"apad=pad_dur={pad:.3f},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100"
     )
     run_ffmpeg(["-i", src, "-af", af, "-ac", "1", dst])
 
@@ -124,6 +129,48 @@ def trim_tail_if_needed(
         f"({plan.cut_seconds:.2f} giây)".replace(".", ",")
     )
     return Path(dst), plan
+
+
+def trim_tail_whisper(
+    voice_wav: str | Path,
+    last_token_end: float,
+    info: dict,
+    dst: str | Path,
+    log=print,
+    warn=print,
+    *,
+    allow_long: bool = False,
+) -> tuple[Path, TailTrim | None]:
+    """Cắt đuôi theo Whisper (4d.1): `voice_end = end(token cuối) + 0,35 s`, fade ra 80 ms, đệm để
+    tổng 1,6 s sau chữ cuối, chuẩn hoá lại −14 LUFS.
+
+    Chỉ cắt khi token cuối khớp thật với âm tiết Whisper nghe được; token cuối chỉ được nội suy thì
+    mốc `end` không đáng tin: không cắt, chỉ cảnh báo nếu có tiếng nói sau chữ khớp cuối cùng."""
+    total = media_duration(voice_wav)
+    content_end = total - TAIL
+    segs = speech_segments(str(voice_wav), total)
+    heard_end = info.get("heard_end")
+    if info.get("last_token_matched"):
+        plan = plan_tail_trim(
+            last_token_end, segs, content_end, allow_long=allow_long, heard_end=heard_end
+        )
+        if plan is None:
+            return Path(voice_wav), None
+        trim_voice_tail(voice_wav, dst, plan.voice_end, pad=TAIL - VOICE_END_MARGIN)
+        log(
+            f"Đã cắt {plan.segments_cut} đoạn thừa ở cuối file giọng "
+            f"({plan.cut_seconds:.2f} giây)".replace(".", ",")
+        )
+        return Path(dst), plan
+    anchor = info.get("last_matched_end")
+    if anchor is not None:
+        plan = plan_tail_trim(anchor, segs, content_end, allow_long=True, heard_end=heard_end)
+        if plan is not None:
+            warn(
+                f"Có thể có đoạn thừa ở cuối file giọng ({plan.cut_seconds:.2f} giây), "
+                "chưa cắt".replace(".", ",")
+            )
+    return Path(voice_wav), None
 
 
 # ---------------------------------------------------------------- nhạc nền
