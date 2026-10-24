@@ -319,6 +319,8 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
      - **Tỉ lệ khớp** (âm tiết kịch bản khớp âm tiết nghe được) chỉ ghi vào log và `meta.json`, không có ngưỡng chặn.
      - **Phương pháp đã dùng** (kèm model, thiết bị, lý do nếu rơi bậc) ghi ở `meta.json`, log và khối kết quả tab Xuất video.
      - **`bench-align`** chỉ có 3 chỉ số: thời gian, tỉ lệ khớp, độ lệch mốc cắt cảnh so với căn khoảng lặng. Việc đối chiếu với bản đã đăng thuộc golden test.
+     - **`bench-align --prompt on|off|both`** (mặc định `on`): chỉ để đo xem `initial_prompt` có giúp hay hại từng model; báo thêm từng mốc cắt cảnh và ghi rõ model vượt giới hạn thời gian. Đường dựng không đổi, luôn gửi `initial_prompt`.
+     - **Tiến độ:** trong lúc Whisper chạy, thanh tiến độ đi từ 6% đến 20% theo phần giọng đã nghe (khung bước 3 ở mục 4); tiến trình con ghi tỉ lệ sau mỗi đoạn nhận dạng, tiến trình cha đọc.
      - Không đạt phụ đề lệch < 0,05 s thì chỉ báo số đo, **không** tự đổi mặc định.
    - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
