@@ -48,7 +48,9 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
     state = AppState(
         settings=settings,
         storage=storage,
-        jobs=JobManager(storage, settings.library_dir, brand_dir, sensitive=sensitive),
+        jobs=JobManager(
+            storage, settings.library_dir, brand_dir, sensitive=sensitive, app_settings=app_settings
+        ),
         library=MusicLibrary(settings.library_dir),
         sensitive=sensitive,
         app_settings=app_settings,

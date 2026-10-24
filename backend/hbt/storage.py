@@ -351,6 +351,7 @@ class Storage:
                 "duration": meta.get("duration"),
                 "lufs": meta.get("lufs"),
                 "aligner": meta.get("aligner"),
+                "aligner_info": meta.get("aligner_info"),
                 "preview_seconds": meta.get("preview_seconds"),
                 "music_start": meta.get("music_start"),
                 "music_start_source": meta.get("music_start_source"),

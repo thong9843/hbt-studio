@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
@@ -131,6 +132,7 @@ class JobManager:
         render_fn=render_project,
         tool_check=check_render_tools,
         sensitive: SensitiveStore | None = None,
+        app_settings: AppSettingsStore | None = None,
     ):
         self.storage = storage
         self.library_dir = library_dir
@@ -138,6 +140,7 @@ class JobManager:
         self._render = render_fn
         self._tool_check = tool_check
         self.sensitive = sensitive
+        self.app_settings = app_settings
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -226,6 +229,7 @@ class JobManager:
             job.status = RUNNING
             job.started_at = time.time()
         folder = self.storage.project_dir(job.slug)
+        cfg = self.app_settings.load() if self.app_settings is not None else None
         opts = RenderOptions(
             preview=job.preview,
             fps=job.fps,
@@ -235,6 +239,8 @@ class JobManager:
             sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
             library_dir=self.library_dir,
             brand_dir=self.brand_dir,
+            whisper_model=cfg.whisper_model if cfg else None,
+            whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
             job_id=job.id,
         )
         try:
@@ -261,6 +267,7 @@ class JobManager:
                 "lufs": round(result.lufs, 2) if result.lufs is not None else None,
                 "preview_seconds": result.preview_seconds,
                 "aligner": result.aligner,
+                "aligner_info": result.aligner_info,
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,
             }

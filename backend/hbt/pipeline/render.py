@@ -32,7 +32,9 @@ from . import captions as _captions
 from . import scene_align as _scene_align
 from . import text as _text
 from . import visual as _visual
-from .align import align_whisper
+from . import whisper as _whisper
+from . import whisper_worker as _whisper_worker
+from .align import match_script
 from .cancel import CancelToken, RenderCancelled
 from .captions import build_phrases, caption_y_for, render_states, write_ffconcat, write_srt
 from .ffutil import ffmpeg_exe, measure_lufs, media_duration, probe, run_ffmpeg
@@ -42,6 +44,7 @@ from .scene_align import AlignError, align_scenes
 from .text import parse_voice
 from .thumbnail import LOGO_FILE, render_cover, save_covers
 from .visual import build_scene_layers
+from .whisper import WhisperConfig, WhisperFailed, run_whisper
 
 X = 0.4  # thời lượng chuyển cảnh (giây)
 SUBSAMPLES = 6  # mẫu con mỗi khung trong nửa chu kỳ khung (màn trập 180°)
@@ -50,7 +53,16 @@ CARD_FADE = 0.35
 OUTRO_FILE = "outro_4s_50fps.mp4"
 # Hash mã nguồn pipeline: đổi thuật toán thì mọi khoá cache trong build/ tự đổi theo.
 PIPELINE_VERSION = cache.code_digest(
-    _text, _align, _scene_align, audio, _captions, _visual, cache, sys.modules[__name__]
+    _text,
+    _align,
+    _scene_align,
+    audio,
+    _captions,
+    _visual,
+    cache,
+    _whisper,
+    _whisper_worker,
+    sys.modules[__name__],
 )
 MAX_PARALLEL_CLIPS = 3
 MAX_PREVIEW_SECONDS = 60  # giới hạn trên của `preview_seconds`
@@ -97,7 +109,8 @@ class RenderOptions:
     sensitive_words: SensitiveWords | None = None  # None → không kiểm từ nhạy cảm
     library_dir: Path | None = None
     brand_dir: Path | None = None
-    whisper_model: str | None = None
+    whisper_model: str | None = None  # model chọn trong Cài đặt (auto → .env → phần cứng)
+    whisper_timeout: int | None = None  # giây; None → mặc định
     job_id: str | None = None  # tên thư mục renders/<job_id>; None → thời điểm dựng
 
 
@@ -119,6 +132,7 @@ class RenderResult:
     preview_seconds: float | None = None  # có giá trị khi chỉ dựng đoạn đầu
     cover: Path | None = None  # cover_9x16.jpg; None nếu không có khối thumbnail hoặc vẽ lỗi
     youtube_cover: Path | None = None  # youtube_3x2.jpg
+    aligner_info: dict = field(default_factory=dict)  # model/thiết bị/tỉ lệ khớp/lý do rơi bậc
 
 
 # ---------------------------------------------------------------- toán học chuyển động
@@ -382,27 +396,62 @@ def make_covers(project, project_dir: Path, out_dir: Path, brand_dir: Path) -> t
 
 
 # ---------------------------------------------------------------- căn chữ
-def run_alignment(tokens, scene_of, wav, total, method, model_size, log):
-    """Trả về (thời gian token, phương pháp đã dùng, số đoạn cuối bỏ, cảnh báo hoặc None)."""
+@dataclass
+class Alignment:
+    times: list
+    aligner: str  # "whisper" | "silence"
+    dropped: int  # số đoạn cuối bị bỏ (chỉ khoảng lặng)
+    warning: str | None
+    info: dict  # chi tiết ghi vào timing.json / meta.json (model, thiết bị, tỉ lệ khớp, lý do rơi)
+
+
+def tokens_of(project) -> tuple[list, list[int]]:
+    """Token của toàn bộ lời đọc và chỉ số cảnh của từng token."""
+    tokens, scene_of = [], []
+    for si, scene in enumerate(project.scenes):
+        ts = parse_voice(scene.voice)
+        tokens += ts
+        scene_of += [si] * len(ts)
+    return tokens, scene_of
+
+
+def whisper_alignment(tokens, wav, cfg: WhisperConfig, log) -> Alignment:
+    """Căn bằng Whisper (tiến trình con). Lỗi thì ném WhisperFailed / RuntimeError."""
+    prompt = " ".join(t["disp"] for t in tokens)
+    run = run_whisper(wav, prompt, cfg, log)
+    m = match_script(tokens, run.syllables)
+    info = {
+        **run.info(),
+        "match_ratio": round(m.matched_ratio, 3),
+        "last_token_matched": m.last_token_matched,
+        "last_matched_end": m.last_matched_end,
+        "heard_end": round(m.heard_end, 3),
+    }
+    log(
+        f"Căn phụ đề bằng Whisper {run.step.label}: khớp {m.matched_ratio:.1%} âm tiết, "
+        f"{run.seconds:.1f} giây".replace(".", ",")
+    )
+    return Alignment(m.times, "whisper", 0, None, info)
+
+
+def run_alignment(tokens, scene_of, wav, total, method, cfg: WhisperConfig, log) -> Alignment:
+    """Whisper (nếu method auto/whisper), lỗi hoặc quá giờ thì rơi về khoảng lặng kèm log lý do."""
+    info: dict = {}
     if method in ("auto", "whisper"):
         try:
-            times = align_whisper(tokens, wav, model_size)
-            log("Căn phụ đề bằng Whisper: OK")
-            return times, "whisper", 0, None
-        except Exception as e:  # noqa: BLE001
+            return whisper_alignment(tokens, wav, cfg, log)
+        except (WhisperFailed, RuntimeError, ImportError) as e:
             if method == "whisper":
-                raise
-            log(
-                f"Không dùng được Whisper ({e.__class__.__name__}), "
-                "chuyển sang căn theo khoảng lặng"
-            )
+                raise RenderError(f"Whisper không chạy được: {e}") from e
+            info["whisper_error"] = str(e)
+            log(f"Không dùng được Whisper ({e}), chuyển sang căn theo khoảng lặng")
     try:
         res = align_scenes(tokens, scene_of, wav, total)
     except AlignError as e:
         raise RenderError(str(e)) from e
     if res.refined_scenes:
         log("Hạ ngưỡng khoảng lặng ở cảnh " + ", ".join(str(k + 1) for k in res.refined_scenes))
-    return res.times, "silence", res.dropped, res.warning
+    return Alignment(res.times, "silence", res.dropped, res.warning, info)
 
 
 # ---------------------------------------------------------------- điều phối
@@ -457,7 +506,12 @@ def _render_project(
     settings = load_settings()
     library_dir = opts.library_dir or settings.library_dir
     brand_dir = opts.brand_dir or BRAND_DIR
-    model_size = opts.whisper_model or settings.whisper_model
+    whisper_cfg = WhisperConfig(
+        model=_whisper.effective_model(opts.whisper_model or "auto", settings.whisper_model),
+        device=settings.whisper_device,
+        timeout=opts.whisper_timeout or _whisper.DEFAULT_TIMEOUT,
+        models_dir=settings.models_dir,
+    )
 
     project = load_project(project_dir)  # lỗi đường dẫn/JSON thì dừng trước khi tạo thư mục nào
     job_id = opts.job_id or time.strftime("%Y%m%d-%H%M%S") + ("-preview" if opts.preview else "")
@@ -549,35 +603,40 @@ def _render_project(
 
     # ---- 3. Căn chữ (6–20)
     rep.at(6, "Căn chữ")
-    tokens, scene_of = [], []
-    for si, scene in enumerate(project.scenes):
-        ts = parse_voice(scene.voice)
-        tokens += ts
-        scene_of += [si] * len(ts)
+    tokens, scene_of = tokens_of(project)
     timing_path = build / "timing.json"
     key = cache.digest(
-        "timing", voice_align, [t["disp"] for t in tokens], project.settings.aligner, model_size,
-        PIPELINE_VERSION,
+        "timing", voice_align, [t["disp"] for t in tokens], project.settings.aligner,
+        whisper_cfg.key_parts(), PIPELINE_VERSION,
     )  # fmt: skip
     if cache.is_fresh(timing_path, key):
         data = json.loads(timing_path.read_text(encoding="utf-8"))
-        times = [tuple(x) for x in data["times"]]
-        aligner, dropped, tail_warning = data["aligner"], data["dropped"], data["warning"]
-        rep.say(f"Mốc thời gian chữ: dùng bản đã có (aligner: {aligner})")
+        alignment = Alignment(
+            [tuple(x) for x in data["times"]],
+            data["aligner"], data["dropped"], data["warning"], data["info"],
+        )  # fmt: skip
+        rep.say(f"Mốc thời gian chữ: dùng bản đã có (aligner: {alignment.aligner})")
     else:
-        times, aligner, dropped, tail_warning = run_alignment(
+        alignment = run_alignment(
             tokens, scene_of, str(voice_align), prepped_total, project.settings.aligner,
-            model_size, rep.say,
+            whisper_cfg, rep.say,
         )  # fmt: skip
         timing_path.write_text(
             json.dumps(
-                {"aligner": aligner, "dropped": dropped, "warning": tail_warning, "times": times}
+                {
+                    "aligner": alignment.aligner,
+                    "dropped": alignment.dropped,
+                    "warning": alignment.warning,
+                    "info": alignment.info,
+                    "times": alignment.times,
+                }  # fmt: skip
             ),
             encoding="utf-8",
         )
         cache.mark(timing_path, key)
-    if tail_warning:
-        warn(tail_warning)
+    times, aligner, dropped = alignment.times, alignment.aligner, alignment.dropped
+    if alignment.warning:
+        warn(alignment.warning)
     rep.say(f"Aligner đã dùng: {aligner}" + (f" (bỏ {dropped} đoạn cuối)" if dropped else ""))
 
     # cắt đuôi giọng thừa (4d); đã cắt tay bằng voice.trim_end thì thôi
@@ -800,6 +859,7 @@ def _render_project(
         "duration": round(duration, 3),
         "lufs": round(lufs, 2) if lufs is not None else None,
         "aligner": aligner,
+        "aligner_info": alignment.info,
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
         "preview_seconds": partial,
@@ -818,7 +878,8 @@ def _render_project(
     return RenderResult(
         job_dir=job_dir, video=video, srt=srt, publish=publish, log=job_dir / "log.txt",
         fps=q.fps, width=q.width, height=q.height, duration=duration, lufs=lufs,
-        aligner=aligner, seconds=time.time() - t_start, warnings=warnings,
+        aligner=aligner, aligner_info=alignment.info, seconds=time.time() - t_start,
+        warnings=warnings,
         preview_seconds=partial, cover=cover, youtube_cover=youtube_cover,
     )  # fmt: skip
 
