@@ -297,7 +297,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 - Mỗi token có `disp` (hiển thị) và `syl` (danh sách âm tiết đã bỏ dấu, dùng để so khớp).
 
 ### 5.2 Căn thời gian (`render.run_alignment`)
-1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
+1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, **không dùng `initial_prompt`** (điểm lệch tham số reference đã duyệt 24/10/2026, số đo bên dưới; reference dùng lời đọc 220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
    - **Chọn cấu hình theo phần cứng** (chủ dự án chốt 22/10/2026). `.env`: `WHISPER_DEVICE=auto`, `WHISPER_MODEL=auto`.
 
      | Phần cứng | Thiết bị | Kiểu tính | Model |
@@ -319,9 +319,21 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
      - **Tỉ lệ khớp** (âm tiết kịch bản khớp âm tiết nghe được) chỉ ghi vào log và `meta.json`, không có ngưỡng chặn.
      - **Phương pháp đã dùng** (kèm model, thiết bị, lý do nếu rơi bậc) ghi ở `meta.json`, log và khối kết quả tab Xuất video.
      - **`bench-align`** chỉ có 3 chỉ số: thời gian, tỉ lệ khớp, độ lệch mốc cắt cảnh so với căn khoảng lặng. Việc đối chiếu với bản đã đăng thuộc golden test.
-     - **`bench-align --prompt on|off|both`** (mặc định `on`): chỉ để đo xem `initial_prompt` có giúp hay hại từng model; báo thêm từng mốc cắt cảnh và ghi rõ model vượt giới hạn thời gian. Đường dựng không đổi, luôn gửi `initial_prompt`.
+     - **`bench-align --prompt off|on|both`** (mặc định `off`, khớp đường dựng): `on` và `both` chỉ để so sánh (ở 1b); báo thêm từng mốc cắt cảnh và ghi rõ model vượt giới hạn thời gian.
      - **Tiến độ:** trong lúc Whisper chạy, thanh tiến độ đi từ 6% đến 20% theo phần giọng đã nghe (khung bước 3 ở mục 4); tiến trình con ghi tỉ lệ sau mỗi đoạn nhận dạng, tiến trình cha đọc.
      - Không đạt phụ đề lệch < 0,05 s thì chỉ báo số đo, **không** tự đổi mặc định.
+   - **Điểm lệch tham số reference: bỏ `initial_prompt` cho mọi model (chủ dự án duyệt 24/10/2026).** Đo bằng `bench-align --models small,medium,large-v3 --prompt both` trên "muỗi" (máy cũ, CPU `int8`, máy rảnh, 24/10/2026). Có prompt, cả ba model bỏ sót nửa đầu kịch bản (tỉ lệ khớp 61–63%); bỏ prompt thì khớp 89–91%. Lệch mốc cắt cảnh so với căn khoảng lặng (khoảng lặng từng khớp bản đã đăng trong 4 ms ở 7 mốc):
+
+     | Model | Prompt | Thời gian | Khớp | Lệch TB | Lệch max | Từng mốc (ms) |
+     |---|---|---|---|---|---|---|
+     | small | có | 22,0 s | 62,9% | 3684 | 12374 | 5329 · 7759 · 12374 · 125 · 74 · 62 · 65 |
+     | small | không | 18,5 s | 89,4% | 129 | 354 | 49 · 1 · 354 · 85 · 324 · 42 · 45 |
+     | medium | có | 107,3 s | 62,9% | 1752 | 7051 | 7051 · 4621 · 6 · 105 · 206 · 168 · 105 |
+     | medium | không | 57,8 s | 90,1% | 137 | 258 | 11 · 241 · 126 · 105 · 156 · 258 · 65 |
+     | large-v3 | có | 130,3 s | 60,9% | 12109 | 24651 | 24651 · 22221 · 17606 · 13725 · 4796 · 1618 · 145 |
+     | large-v3 | không | 111,4 s | 91,4% | 330 | 435 | 389 · 89 · 354 · 435 · 384 · 322 · 335 |
+
+     Không model nào vượt 900 s. Chưa model nào đạt phụ đề lệch < 0,05 s ở mọi mốc (chỉ báo số, mục dưới). **Mặc định `auto` giữ như bảng trên** (CPU → `small` `int8`; CUDA → `large-v3` `int8_float16`); mặc định cuối của mỗi máy chốt sau golden test. `large-v3` trên CPU lệch đều khoảng 0,3–0,4 s ở gần như mọi mốc, chưa rõ nguyên nhân: kiểm ở 1b.
    - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
@@ -649,7 +661,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - [x] (d) Xem nhanh 10 s đầu (chủ dự án chốt 23/10/2026): nút Xem nhanh mặc định chỉ dựng 10 s đầu (540×960, 30 fps như cũ), giữ tuỳ chọn xem nhanh cả video; căn chữ và điểm nhạc (`music_start`) vẫn tính trên cả video; thời gian dựng tuỳ máy. Chi tiết kỹ thuật ghi vào mục 4 và 9 khi làm.
 - **Đợt 1 (Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper)** — chia đôi (chủ dự án chốt 24/10/2026, vì máy mới đang hỏng):
   - **1a (máy cũ, không GPU):** toàn bộ code Đợt 1; đường CPU chạy thật (`small`, `int8`); đường CUDA viết theo đặc tả nhưng chỉ kiểm bằng test giả lập.
-  - **1b (máy mới, khi sửa xong):** kiểm đường CUDA thật (`large-v3`, `int8_float16`), chạy `bench-align`, chốt mặc định theo số đo.
+  - **1b (máy mới, khi sửa xong):** kiểm đường CUDA thật (`large-v3`, `int8_float16`), chạy `bench-align --prompt both` để đo `large-v3` CUDA **không prompt và có prompt**, kiểm độ lệch đều 0,3–0,4 s của `large-v3` (so với bản đã đăng nếu cần), chốt mặc định theo số đo và golden test.
 - **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
 ---
