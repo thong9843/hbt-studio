@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
 import type { AppSettings, Fps, SensitiveCategory, SensitiveWords } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
@@ -11,6 +12,14 @@ const S = vi.settings;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const FPS: Fps[] = [30, 50, 60];
 const MODELS: AppSettings['whisper_model'][] = ['auto', 'small', 'medium', 'large-v3'];
+
+/** Dòng giải thích Whisper sẽ chạy thế nào trên máy này (health.gpu / health.whisper). */
+function whisperNote(health: { gpu: boolean; whisper: boolean } | undefined): string {
+  const G = S.general;
+  if (!health) return G.whisperNoteUnknown;
+  if (!health.whisper) return G.whisperNoteMissing;
+  return health.gpu ? G.whisperNoteGpu : G.whisperNoteCpu;
+}
 
 function GeneralSection({ initial }: { initial: AppSettings }) {
   const queryClient = useQueryClient();
@@ -27,6 +36,7 @@ function GeneralSection({ initial }: { initial: AppSettings }) {
     if (HEX.test(next.theme.primary) && HEX.test(next.theme.accent)) schedule(next);
   };
 
+  const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth() });
   const slow = value.whisper_model === 'medium' || value.whisper_model === 'large-v3';
   const G = S.general;
   return (
@@ -133,7 +143,7 @@ function GeneralSection({ initial }: { initial: AppSettings }) {
           {G.whisperSlowWarning}
         </p>
       )}
-      <p className="text-small text-text-muted">{G.whisperNote}</p>
+      <p className="text-small text-text-muted">{whisperNote(health.data)}</p>
     </section>
   );
 }

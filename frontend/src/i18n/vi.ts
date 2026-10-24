@@ -261,6 +261,9 @@ export const vi = {
       fps: 'fps',
       lufs: 'Độ lớn',
       aligner: 'Căn chữ',
+      alignerMatch: (pct: string) => `Khớp ${pct} âm tiết của kịch bản.`,
+      alignerFallback: (why: string) => `Whisper không dùng được, đã căn theo khoảng lặng: ${why}`,
+      alignerSkipped: (why: string) => `Đã bỏ qua: ${why}`,
       seconds: 'Thời gian dựng',
       warnings: 'Cảnh báo khi dựng',
       cover: 'Tải cover_9x16.jpg',
@@ -319,6 +322,12 @@ export const vi = {
     },
     player: 'Trình phát video đã dựng',
   },
+  aligner: {
+    whisper: 'Whisper',
+    silence: 'Khoảng lặng',
+    gpu: 'GPU',
+    cpu: 'CPU',
+  },
   settings: {
     title: 'Cài đặt',
     loadFailed: 'Không tải được cài đặt.',
@@ -332,7 +341,14 @@ export const vi = {
       whisperSlowWarning:
         'Model này chạy chậm nếu máy không có GPU. Nếu quá thời gian bên dưới, app sẽ dùng căn theo khoảng lặng.',
       whisperTimeout: 'Giới hạn thời gian Whisper (giây)',
-      whisperNote: 'Hai mục Whisper được lưu từ bây giờ và dùng khi Whisper được bật (mốc M4).',
+      whisperNoteGpu:
+        'Máy này có GPU: "Tự chọn theo máy" dùng large-v3 trên GPU. GPU lỗi thì app tự chuyển sang small trên CPU, rồi sang căn theo khoảng lặng.',
+      whisperNoteCpu:
+        'Máy này không có GPU: "Tự chọn theo máy" dùng small trên CPU. Whisper lỗi hoặc quá giới hạn thời gian thì app căn theo khoảng lặng.',
+      whisperNoteMissing:
+        'Chưa cài faster-whisper nên app đang căn theo khoảng lặng. Cài theo hướng dẫn trong README để dùng Whisper.',
+      whisperNoteUnknown:
+        'Whisper lỗi hoặc quá giới hạn thời gian thì app căn theo khoảng lặng. Phương pháp đã dùng hiện ở kết quả dựng.',
       saved: 'Đã lưu',
       saving: 'Đang lưu…',
     },

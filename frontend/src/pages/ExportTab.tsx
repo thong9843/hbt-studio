@@ -12,6 +12,7 @@ import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { useJob } from '../hooks/useJob';
 import { vi } from '../i18n/vi';
+import { alignerLabel, alignerNotes } from '../utils/aligner';
 import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
 import { splitPublishBlocks } from '../utils/publish';
 import { sceneNumber } from '../utils/scene';
@@ -161,7 +162,7 @@ function ResultView({ job }: { job: Job }) {
           [R.duration, formatDuration(out.duration)],
           [R.fps, String(out.fps)],
           [R.lufs, out.lufs === null ? '—' : `${out.lufs.toFixed(1)} LUFS`],
-          [R.aligner, out.aligner],
+          [R.aligner, alignerLabel(out.aligner, out.aligner_info)],
           [R.seconds, `${out.seconds} ${vi.common.seconds}`],
         ].map(([k, v]) => (
           <div key={k} className="card p-4">
@@ -170,6 +171,11 @@ function ResultView({ job }: { job: Job }) {
           </div>
         ))}
       </dl>
+      {alignerNotes(out.aligner, out.aligner_info).map((note) => (
+        <p key={note} className="text-small text-text-muted">
+          {note}
+        </p>
+      ))}
       {out.warnings.length > 0 && (
         <div className="rounded-card bg-accent p-4 text-small text-on-accent">
           <b className="flex items-center gap-2">
@@ -280,7 +286,7 @@ function History({
               {r.duration ? formatDuration(r.duration) : ''}
               {r.fps ? ` · ${r.fps} fps` : ''}
               {` · ${formatBytes(r.size)}`}
-              {r.aligner ? ` · ${r.aligner}` : ''}
+              {r.aligner ? ` · ${alignerLabel(r.aligner, r.aligner_info)}` : ''}
             </span>
             <span className="ml-auto flex flex-wrap gap-2">
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPlay(r)}>

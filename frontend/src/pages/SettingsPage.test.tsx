@@ -51,3 +51,37 @@ describe('Settings page: sensitive words', () => {
     expect(await screen.findByText('Đã lưu danh sách')).toBeInTheDocument();
   });
 });
+
+describe('Settings page: Whisper note', () => {
+  const open = (health: Record<string, unknown> | undefined) => {
+    stubFetch({
+      'GET /api/settings/app': appSettings,
+      'GET /api/settings/sensitive-words': words,
+      ...(health ? { 'GET /api/health': health } : {}),
+    });
+    renderWithProviders(<SettingsPage />);
+  };
+  const base = { ok: true, ffmpeg: true, missing: [] };
+
+  it('explains the GPU path when the machine has a GPU', async () => {
+    open({ ...base, whisper: true, gpu: true });
+    expect(await screen.findByText(/có GPU.*large-v3 trên GPU/)).toBeInTheDocument();
+  });
+
+  it('explains the CPU path when there is no GPU', async () => {
+    open({ ...base, whisper: true, gpu: false });
+    expect(await screen.findByText(/không có GPU.*small trên CPU/)).toBeInTheDocument();
+  });
+
+  it('says Whisper is not installed and silence alignment is used', async () => {
+    open({ ...base, whisper: false, gpu: false });
+    expect(await screen.findByText(/Chưa cài faster-whisper/)).toBeInTheDocument();
+  });
+
+  it('shows the generic note while the health check is not available', async () => {
+    open(undefined);
+    expect(
+      await screen.findByText(/căn theo khoảng lặng\. Phương pháp đã dùng/),
+    ).toBeInTheDocument();
+  });
+});

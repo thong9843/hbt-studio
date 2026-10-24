@@ -48,6 +48,20 @@ export interface Music {
 }
 
 export type Aligner = 'auto' | 'whisper' | 'silence';
+
+/** Chi tiết căn chữ ghi trong meta.json (có khi aligner là whisper, hoặc khi Whisper phải bỏ). */
+export interface AlignerInfo {
+  model?: string;
+  device?: 'cuda' | 'cpu';
+  compute_type?: string;
+  whisper_seconds?: number;
+  match_ratio?: number;
+  last_token_matched?: boolean;
+  /** Các bậc Whisper đã bỏ qua trước khi có kết quả, kèm lý do. */
+  skipped?: string[];
+  /** Lý do Whisper không dùng được khi phải rơi về khoảng lặng. */
+  whisper_error?: string;
+}
 export type Fps = 30 | 50 | 60;
 
 export interface ProjectSettings {
@@ -111,6 +125,7 @@ export interface RenderRecord extends RenderSummary {
   height: number | null;
   lufs: number | null;
   aligner: string | null;
+  aligner_info?: AlignerInfo | null;
   music_start: number | null;
   music_start_source: 'manual' | 'auto' | null;
   /** null = dựng cả video. */
@@ -170,6 +185,7 @@ export interface JobOutput {
   lufs: number | null;
   preview_seconds: number | null;
   aligner: string;
+  aligner_info?: AlignerInfo | null;
   seconds: number;
   warnings: string[];
 }

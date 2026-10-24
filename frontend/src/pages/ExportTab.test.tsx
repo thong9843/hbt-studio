@@ -154,4 +154,49 @@ describe('Export tab: quick preview', () => {
     expect(screen.getByText('Độ lớn').nextElementSibling).toHaveTextContent('—');
     expect(screen.queryByText('captions.srt')).not.toBeInTheDocument();
   });
+  it('shows which aligner built the video, with the model, device and match ratio', async () => {
+    const job = {
+      id: 'j1',
+      project: 'muoi',
+      status: 'done',
+      progress: 100,
+      step: 'Xong',
+      log_tail: [],
+      error: null,
+      needs_confirmation: false,
+      preview: true,
+      preview_seconds: null,
+      output: {
+        video: '/api/files/v.mp4',
+        srt: null,
+        publish: '/api/files/p.txt',
+        log: '/api/files/l.txt',
+        fps: 30,
+        width: 540,
+        height: 960,
+        duration: 50,
+        lufs: -14,
+        preview_seconds: null,
+        aligner: 'whisper',
+        aligner_info: {
+          model: 'small',
+          device: 'cpu',
+          match_ratio: 0.9712,
+          skipped: ['large-v3 (cuda, int8_float16): lỗi lúc nạp model: x'],
+        },
+        seconds: 80,
+        warnings: [],
+      },
+    };
+    open([], { 'GET /api/jobs/j1': job, 'GET /api/files/p.txt': '' });
+    const user = userEvent.setup();
+    const button = await screen.findByRole('button', { name: 'Xem nhanh' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => FakeEventSource.instances[0].emit('end', { status: 'done' }));
+    expect(await screen.findByText('Whisper small · CPU')).toBeInTheDocument();
+    expect(screen.getByText('Khớp 97,1% âm tiết của kịch bản.')).toBeInTheDocument();
+    expect(screen.getByText(/Đã bỏ qua: large-v3 \(cuda/)).toBeInTheDocument();
+  });
 });
