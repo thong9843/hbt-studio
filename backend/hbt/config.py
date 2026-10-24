@@ -32,6 +32,10 @@ class Settings:
     whisper_model: str
     whisper_device: str
     default_fps: int
+    models_dir: Path = REPO_ROOT / "models"  # model Whisper tải về đây (đã ignore)
+
+
+WHISPER_MODELS = ("auto", "small", "medium", "large-v3")
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
@@ -49,13 +53,25 @@ def load_settings(env_file: Path | None = None) -> Settings:
     if device not in ("auto", "cuda", "cpu"):
         raise ValueError(f"WHISPER_DEVICE phải là auto|cuda|cpu, nhận {device}")
 
+    model = env.get("WHISPER_MODEL", "auto")
+    if model not in WHISPER_MODELS:
+        raise ValueError(f"WHISPER_MODEL phải là {'|'.join(WHISPER_MODELS)}, nhận {model}")
+
     return Settings(
         workspace_dir=path("WORKSPACE_DIR", "./workspace"),
         library_dir=path("LIBRARY_DIR", "./library"),
-        whisper_model=env.get("WHISPER_MODEL", "large-v3"),
+        whisper_model=model,
         whisper_device=device,
         default_fps=fps,
+        models_dir=path("MODELS_DIR", "./models"),
     )
 
 
-_KEYS = ("WORKSPACE_DIR", "LIBRARY_DIR", "WHISPER_MODEL", "WHISPER_DEVICE", "DEFAULT_FPS")
+_KEYS = (
+    "WORKSPACE_DIR",
+    "LIBRARY_DIR",
+    "WHISPER_MODEL",
+    "WHISPER_DEVICE",
+    "DEFAULT_FPS",
+    "MODELS_DIR",
+)
