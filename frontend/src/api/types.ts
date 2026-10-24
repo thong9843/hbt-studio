@@ -126,6 +126,7 @@ export interface RenderRecord extends RenderSummary {
   lufs: number | null;
   aligner: string | null;
   aligner_info?: AlignerInfo | null;
+  trimmed_tail?: string | null;
   music_start: number | null;
   music_start_source: 'manual' | 'auto' | null;
   /** null = dựng cả video. */
@@ -186,6 +187,9 @@ export interface JobOutput {
   preview_seconds: number | null;
   aligner: string;
   aligner_info?: AlignerInfo | null;
+  /** Phần giọng đã cắt khỏi cuối file (IMPLEMENT 4d.4); null nếu không cắt. */
+  trimmed_tail?: string | null;
+  trimmed_tail_seconds?: number | null;
   seconds: number;
   warnings: string[];
 }
@@ -200,6 +204,8 @@ export interface Job {
   output: JobOutput | null;
   error: string | null;
   needs_confirmation: boolean;
+  /** Phần giọng sẽ bị cắt, để nghe trước khi xác nhận (khi needs_confirmation). */
+  cut_audio?: string | null;
   preview: boolean;
   preview_seconds: number | null;
 }

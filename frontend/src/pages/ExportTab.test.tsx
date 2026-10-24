@@ -199,4 +199,114 @@ describe('Export tab: quick preview', () => {
     expect(screen.getByText('Khớp 97,1% âm tiết của kịch bản.')).toBeInTheDocument();
     expect(screen.getByText(/Đã bỏ qua: large-v3 \(cuda/)).toBeInTheDocument();
   });
+  const baseJob = {
+    id: 'j1',
+    project: 'muoi',
+    progress: 100,
+    step: 'Xong',
+    log_tail: [],
+    preview: true,
+    preview_seconds: null,
+  };
+  const baseOutput = {
+    video: '/api/files/v.mp4',
+    srt: null,
+    publish: '/api/files/p.txt',
+    log: '/api/files/l.txt',
+    fps: 30,
+    width: 540,
+    height: 960,
+    duration: 50,
+    lufs: -14,
+    preview_seconds: null,
+    aligner: 'whisper',
+    seconds: 80,
+    warnings: [],
+  };
+
+  async function runJob(job: Record<string, unknown>, status: string) {
+    open([], { 'GET /api/jobs/j1': job, 'GET /api/files/p.txt': '' });
+    const user = userEvent.setup();
+    const button = await screen.findByRole('button', { name: 'Xem nhanh' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => FakeEventSource.instances[0].emit('end', { status }));
+  }
+
+  it('lets you listen to the voice tail that was cut, next to the result', async () => {
+    await runJob(
+      {
+        ...baseJob,
+        status: 'done',
+        error: null,
+        needs_confirmation: false,
+        output: {
+          ...baseOutput,
+          trimmed_tail: '/api/files/projects/muoi/renders/j1/trimmed_tail.wav',
+          trimmed_tail_seconds: 3.7,
+        },
+      },
+      'done',
+    );
+    expect(await screen.findByText(/Đã cắt 3,7 giây thừa ở cuối file giọng/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Nghe phần giọng đã cắt')).toHaveAttribute(
+      'src',
+      '/api/files/projects/muoi/renders/j1/trimmed_tail.wav',
+    );
+  });
+
+  it('shows no player when nothing was cut', async () => {
+    await runJob(
+      {
+        ...baseJob,
+        status: 'done',
+        error: null,
+        needs_confirmation: false,
+        output: { ...baseOutput, trimmed_tail: null, trimmed_tail_seconds: null },
+      },
+      'done',
+    );
+    expect(await screen.findByText('Căn chữ')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Nghe phần giọng đã cắt')).toBeNull();
+  });
+
+  it('plays the part that will be cut inside the over-8-seconds confirmation box', async () => {
+    await runJob(
+      {
+        ...baseJob,
+        status: 'failed',
+        error: 'Đuôi thừa dài 9,50 giây (> 8 giây)',
+        needs_confirmation: true,
+        cut_audio: '/api/files/projects/muoi/renders/j1/trimmed_tail.wav',
+        output: null,
+      },
+      'failed',
+    );
+    expect(await screen.findByLabelText('Nghe phần sẽ bị cắt')).toHaveAttribute(
+      'src',
+      '/api/files/projects/muoi/renders/j1/trimmed_tail.wav',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Tôi đã nghe, cắt và dựng tiếp' }),
+    ).toBeInTheDocument();
+  });
+
+  it('still asks for confirmation when no audio file is available', async () => {
+    await runJob(
+      {
+        ...baseJob,
+        status: 'failed',
+        error: 'Đuôi thừa dài 9,50 giây',
+        needs_confirmation: true,
+        cut_audio: null,
+        output: null,
+      },
+      'failed',
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Tôi đã nghe, cắt và dựng tiếp' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Nghe phần sẽ bị cắt')).toBeNull();
+  });
 });

@@ -252,6 +252,7 @@ export const vi = {
     failed: 'Dựng không thành công',
     confirmTrim: 'Giọng có đoạn thừa dài ở cuối sẽ bị cắt. Hãy nghe lại rồi xác nhận để dựng tiếp.',
     confirmTrimButton: 'Tôi đã nghe, cắt và dựng tiếp',
+    cutAudio: 'Nghe phần sẽ bị cắt',
     done: 'Dựng xong',
     result: {
       title: 'Kết quả',
@@ -264,6 +265,9 @@ export const vi = {
       alignerMatch: (pct: string) => `Khớp ${pct} âm tiết của kịch bản.`,
       alignerFallback: (why: string) => `Whisper không dùng được, đã căn theo khoảng lặng: ${why}`,
       alignerSkipped: (why: string) => `Đã bỏ qua: ${why}`,
+      trimmedTail: (seconds: string) =>
+        `Đã cắt ${seconds} giây thừa ở cuối file giọng. Nghe phần đã cắt:`,
+      trimmedTailPlayer: 'Nghe phần giọng đã cắt',
       seconds: 'Thời gian dựng',
       warnings: 'Cảnh báo khi dựng',
       cover: 'Tải cover_9x16.jpg',

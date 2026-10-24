@@ -171,6 +171,14 @@ function ResultView({ job }: { job: Job }) {
           </div>
         ))}
       </dl>
+      {out.trimmed_tail && (
+        <div className="space-y-2 text-small">
+          <p className="text-text-muted">
+            {R.trimmedTail((out.trimmed_tail_seconds ?? 0).toFixed(1).replace('.', ','))}
+          </p>
+          <audio controls aria-label={R.trimmedTailPlayer} src={out.trimmed_tail} />
+        </div>
+      )}
       {alignerNotes(out.aligner, out.aligner_info).map((note) => (
         <p key={note} className="text-small text-text-muted">
           {note}
@@ -496,6 +504,9 @@ export function ExportTab() {
               {failure.needs_confirmation && (
                 <>
                   <p className="text-small">{X.confirmTrim}</p>
+                  {failure.cut_audio && (
+                    <audio controls aria-label={X.cutAudio} src={failure.cut_audio} />
+                  )}
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
