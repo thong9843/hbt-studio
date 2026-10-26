@@ -87,7 +87,7 @@ flowchart LR
 | **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 50fps, -14 LUFS |
 | **M2** · API | CRUD project, tải file, job dựng + SSE, ảnh xem trước từng cảnh | 1,5 | Gọi API bằng curl dựng được video |
 | **M3** · Giao diện | Danh sách project, trình soạn cảnh, nhạc, xuất video, xem video | 2,5 | Làm trọn 1 video chỉ bằng giao diện |
-| **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Mọi cụm phụ đề lệch ≤ 0,2 giây; cảnh báo khi kịch bản có "bia", "máu"… |
+| **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, không cụm nào thấy lệch; cảnh báo khi kịch bản có "bia", "máu"… |
 | **Tổng** | | **~8 buổi** | |
 
 ## 7. Rủi ro
@@ -172,7 +172,7 @@ flowchart LR
 | 24/10/2026 | Mốc cảnh Whisper không hợp lệ thì coi là Whisper lỗi và rơi về khoảng lặng; cắt 3,78 s cuối "muỗi" bằng Whisper được xác nhận là phần thừa; lưu phần cắt ở `renders/<job>/trimmed_tail.wav`; thanh tiến độ Whisper chạy 6→20% | Hỏng mốc cảnh không được làm dựng lỗi; chủ dự án cần nghe lại phần cắt |
 | 26/10/2026 | Nạp DLL CUDA trên Windows: `whisper_worker` gọi `os.add_dll_directory` và thêm `site-packages
 vidia\*in` vào PATH của riêng tiến trình con, trước khi import `faster_whisper`; không sửa PATH hệ thống (IMPLEMENT 0) | Máy mới báo `cublas64_12.dll` không nạp được dù DLL có trong venv, nên rơi xuống `small` CPU |
-| 26/10/2026 | Golden test phụ đề đối chiếu với **mốc đánh tay** (`workspace/samples/muoi/golden_marks.json`), không dùng bản đã đăng; ngưỡng mọi cụm lệch (giá trị tuyệt đối) ≤ 0,2 s (đầu chữ đầu cụm so với `start` + `VOICE_DELAY` 0,2 s); mặc định Whisper mỗi máy = model nhẹ nhất đạt ngưỡng, chốt sau khi có số đo (IMPLEMENT 10b) | Yêu cầu thật: lời đọc và chữ karaoke nổi khớp nhau bằng tai/mắt; lệch ≤ 0,2 s chấp nhận được; ưu tiên hiệu năng trên máy yếu. Ngưỡng 0,05 s bỏ vì tốn công đánh mốc |
+| 26/10/2026 | Đổi golden sang kiểm bằng mắt/tai: chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, đạt khi không cụm nào thấy lệch; bỏ ngưỡng số 0,05 s và ≤ 0,2 s, bỏ mốc đánh tay (IMPLEMENT 10b). Mặc định Whisper mỗi máy = model nhẹ nhất đạt, chốt sau khi có kết quả | Đánh mốc tay quá tốn công; yêu cầu thật là chữ nổi khớp lời đọc |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |

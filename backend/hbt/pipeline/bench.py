@@ -1,7 +1,7 @@
 """`python -m cli bench-align`: đo Whisper trên một project (IMPLEMENT.md 5.2).
 
 Ba chỉ số cho mỗi model: thời gian chạy, tỉ lệ âm tiết kịch bản khớp với âm tiết nghe được, và
-độ lệch mốc cắt cảnh so với căn theo khoảng lặng. Không so với bản đã đăng (việc của golden test)
+độ lệch mốc cắt cảnh so với căn theo khoảng lặng (golden test là xem video, IMPLEMENT 10b)
 và không đặt ngưỡng đạt/rớt: chỉ báo số đo để chủ dự án chốt model mặc định theo từng máy.
 """
 
