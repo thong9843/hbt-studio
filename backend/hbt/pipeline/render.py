@@ -50,6 +50,9 @@ from .whisper import WhisperConfig, WhisperFailed, run_whisper
 X = 0.4  # thời lượng chuyển cảnh (giây)
 SUBSAMPLES = 6  # mẫu con mỗi khung trong nửa chu kỳ khung (màn trập 180°)
 INTERNAL_SCALE = (3240, 5760)  # ảnh phóng nội bộ gấp 3 lần 1080×1920
+# Xem nhanh phóng ×2 như reference 30 fps: zoompan làm tròn vị trí cắt về pixel nguyên của ảnh
+# nguồn, không phóng thì hình rung (chốt 26/10/2026 theo số đo rung).
+PREVIEW_INTERNAL_SCALE = (2160, 3840)
 CARD_FADE = 0.35
 OUTRO_FILE = "outro_4s_50fps.mp4"
 # Hash mã nguồn pipeline: đổi thuật toán thì mọi khoá cache trong build/ tự đổi theo.
@@ -227,11 +230,9 @@ def scene_clip(
         f":d={n}:s={q.width}x{q.height}:fps={q.fps}"
     )
     fade = f"format=rgba,fade=in:st={card_start}:d={CARD_FADE}:alpha=1"
-    if q.preview:
-        fc = f"[0]{pan}[bg];[1]scale={q.width}:{q.height},{fade}[t];"
-    else:
-        scale = f"scale={INTERNAL_SCALE[0]}:{INTERNAL_SCALE[1]}:flags=lanczos"
-        fc = f"[0]{scale},{pan}[bg];[1]{fade}[t];"
+    sw, sh = PREVIEW_INTERNAL_SCALE if q.preview else INTERNAL_SCALE
+    fc = f"[0]scale={sw}:{sh}:flags=lanczos,{pan}[bg];"
+    fc += f"[1]scale={q.width}:{q.height},{fade}[t];" if q.preview else f"[1]{fade}[t];"
     fc += "[bg][t]overlay=shortest=1,format=yuv420p[out]"
     tmp = out.with_name(out.stem + ".tmp.mp4")
     run_ffmpeg([

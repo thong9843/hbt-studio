@@ -106,6 +106,28 @@ def test_scene_clip_full_quality_frame_count(tmp_path):
     )
 
 
+def _clip_filter(monkeypatch, tmp_path, q):
+    """Chạy `scene_clip` với ffmpeg giả; trả về chuỗi filter_complex đã dùng."""
+    seen: list = []
+    monkeypatch.setattr(render, "run_ffmpeg", lambda args: seen.append([str(a) for a in args]))
+    monkeypatch.setattr(render.cache, "publish_atomic", lambda *a, **k: None)
+    render.scene_clip(tmp_path / "b.png", tmp_path / "t.png", 1.0, 1, q, False, tmp_path / "c.mp4")
+    args = seen[0]
+    return args[args.index("-filter_complex") + 1]
+
+
+def test_preview_clip_upscales_x2_before_zoompan(monkeypatch, tmp_path):
+    fc = _clip_filter(monkeypatch, tmp_path, render.quality_for(True, 50))
+    assert fc.startswith("[0]scale=2160:3840:flags=lanczos,zoompan=")
+    assert ":s=540x960:fps=30" in fc
+
+
+def test_full_quality_clip_keeps_x3_upscale_before_zoompan(monkeypatch, tmp_path):
+    fc = _clip_filter(monkeypatch, tmp_path, render.quality_for(False, 50))
+    assert fc.startswith("[0]scale=3240:5760:flags=lanczos,zoompan=")
+    assert ":s=1080x1920:fps=50" in fc
+
+
 # ---------------------------------------------------------------- dựng đầu-cuối (Xem nhanh)
 
 SENTENCES = ["Xin chào các bạn.", "Hôm nay mình học.", "Hẹn gặp lại nhé."]
