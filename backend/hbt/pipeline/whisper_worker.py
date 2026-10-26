@@ -53,7 +53,8 @@ def progress_reporter(path, duration):
 def add_cuda_dll_dirs() -> list[str]:
     """Windows: thư viện CUDA cài bằng pip nằm ở `site-packages/nvidia/*/bin`, không có trong PATH.
     Thêm các thư mục đó cho riêng tiến trình này (không đụng PATH hệ thống). Nơi khác, hoặc không có
-    thư mục nvidia: không làm gì. Trả về danh sách thư mục đã thêm."""
+    thư mục nvidia: không làm gì. Thư mục nào `add_dll_directory` báo OSError thì bỏ qua và ghi log.
+    Trả về danh sách thư mục đã thêm."""
     if sys.platform != "win32":
         return []
     roots = {sysconfig.get_paths()["purelib"], *site.getsitepackages()}
@@ -62,12 +63,18 @@ def add_cuda_dll_dirs() -> list[str]:
         for bin_dir in sorted(Path(root, "nvidia").glob("*/bin")):
             if bin_dir.is_dir() and str(bin_dir) not in added:
                 added.append(str(bin_dir))
+    ok: list[str] = []
     for d in added:
-        os.add_dll_directory(d)
-    if added:
-        os.environ["PATH"] = os.pathsep.join([*added, os.environ.get("PATH", "")])
-        print("Đã thêm thư mục DLL CUDA: " + "; ".join(added), file=sys.stderr, flush=True)
-    return added
+        try:
+            os.add_dll_directory(d)
+        except OSError as e:  # thư mục hỏng: bỏ qua, các thư mục còn lại vẫn thêm
+            print(f"Bỏ qua thư mục DLL CUDA {d}: {e}", file=sys.stderr, flush=True)
+        else:
+            ok.append(d)
+    if ok:
+        os.environ["PATH"] = os.pathsep.join([*ok, os.environ.get("PATH", "")])
+        print("Đã thêm thư mục DLL CUDA: " + "; ".join(ok), file=sys.stderr, flush=True)
+    return ok
 
 
 def run(req: dict) -> list[list]:

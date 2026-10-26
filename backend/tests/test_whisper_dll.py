@@ -46,6 +46,28 @@ def test_non_windows_does_nothing(monkeypatch, site):
     assert calls == [] and os.environ["PATH"] == "C:/sys"
 
 
+def test_oserror_on_one_dir_is_logged_and_the_rest_still_added(monkeypatch, site, capsys):
+    root, _ = site
+    monkeypatch.setattr(sys, "platform", "win32")
+    bad = str(root / "nvidia" / "cublas" / "bin")
+    good = str(root / "nvidia" / "cudnn" / "bin")
+    for d in (bad, good):
+        os.makedirs(d)
+    added: list[str] = []
+
+    def add(d):
+        if d == bad:
+            raise OSError("không nạp được")
+        added.append(d)
+
+    monkeypatch.setattr(os, "add_dll_directory", add, raising=False)
+    assert whisper_worker.add_cuda_dll_dirs() == [good]
+    assert added == [good]
+    assert os.environ["PATH"].split(os.pathsep)[:2] == [good, "C:/sys"]
+    err = capsys.readouterr().err
+    assert bad in err and "không nạp được" in err
+
+
 def test_dirs_are_added_before_faster_whisper_is_imported(monkeypatch):
     order: list[str] = []
     monkeypatch.setattr(whisper_worker, "add_cuda_dll_dirs", lambda: order.append("dll") or [])
