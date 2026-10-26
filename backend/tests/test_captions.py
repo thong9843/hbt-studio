@@ -172,3 +172,27 @@ def test_srt(tmp_path):
     captions.write_srt([p, p], f)
     text = f.read_text(encoding="utf-8")
     assert text.startswith("1\n00:00:00,500 --> 01:02:05,123\nXin chào!\n\n2\n")
+
+
+def _active_picture(tmp_path):
+    p = phrase(["Xin", "chào"], [(0.0, 0.5, 0)])
+    path = captions.render_states([p], [1420], tmp_path, total=0.5)[0][0]
+    return Image.open(path).convert("RGBA")
+
+
+def test_active_word_is_yellow_text_without_a_pill_background(tmp_path):
+    im = _active_picture(tmp_path)
+    px = im.load()
+    yellow = [(x, y) for y in range(im.height) for x in range(im.width) if px[x, y] == YELLOW]
+    xs, ys = [x for x, _ in yellow], [y for _, y in yellow]
+    box = (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)
+    assert yellow and len(yellow) < 0.5 * box  # viên thuốc vàng đặc sẽ lấp gần kín khung
+
+
+def test_only_the_active_word_is_yellow_the_rest_stay_white(tmp_path):
+    im = _active_picture(tmp_path)
+    left = im.crop((0, 0, im.width // 2, im.height)).getcolors(maxcolors=1_000_000)
+    right = im.crop((im.width // 2, 0, im.width, im.height)).getcolors(maxcolors=1_000_000)
+    assert YELLOW in {c for _, c in left}
+    assert YELLOW not in {c for _, c in right}
+    assert (255, 255, 255, 255) in {c for _, c in right}

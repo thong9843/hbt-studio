@@ -349,7 +349,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.3 Phụ đề karaoke (`captions.py`)
 - **Cụm:** theo `|` và dấu câu; cụm > 7 token thì tự tách đôi. Tối đa 2 dòng, rộng 900 px.
-- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc**: nền vàng `#FFD43B` bo góc 18 px, chữ tối. Dòng cao 96 px, căn giữa tại `caption_y`.
+- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc** đổi màu vàng `#FFD43B` (cùng viền tối 7 px và bóng), đọc xong trở lại trắng; **không có nền viên thuốc** (chủ dự án chốt 26/10/2026, thay kiểu cũ: nền vàng bo 18 px, chữ tối). Dòng cao 96 px, căn giữa tại `caption_y`.
 - **Thời gian hiện cụm:** từ (đầu chữ đầu − 0,05 s) đến đầu cụm sau nếu khoảng cách < 0,6 s, ngược lại đến (cuối chữ cuối + 0,25 s). Chữ k sáng từ đầu chữ k đến đầu chữ k+1.
 - **Hiển thị:** bỏ `, . : ;` cuối token; giữ `? ! …`.
 - **Kỹ thuật:** mỗi trạng thái 1 PNG 1080×1920 trong suốt; file `ffconcat` có `duration`; phủ bằng `overlay` (xem `assemble`).
