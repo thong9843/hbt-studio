@@ -34,6 +34,9 @@ Chủ dự án dùng hai máy và sẽ cho biết đang dùng máy nào ở đ�
 
 **Python:** dự án ghim **Python 3.11.x**. Máy nào đã có Python mới hơn thì cài thêm 3.11 **song song** (không gỡ bản cũ), gọi bằng `py -3.11`, và tạo `backend\.venv` đúng bằng bản 3.11 (`py -3.11 -m venv backend\.venv`). Kiểm tra bằng `py -3.11 --version` (README có bước này). Claude Code phải **hỏi chủ dự án trước khi cài** Python hay bất kỳ phần mềm cấp hệ thống nào.
 
+**Thư viện CUDA trên Windows (ghi 26/10/2026, máy mới):** `nvidia-cublas-cu12 12.9.2.10`, `nvidia-cudnn-cu12 9.27.0.42` trong `backend\.venv`. Các DLL (`cublas64_12.dll`, cuDNN…) nằm ở `site-packages
+vidia\*in`, không có trong PATH, nên lúc đầu CUDA báo `Library cublas64_12.dll is not found or cannot be loaded` và app rơi xuống `small` CPU. Cách nạp (b6, chủ dự án duyệt): ở đầu `whisper_worker.run()`, **trước khi import `faster_whisper`**, chỉ trên Windows, với mỗi thư mục `nvidia\*in` có thật thì gọi `os.add_dll_directory()` và thêm vào đầu `PATH` của **riêng tiến trình con** (có ghi log). Không có thư mục nvidia (máy cũ, CI Linux) thì không làm gì. Không sửa PATH hệ thống. `/health.gpu` giữ nguyên (chỉ đếm thiết bị CUDA).
+
 Model Whisper tải lần chạy đầu về `models/` (đã ignore); chọn model và thiết bị theo phần cứng: mục 5.2. Lỗi CUDA, không có GPU hoặc Whisper không dùng được → rơi về CPU, rồi về căn theo khoảng lặng.
 
 ---
@@ -321,7 +324,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
      - **`bench-align`** chỉ có 3 chỉ số: thời gian, tỉ lệ khớp, độ lệch mốc cắt cảnh so với căn khoảng lặng. Việc đối chiếu với bản đã đăng thuộc golden test.
      - **`bench-align --prompt off|on|both`** (mặc định `off`, khớp đường dựng): `on` và `both` chỉ để so sánh (ở 1b); báo thêm từng mốc cắt cảnh và ghi rõ model vượt giới hạn thời gian.
      - **Tiến độ:** trong lúc Whisper chạy, thanh tiến độ đi từ 6% đến 20% theo phần giọng đã nghe (khung bước 3 ở mục 4); tiến trình con ghi tỉ lệ sau mỗi đoạn nhận dạng, tiến trình cha đọc.
-     - Không đạt phụ đề lệch < 0,05 s thì chỉ báo số đo, **không** tự đổi mặc định.
+     - Không đạt ngưỡng golden (mọi cụm lệch ≤ 0,2 s, mục 10b) thì chỉ báo số đo, **không** tự đổi mặc định.
    - **Điểm lệch tham số reference: bỏ `initial_prompt` cho mọi model (chủ dự án duyệt 24/10/2026).** Đo bằng `bench-align --models small,medium,large-v3 --prompt both` trên "muỗi" (máy cũ, CPU `int8`, máy rảnh, 24/10/2026). Có prompt, cả ba model bỏ sót nửa đầu kịch bản (tỉ lệ khớp 61–63%); bỏ prompt thì khớp 89–91%. Lệch mốc cắt cảnh so với căn khoảng lặng (khoảng lặng từng khớp bản đã đăng trong 4 ms ở 7 mốc):
 
      | Model | Prompt | Thời gian | Khớp | Lệch TB | Lệch max | Từng mốc (ms) |
@@ -333,7 +336,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
      | large-v3 | có | 130,3 s | 60,9% | 12109 | 24651 | 24651 · 22221 · 17606 · 13725 · 4796 · 1618 · 145 |
      | large-v3 | không | 111,4 s | 91,4% | 330 | 435 | 389 · 89 · 354 · 435 · 384 · 322 · 335 |
 
-     Không model nào vượt 900 s. Chưa model nào đạt phụ đề lệch < 0,05 s ở mọi mốc (chỉ báo số, mục dưới). **Mặc định `auto` giữ như bảng trên** (CPU → `small` `int8`; CUDA → `large-v3` `int8_float16`); mặc định cuối của mỗi máy chốt sau golden test. `large-v3` trên CPU lệch đều khoảng 0,3–0,4 s ở gần như mọi mốc, chưa rõ nguyên nhân: kiểm ở 1b.
+     Không model nào vượt 900 s. Ngưỡng 0,05 s đã bỏ (26/10/2026); đạt hay không tính theo golden test, mục 10b (chỉ báo số, mục dưới). **Mặc định `auto` giữ như bảng trên** (CPU → `small` `int8`; CUDA → `large-v3` `int8_float16`); mặc định cuối của mỗi máy chốt sau golden test. `large-v3` trên CPU lệch đều khoảng 0,3–0,4 s ở gần như mọi mốc, chưa rõ nguyên nhân: kiểm ở 1b.
    - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
@@ -572,6 +575,11 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
     - Lint cảnh báo khi lời đọc có 751 ký tự, không cảnh báo khi 750.
   - `thumbnail` (mục 4e): khối chữ tiêu đề nằm trọn trong y=600..1320; logo và nhãn series nằm trong y=240..1680; đầu ra đúng kích thước 1080×1920 (`cover_9x16.jpg`) và 1080×720 (`youtube_3x2.jpg`).
 - **Golden test thủ công (M1):** chủ dự án đặt bộ file tập "muỗi" vào `workspace/samples/muoi/`, chạy CLI, so với bản đã đăng.
+- **Golden test phụ đề (chủ dự án chốt 26/10/2026):** đối chiếu với **mốc đánh tay**, không dùng bản đã đăng.
+  - File `workspace/samples/muoi/golden_marks.json` (nằm trong `workspace/` nên không vào git): `tolerance_sec` = 0,2 và danh sách `marks` theo thứ tự mọi cụm phụ đề (đúng cách chia cụm của `captions.split_phrases`), mỗi mục `{index, scene, text, start}`. `start` là giây trên file `voice.mp3` **gốc**, tại lúc bắt đầu chữ đầu tiên của cụm. `scene` tính từ 0 như API.
+  - So sánh: đầu chữ đầu của cụm (do app căn) so với `start` + `VOICE_DELAY` (0,2 s, `audio.py`, bước chuẩn hoá giọng).
+  - **Ngưỡng:** mọi cụm |lệch| ≤ 0,2 s. Báo: số cụm đạt/tổng, lệch TB, lệch max, bảng lệch từng cụm (chỉ để biết, không thêm ngưỡng khác).
+  - **Mặc định Whisper mỗi máy** = model nhẹ nhất đạt ngưỡng (máy cũ thử `small` trước). Đợt này không đổi mặc định trong code: chỉ báo số đo, chờ chủ dự án chốt.
 - **Vitest:** hàm tiện ích frontend (định dạng thời gian, gọi API).
 
 ---
@@ -651,7 +659,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [x] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động (Đợt 2a/2b)
 - [x] `publish.txt` + nút sao chép (khối `[Thumbnail]` đủ 3 dòng)
 - [x] `thumbnail.py` (mục 4e): ảnh bìa, API xem trước, UI tab Xuất video; dọn `build/` bằng nút trong UI
-- **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
+- **Xong khi:** mọi cụm phụ đề lệch ≤ 0,2 s trên tập "muỗi" (golden test, mục 10b); kịch bản có chữ "bia" hiện cảnh báo.
 
 **Kế hoạch M4 (chủ dự án chốt 23/10/2026):**
 - **Đợt 2 (máy cũ):**
