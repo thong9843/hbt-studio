@@ -12,7 +12,8 @@ from pydantic import ValidationError
 from hbt.config import ALLOWED_FPS, WHISPER_MODELS, load_settings
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.bench import bench_align, format_rows
-from hbt.pipeline.ffutil import FFmpegError
+from hbt.pipeline.ffutil import FFmpegError, media_duration
+from hbt.pipeline.golden import GoldenError, import_file
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
 from hbt.pipeline.whisper import DEFAULT_TIMEOUT, WhisperConfig
 from hbt.sensitive import SensitiveStore
@@ -61,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TIMEOUT,
         help=f"giới hạn thời gian mỗi model, giây (mặc định {DEFAULT_TIMEOUT})",
     )
+    g = sub.add_parser(
+        "golden-import", help="Nhập mốc đánh tay (nhãn Audacity) vào golden_marks.json của tập mẫu"
+    )
+    g.add_argument("sample_dir", type=Path, help="thư mục tập mẫu, ví dụ workspace/samples/muoi")
+    g.add_argument(
+        "--labels", type=Path, help="file nhãn Audacity (mặc định labels.txt trong thư mục mẫu)"
+    )
     return parser
 
 
@@ -89,6 +97,17 @@ def _describe(err: ValidationError) -> str:
     return "\n".join(
         f"  {'.'.join(str(p) for p in e['loc']) or '(gốc)'}: {e['msg']}" for e in err.errors()
     )
+
+
+def _golden_import(args) -> int:
+    try:
+        duration = media_duration(args.sample_dir / "voice.mp3")
+        path, n = import_file(args.sample_dir, args.labels, duration)
+    except (GoldenError, ValidationError, FileNotFoundError, FFmpegError) as e:
+        print(f"\nLỖI: {e}\nChưa ghi gì vào golden_marks.json.", file=sys.stderr)
+        return 1
+    print(f"Đã ghi {n} mốc vào {path}")
+    return 0
 
 
 def _bench_align(args, parser: argparse.ArgumentParser) -> int:
@@ -123,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "bench-align":
         return _bench_align(args, parser)
+    if args.command == "golden-import":
+        return _golden_import(args)
 
     options = RenderOptions(
         preview=args.preview,
