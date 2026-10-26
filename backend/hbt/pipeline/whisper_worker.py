@@ -10,7 +10,10 @@ khi tiến trình thoát (IMPLEMENT.md 5.2). Kết quả ghi vào file `out` tro
 from __future__ import annotations
 
 import json
+import os
+import site
 import sys
+import sysconfig
 from pathlib import Path
 
 from .text import norm
@@ -47,9 +50,30 @@ def progress_reporter(path, duration):
     return report
 
 
+def add_cuda_dll_dirs() -> list[str]:
+    """Windows: thư viện CUDA cài bằng pip nằm ở `site-packages/nvidia/*/bin`, không có trong PATH.
+    Thêm các thư mục đó cho riêng tiến trình này (không đụng PATH hệ thống). Nơi khác, hoặc không có
+    thư mục nvidia: không làm gì. Trả về danh sách thư mục đã thêm."""
+    if sys.platform != "win32":
+        return []
+    roots = {sysconfig.get_paths()["purelib"], *site.getsitepackages()}
+    added: list[str] = []
+    for root in sorted(roots):
+        for bin_dir in sorted(Path(root, "nvidia").glob("*/bin")):
+            if bin_dir.is_dir() and str(bin_dir) not in added:
+                added.append(str(bin_dir))
+    for d in added:
+        os.add_dll_directory(d)
+    if added:
+        os.environ["PATH"] = os.pathsep.join([*added, os.environ.get("PATH", "")])
+        print("Đã thêm thư mục DLL CUDA: " + "; ".join(added), file=sys.stderr, flush=True)
+    return added
+
+
 def run(req: dict) -> list[list]:
     stage = "load"
     try:
+        add_cuda_dll_dirs()  # phải chạy trước khi import faster_whisper (nạp cublas/cudnn)
         from faster_whisper import WhisperModel  # import muộn: không bắt buộc cài
 
         model = WhisperModel(
