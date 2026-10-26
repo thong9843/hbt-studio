@@ -200,7 +200,7 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 | 9 | Ghép cuối | `assemble` (reference): xfade `slideleft` 0,4 s + phủ phụ đề + tiếng; H.264 `crf 18 medium`, `-r {fps}`, yuv420p, AAC 192k, `+faststart` | 80–98 |
 | 10 | Kiểm tra đầu ra | ffprobe đúng fps, 1080×1920, độ dài; đo `ebur128` trong khoảng −15…−13 LUFS; sinh `publish.txt` | 98–100 |
 
-**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
+**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, **phóng ×2 (2160×3840, `lanczos`) trước zoompan** như reference 30 fps (chốt 26/10/2026 theo số đo rung: không phóng thì zoompan làm tròn vị trí cắt về pixel nguyên của ảnh 1080 và hình rung; rung x/y giảm từ 0,19–0,39 px xuống 0,05–0,09 px, dựng cả video muỗi 59 s → 66 s; áp cho cả Xem nhanh 10 s), clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
 
 **Xem nhanh 10 s đầu** (chủ dự án chốt 23/10/2026): nút **Xem nhanh** mặc định chỉ dựng 10 giây đầu (`preview_seconds = 10`, vẫn 540×960, 30 fps); nút phụ **Xem nhanh cả video** giữ cách dựng cũ.
 - **Phần dùng chung với cả video:** giọng, căn chữ (cache `timing.json`), mốc chuyển cảnh, điểm nhạc (`music_start`) vẫn tính trên **cả video**; nên lần đầu vẫn tốn thời gian căn chữ (chấp nhận), thời gian dựng tuỳ máy.
