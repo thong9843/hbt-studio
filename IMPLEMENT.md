@@ -176,7 +176,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
 | `voice` (gốc project) | `"voice.mp3"` hoặc `{"file", "trim_end"}`: file giọng; `trim_end` = giây của file gốc để cắt đuôi (mục 4d.3) |
 | `scenes[].voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
 | `punch` | `true` = cảnh "cú lật": phóng giật + hiện thẻ nhanh + whoosh |
-| `caption_y` | `null` = tự động (1420; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
+| `caption_y` | `null` = tự động (1400; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
 | `music.start` | `null` = tự chọn đoạn hay; hoặc số giây |
 
 Validate bằng Pydantic. Đúng **1 đoạn lời cho mỗi cảnh**; số cảnh 3–12.
@@ -350,7 +350,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.3 Phụ đề karaoke (`captions.py`)
 - **Cụm:** theo `|` và dấu câu; cụm > 7 token thì tự tách đôi. Tối đa 2 dòng, rộng 900 px.
-- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc** đổi màu vàng `#FFD43B` (cùng viền tối 7 px và bóng), đọc xong trở lại trắng; **không có nền viên thuốc** (chủ dự án chốt 26/10/2026, thay kiểu cũ: nền vàng bo 18 px, chữ tối). Dòng cao 96 px, căn giữa tại `caption_y`.
+- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc** đổi màu vàng `#FFD43B` (cùng viền tối 7 px và bóng), đọc xong trở lại trắng; **không có nền viên thuốc** (chủ dự án chốt 26/10/2026, thay kiểu cũ: nền vàng bo 18 px, chữ tối). Dòng cao 96 px, căn giữa tại `caption_y` (tâm khối chữ; mặc định **1400** từ 26/10/2026 để đáy khối 2 dòng, kể cả dấu và chân chữ, ≤ 1500 trong vùng an toàn TikTok y=100…1500; trước đó 1420 cho đáy tới 1519).
 - **Thời gian hiện cụm:** từ (đầu chữ đầu − 0,05 s) đến đầu cụm sau nếu khoảng cách < 0,6 s, ngược lại đến (cuối chữ cuối + 0,25 s). Chữ k sáng từ đầu chữ k đến đầu chữ k+1.
 - **Hiển thị:** bỏ `, . : ;` cuối token; giữ `? ! …`.
 - **Kỹ thuật:** mỗi trạng thái 1 PNG 1080×1920 trong suốt; file `ffconcat` có `duration`; phủ bằng `overlay` (xem `assemble`).

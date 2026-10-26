@@ -90,10 +90,10 @@ def test_start_is_clamped_at_zero_and_times_never_go_backwards():
 @pytest.mark.parametrize(
     "caption_y, bottom, expected",
     [
-        (None, None, 1420),
-        (None, 1100, 1420),
+        (None, None, 1400),
+        (None, 1100, 1400),
         (None, 1101, 230),
-        (None, 600, 1420),
+        (None, 600, 1400),
         (500, 1500, 500),
     ],
 )
@@ -196,3 +196,11 @@ def test_only_the_active_word_is_yellow_the_rest_stay_white(tmp_path):
     assert YELLOW in {c for _, c in left}
     assert YELLOW not in {c for _, c in right}
     assert (255, 255, 255, 255) in {c for _, c in right}
+
+
+def test_default_two_line_block_stays_inside_the_tiktok_safe_zone(tmp_path):
+    words = ["ẤẾỔẨỂ"] * 3 + ["gypqựợ"] * 3  # dấu cao nhất ở dòng 1, chân thấp nhất ở dòng 2
+    p = phrase(words, [(0.0, 0.5, -1)])
+    path = captions.render_states([p], [captions.DEFAULT_Y], tmp_path, total=0.5)[0][0]
+    top, bottom = Image.open(path).getbbox()[1::2]
+    assert bottom <= 1500 and top >= 100

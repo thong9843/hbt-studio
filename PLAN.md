@@ -177,6 +177,8 @@ vidia\*in` vào PATH của riêng tiến trình con, trước khi import `faste
 | 26/10/2026 | Phụ đề karaoke: chữ đang đọc đổi màu vàng `#FFD43B`, đọc xong trở lại trắng; bỏ nền viên thuốc vàng và chữ tối (IMPLEMENT 5.3); giữ font, cỡ, viền, bóng, dòng, `caption_y`, mốc thời gian, `captions.srt` | Chữ vàng viền tối dễ đọc hơn, ít che hình hơn nền vàng đặc |
 | 26/10/2026 | Outro 60 fps: dựng sẵn `brand/outro/outro_4s_60fps.mp4` bằng mã `outro_reference.py` (đổi `FPS=60`, không sửa `reference/`); xuất 60 fps dùng clip 60, 50 và 30 fps dùng clip 50 (IMPLEMENT 4c) | Đổi 50→60 bằng `fps=` lặp khung, outro giật nhẹ 10 Hz |
 | 26/10/2026 | Khối JSON kịch bản (dán 1 lần điền voice, card, labels, punch, publish, thumbnail) làm ở mốc riêng sau khi đóng M4, trước v1.0.0 (chỉ ghi, chưa làm) | Giảm công nhập tay từng trường |
+| 26/10/2026 | `caption_y` mặc định 1420 → 1400 (tâm khối chữ); giữ quy tắc đáy thẻ > 1100 thì 230 (IMPLEMENT 5.3) | Đo bằng Pillow: khối 2 dòng ở 1420 có đáy tới 1519, vượt vùng an toàn TikTok (y ≤ 1500); ở 1400 đáy tối đa 1499 |
+| 26/10/2026 | `library/music/index.json` vào `.prettierignore` (dữ liệu do app ghi) | Lint Prettier báo lỗi định dạng trên file app ghi |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |

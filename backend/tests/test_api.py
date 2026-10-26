@@ -300,7 +300,7 @@ def test_scene_preview_shows_card_and_sample_caption(client):
     bare = Image.open(io.BytesIO(client.get(f"/api/projects/{slug}/scenes/0/preview.png").content))
     top = (0, 100, 1080, 700)  # vùng thẻ chữ (y=110) khác nhau khi có / không có thẻ
     assert plain.crop(top).tobytes() != bare.crop(top).tobytes()
-    low = (0, 1300, 1080, 1600)  # vùng phụ đề (y≈1420): có chữ phụ đề trắng/vàng
+    low = (0, 1300, 1080, 1600)  # vùng phụ đề (y≈1400): có chữ phụ đề trắng/vàng
     assert plain.crop(low).tobytes() != Image.new("RGB", plain.crop(low).size).tobytes()
 
 
