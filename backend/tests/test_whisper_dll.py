@@ -19,9 +19,15 @@ def site(monkeypatch, tmp_path):
     return tmp_path, calls
 
 
-def test_windows_with_nvidia_dirs_adds_each_and_prepends_path(monkeypatch, site):
-    root, calls = site
+@pytest.fixture
+def windows(monkeypatch):
+    """Giả lập Windows đủ cả dấu phân cách PATH (Linux dùng ":" làm "C:/sys" bị tách đôi)."""
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "pathsep", ";")
+
+
+def test_windows_with_nvidia_dirs_adds_each_and_prepends_path(site, windows):
+    root, calls = site
     for pkg in ("cublas", "cudnn"):
         (root / "nvidia" / pkg / "bin").mkdir(parents=True)
     (root / "nvidia" / "empty").mkdir()  # không có bin → bỏ qua
@@ -31,9 +37,8 @@ def test_windows_with_nvidia_dirs_adds_each_and_prepends_path(monkeypatch, site)
     assert os.environ["PATH"].split(os.pathsep)[:3] == [*want, "C:/sys"]
 
 
-def test_windows_without_nvidia_does_nothing(monkeypatch, site):
+def test_windows_without_nvidia_does_nothing(site, windows):
     _, calls = site
-    monkeypatch.setattr(sys, "platform", "win32")
     assert whisper_worker.add_cuda_dll_dirs() == []
     assert calls == [] and os.environ["PATH"] == "C:/sys"
 
@@ -46,9 +51,8 @@ def test_non_windows_does_nothing(monkeypatch, site):
     assert calls == [] and os.environ["PATH"] == "C:/sys"
 
 
-def test_oserror_on_one_dir_is_logged_and_the_rest_still_added(monkeypatch, site, capsys):
+def test_oserror_on_one_dir_is_logged_and_the_rest_still_added(monkeypatch, site, windows, capsys):
     root, _ = site
-    monkeypatch.setattr(sys, "platform", "win32")
     bad = str(root / "nvidia" / "cublas" / "bin")
     good = str(root / "nvidia" / "cudnn" / "bin")
     for d in (bad, good):
