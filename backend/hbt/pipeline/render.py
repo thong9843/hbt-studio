@@ -55,6 +55,16 @@ INTERNAL_SCALE = (3240, 5760)  # ảnh phóng nội bộ gấp 3 lần 1080×192
 PREVIEW_INTERNAL_SCALE = (2160, 3840)
 CARD_FADE = 0.35
 OUTRO_FILE = "outro_4s_50fps.mp4"
+OUTRO_FILE_60 = "outro_4s_60fps.mp4"  # dựng sẵn cho 60 fps: đổi 50→60 bằng `fps=` sẽ lặp khung
+
+
+def outro_clip_for(fps: int, brand_dir: Path) -> Path:
+    """Clip outro theo fps xuất: 60 fps dùng clip 60 (nếu có); 30 và 50 fps dùng clip 50."""
+    if fps == 60 and (brand_dir / "outro" / OUTRO_FILE_60).is_file():
+        return brand_dir / "outro" / OUTRO_FILE_60
+    return brand_dir / "outro" / OUTRO_FILE
+
+
 # Hash mã nguồn pipeline: đổi thuật toán thì mọi khoá cache trong build/ tự đổi theo.
 PIPELINE_VERSION = cache.code_digest(
     _text,
@@ -832,7 +842,7 @@ def _render_project(
         final_audio = build / "preview_audio.wav"
         audio.trim_with_fade(mix, partial, final_audio)
     elif use_outro:
-        outro_clip = brand_dir / "outro" / OUTRO_FILE
+        outro_clip = outro_clip_for(fps, brand_dir)
         if not outro_clip.is_file():
             raise RenderError(f"Thiếu clip outro: {outro_clip}")
         outro_voice = library_dir / "outro" / "voice.wav"

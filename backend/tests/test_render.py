@@ -128,6 +128,29 @@ def test_full_quality_clip_keeps_x3_upscale_before_zoompan(monkeypatch, tmp_path
     assert ":s=1080x1920:fps=50" in fc
 
 
+def test_outro_clip_follows_fps(tmp_path):
+    (tmp_path / "outro").mkdir()
+    for name in (render.OUTRO_FILE, render.OUTRO_FILE_60):
+        (tmp_path / "outro" / name).write_bytes(b"x")
+    pick = {fps: render.outro_clip_for(fps, tmp_path).name for fps in (30, 50, 60)}
+    assert pick == {30: render.OUTRO_FILE, 50: render.OUTRO_FILE, 60: render.OUTRO_FILE_60}
+
+
+def test_outro_60_falls_back_to_the_50_clip_when_missing(tmp_path):
+    (tmp_path / "outro").mkdir()
+    (tmp_path / "outro" / render.OUTRO_FILE).write_bytes(b"x")
+    assert render.outro_clip_for(60, tmp_path).name == render.OUTRO_FILE
+
+
+@needs_ffmpeg
+def test_shipped_outro_clips_have_the_right_fps_and_length():
+    brand = BRAND_DIR / "outro"
+    for name, fps in ((render.OUTRO_FILE, 50), (render.OUTRO_FILE_60, 60)):
+        vs = probe(brand / name)["streams"][0]
+        assert (vs["width"], vs["height"], vs["r_frame_rate"]) == (1080, 1920, f"{fps}/1")
+        assert int(vs["nb_frames"]) == 4 * fps
+
+
 # ---------------------------------------------------------------- dựng đầu-cuối (Xem nhanh)
 
 SENTENCES = ["Xin chào các bạn.", "Hôm nay mình học.", "Hẹn gặp lại nhé."]
