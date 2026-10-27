@@ -688,6 +688,8 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 
 **Test cần có (M5):**
 
+> Chạy `pytest` toàn bộ chỉ một lần tại một thời điểm và không dựng video khi đang chạy test: `test_cancel.py` đếm tiến trình ffmpeg trên toàn máy nên đỏ nếu có ffmpeg khác chạy cùng lúc (đã gặp ở Đợt 1 khi chạy hai pytest song song).
+
 | Loại                                | Ca                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | pytest `test_script.py`             | Dạng đầy đủ và mảng ngắn cho cùng kết quả · trường vắng giữ nguyên · `card` ghi đè cả khối · `labels: []` xoá · `caption_y: null` · `hbt_script: 2` lỗi · trường lạ (`pucnh`) lỗi · trường cấm (`image`, `music`) lỗi · K3 từng giá trị sai · K5 "“được muỗi yêu”?" cỡ l = 16 → cảnh báo, "gấp 100 lần" cỡ xl = 11 → cảnh báo, 15/10 không cảnh báo · K6 một từ đơn > 888 px → lỗi · K6b dòng tự xuống hàng → cảnh báo, không lỗi · K7 · K8 · K9 751 ký tự cảnh báo, 750 không · K10 "ma tuý" → cảnh báo chặn xuất · K11 · K12 · NFC (chữ tổ hợp) · hashtag `#muoi` → `muoi` · ít phần tử → áp n cảnh + cảnh báo · nhiều phần tử → lỗi; `add` → thêm cảnh; `trim` → bỏ thừa · sau gộp ngoài 3–12 → lỗi · `realign_scenes` đúng cảnh đổi lời |
@@ -839,11 +841,11 @@ Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự độn
 |---|---|
 | Trường vắng | Giữ nguyên giá trị cũ |
 | Trường có mặt | Ghi đè **cả trường** (`card` thay toàn bộ; `labels: []` xoá hết nhãn; `publish`, `thumbnail` thay cả khối) |
-| `null` | Chỉ hợp lệ ở `caption_y` (= tự động) |
+| `null` | Chỉ hợp lệ ở `caption_y` (= tự động); ở mọi nơi khác (`voice`, `card`, `labels`, `punch`, `publish`, `thumbnail`, `hbt_script`) là lỗi K3 |
 | Không đổi qua JSON | `image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
 | Chuẩn hoá | NFC mọi chuỗi; hashtag bỏ `#` đầu và khoảng trắng hai đầu |
 | Đếm ký tự | Số ký tự Unicode sau NFC (Python `len`, JS `[...s.normalize('NFC')].length`); dùng chung bộ ca test cho hai phía |
-| Mô hình đầu vào | **`ScriptIn` riêng trong `backend/hbt/script.py`, `extra="forbid"`** (cho K4). **Không đổi `models.py`** (`Project` giữ `extra="ignore"`); K12 vẫn kiểm bản sau gộp bằng `Project.model_validate` |
+| Mô hình đầu vào | **`ScriptIn` riêng trong `backend/hbt/script.py`, `extra="forbid"`** (cho K4), chặt cả các khối con (`card`, `lines`, `labels`, `publish`, `thumbnail` là lớp con `extra="forbid"` của lớp trong `models.py`, nên `colour` hay `pucnh` ở bất kỳ cấp nào đều là K4). **Không đổi `models.py`** (`Project` giữ `extra="ignore"`); K12 vẫn kiểm bản sau gộp bằng `Project.model_validate` |
 
 **13.B4.3 Quy tắc kiểm** (Lỗi = không cho áp · Cảnh báo = vẫn áp)
 
@@ -862,6 +864,14 @@ Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự độn
 | K10 | Lint từ nhạy cảm trên bản sau gộp: `block` → cảnh báo đỏ "sẽ chặn xuất"; `warn` → vàng | Cảnh báo |
 | K11 | `thumbnail.lines` 2–3 dòng; `thumbnail.scene` ≤ số cảnh sau gộp | Lỗi |
 | K12 | Toàn bộ project sau gộp qua `Project.model_validate` | Lỗi (giữ bản cũ) |
+
+**Phạm vi áp (chốt ở Đợt 1):**
+
+- K5–K8 chỉ kiểm cảnh có `card` trong JSON (thẻ không đổi thì không kiểm lại).
+- K9 "cảnh có lời trống" chỉ áp cho cảnh có `voice` trong JSON hoặc cảnh mới thêm (`extra: "add"`), để JSON chỉ có thẻ chữ không báo lời trống hàng loạt. K9 "tổng > 750" và K10 chạy trên toàn bản sau gộp.
+- Mỗi cảnh báo K10 có thêm `level`: `block` (đỏ, "sẽ chặn xuất") hoặc `warn` (vàng).
+- K5 và K6 có thể cùng hiện trên một dòng; K6b hiện khi một dòng tự xuống hàng, kể cả khi dòng đó cũng bị K6.
+- K11 (`thumbnail.lines` 2–3, `thumbnail.scene` ≤ số cảnh) và K2 (ngoài 3–12) không báo trùng thêm một lỗi K12.
 
 **13.B4.4 Ghi chú hệ quả** (hiện ở bước Kiểm tra): cảnh đổi `voice` → "n cảnh sẽ căn chữ lại ở lần dựng tới".
 
@@ -886,11 +896,16 @@ Hoàn tác về sau: menu "Bản sao lưu" (danh sách 10 bản, ngày giờ, Kh
 | Method | Path | Thân / kết quả | Lỗi |
 |---|---|---|---|
 | POST | `/projects/{slug}/script/check` | `{script, extra?: "add"\|"trim"}` → `{ok, base_hash, counts{json, project, after}, errors[], warnings[], diff[], realign_scenes[]}`; mỗi lỗi/cảnh báo `{code, scene_index?, field, message}`; mỗi diff `{scene_index?, field, before, after}`. **Không ghi gì** | 404, 422 slug/body |
-| POST | `/projects/{slug}/script/apply` | `{script, extra?, base_hash}` → kiểm lại; sao lưu `project.json` hiện tại; ghi bản gộp → `{project, backup_id}` | 422 có lỗi; **409** đang dựng hoặc `base_hash` khác (project đã đổi sau khi kiểm) |
+| POST | `/projects/{slug}/script/apply` | `{script, extra?, base_hash}` → kiểm lại; sao lưu `project.json` hiện tại; ghi bản gộp → `{project, backup_id, base_hash}` (hash mới sau khi ghi) | 422 có lỗi (`{detail, errors[]}`, không ghi, không sao lưu); **409** đang dựng hoặc `base_hash` khác (project đã đổi sau khi kiểm); 409 được kiểm trước khi sao lưu |
 | GET | `/projects/{slug}/backups` | `[{id, created_at, reason}]` mới nhất trước, ≤ 10 | 404 |
-| POST | `/projects/{slug}/backups/{id}/restore` | Sao lưu bản hiện tại (`reason: "restore"`) rồi khôi phục → `{project, backup_id}` | 404; 409 đang dựng; 422 id sai dạng |
+| POST | `/projects/{slug}/backups/{id}/restore` | Sao lưu bản hiện tại (`reason: "restore"`) rồi khôi phục → `{project, backup_id, base_hash}` (`backup_id` là bản vừa sao lưu; ghi lại đúng byte bản được chọn nên `base_hash` trở về giá trị cũ) | 404; 409 đang dựng; 422 id sai dạng hoặc bản sao lưu hỏng / thuộc project khác |
 
 - Lưu ở `workspace/projects/<slug>/backups/project-YYYYMMDD-HHMMSS[-n].json`; giữ 10 bản mới nhất (xoá bản cũ hơn); `duplicate` không chép `backups/`; "Dọn file tạm" không đụng `backups/`; `id` chỉ nhận `[0-9-]` (chặn đường dẫn).
+- **`id`** = phần giữa `project-` và `.json`, khớp `^\d{8}-\d{6}(-\d+)?$` (sai dạng → 422). Trùng giây thì thêm `-n` (n = 1, 2, …), sắp theo số (`-10` mới hơn `-9`). Giờ trong tên và `created_at` là UTC.
+- **File phụ** `project-….meta.json` cạnh mỗi bản: `{reason: "apply"|"restore", created_at}`. Thiếu hoặc hỏng thì `reason` = null và `created_at` lấy từ giờ sửa file. Dọn còn 10 bản thì xoá cả cặp.
+- `apply` và `restore` trả 409 khi đang dựng; `apply` còn 409 khi `base_hash` lệch. Cả hai kiểm trước khi sao lưu hay ghi gì. `restore` đọc bản được chọn trước khi sao lưu bản hiện tại, nên khôi phục bản cũ nhất trong 10 bản vẫn đúng.
+- `check` không ghi gì (kể cả sao lưu, kể cả dời ảnh cũ): đọc `project.json` thẳng từ đĩa. `base_hash` tính trên byte nguyên của file, không chuẩn hoá JSON.
+- `script` trong thân yêu cầu nhận chuỗi JSON (K1 báo dòng:cột) hoặc giá trị đã đọc.
 - Mã nguồn: `backend/hbt/script.py` (parse, gộp, kiểm), `backend/hbt/api/script.py`, `backend/hbt/backups.py`. `base_hash` = SHA-256 nội dung `project.json`.
 
 ### 13.B5 Ước tính thời gian dựng (chốt B′ 27/10)
@@ -905,8 +920,10 @@ Hoàn tác về sau: menu "Bản sao lưu" (danh sách 10 bản, ngày giờ, Kh
 
 **6a. `GET /projects` → `last_render`:** chưa có `cover`. `storage.last_render` (`backend/hbt/storage.py`) chỉ trả `job_id, preview, fps, duration, created_at, video`; `backend/hbt/api/projects.py` (`list_projects`) chỉ đổi `video` sang URL. `GET /projects/{slug}/renders` đã có `cover`. **Quyết định (chủ dự án 27/10), code ở Đợt 1:** `ProjectSummary` thêm
 
-- `cover` = `cover_9x16.jpg` của lần dựng **gần nhất có bìa** (URL qua `file_url`; không có thì `null`);
-- `last_final` = bản đẹp (không phải xem nhanh) mới nhất `{job_id, fps, created_at}` hoặc `null`.
+- `cover` = URL `/api/files/projects/<slug>/renders/<job>/cover_9x16.jpg` của lần dựng **gần nhất có file `cover_9x16.jpg`** (duyệt từ mới đến cũ, gặp là dừng; không có thì `null`). Lần dựng mới nhất vẽ bìa lỗi (chỉ cảnh báo) thì lấy bìa của lần cũ hơn;
+- `last_final` = bản đẹp (không phải xem nhanh) mới nhất, **đủ các khoá như `last_render`** (`job_id, preview, fps, duration, render_seconds, align_cached, created_at, video`; `video` là URL) hoặc `null`.
+
+`last_render` và `GET /projects/{slug}/renders` cũng trả `render_seconds`, `align_cached` (bản dựng cũ thiếu thì `null`). Hai khoá mới nằm cuối `ProjectSummary`, thứ tự khoá cũ giữ nguyên.
 
 Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dòng **Dự án**).
 
@@ -914,6 +931,6 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 
 **6c. Cờ cache căn chữ:** `aligner_info` chưa có (đọc lại từ `timing.json` y hệt lần đầu, `RenderResult` cũng không có cờ). `jobs.py` đủ thông tin mà không đụng pipeline: **`align_cached` = mtime của `build/timing.json` không đổi trước/sau `_render`** (thiếu file trước đó → `False`).
 
-**6d. Ghi `render_seconds`:** `meta.json` do pipeline ghi ở cuối `render.py`. Trong `jobs.py` (`_run`, nhánh `else:` sau khi có `result`, **trước `job._finish(DONE, …)`**) ghi thêm `render_seconds` (= `result.seconds`, làm tròn 1 chữ số) và `align_cached` vào `result.job_dir / "meta.json"`. Ghi an toàn (ghi file tạm rồi `os.replace`); lỗi chỉ ghi log, **không làm hỏng job**. `storage` (`/renders`) trả thêm hai trường. Không đụng `backend/hbt/pipeline/`.
+**6d. Ghi `render_seconds`:** `meta.json` do pipeline ghi ở cuối `render.py`. Trong `jobs.py` (`_run`, nhánh `else:` sau khi có `result`, **trước `job._finish(DONE, …)`**) ghi thêm `render_seconds` (= `result.seconds`, làm tròn 1 chữ số) và `align_cached` vào `result.job_dir / "meta.json"`. Ghi an toàn (ghi file tạm rồi `os.replace`); lỗi chỉ ghi log, **không làm hỏng job**. Chỉ ghi khi job thành công (Xem nhanh hay bản đẹp) và `meta.json` đã có; job huỷ hoặc lỗi thì không ghi, không tạo `meta.json`, không đổi trường pipeline đã ghi. `render_seconds` lấy từ `result.seconds` (thời gian dựng thật, **không** tính xếp hàng). `align_cached` chỉ `True` khi `build/timing.json` có trước job và mtime không đổi sau job. `storage` (`/renders`) trả thêm hai trường. Không đụng `backend/hbt/pipeline/`.
 
 **X6 (đổi mốc so sánh):** `PIPELINE_VERSION` không đổi so với tag `v0.5.1`, và `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (v0.5.1 đã sửa `render.py`; `b240e97` không còn là mốc).
