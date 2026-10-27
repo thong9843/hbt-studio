@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import io
+
 from fastapi import APIRouter, Query, Response
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State, file_url
-from hbt.models import MAX_SCENES, MIN_SCENES, Project, Scene, Theme
+from hbt.models import MAX_SCENES, MIN_SCENES, Project, Scene, Theme, Thumbnail
 from hbt.pipeline.preview import resize_png, scene_preview_for, scene_preview_png
-from hbt.storage import BadRequest, Conflict, NotFound
+from hbt.pipeline.thumbnail import LOGO_FILE, render_cover
+from hbt.storage import BadRequest, Conflict, NotFound, Unprocessable
 
 router = APIRouter(tags=["projects"])
 
@@ -141,12 +145,57 @@ def draft_scene_preview(
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
+class DraftThumbnail(BaseModel):
+    thumbnail: Thumbnail | None = None  # bỏ trống → dùng khối thumbnail đã lưu của project
+
+
+@router.post("/projects/{slug}/thumbnail/preview.jpg")
+def draft_thumbnail_preview(
+    slug: str,
+    body: DraftThumbnail,
+    state: State,
+    w: int | None = Query(default=None, ge=16, le=1080),
+) -> Response:
+    """Xem trước ảnh bìa 1080×1920 theo bản nháp (chưa lưu); giao diện tự cắt khung 3:4 và 3:2."""
+    project = state.storage.load(slug)
+    thumb = body.thumbnail or project.thumbnail
+    if thumb is None:
+        raise Unprocessable("Project chưa có khối thumbnail (ảnh bìa)")
+    if thumb.scene > len(project.scenes):
+        raise Unprocessable(f"Cảnh nền {thumb.scene} vượt quá số cảnh ({len(project.scenes)})")
+    image = project.scenes[thumb.scene - 1].image
+    bg = state.storage.project_file(slug, image) if image else None
+    if bg is None or not bg.is_file():
+        raise Unprocessable(f"Cảnh {thumb.scene} chưa có ảnh để làm nền bìa")
+    try:
+        cover = render_cover(
+            bg, thumb.lines, thumb.series or project.series, thumb.accent,
+            state.brand_dir / LOGO_FILE,
+        )  # fmt: skip
+    except OSError as e:
+        raise Unprocessable(f"Không vẽ được ảnh bìa: {e}") from e
+    buf = io.BytesIO()
+    if w and w < cover.width:
+        cover = cover.resize((w, round(cover.height * w / cover.width)), Image.LANCZOS)
+    cover.save(buf, format="JPEG", quality=90)
+    return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/projects/{slug}/build/clean")
+def clean_build(slug: str, state: State):
+    """Dọn file tạm trong `build/` (giữ `timing.json`). 409 khi project đang được dựng."""
+    state.storage.load(slug)  # 404 nếu không có project
+    if state.jobs.is_busy(slug):
+        raise Conflict("Project đang được dựng, hãy đợi xong hoặc huỷ job rồi mới dọn file tạm")
+    return state.storage.clean_build(slug)
+
+
 @router.get("/projects/{slug}/renders")
 def list_renders(slug: str, state: State):
     """Lịch sử các lần xuất (mới nhất trước); đường dẫn file đã đổi thành URL."""
     state.storage.load(slug)
     items = state.storage.list_renders(slug)
     for item in items:
-        for key in ("video", "srt", "publish", "log"):
+        for key in ("video", "srt", "publish", "log", "cover", "youtube_cover"):
             item[key] = file_url(item[key])
     return items

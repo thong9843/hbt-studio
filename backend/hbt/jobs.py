@@ -15,11 +15,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
-from hbt.pipeline.render import RenderOptions, render_project
+from hbt.pipeline.lint import describe_issue, lint_project
+from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
+from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
@@ -38,11 +41,13 @@ class Job:
     fps: int | None
     outro: bool | None
     allow_long_trim: bool
+    preview_seconds: float | None = None
     status: str = QUEUED
     progress: float = 0.0
     step: str = ""
     error: str | None = None
     needs_confirmation: bool = False
+    cut_audio: str | None = None  # phần giọng sẽ bị cắt (rel), để nghe trước khi xác nhận
     output: dict[str, Any] | None = None
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -127,12 +132,16 @@ class JobManager:
         brand_dir: Path | None = None,
         render_fn=render_project,
         tool_check=check_render_tools,
+        sensitive: SensitiveStore | None = None,
+        app_settings: AppSettingsStore | None = None,
     ):
         self.storage = storage
         self.library_dir = library_dir
         self.brand_dir = brand_dir
         self._render = render_fn
         self._tool_check = tool_check
+        self.sensitive = sensitive
+        self.app_settings = app_settings
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -158,16 +167,32 @@ class JobManager:
         fps: int | None = None,
         outro: bool | None = None,
         allow_long_trim: bool = False,
+        preview_seconds: float | None = None,
     ) -> Job:
         project = self.storage.load(slug)  # NotFound / BadRequest nếu project hỏng
         if fps is not None and fps not in ALLOWED_FPS:
             raise Unprocessable(f"fps phải là một trong {ALLOWED_FPS}")
+        if preview_seconds is not None:
+            if not preview:
+                raise Unprocessable("preview_seconds chỉ dùng với chế độ Xem nhanh (preview=true)")
+            if not 0 < preview_seconds <= MAX_PREVIEW_SECONDS:
+                raise Unprocessable(f"preview_seconds phải trong (0, {MAX_PREVIEW_SECONDS}] giây")
         problems = project.render_problems()
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
+        if self.sensitive is not None:  # từ mức `block` chặn xuất, không tạo job (mục 7)
+            blocked = [
+                describe_issue(i)
+                for i in lint_project(project, self.sensitive.load())
+                if i.level == "block"
+            ]
+            if blocked:
+                raise Unprocessable("Có từ bị chặn, sửa rồi dựng lại: " + "; ".join(blocked))
         if self._tool_check is not None:
             self._tool_check()
-        job = Job(uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim)
+        job = Job(
+            uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim, preview_seconds
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -205,13 +230,18 @@ class JobManager:
             job.status = RUNNING
             job.started_at = time.time()
         folder = self.storage.project_dir(job.slug)
+        cfg = self.app_settings.load() if self.app_settings is not None else None
         opts = RenderOptions(
             preview=job.preview,
             fps=job.fps,
             outro=job.outro,
             allow_long_trim=job.allow_long_trim,
+            preview_seconds=job.preview_seconds,
+            sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
             library_dir=self.library_dir,
             brand_dir=self.brand_dir,
+            whisper_model=cfg.whisper_model if cfg else None,
+            whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
             job_id=job.id,
         )
         try:
@@ -219,7 +249,8 @@ class JobManager:
         except RenderCancelled:
             job._finish(CANCELLED)
         except TailTrimNeedsConfirmation as e:
-            job._finish(FAILED, error=str(e), needs_confirmation=True)
+            cut = self.storage.rel(e.cut_file) if e.cut_file else None
+            job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
         else:
@@ -229,12 +260,20 @@ class JobManager:
                 "publish": rel(result.publish),
                 "log": rel(result.log),
                 "srt": rel(result.srt) if result.srt else None,
+                "cover": rel(result.cover) if result.cover else None,
+                "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
                 "fps": result.fps,
                 "width": result.width,
                 "height": result.height,
                 "duration": round(result.duration, 3),
-                "lufs": round(result.lufs, 2),
+                "lufs": round(result.lufs, 2) if result.lufs is not None else None,
+                "preview_seconds": result.preview_seconds,
                 "aligner": result.aligner,
+                "aligner_info": result.aligner_info,
+                "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
+                "trimmed_tail_seconds": (
+                    round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
+                ),
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,
             }

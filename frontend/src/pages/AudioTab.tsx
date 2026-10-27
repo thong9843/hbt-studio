@@ -224,12 +224,23 @@ function MusicSection() {
   const queryClient = useQueryClient();
   const library = useQuery({ queryKey: ['music'], queryFn: api.listMusic });
   const music = project.music;
-  const start = music?.start ?? 0;
+  const renders = useQuery({
+    queryKey: ['renders', project.slug],
+    queryFn: () => api.listRenders(project.slug),
+    enabled: Boolean(music?.file),
+  });
+  // Lần dựng gần nhất (mới nhất đứng đầu) cho biết giây app đã tự chọn.
+  const latest = renders.data?.[0];
+  const lastWasAuto = latest?.music_start_source === 'auto' && latest.music_start !== null;
+  // Chỉ tin giây đó khi nhạc hiện tại vẫn là nhạc đã dùng cho lần dựng ấy.
+  const musicChanged = lastWasAuto && !latest.music_matches_current;
+  const autoStart = lastWasAuto && latest.music_matches_current ? latest.music_start : null;
+  const start = music?.start ?? autoStart ?? 0;
 
   const attach = useMutation({
-    mutationFn: async (file: string) => {
+    mutationFn: async (id: string) => {
       await editor.flush();
-      return api.attachLibraryMusic(project.slug, file);
+      return api.attachLibraryMusic(project.slug, id);
     },
     onSuccess: (res) => editor.applyServer((p) => ({ ...p, music: res.music })),
   });
@@ -266,6 +277,25 @@ function MusicSection() {
                 onChange={(e) => patchMusic({ start: numberOrNull(e.target.value) })}
               />
               <p className="mt-1 text-small text-text-muted">{A.music.startHelp}</p>
+              {music.start === null &&
+                (autoStart !== null ? (
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-small">
+                    <span>{A.music.autoStart(autoStart)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => patchMusic({ start: autoStart })}
+                    >
+                      {A.music.useAutoStart}
+                    </button>
+                  </p>
+                ) : (
+                  renders.isSuccess && (
+                    <p className="mt-1 text-small text-text-muted">
+                      {musicChanged ? A.music.musicChanged : A.music.noRenderYet}
+                    </p>
+                  )
+                ))}
             </div>
             <div>
               <label className="label" htmlFor="music-credit">
@@ -302,7 +332,7 @@ function MusicSection() {
         )}
         <ul className="space-y-2">
           {library.data?.map((entry) => (
-            <li key={entry.file} className="card flex flex-wrap items-center gap-3 p-3">
+            <li key={entry.id} className="card flex flex-wrap items-center gap-3 p-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-bold">{entry.title}</p>
                 <p className="truncate text-small text-text-muted">
@@ -310,17 +340,12 @@ function MusicSection() {
                   {entry.bpm ? ` · ${entry.bpm} BPM` : ''}
                 </p>
               </div>
-              <audio
-                controls
-                preload="none"
-                src={api.libraryMusicUrl(entry.file)}
-                className="h-9"
-              />
+              <audio controls preload="none" src={api.libraryMusicUrl(entry.id)} className="h-9" />
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
                 disabled={attach.isPending}
-                onClick={() => attach.mutate(entry.file)}
+                onClick={() => attach.mutate(entry.id)}
               >
                 {A.music.use}
               </button>
@@ -333,7 +358,7 @@ function MusicSection() {
       <NewTrackForm
         onAdded={(entry) => {
           void queryClient.invalidateQueries({ queryKey: ['music'] });
-          attach.mutate(entry.file);
+          attach.mutate(entry.id);
         }}
       />
     </section>

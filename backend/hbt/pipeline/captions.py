@@ -22,7 +22,7 @@ MAX_TOKENS = 7  # cụm dài hơn thì tự tách đôi
 LEAD = 0.05  # hiện cụm sớm hơn chữ đầu
 JOIN_GAP = 0.6  # khoảng cách tới cụm sau nhỏ hơn mức này thì giữ cụm đến lúc cụm sau xuất hiện
 HOLD = 0.25  # giữ cụm sau chữ cuối nếu cụm sau còn xa
-DEFAULT_Y = 1420
+DEFAULT_Y = 1400  # tâm khối chữ; đáy khối 2 dòng ≤ 1500 (vùng an toàn TikTok)
 HIGH_CARD_Y = 230
 HIGH_CARD_BOTTOM = 1100
 MIN_STATE = 0.001
@@ -42,7 +42,7 @@ class Phrase:
 
 
 def caption_y_for(caption_y: int | None, card_bottom: int | None) -> int:
-    """null → 1420; nếu đáy thẻ chữ > 1100 thì 230; số cụ thể thì giữ nguyên."""
+    """null → 1400; nếu đáy thẻ chữ > 1100 thì 230; số cụ thể thì giữ nguyên."""
     if caption_y is not None:
         return caption_y
     if card_bottom is not None and card_bottom > HIGH_CARD_BOTTOM:

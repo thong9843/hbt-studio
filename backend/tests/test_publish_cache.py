@@ -99,3 +99,8 @@ def test_small_files_are_rehashed_even_if_size_and_mtime_match(tmp_path):
     f.write_bytes(b"y")  # cùng kích thước
     os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns))  # và cùng thời điểm sửa
     assert cache.file_digest(f) != before
+
+
+def test_publish_text_with_empty_credit_drops_the_music_line():
+    text = build_publish_text(project(music={"file": "m.mp3", "credit": ""}))
+    assert "Nhạc" not in text

@@ -3,13 +3,16 @@ import { useState } from 'react';
 import { fetchHealth, fetchText } from '../api/client';
 import { api } from '../api/endpoints';
 import type { Fps, Job, LintIssue, LintResult, RenderOptions, RenderRecord } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
+import { ThumbnailEditor } from '../components/ThumbnailEditor';
 import { AlertIcon, CopyIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
 import { ProgressBar } from '../components/ProgressBar';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { useJob } from '../hooks/useJob';
 import { vi } from '../i18n/vi';
+import { alignerLabel, alignerNotes } from '../utils/aligner';
 import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
 import { splitPublishBlocks } from '../utils/publish';
 import { sceneNumber } from '../utils/scene';
@@ -17,6 +20,7 @@ import { sceneNumber } from '../utils/scene';
 const X = vi.export;
 const LEVEL_CHIP = { block: 'chip-danger', warn: 'chip-warn', info: 'chip-muted' } as const;
 const FPS: Fps[] = [30, 50, 60];
+export const HEAD_PREVIEW_SECONDS = 10;
 
 function issueScope(issue: LintIssue): string {
   return issue.scene_index === null
@@ -157,8 +161,8 @@ function ResultView({ job }: { job: Job }) {
         {[
           [R.duration, formatDuration(out.duration)],
           [R.fps, String(out.fps)],
-          [R.lufs, `${out.lufs.toFixed(1)} LUFS`],
-          [R.aligner, out.aligner],
+          [R.lufs, out.lufs === null ? '—' : `${out.lufs.toFixed(1)} LUFS`],
+          [R.aligner, alignerLabel(out.aligner, out.aligner_info)],
           [R.seconds, `${out.seconds} ${vi.common.seconds}`],
         ].map(([k, v]) => (
           <div key={k} className="card p-4">
@@ -167,6 +171,19 @@ function ResultView({ job }: { job: Job }) {
           </div>
         ))}
       </dl>
+      {out.trimmed_tail && (
+        <div className="space-y-2 text-small">
+          <p className="text-text-muted">
+            {R.trimmedTail((out.trimmed_tail_seconds ?? 0).toFixed(1).replace('.', ','))}
+          </p>
+          <audio controls aria-label={R.trimmedTailPlayer} src={out.trimmed_tail} />
+        </div>
+      )}
+      {alignerNotes(out.aligner, out.aligner_info).map((note) => (
+        <p key={note} className="text-small text-text-muted">
+          {note}
+        </p>
+      ))}
       {out.warnings.length > 0 && (
         <div className="rounded-card bg-accent p-4 text-small text-on-accent">
           <b className="flex items-center gap-2">
@@ -191,8 +208,61 @@ function ResultView({ job }: { job: Job }) {
             {R.srt}
           </a>
         )}
+        {out.cover && (
+          <a className="btn btn-secondary" href={out.cover} download="cover_9x16.jpg">
+            <DownloadIcon size={20} />
+            {R.cover}
+          </a>
+        )}
+        {out.youtube_cover && (
+          <a className="btn btn-secondary" href={out.youtube_cover} download="youtube_3x2.jpg">
+            <DownloadIcon size={20} />
+            {R.youtubeCover}
+          </a>
+        )}
       </div>
       <PublishBox url={out.publish} />
+    </section>
+  );
+}
+
+function CleanBuild({ slug, disabled }: { slug: string; disabled: boolean }) {
+  const C = X.clean;
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const clean = useMutation({
+    mutationFn: () => api.cleanBuild(slug),
+    onSuccess: (r) => {
+      setConfirming(false);
+      toast.info(C.done(formatBytes(r.freed_bytes)));
+    },
+    onError: (e) => {
+      setConfirming(false);
+      toast.error(e);
+    },
+  });
+  return (
+    <section className="space-y-3">
+      <h2>{C.title}</h2>
+      <p className="text-small text-text-muted">{C.help}</p>
+      <button
+        type="button"
+        className="btn btn-outline"
+        disabled={disabled || clean.isPending}
+        onClick={() => setConfirming(true)}
+      >
+        {C.button}
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title={C.confirmTitle}
+          message={C.confirmMessage}
+          confirmLabel={clean.isPending ? C.busy : C.confirm}
+          busy={clean.isPending}
+          onConfirm={() => clean.mutate()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </section>
   );
 }
@@ -217,14 +287,14 @@ function History({
             className="flex flex-wrap items-center gap-3 border-b border-border py-3 text-small"
           >
             <span className={`chip ${r.preview ? 'chip-muted' : 'chip-warn'}`}>
-              {r.preview ? H.fast : H.final}
+              {r.preview ? (r.preview_seconds ? H.fastHead(r.preview_seconds) : H.fast) : H.final}
             </span>
             <span className="num">{formatDateTime(r.created_at)}</span>
             <span className="num text-text-muted">
               {r.duration ? formatDuration(r.duration) : ''}
               {r.fps ? ` · ${r.fps} fps` : ''}
               {` · ${formatBytes(r.size)}`}
-              {r.aligner ? ` · ${r.aligner}` : ''}
+              {r.aligner ? ` · ${alignerLabel(r.aligner, r.aligner_info)}` : ''}
             </span>
             <span className="ml-auto flex flex-wrap gap-2">
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPlay(r)}>
@@ -241,6 +311,22 @@ function History({
                 <a className="btn btn-outline btn-sm" href={r.srt} download="captions.srt">
                   <DownloadIcon size={18} />
                   {H.srt}
+                </a>
+              )}
+              {r.cover && (
+                <a className="btn btn-outline btn-sm" href={r.cover} download="cover_9x16.jpg">
+                  <DownloadIcon size={18} />
+                  {H.cover}
+                </a>
+              )}
+              {r.youtube_cover && (
+                <a
+                  className="btn btn-outline btn-sm"
+                  href={r.youtube_cover}
+                  download="youtube_3x2.jpg"
+                >
+                  <DownloadIcon size={18} />
+                  {H.youtubeCover}
                 </a>
               )}
             </span>
@@ -301,6 +387,11 @@ export function ExportTab() {
   const reason = blocked ? X.blocked : noFfmpeg ? X.missingFfmpeg : undefined;
   const launch = (options: RenderOptions) => start.mutate({ ...options, outro });
   const failure = finished?.status === 'failed' ? finished : null;
+  const withCovers = renders.data?.find((r) => r.cover && r.youtube_cover);
+  const latestCovers =
+    withCovers?.cover && withCovers.youtube_cover
+      ? { cover: withCovers.cover, youtube: withCovers.youtube_cover }
+      : null;
   const pct = job?.progress ?? progress.progress;
 
   return (
@@ -329,7 +420,7 @@ export function ExportTab() {
             className="btn btn-primary"
             disabled={cannotStart}
             title={reason}
-            onClick={() => launch({ preview: true })}
+            onClick={() => launch({ preview: true, preview_seconds: HEAD_PREVIEW_SECONDS })}
           >
             {start.isPending ? (
               <span className="spinner" aria-hidden="true" />
@@ -337,6 +428,15 @@ export function ExportTab() {
               <PlayIcon size={20} />
             )}
             {X.fast}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={cannotStart}
+            title={reason}
+            onClick={() => launch({ preview: true })}
+          >
+            {X.fastFull}
           </button>
           <div className="flex items-end gap-2">
             <div>
@@ -404,6 +504,9 @@ export function ExportTab() {
               {failure.needs_confirmation && (
                 <>
                   <p className="text-small">{X.confirmTrim}</p>
+                  {failure.cut_audio && (
+                    <audio controls aria-label={X.cutAudio} src={failure.cut_audio} />
+                  )}
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
@@ -433,7 +536,11 @@ export function ExportTab() {
         </section>
       )}
 
+      <ThumbnailEditor covers={latestCovers} />
+
       <History renders={renders.data ?? []} onPlay={setPlayed} />
+
+      <CleanBuild slug={slug} disabled={running} />
     </div>
   );
 }

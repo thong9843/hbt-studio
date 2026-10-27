@@ -53,21 +53,21 @@ def add_music(
         tmp.unlink(missing_ok=True)
 
 
-@router.get("/music/{file:path}/audio")
-def get_library_music(file: str, state: State) -> FileResponse:
-    """Phát một bài trong thư viện để nghe thử (có Range). `file` là tên file trong `GET /music`."""
-    _, path = state.library.find(file)
+@router.get("/music/{music_id}/audio")
+def get_library_music(music_id: str, state: State) -> FileResponse:
+    """Phát một bài trong thư viện để nghe thử (có Range). `music_id` là `id` trong `GET /music`."""
+    _, path = state.library.find(music_id)
     return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 class FromLibrary(BaseModel):
-    file: str
+    id: str
 
 
 @router.post("/projects/{slug}/music/from-library", response_model=Project)
 def attach_library_music(slug: str, body: FromLibrary, state: State):
     """Dùng một bài trong thư viện cho project: chép file và đặt ghi công theo thư viện."""
     state.storage.load(slug)  # 404 trước nếu project không có
-    entry, path = state.library.find(body.file)
+    entry, path = state.library.find(body.id)
     _, project = state.storage.attach_music(slug, path, entry.credit)
     return project

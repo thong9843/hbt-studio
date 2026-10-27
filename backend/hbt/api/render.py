@@ -7,7 +7,7 @@ import json
 from typing import Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from hbt.api.deps import State, file_url
@@ -15,7 +15,9 @@ from hbt.jobs import Job
 
 router = APIRouter(tags=["render"])
 
-URL_KEYS = ("video", "srt", "publish", "log")
+URL_KEYS = (
+    "video", "srt", "publish", "log", "cover", "youtube_cover", "trimmed_tail",
+)  # fmt: skip
 POLL_SECONDS = 0.2
 
 
@@ -23,6 +25,8 @@ class RenderRequest(BaseModel):
     preview: bool = False
     fps: Literal[30, 50, 60] | None = None
     outro: bool | None = None  # None → theo settings.outro của project
+    # Xem nhanh chỉ dựng chừng này giây đầu; None = cả video (UI gửi 10)
+    preview_seconds: float | None = Field(default=None, gt=0, le=60)
     allow_long_trim: bool = False  # chỉ sau khi đã nghe và xác nhận phần giọng bị cắt (> 8 s)
 
 
@@ -44,7 +48,9 @@ def job_view(job: Job) -> dict:
         "output": output,
         "error": job.error,
         "needs_confirmation": job.needs_confirmation,
+        "cut_audio": file_url(job.cut_audio),
         "preview": job.preview,
+        "preview_seconds": job.preview_seconds,
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
@@ -60,6 +66,7 @@ def start_render(slug: str, state: State, body: RenderRequest | None = None):
         fps=body.fps,
         outro=body.outro,
         allow_long_trim=body.allow_long_trim,
+        preview_seconds=body.preview_seconds,
     )
     return {"job_id": job.id}
 

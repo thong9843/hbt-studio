@@ -1,7 +1,14 @@
 # Media & dữ liệu người dùng — không lên Git
 workspace/
 models/
-library/music/**/*.mp3
+library/music/**
+!library/music/index.json
+*.mp3
+*.m4a
+*.ogg
+*.flac
+*.aac
+*.opus
 *.mp4
 *.wav
 .env

@@ -23,6 +23,7 @@ TARGET_LUFS = -14.0
 VOICE_END_MARGIN = 0.35
 TAIL_FADE = 0.08
 MAX_TRIM_SECONDS = 8.0
+HEARD_MARGIN = 0.05  # Whisper nghe thêm chữ sau voice_end quá chừng này mới tính là đoạn thừa
 
 # Outro (4c)
 OUTRO_DURATION = 4.0
@@ -30,6 +31,7 @@ OUTRO_VOICE_DELAY = 0.5
 OUTRO_TINGS = ((0.15, 0.22), (1.15, 0.18))  # (giây, âm lượng)
 OUTRO_FADE_OUT = 0.3
 OUTRO_CROSSFADE = 0.5
+PREVIEW_FADE = 0.3  # fade ra ở cuối bản Xem nhanh 10 s đầu
 OUTRO_LIMITER = "alimiter=limit=0.89:level=0"  # level=0: không tự nâng mức lên −13 LUFS
 
 # Whoosh (6.3)
@@ -51,7 +53,18 @@ def prep_voice(src: str | Path, dst: str | Path) -> None:
 
 
 class TailTrimNeedsConfirmation(RuntimeError):
-    """Đuôi thừa quá dài (> 8 s): dừng lại, hỏi chủ dự án trước khi cắt (4d.3)."""
+    """Đuôi thừa quá dài (> 8 s): dừng lại, hỏi chủ dự án trước khi cắt (4d.3).
+
+    `voice_end`/`content_end` (giây trên voice.wav) cho biết phần sẽ bị cắt; bộ dựng lưu phần đó
+    vào `cut_file` để chủ dự án nghe trước khi xác nhận (4d.4)."""
+
+    def __init__(
+        self, message: str, voice_end: float | None = None, content_end: float | None = None
+    ):
+        super().__init__(message)
+        self.voice_end = voice_end
+        self.content_end = content_end
+        self.cut_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -67,12 +80,16 @@ def plan_tail_trim(
     content_end: float,
     *,
     allow_long: bool = False,
+    heard_end: float | None = None,
 ) -> TailTrim | None:
     """Có đoạn tiếng nói nào *sau* chữ cuối của kịch bản không? Có thì trả kế hoạch cắt.
 
-    `content_end` = hết phần giọng thật (trước đoạn đệm TAIL). Không có đoạn thừa → None."""
+    `content_end` = hết phần giọng thật (trước đoạn đệm TAIL). Không có đoạn thừa → None.
+    `heard_end` (Whisper): Whisper còn nghe thấy chữ sau `voice_end` thì cũng là đoạn thừa."""
     voice_end = last_token_end + VOICE_END_MARGIN
     extra = [s for s in speech_segs if s[0] >= voice_end]
+    if not extra and heard_end is not None and heard_end > voice_end + HEARD_MARGIN:
+        extra = [(voice_end, heard_end)]
     if not extra:
         return None
     cut = content_end - voice_end
@@ -82,19 +99,33 @@ def plan_tail_trim(
         raise TailTrimNeedsConfirmation(
             f"Đuôi thừa dài {cut:.2f} giây (> {MAX_TRIM_SECONDS:.0f} giây) "
             "sau chữ cuối của kịch bản. "
-            "Hãy nghe lại file giọng; nếu đúng là phần cần cắt thì chạy lại với xác nhận."
+            "Hãy nghe lại file giọng; nếu đúng là phần cần cắt thì chạy lại với xác nhận.",
+            voice_end=voice_end,
+            content_end=content_end,
         )
     return TailTrim(voice_end=voice_end, cut_seconds=cut, segments_cut=len(extra))
 
 
-def trim_voice_tail(src: str | Path, dst: str | Path, voice_end: float) -> None:
-    """Cắt đuôi tại voice_end, fade ra 80 ms, đệm lại TAIL, chuẩn hoá lại −14 LUFS.
+CUT_PART_NAME = "trimmed_tail.wav"
+
+
+def save_cut_part(voice_wav: str | Path, start: float, end: float, dst: str | Path) -> Path:
+    """Lưu phần giọng bị cắt (từ `start` đến `end`, giây trên voice.wav) để chủ dự án nghe lại."""
+    run_ffmpeg([
+        "-i", voice_wav, "-af", f"atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS",
+        "-ac", "1", dst,
+    ])  # fmt: skip
+    return Path(dst)
+
+
+def trim_voice_tail(src: str | Path, dst: str | Path, voice_end: float, pad: float = TAIL) -> None:
+    """Cắt đuôi tại voice_end, fade ra 80 ms, đệm lại `pad` (mặc định TAIL), chuẩn hoá −14 LUFS.
 
     Chuẩn hoá lại sau khi cắt để độ lớn (và ducking) chỉ tính trên phần giọng giữ lại (4d.4)."""
     fade_start = max(voice_end - TAIL_FADE, 0)
     af = (
         f"atrim=end={voice_end:.3f},afade=t=out:st={fade_start:.3f}:d={TAIL_FADE},"
-        f"apad=pad_dur={TAIL},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100"
+        f"apad=pad_dur={pad:.3f},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100"
     )
     run_ffmpeg(["-i", src, "-af", af, "-ac", "1", dst])
 
@@ -123,6 +154,48 @@ def trim_tail_if_needed(
         f"({plan.cut_seconds:.2f} giây)".replace(".", ",")
     )
     return Path(dst), plan
+
+
+def trim_tail_whisper(
+    voice_wav: str | Path,
+    last_token_end: float,
+    info: dict,
+    dst: str | Path,
+    log=print,
+    warn=print,
+    *,
+    allow_long: bool = False,
+) -> tuple[Path, TailTrim | None]:
+    """Cắt đuôi theo Whisper (4d.1): `voice_end = end(token cuối) + 0,35 s`, fade ra 80 ms, đệm để
+    tổng 1,6 s sau chữ cuối, chuẩn hoá lại −14 LUFS.
+
+    Chỉ cắt khi token cuối khớp thật với âm tiết Whisper nghe được; token cuối chỉ được nội suy thì
+    mốc `end` không đáng tin: không cắt, chỉ cảnh báo nếu có tiếng nói sau chữ khớp cuối cùng."""
+    total = media_duration(voice_wav)
+    content_end = total - TAIL
+    segs = speech_segments(str(voice_wav), total)
+    heard_end = info.get("heard_end")
+    if info.get("last_token_matched"):
+        plan = plan_tail_trim(
+            last_token_end, segs, content_end, allow_long=allow_long, heard_end=heard_end
+        )
+        if plan is None:
+            return Path(voice_wav), None
+        trim_voice_tail(voice_wav, dst, plan.voice_end, pad=TAIL - VOICE_END_MARGIN)
+        log(
+            f"Đã cắt {plan.segments_cut} đoạn thừa ở cuối file giọng "
+            f"({plan.cut_seconds:.2f} giây)".replace(".", ",")
+        )
+        return Path(dst), plan
+    anchor = info.get("last_matched_end")
+    if anchor is not None:
+        plan = plan_tail_trim(anchor, segs, content_end, allow_long=True, heard_end=heard_end)
+        if plan is not None:
+            warn(
+                f"Có thể có đoạn thừa ở cuối file giọng ({plan.cut_seconds:.2f} giây), "
+                "chưa cắt".replace(".", ",")
+            )
+    return Path(voice_wav), None
 
 
 # ---------------------------------------------------------------- nhạc nền
@@ -265,6 +338,15 @@ def build_outro_audio(
     af = f"volume={gain:.3f}dB,{OUTRO_LIMITER},afade=t=out:st={fade_start}:d={OUTRO_FADE_OUT}"
     run_ffmpeg(["-i", raw, "-af", af, "-c:a", "pcm_s16le", out])
     return measured
+
+
+def trim_with_fade(src: str | Path, seconds: float, out: str | Path, fade: float = PREVIEW_FADE):
+    """Giữ `seconds` giây đầu của `src`, fade ra `fade` giây ở cuối (bản Xem nhanh 10 s đầu)."""
+    run_ffmpeg([
+        "-i", src, "-af",
+        f"atrim=0:{seconds:.3f},afade=t=out:st={max(seconds - fade, 0):.3f}:d={fade}",
+        "-c:a", "pcm_s16le", out,
+    ])  # fmt: skip
 
 
 def join_audio(body: str | Path, outro: str | Path, out: str | Path) -> float:

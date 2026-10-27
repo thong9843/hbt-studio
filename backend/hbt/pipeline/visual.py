@@ -142,20 +142,14 @@ def render_caption(words, act, path, yc):
         tw = sum(ws[k] for k in ln) + sp * (len(ln) - 1)
         x, y = (W - tw) / 2, y0 + li * lh
         for k in ln:
-            if k == act:
-                d.rounded_rectangle(
-                    (x - 12, y + 2, x + ws[k] + 12, y + lh - 4), 18, fill=HIGHLIGHT + (255,)
-                )
-                d.text((x, y + 4), toks[k], font=f, fill=(20, 20, 20))
-            else:
-                d.text((x + 3, y + 8), toks[k], font=f, fill=(0, 0, 0, 120))
-                d.text(
-                    (x, y + 4),
-                    toks[k],
-                    font=f,
-                    fill=(255, 255, 255),
-                    stroke_width=7,
-                    stroke_fill=(15, 15, 25),
-                )
+            d.text((x + 3, y + 8), toks[k], font=f, fill=(0, 0, 0, 120))
+            d.text(
+                (x, y + 4),
+                toks[k],
+                font=f,
+                fill=HIGHLIGHT if k == act else (255, 255, 255),  # đang đọc: vàng, xong: trắng
+                stroke_width=7,
+                stroke_fill=(15, 15, 25),
+            )
             x += ws[k] + sp
     im.save(path)

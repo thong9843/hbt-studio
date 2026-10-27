@@ -3,6 +3,8 @@ import type {
   AppSettings,
   Job,
   LintResult,
+  BuildClean,
+  Thumbnail,
   MusicEntry,
   NewMusicInput,
   Project,
@@ -52,6 +54,12 @@ export const api = {
       signal,
     ),
 
+  /** Ảnh bìa 9:16 theo bản nháp (chưa lưu); giao diện tự cắt khung 3:4 và 3:2. */
+  previewThumbnail: (slug: string, thumbnail: Thumbnail, signal?: AbortSignal) =>
+    apiPostBlob(`/projects/${enc(slug)}/thumbnail/preview.jpg?w=360`, { thumbnail }, signal),
+  cleanBuild: (slug: string) =>
+    apiRequest<BuildClean>('POST', `/projects/${enc(slug)}/build/clean`),
+
   uploadAsset: (
     slug: string,
     kind: 'image' | 'voice' | 'music',
@@ -79,9 +87,9 @@ export const api = {
     if (input.bpm) form.set('bpm', String(input.bpm));
     return apiRequest<MusicEntry>('POST', '/music', { form });
   },
-  libraryMusicUrl: (file: string) => `/api/music/${enc(file)}/audio`,
-  attachLibraryMusic: (slug: string, file: string) =>
-    apiRequest<Project>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { file } }),
+  libraryMusicUrl: (id: string) => `/api/music/${enc(id)}/audio`,
+  attachLibraryMusic: (slug: string, id: string) =>
+    apiRequest<Project>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { id } }),
 
   lint: (slug: string) => apiRequest<LintResult>('POST', `/projects/${enc(slug)}/lint`),
   startRender: (slug: string, options: RenderOptions) =>

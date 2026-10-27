@@ -1,8 +1,8 @@
 """Căn thời gian từng chữ của kịch bản với giọng đọc.
 
 Hai cách:
-  1. whisper  : nhận dạng giọng bằng faster-whisper (GPU), lấy mốc thời gian từng âm tiết,
-                rồi so khớp với kịch bản (kịch bản luôn là nguồn chữ chuẩn).
+  1. whisper  : nhận dạng giọng bằng faster-whisper (tiến trình con, xem `whisper.py`), lấy mốc
+                thời gian từng âm tiết, rồi so khớp với kịch bản (kịch bản luôn là nguồn chữ chuẩn).
   2. silence  : không cần model, dựa vào các khoảng lặng + độ dài chữ để ước lượng.
 """
 
@@ -10,60 +10,45 @@ import difflib
 import math
 import re
 import subprocess
+from dataclasses import dataclass
 
-from .text import norm, weight
+from .text import weight
+
 
 # ---------------------------------------------------------------- whisper
-_MODEL = None
+# Whisper chạy ở tiến trình con (`whisper.py`); ở đây chỉ so khớp âm tiết nghe được với kịch bản.
+@dataclass
+class Match:
+    times: list[tuple[float, float]]  # mốc từng token
+    matched_ratio: float  # tỉ lệ âm tiết kịch bản khớp âm tiết nghe được
+    last_token_matched: bool  # âm tiết cuối của token cuối có khớp thật (không phải nội suy)
+    last_matched_end: float | None  # hết âm tiết khớp cuối cùng; None nếu không khớp âm tiết nào
+    heard_end: float  # hết âm tiết cuối cùng Whisper nghe được (kể cả phần thừa)
 
 
-def _load_model(size: str):
-    global _MODEL
-    if _MODEL is None:
-        from faster_whisper import WhisperModel  # import muộn: không bắt buộc cài
-
-        try:
-            _MODEL = WhisperModel(size, device="cuda", compute_type="int8_float16")
-        except Exception:
-            _MODEL = WhisperModel(size, device="cpu", compute_type="int8")
-    return _MODEL
-
-
-def whisper_syllables(wav: str, prompt: str, size: str = "large-v3"):
-    model = _load_model(size)
-    segments, _ = model.transcribe(
-        wav,
-        language="vi",
-        word_timestamps=True,
-        beam_size=5,
-        initial_prompt=prompt[:220],
-        condition_on_previous_text=False,
-    )
-    out = []
-    for seg in segments:
-        for w in seg.words or []:
-            parts = [p for p in (norm(x) for x in w.word.split()) if p]
-            if not parts:
-                continue
-            step = (w.end - w.start) / len(parts)
-            for i, p in enumerate(parts):
-                out.append((p, w.start + i * step, w.start + (i + 1) * step))
-    return out
-
-
-def align_whisper(tokens, wav, size="large-v3"):
-    script = [(ti, s) for ti, t in enumerate(tokens) for s in t["syl"]]
-    prompt = " ".join(t["disp"] for t in tokens)
-    heard = whisper_syllables(wav, prompt, size)
+def match_script(tokens, heard) -> Match:
+    """Khớp âm tiết Whisper nghe được với kịch bản (kịch bản luôn là nguồn chữ chuẩn)."""
     if not heard:
         raise RuntimeError("Whisper không nhận ra giọng nói")
+    script = [(ti, s) for ti, t in enumerate(tokens) for s in t["syl"]]
     sm = difflib.SequenceMatcher(a=[s for _, s in script], b=[h[0] for h in heard], autojunk=False)
     times = [None] * len(script)
+    matched = 0
     for a, b, n in sm.get_matching_blocks():
         for k in range(n):
             times[a + k] = (heard[b + k][1], heard[b + k][2])
+        matched += n
+    anchors = [t for t in times if t is not None]
+    last_matched = bool(script) and times[-1] is not None
+    last_end = anchors[-1][1] if anchors else None
     _interpolate(times, script, heard[0][1], heard[-1][2])
-    return _syllables_to_tokens(tokens, script, times)
+    return Match(
+        times=_syllables_to_tokens(tokens, script, times),
+        matched_ratio=matched / len(script) if script else 0.0,
+        last_token_matched=last_matched,
+        last_matched_end=last_end,
+        heard_end=heard[-1][2],
+    )
 
 
 def _interpolate(times, script, t0, t1):
@@ -201,19 +186,3 @@ def _align_silence_segments(tokens, segs, max_group=6):
 def align_silence(tokens, wav, total):
     """Ghép từng cụm câu (tách theo dấu câu) với các đoạn có tiếng nói bằng quy hoạch động."""
     return _align_silence_segments(tokens, speech_segments(wav, total))[1]
-
-
-def align(tokens, wav, total, method="auto", model_size="large-v3", log=print):
-    if method in ("auto", "whisper"):
-        try:
-            r = align_whisper(tokens, wav, model_size)
-            log("Căn phụ đề bằng Whisper: OK")
-            return r
-        except Exception as e:  # noqa: BLE001
-            if method == "whisper":
-                raise
-            log(
-                f"Không dùng được Whisper ({e.__class__.__name__}), "
-                "chuyển sang căn theo khoảng lặng"
-            )
-    return align_silence(tokens, wav, total)

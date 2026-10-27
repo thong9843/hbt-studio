@@ -8,7 +8,8 @@ def test_defaults(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     s = config.load_settings(tmp_path / "missing.env")
     assert s.default_fps == 50
-    assert s.whisper_model == "large-v3"
+    assert s.whisper_model == "auto"
+    assert s.models_dir == (config.REPO_ROOT / "models").resolve()
     assert s.whisper_device == "auto"
     assert s.workspace_dir == (config.REPO_ROOT / "workspace").resolve()
 
@@ -32,4 +33,10 @@ def test_allowed_fps(tmp_path, monkeypatch, fps):
 def test_rejects_odd_fps(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFAULT_FPS", "45")
     with pytest.raises(ValueError):
+        config.load_settings(tmp_path / "missing.env")
+
+
+def test_rejects_unknown_whisper_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("WHISPER_MODEL", "huge")
+    with pytest.raises(ValueError, match="WHISPER_MODEL"):
         config.load_settings(tmp_path / "missing.env")

@@ -30,9 +30,12 @@ Chủ dự án dùng hai máy và sẽ cho biết đang dùng máy nào ở đ�
 | Node.js | 20 LTS trở lên | `winget install OpenJS.NodeJS.LTS` |
 | FFmpeg | ≥ 6.0, có `libx264`, `zoompan`, `xfade`, `sidechaincompress`, `loudnorm` | `winget install Gyan.FFmpeg` (thêm vào PATH) |
 | Driver NVIDIA | hỗ trợ CUDA 12 (chỉ máy có GPU) | GeForce Experience / trang NVIDIA |
-| faster-whisper | bản ổn định mới nhất | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
+| faster-whisper | bản ổn định mới nhất (đã cài và chạy thử trên máy cũ 24/10/2026: `faster-whisper 1.2.1`, `ctranslate2 4.8.3`, `onnxruntime 1.31.0`, `av 18.1.0`) | `pip install faster-whisper`; máy có GPU cần thêm thư viện CUDA 12 (xem README của faster-whisper: `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) |
 
 **Python:** dự án ghim **Python 3.11.x**. Máy nào đã có Python mới hơn thì cài thêm 3.11 **song song** (không gỡ bản cũ), gọi bằng `py -3.11`, và tạo `backend\.venv` đúng bằng bản 3.11 (`py -3.11 -m venv backend\.venv`). Kiểm tra bằng `py -3.11 --version` (README có bước này). Claude Code phải **hỏi chủ dự án trước khi cài** Python hay bất kỳ phần mềm cấp hệ thống nào.
+
+**Thư viện CUDA trên Windows (ghi 26/10/2026, máy mới):** `nvidia-cublas-cu12 12.9.2.10`, `nvidia-cudnn-cu12 9.27.0.42` trong `backend\.venv`. Các DLL (`cublas64_12.dll`, cuDNN…) nằm ở `site-packages
+vidia\*in`, không có trong PATH, nên lúc đầu CUDA báo `Library cublas64_12.dll is not found or cannot be loaded` và app rơi xuống `small` CPU. Cách nạp (b6, chủ dự án duyệt): ở đầu `whisper_worker.run()`, **trước khi import `faster_whisper`**, chỉ trên Windows, với mỗi thư mục `nvidia\*in` có thật thì gọi `os.add_dll_directory()` và thêm vào đầu `PATH` của **riêng tiến trình con** (có ghi log). Không có thư mục nvidia (máy cũ, CI Linux) thì không làm gì. Không sửa PATH hệ thống. `/health.gpu` giữ nguyên (chỉ đếm thiết bị CUDA).
 
 Model Whisper tải lần chạy đầu về `models/` (đã ignore); chọn model và thiết bị theo phần cứng: mục 5.2. Lỗi CUDA, không có GPU hoặc Whisper không dùng được → rơi về CPU, rồi về căn theo khoảng lặng.
 
@@ -57,7 +60,10 @@ hbt-studio/
 │  │  ├─ api/                # projects.py, assets.py, render.py, music.py, lint.py, publish.py
 │  │  ├─ pipeline/
 │  │  │  ├─ text.py          # = reference/pipeline/text.py
-│  │  │  ├─ align.py         # = reference/pipeline/align.py
+│  │  │  ├─ align.py         # reference/pipeline/align.py + `match_script` (khớp âm tiết Whisper với kịch bản)
+│  │  │  ├─ whisper.py       # chạy Whisper ở tiến trình con, bậc rơi, timeout, huỷ (5.2)
+│  │  │  ├─ whisper_worker.py # tiến trình con: nạp faster-whisper, nhận dạng, ghi JSON
+│  │  │  ├─ bench.py         # `cli bench-align`
 │  │  │  ├─ visual.py        # = reference/pipeline/visual.py
 │  │  │  ├─ audio.py         # chuẩn hoá giọng, chọn đoạn nhạc, ducking, whoosh
 │  │  │  ├─ captions.py      # chia cụm, vẽ trạng thái karaoke, file concat, xuất .srt
@@ -76,7 +82,7 @@ hbt-studio/
 └─ workspace/                # ignore toàn bộ: projects/<slug>/…
 ```
 
-`.gitignore` bắt buộc có: `workspace/`, `models/`, `library/music/**/*.mp3`, `*.mp4`, `*.wav`, `.env`, `node_modules/`, `.venv/`, `__pycache__/`.
+`.gitignore` bắt buộc có: `workspace/`, `models/`, `library/music/**` (kèm `!library/music/index.json`), `*.mp3`, `*.m4a`, `*.ogg`, `*.flac`, `*.aac`, `*.mp4`, `*.wav`, `.env`, `node_modules/`, `.venv/`, `__pycache__/`. Ngoại lệ: `brand/outro/*.mp4`, `library/outro/voice.wav`.
 
 ---
 
@@ -170,7 +176,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
 | `voice` (gốc project) | `"voice.mp3"` hoặc `{"file", "trim_end"}`: file giọng; `trim_end` = giây của file gốc để cắt đuôi (mục 4d.3) |
 | `scenes[].voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
 | `punch` | `true` = cảnh "cú lật": phóng giật + hiện thẻ nhanh + whoosh |
-| `caption_y` | `null` = tự động (1420; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
+| `caption_y` | `null` = tự động (1400; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
 | `music.start` | `null` = tự chọn đoạn hay; hoặc số giây |
 
 Validate bằng Pydantic. Đúng **1 đoạn lời cho mỗi cảnh**; số cảnh 3–12.
@@ -183,9 +189,9 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 
 | # | Bước | Chi tiết | Tiến độ |
 |---|---|---|---|
-| 1 | Kiểm tra | Validate project, đủ ảnh/giọng, chạy `lint` (mục 7). Lỗi mức `block` → dừng | 0–3 |
+| 1 | Kiểm tra | Validate project, đủ ảnh/giọng, chạy `lint` với danh sách từ hiện hành (mục 7). Có mức `block` → dừng, báo `Chặn xuất: Cảnh N: …` (CLI lấy danh sách như app: bản riêng ở `workspace/settings/` nếu có, không thì bản mặc định) | 0–3 |
 | 2 | Chuẩn hoá giọng | `prep_voice` (reference): highpass 70 Hz, trễ 0,2 s, đệm 1,6 s, loudnorm −14 LUFS, mono 44,1 kHz → `build/voice.wav` | 3–6 |
-| 3 | Căn chữ | Ghép token mọi cảnh (giữ chỉ số cảnh) → `align.align()` (mục 5). Lưu `build/timing.json` | 6–20 |
+| 3 | Căn chữ | Ghép token mọi cảnh (giữ chỉ số cảnh) → `render.run_alignment()` (Whisper qua `whisper.run_whisper` + `align.match_script`, rơi về `scene_align.align_scenes`; mục 5). Lưu `build/timing.json` | 6–20 |
 | 4 | Mốc chuyển cảnh | cut_k = (kết thúc chữ cuối cảnh k−1 + bắt đầu chữ đầu cảnh k)/2; offset xfade = cut − 0,2; thời lượng theo `durations()` (reference) | 20 |
 | 5 | Lớp hình | `visual.build_scene_layers`: ảnh fit 1080×1920 + nhãn cố định; lớp thẻ chữ PNG trong suốt | 20–25 |
 | 6 | Clip từng cảnh | `render_scene` (reference): zoompan trên ảnh phóng 2160×3840, cảnh lẻ 1.00→1.08, chẵn 1.08→1.00; `punch`: 1.18→1.00 trong 0,4 s rồi 1.00→1.05; thẻ hiện dần sau 0,3 s (punch: 0,15 s). Encode trung gian `crf 16 veryfast` | 25–70 |
@@ -194,7 +200,16 @@ Mỗi bước báo tiến độ (0–100) và ghi log. Bước nào có output t
 | 9 | Ghép cuối | `assemble` (reference): xfade `slideleft` 0,4 s + phủ phụ đề + tiếng; H.264 `crf 18 medium`, `-r {fps}`, yuv420p, AAC 192k, `+faststart` | 80–98 |
 | 10 | Kiểm tra đầu ra | ffprobe đúng fps, 1080×1920, độ dài; đo `ebur128` trong khoảng −15…−13 LUFS; sinh `publish.txt` | 98–100 |
 
-**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, zoompan trên ảnh 1080×1920, clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
+**Chế độ Xem nhanh (`preview=true`):** 540×960, 30 fps, **phóng ×2 (2160×3840, `lanczos`) trước zoompan** như reference 30 fps (chốt 26/10/2026 theo số đo rung: không phóng thì zoompan làm tròn vị trí cắt về pixel nguyên của ảnh 1080 và hình rung; rung x/y giảm từ 0,19–0,39 px xuống 0,05–0,09 px, dựng cả video muỗi 59 s → 66 s; áp cho cả Xem nhanh 10 s), clip cảnh `ultrafast crf 23`, ghép cuối `veryfast crf 30`, AAC 96 kbps. Dùng để duyệt trước khi xuất bản đẹp. Mục tiêu dưới ~10 MB cho video 50 giây; đo thực tế trên tập "muỗi": 3,7 MB, 36 s dựng (trước đó `ultrafast crf 23` + AAC 192k: 39,8 MB). Tham số bản đẹp không đổi.
+
+**Xem nhanh 10 s đầu** (chủ dự án chốt 23/10/2026): nút **Xem nhanh** mặc định chỉ dựng 10 giây đầu (`preview_seconds = 10`, vẫn 540×960, 30 fps); nút phụ **Xem nhanh cả video** giữ cách dựng cũ.
+- **Phần dùng chung với cả video:** giọng, căn chữ (cache `timing.json`), mốc chuyển cảnh, điểm nhạc (`music_start`) vẫn tính trên **cả video**; nên lần đầu vẫn tốn thời gian căn chữ (chấp nhận), thời gian dựng tuỳ máy.
+- **Cảnh nào được dựng:** những cảnh bắt đầu trước giây T. Cảnh cuối của đoạn chỉ giữ các khung trước giây T nhưng `zoompan` vẫn tính theo độ dài đầy đủ của cảnh, nên 10 s đầu giống hệt khung hình của bản xem nhanh cả video. Cảnh sau T không dựng.
+- **Tiếng:** trộn nhạc/giọng/whoosh trên cả video như thường rồi giữ T giây đầu, **fade ra 0,3 s** ở cuối (không cắt đột ngột).
+- **Không có:** outro, `captions.srt`, đo độ lớn (LUFS; `lufs = null`). Vẫn kiểm fps, kích thước và độ dài ≈ T (±0,25 s). Phụ đề karaoke vẫn hiện trên hình trong 0–T.
+- **Video ngắn hơn hoặc bằng T:** dựng như xem nhanh cả video (có outro nếu bật), `preview_seconds` trong `meta.json` là `null`.
+- **`meta.json`:** `preview_seconds` (10 hoặc `null`); `music_start`, `music_start_source`, `music_sha256` vẫn là của cả video; `duration` là độ dài thật của file.
+- **CLI:** `python -m cli render <dir> --preview --seconds 10`.
 
 **FPS:** mặc định **50** (cho phép 30, 50, 60). Không cho chọn số lạ như 45 (nền tảng dễ chuyển đổi lại gây giật). Xem mục 4b.
 
@@ -217,6 +232,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 ### 4c. Outro (tự động thêm cuối mỗi video)
 
 - Clip dựng sẵn: `brand/outro/outro_4s_50fps.mp4` (4,0 giây, 1080×1920, 50fps). Mã tạo: `reference/pipeline/outro_reference.py` (Pillow, nền đỏ chấm bi, logo bật nảy, dòng "Theo dõi để biết tuốt mọi chuyện!", nút THEO DÕI, 2 nút chữ TikTok và YouTube, tên kênh). **Không dùng logo TikTok/YouTube.**
+- **Clip theo fps xuất (chủ dự án chốt 26/10/2026):** xuất 60 fps dùng `brand/outro/outro_4s_60fps.mp4`; xuất 50 và 30 fps dùng clip 50 như cũ (`render.outro_clip_for`; thiếu clip 60 thì dùng clip 50). Lý do: đổi 50→60 bằng filter `fps=` lặp khung (cứ 6 khung có 1 khung trùng hệt, khoảng 10 khung/giây ở outro). Clip 60 dựng bằng đúng mã `outro_reference.py` chỉ đổi `FPS=60` (chạy bản sao tạm có đổi đường dẫn font và logo; `reference/` không sửa): 4,0 s (240 khung), 1080×1920, `libx264 crf 14`, `yuv420p`, mốc hình 1,15 / 2,15 / 2,55 / 2,85 s như clip 50. Kiểm: không còn mẫu khung lặp đều; so cùng thời điểm với clip 50 dựng lại từ cùng mã thì PSNR 46 dB (cùng nội dung). Chữ ở mép nét của clip 60 khác clip 50 gốc một chút (PSNR khoảng 26–30 dB so với clip 50 đã đăng) vì bản dựng lại dùng font và Pillow của repo.
 - Cài đặt: `settings.outro` (mặc định `true`) chỉ là bật/tắt; clip outro cố định **4,0 giây** (không có cài đặt thời lượng).
 - **Thời điểm hình** trong clip: nút THEO DÕI 1,15 s, nút TikTok 2,15 s, nút YouTube 2,55 s, tên kênh 2,85 s (đã căn theo lời đọc).
 - Ghép vào video: nối sau cảnh cuối bằng hoà trộn hình (`fade`) **0,5 s** kèm `acrossfade` **0,5 s** cho tiếng; không áp phụ đề karaoke lên outro. Nhạc nền tiếp tục nhỏ dần trong 2,5 giây cuối của **phần có lời**.
@@ -237,6 +253,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
 - **Giới hạn ký tự:** lời đọc mỗi video **≤ 750 ký tự** (tính cả dấu cách; bỏ ký hiệu `|` và `{}`), vì gói Vbee giới hạn 3.000 ký tự mỗi ngày. Hiển thị bộ đếm cạnh ô lời đọc, cảnh báo vàng khi > 750 (mức `warn`, vẫn cho xuất).
 - **Cắt quảng cáo cuối file Vbee:** file giọng từ Vbee có thể kèm câu giới thiệu hoặc quảng cáo ở cuối. Sau khi căn chữ (bước 3), mọi âm thanh nằm **sau chữ cuối của kịch bản** đều bị cắt:
   1. Với Whisper (M4): `voice_end = end(token cuối) + 0,35 s`, cắt đuôi, fade ra 80 ms.
+     - **Chốt M4 Đợt 1a (24/10/2026):** cắt sau bước 3, trên `build/voice.wav`. Sau `voice_end` đệm sao cho tổng **1,6 s sau chữ cuối** (nghĩa là đệm `1,6 − 0,35 = 1,25 s`), rồi chuẩn hoá lại −14 LUFS. Chỉ cắt khi token cuối của kịch bản **khớp thật** với âm tiết Whisper nghe được; token cuối chỉ được nội suy thì **không cắt**, chỉ cảnh báo `Có thể có đoạn thừa ở cuối file giọng…`. Cắt > 8 s: job `failed` + `needs_confirmation`, gửi lại với `allow_long_trim` (cơ chế M2, mục 9), không thêm API.
   2. Với chế độ khoảng lặng (chưa có Whisper), căn 2 cấp: cấp 1 ghép cảnh ↔ nhóm đoạn tiếng, cấp 2 ghép cụm câu ↔ đoạn tiếng trong từng cảnh (mục 5.2). Chỉ **tự động** bỏ đoạn cuối khi đủ **cả ba** điều kiện:
      - điều kiện bảo vệ: tối đa `số đoạn tiếng − số cụm câu` đoạn cuối (và không quá 3);
      - bỏ đoạn đó làm chi phí ghép **giảm từ 1,0 trở lên**;
@@ -245,6 +262,7 @@ Nút xuất cuối: **50fps (mặc định)**, **60fps**, **30fps**.
      Ngược lại giữ nguyên và ghi cảnh báo `Có thể có đoạn thừa ở cuối file giọng (x,xx giây), chưa cắt` (nếu bỏ đoạn đó vẫn làm chi phí giảm). Kịch bản ngắn (khoảng 3 cảnh) thường không đạt ngưỡng 1,0 nên chỉ cảnh báo.
   3. **Tự cắt tay bằng `voice.trim_end`:** trong `project.json`, `voice` có thể là `"voice.mp3"` hoặc `{"file": "voice.mp3", "trim_end": 41.5}`. `trim_end` là giây trên **file giọng gốc** (nghe file gốc để chọn điểm cắt). Có `trim_end` thì cắt **trước khi căn chữ** (để đoạn thừa không làm lệch căn), không chạy cắt tự động và không cần xác nhận, fade ra 80 ms, đệm lại 1,6 s. `trim_end` nằm sau hết file giọng thì báo lỗi.
   4. Ghi log `Đã cắt N đoạn thừa ở cuối file giọng (x,xx giây)` và hiện trong UI kèm nút **nghe phần đã cắt** để chủ dự án xác nhận. Cắt quá 8 giây thì dừng và hỏi.
+     - **Chốt M4 Đợt 1a (24/10/2026):** phần bị cắt lưu ở `renders/<job_id>/trimmed_tail.wav` (không ở `build/`, vì nút Dọn file tạm xoá `build/`), cho cả đường Whisper, khoảng lặng và `voice.trim_end`. `meta.json` có `trimmed_tail` (tên file hoặc `null`) và `trimmed_tail_seconds`; `GET /renders` và `output` của job trả `trimmed_tail` (URL hoặc `null`). Job `needs_confirmation` cũng lưu file này và trả URL ở trường `cut_audio` để nghe trong hộp xác nhận. Phát qua `GET /files` sẵn có, không thêm endpoint.
   5. Âm lượng và hạ nhạc (ducking) chỉ tính trên phần giọng đã cắt.
 
 ### 4e. Ảnh bìa (thumbnail)
@@ -263,7 +281,14 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
   - Viền tối bằng 11% cỡ chữ, cộng bóng đổ lệch (10, 12).
 - **Vùng an toàn:** khối tiêu đề nằm trong y=600..1320 (vừa khung cắt 3:2 của YouTube Shorts). Nhãn series (cao 84 px, y=330) và logo HBT (rộng 300 px, y=1385) nằm trong y=240..1680 (vừa khung cắt 3:4 của lưới hồ sơ TikTok).
 - **Quy tắc chung:** chữ luôn vẽ bằng Pillow. Áp dụng lint từ nhạy cảm (mục 7) cho các dòng bìa.
-- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` thêm khối `[Thumbnail]` gồm 3 dòng (mục 8): `Dòng chữ bìa: <các dòng cách nhau bằng dấu />`, `TikTok: cover_9x16.jpg`, `YouTube Shorts: youtube_3x2.jpg`.
+- **Quyết định M4 Đợt 3** (chủ dự án chốt 23/10/2026):
+  - **Font:** `backend/hbt/fonts/BricolageGrotesque-Variable.ttf` (bản variable từ kho `google/fonts`, trục `opsz` 12–96, `wght` 200–800, `wdth` 75–100), giấy phép `OFL-BricolageGrotesque.txt`; giấy phép Be Vietnam Pro đổi tên `OFL-BeVietnamPro.txt`. Pillow đặt `set_variation_by_axes([96, 800, 78])` (thứ tự trục của file là opsz, wght, wdth). Thiếu file thì dự phòng Be Vietnam Pro ExtraBold. Cố định, không chỉnh trong Cài đặt.
+  - **Chữ:** mỗi dòng chuẩn hoá NFC rồi `.upper()` khi vẽ ("đ"→"Đ", "ư"→"Ư", "ỷ"→"Ỷ"); `project.json` giữ nguyên chữ người dùng nhập. Nhãn series lấy `thumbnail.series`, trống thì `project.series`, trống cả hai thì bỏ nhãn.
+  - **Khi nào vẽ:** cùng lúc với video ở bản đẹp và Xem nhanh cả video; **bỏ qua** ở Xem nhanh 10 s đầu. Project không có khối `thumbnail` thì không vẽ (và `publish.txt` không có khối `[Thumbnail]`).
+  - **Lỗi vẽ bìa** (thiếu logo, ảnh nền hỏng…) chỉ là cảnh báo: log `Không vẽ được ảnh bìa: …`, `result.warnings`, video vẫn xuất; `meta.json` để `cover_9x16` và `youtube_3x2` là `null`; tab Xuất video hiện cảnh báo ở khối "Cảnh báo khi dựng".
+  - **`meta.json`** thêm `cover_9x16` và `youtube_3x2` (tên file hoặc `null`); `GET /renders` và `output` của job trả `cover` và `youtube_cover` (URL hoặc `null`).
+  - JPG chất lượng 93 (`subsampling=0`); nếu quá 5 MB thì hạ dần chất lượng (tối thiểu 70).
+- **UI tab Xuất video:** ô nhập 2–3 dòng, chọn cảnh nền, xem trước hai khung cắt 3:4 và 3:2, nút tải hai file. `publish.txt` có khối `[Thumbnail]` gồm 3 dòng (mục 8, đã làm từ M1; M4 chỉ thêm file ảnh thật): `Dòng chữ bìa: <các dòng cách nhau bằng dấu />`, `TikTok: cover_9x16.jpg`, `YouTube Shorts: youtube_3x2.jpg`.
 
 **Vùng an toàn TikTok:** nội dung quan trọng (thẻ, phụ đề) trong khoảng y = 100…1500, tránh mép phải 120 px.
 
@@ -275,8 +300,8 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 - Tách theo khoảng trắng; `|` đánh dấu cụm mới; token kết thúc bằng `, . ! ? : ; …` cũng kết thúc cụm.
 - Mỗi token có `disp` (hiển thị) và `syl` (danh sách âm tiết đã bỏ dấu, dùng để so khớp).
 
-### 5.2 Căn thời gian (`align.align`)
-1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, `initial_prompt` = lời đọc (220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
+### 5.2 Căn thời gian (`render.run_alignment`)
+1. **Whisper** (mặc định): faster-whisper, `language="vi"`, `word_timestamps=True`, **không dùng `initial_prompt`** (điểm lệch tham số reference đã duyệt 24/10/2026, số đo bên dưới; reference dùng lời đọc 220 ký tự đầu). Chuẩn hoá âm tiết nghe được (`text.norm`), so khớp với âm tiết kịch bản bằng `difflib.SequenceMatcher(autojunk=False)`; âm tiết không khớp thì nội suy giữa 2 điểm neo. Thời gian token = âm tiết đầu → âm tiết cuối.
    - **Chọn cấu hình theo phần cứng** (chủ dự án chốt 22/10/2026). `.env`: `WHISPER_DEVICE=auto`, `WHISPER_MODEL=auto`.
 
      | Phần cứng | Thiết bị | Kiểu tính | Model |
@@ -286,7 +311,33 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
      Trong **Cài đặt** cho đổi sang `medium` hoặc `large-v3` trên CPU, kèm cảnh báo "sẽ chậm". Không giả định có GPU: `auto` kiểm tra CUDA lúc chạy (`/health.gpu`).
    - **Cache:** kết quả căn chữ lưu ở `build/timing.json`, khoá theo **hash file giọng** và **hash kịch bản** (kèm phương pháp, model, mã nguồn); chỉ căn lại khi một trong hai đổi.
+   - **Điểm lệch đã duyệt (24/10/2026):** khoá còn gồm thêm `whisper_timeout_seconds`, "đã cài faster-whisper chưa" và "có CUDA không" (`WhisperConfig.key_parts`). Nhờ vậy tăng giới hạn thời gian, cài Whisper hoặc đổi máy thì căn lại, không dùng nhầm kết quả khoảng lặng cũ.
    - **Dự phòng khi lỗi hoặc chậm:** Whisper lỗi (không cài, lỗi CUDA, thiếu RAM) hoặc quá chậm (vượt **giới hạn thời gian** đặt trong Cài đặt) thì tự rơi về căn theo khoảng lặng (mục dưới) và ghi log lý do; kết quả ghi rõ phương pháp đã dùng.
+   - **Chốt M4 Đợt 1a (chủ dự án duyệt 24/10/2026):**
+     - **Bậc rơi theo mục 0:** CUDA lỗi (lúc nạp hoặc lúc chạy) hoặc không có GPU → CPU `small` `int8` → khoảng lặng. Mỗi bậc ghi log lý do.
+     - **Tiến trình con:** Whisper chạy trong tiến trình con (`python -m hbt.pipeline.whisper_worker`), không chạy trong tiến trình app. Hết giờ hoặc huỷ job thì kill tiến trình con; model được giải phóng khi tiến trình thoát (bước 3 bên dưới).
+     - **Giới hạn thời gian:** một giá trị cố định `whisper_timeout_seconds` (Cài đặt, mặc định **900 s**), tính cho cả bước Whisper (mọi bậc cộng lại). Hết giờ thì rơi thẳng về khoảng lặng.
+     - **Ưu tiên cấu hình:** `whisper_model` trong `workspace/settings/app.json` (Cài đặt) ghi đè `.env`; giá trị `auto` thì xét `WHISPER_MODEL` trong `.env`, vẫn `auto` thì chọn theo phần cứng (bảng trên).
+     - **Model:** đã có trong `models/` thì nạp thẳng từ đó (`local_files_only`), không tải lại; chưa có thì tải về `models/` (`download_root`). `faster_whisper` chỉ được import khi dùng.
+     - **Dữ liệu vào:** Whisper chạy trên `build/voice.wav` (kết quả bước 2).
+     - **Tỉ lệ khớp** (âm tiết kịch bản khớp âm tiết nghe được) chỉ ghi vào log và `meta.json`, không có ngưỡng chặn.
+     - **Phương pháp đã dùng** (kèm model, thiết bị, lý do nếu rơi bậc) ghi ở `meta.json`, log và khối kết quả tab Xuất video.
+     - **`bench-align`** chỉ có 3 chỉ số: thời gian, tỉ lệ khớp, độ lệch mốc cắt cảnh so với căn khoảng lặng. Không so với bản đã đăng; golden test là xem video (mục 10b).
+     - **`bench-align --prompt off|on|both`** (mặc định `off`, khớp đường dựng): `on` và `both` chỉ để so sánh (ở 1b); báo thêm từng mốc cắt cảnh và ghi rõ model vượt giới hạn thời gian.
+     - **Tiến độ:** trong lúc Whisper chạy, thanh tiến độ đi từ 6% đến 20% theo phần giọng đã nghe (khung bước 3 ở mục 4); tiến trình con ghi tỉ lệ sau mỗi đoạn nhận dạng, tiến trình cha đọc.
+     - Chưa qua golden (xem Xem nhanh, mục 10b) thì chỉ báo số đo, **không** tự đổi mặc định.
+   - **Điểm lệch tham số reference: bỏ `initial_prompt` cho mọi model (chủ dự án duyệt 24/10/2026).** Đo bằng `bench-align --models small,medium,large-v3 --prompt both` trên "muỗi" (máy cũ, CPU `int8`, máy rảnh, 24/10/2026). Có prompt, cả ba model bỏ sót nửa đầu kịch bản (tỉ lệ khớp 61–63%); bỏ prompt thì khớp 89–91%. Lệch mốc cắt cảnh so với căn khoảng lặng (khoảng lặng từng khớp bản đã đăng trong 4 ms ở 7 mốc):
+
+     | Model | Prompt | Thời gian | Khớp | Lệch TB | Lệch max | Từng mốc (ms) |
+     |---|---|---|---|---|---|---|
+     | small | có | 22,0 s | 62,9% | 3684 | 12374 | 5329 · 7759 · 12374 · 125 · 74 · 62 · 65 |
+     | small | không | 18,5 s | 89,4% | 129 | 354 | 49 · 1 · 354 · 85 · 324 · 42 · 45 |
+     | medium | có | 107,3 s | 62,9% | 1752 | 7051 | 7051 · 4621 · 6 · 105 · 206 · 168 · 105 |
+     | medium | không | 57,8 s | 90,1% | 137 | 258 | 11 · 241 · 126 · 105 · 156 · 258 · 65 |
+     | large-v3 | có | 130,3 s | 60,9% | 12109 | 24651 | 24651 · 22221 · 17606 · 13725 · 4796 · 1618 · 145 |
+     | large-v3 | không | 111,4 s | 91,4% | 330 | 435 | 389 · 89 · 354 · 435 · 384 · 322 · 335 |
+
+     Không model nào vượt 900 s. Ngưỡng số 0,05 s đã bỏ (26/10/2026); đạt hay không do chủ dự án xem video, mục 10b (chỉ báo số, mục dưới). **Mặc định `auto` giữ như bảng trên** (CPU → `small` `int8`; CUDA → `large-v3` `int8_float16`); mặc định cuối của mỗi máy chốt sau golden test. `large-v3` trên CPU lệch đều khoảng 0,3–0,4 s ở gần như mọi mốc, chưa rõ nguyên nhân: kiểm ở 1b.
    - **Đo thật để chốt mặc định:** lệnh `python -m cli bench-align <dự án> [--models small,medium,large-v3]` (làm ở M4) báo thời gian chạy, tỉ lệ âm tiết khớp với kịch bản và độ lệch mốc cắt cảnh so với căn khoảng lặng. Mặc định cuối cùng chốt theo số đo thật trên từng máy.
 2. **Dự phòng — khoảng lặng** (`pipeline/scene_align.py`; dùng khi không cài Whisper hoặc `aligner="silence"`), căn **2 cấp**:
    - Cấp 1: ghép các cảnh (mỗi cảnh là một đoạn lời) với các nhóm đoạn tiếng liên tiếp; chi phí theo tổng thời lượng so với trọng số của cảnh.
@@ -299,7 +350,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 
 ### 5.3 Phụ đề karaoke (`captions.py`)
 - **Cụm:** theo `|` và dấu câu; cụm > 7 token thì tự tách đôi. Tối đa 2 dòng, rộng 900 px.
-- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc**: nền vàng `#FFD43B` bo góc 18 px, chữ tối. Dòng cao 96 px, căn giữa tại `caption_y`.
+- **Kiểu:** Be Vietnam Pro ExtraBold 70 px, chữ trắng viền tối 7 px + bóng; **chữ đang đọc** đổi màu vàng `#FFD43B` (cùng viền tối 7 px và bóng), đọc xong trở lại trắng; **không có nền viên thuốc** (chủ dự án chốt 26/10/2026, thay kiểu cũ: nền vàng bo 18 px, chữ tối). Dòng cao 96 px, căn giữa tại `caption_y` (tâm khối chữ; mặc định **1400** từ 26/10/2026 để đáy khối 2 dòng, kể cả dấu và chân chữ, ≤ 1500 trong vùng an toàn TikTok y=100…1500; trước đó 1420 cho đáy tới 1519).
 - **Thời gian hiện cụm:** từ (đầu chữ đầu − 0,05 s) đến đầu cụm sau nếu khoảng cách < 0,6 s, ngược lại đến (cuối chữ cuối + 0,25 s). Chữ k sáng từ đầu chữ k đến đầu chữ k+1.
 - **Hiển thị:** bỏ `, . : ;` cuối token; giữ `? ! …`.
 - **Kỹ thuật:** mỗi trạng thái 1 PNG 1080×1920 trong suốt; file `ffconcat` có `duration`; phủ bằng `overlay` (xem `assemble`).
@@ -312,9 +363,11 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
 ### 6.1 Tự chọn đoạn nhạc (`music.start = null`)
 Tính độ lớn theo cửa sổ 1 s; bỏ 2 s đầu; chọn thời điểm đầu tiên có độ lớn ≥ (trung vị − 3 dB) để bỏ phần dạo đầu quá nhỏ; nếu đoạn còn lại ngắn hơn video thì lùi điểm bắt đầu. Ghi điểm đã chọn vào log để người dùng chỉnh tay.
 
+**Quyết định P3 (chủ dự án chốt 23/10/2026):** mỗi lần dựng (xem nhanh và bản đẹp) ghi vào `renders/<job>/meta.json` hai khoá `music_start` (giây thật đã dùng, `null` nếu không có nhạc) và `music_start_source` (`"manual"` khi `music.start` đặt tay, `"auto"` khi app tự chọn). `GET /projects/{slug}/renders` trả cả hai khoá; không thêm route, không thêm trường vào `project.json`. Khi `music.start + độ dài phần có lời` vượt độ dài nhạc, log ghi CẢNH BÁO (không chặn). `meta.json` còn có `music_sha256` (SHA-256 file nhạc đã dùng, `null` khi không nhạc); `GET /renders` thêm `music_matches_current` (hash file nhạc hiện tại == `music_sha256`). Tab Âm thanh chỉ hiện "app chọn giây X" và nút **Dùng giá trị này** khi cờ này là `true`; `false` thì hiện ghi chú nhạc đã đổi. Thư viện nhạc không có điểm bắt đầu riêng.
+
 ### 6.2 Thư viện `library/music/index.json`
 ```json
-[{ "file": "funny/the-wacky-sprint.mp3", "title": "The Wacky Sprint", "artist": "nkbloom",
+[{ "id": "the-wacky-sprint", "file": "funny/the-wacky-sprint.mp3", "title": "The Wacky Sprint", "artist": "nkbloom",
    "source": "Pixabay", "url": "https://pixabay.com/…", "license": "Pixabay Content License",
    "moods": ["vui", "tinh nghịch"], "bpm": null }]
 ```
@@ -361,6 +414,15 @@ Tất cả tổng hợp bằng FFmpeg, không dùng file ngoài. Xuất stereo 4
 - Người dùng chỉnh danh sách ngay trong trang Cài đặt.
 - Thêm cảnh báo khi lời đọc có chữ số mà không ghi cách đọc (`100` thay vì `100{một trăm}`): mức `info`.
 
+**Quyết định M4 Đợt 2 (chủ dự án chốt 23/10/2026):**
+- **Nguồn danh sách:** `hbt/data/sensitive_words.json` (mặc định, nằm trên Git) và bản riêng `workspace/settings/sensitive_words.json` (ưu tiên khi có). Không có file `.txt` riêng trong `library/`.
+- **Mức xử lý:** `block` chặn xuất (nút Xem nhanh và Xuất bị khoá); `warn` và `info` chỉ nhắc, không chặn và không có nút "Vẫn dựng".
+- **So khớp** (`pipeline/textmatch.py`): chuẩn hoá NFC, không phân biệt hoa thường, theo ranh giới từ (ký tự chữ, số, `_` ở hai bên thì không khớp), cụm nhiều từ khớp với một hay nhiều khoảng trắng. **Không bỏ dấu**: "bia" không khớp "bìa". Riêng dấu thanh ở cụm `oa`, `oe`, `uy` có hai cách đặt, nên cả văn bản lẫn từ khoá được đưa về cách đặt ở nguyên âm thứ hai trước khi so: "hoá"="hóa", "tuý"="túy", "thuỷ"="thủy", "khoẻ"="khỏe".
+- **Vùng quét** (`field` trong kết quả): `card.lines` (nối các dòng thẻ), `labels`, `voice`, `publish.hook`, `thumbnail.lines` (4e). Mỗi từ báo một lần cho mỗi vùng và cảnh. `publish.hook` và `thumbnail.lines` có `scene` là `null`. Không quét `title` và `hashtags`.
+- **Lời đọc:** quét **cả chữ hiển thị lẫn chữ đọc trong `{…}`**; `|`, `{`, `}` được đổi thành dấu cách trước khi so (để "nhậu|rượu" không dính thành một từ).
+- **Số chưa ghi cách đọc** (`category = "number_reading"`, mức `info`, `field = "voice"`): báo **mọi** số trần không có `{cách đọc}` đi kèm, kể cả số một chữ số và năm; số có phân cách (`1.000`, `3,5`) tính là một số; **mỗi cảnh một dòng** liệt kê các số theo thứ tự xuất hiện, không lặp (ví dụ cảnh 3: `Số chưa ghi cách đọc: 1, 100.`; `word` là chuỗi `1, 100`).
+- `POST /projects/{slug}/lint` dùng danh sách hiện hành (bản riêng nếu có). Test: `test_textmatch.py`, `test_lint.py`, `test_api.py`.
+
 ---
 
 Thêm vào lint: tổng ký tự lời đọc > 750 → `warn` (mục 4d); lời đọc có chữ số chưa ghi cách đọc → `info`.
@@ -381,7 +443,7 @@ Dòng chữ bìa: {thumbnail.lines cách nhau bằng dấu /}
 TikTok: cover_9x16.jpg
 YouTube Shorts: youtube_3x2.jpg
 ```
-Hiện trong UI với nút **Sao chép** từng khối.
+Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` chỉ có khi project có `thumbnail`; hai tên file trỏ tới `cover_9x16.jpg` và `youtube_3x2.jpg` trong cùng thư mục `renders/<job>/` (có thể vắng nếu vẽ bìa lỗi, xem 4e).
 
 ---
 
@@ -397,11 +459,15 @@ Hiện trong UI với nút **Sao chép** từng khối.
 | POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
 | GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
+| POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
+| POST | `/projects/{slug}/build/clean` | dọn `build/` → `{before_bytes, after_bytes, freed_bytes, kept, failed}` |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
 | GET | `/jobs/{id}/events` | SSE: `event: progress` `data: {progress, step, message}` |
 | POST | `/jobs/{id}/cancel` | huỷ (kill tiến trình ffmpeg con) |
-| GET | `/music` · POST `/music` | thư viện nhạc |
+| GET | `/music` · POST `/music` | thư viện nhạc (mỗi bài có `id`) |
+| GET | `/music/{id}/audio` | nghe thử bài trong thư viện (Range) |
+| POST | `/projects/{slug}/music/from-library` | `{id}` → chép bài vào project, đặt ghi công |
 | GET | `/settings/sensitive-words` · PUT | danh sách từ nhạy cảm |
 | GET | `/files/{path}` | phục vụ file trong workspace (chặn `..`) |
 
@@ -423,17 +489,19 @@ Hiện trong UI với nút **Sao chép** từng khối.
 - **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
 - **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
 - **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
-- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. M2 mới có quy tắc độ dài lời đọc; kiểm tra từ nhạy cảm làm ở M4. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
-- **`POST /projects/{slug}/render`** nhận `{preview, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
+- **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. Từ M4: độ dài lời đọc, từ nhạy cảm (mục 7) và số chưa ghi cách đọc. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
+- **`POST /projects/{slug}/render`** nhận `{preview, preview_seconds, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. `preview_seconds` (số giây, 0 < giá trị ≤ 60, mặc định `null` = cả video; giao diện gửi 10) chỉ hợp lệ khi `preview = true`, sai thì 422 và không tạo job; job và `GET /renders` trả `preview_seconds`, `output.lufs` và `output.srt` có thể là `null` ở bản 10 s (mục 4). Trước khi tạo job, lint chạy với danh sách từ hiện hành: có từ mức `block` → **422** `Có từ bị chặn, sửa rồi dựng lại: Cảnh N: …` (liệt kê các từ), không tạo job (cùng kiểu với `Project chưa đủ để dựng`, kiểm sau lỗi thiếu dữ liệu và trước kiểm FFmpeg). Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
 - **Job:** một luồng dựng, job nằm trong bộ nhớ (giữ 200 job; mất khi khởi động lại server, file đã xuất vẫn còn). `GET /jobs/{id}` → `{id, project, status, progress, step, log_tail, output, error, needs_confirmation, …}`; `output` có URL `/api/files/...`. **SSE** `GET /jobs/{id}/events`: `event: progress` (`{progress, step, message}`) rồi `event: end` (`{status, error, output}`); người nối sau nhận lại từ đầu. **Huỷ**: job xếp hàng huỷ ngay và không bao giờ chạy; job đang chạy bị kill ffmpeg, đợi tối đa 5 s cho luồng dừng, không để lại video dở. Đuôi giọng cần cắt > 8 s: job `failed` với `needs_confirmation = true` (gửi lại với `allow_long_trim`).
-- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu `library/music/<slug-tiêu-đề>.<ext>` và thêm vào `index.json`.
+- **`POST /music`** (multipart `file`, `title`, `artist`, `source`, `license` bắt buộc; `url`, `moods` cách nhau dấu phẩy, `bpm` 30–300) lưu phẳng `library/music/<slug-tiêu-đề>.<ext>`, tạo `id` (slug từ tiêu đề, bỏ dấu tiếng Việt kể cả `đ`, trùng thì `-2`, tạo một lần, không đổi) và thêm vào `index.json`. `file` trong index là đường dẫn tương đối trong `library/music/` (cho thư mục con, dùng `/`; từ chối tuyệt đối, ổ đĩa, `..`, `\`, đuôi ngoài các đuôi âm thanh của mục 9). Bài thiếu `id` trong `index.json` được gán id từ tiêu đề theo thứ tự trong file rồi ghi lại một lần. Thư mục con chỉ dành cho file đặt tay rồi khai vào `index.json`.
 - **`GET /files/{path}`** chỉ phục vụ trong workspace, hỗ trợ Range (206) cho video; chặn `..`, đường dẫn tuyệt đối, ổ đĩa và mọi thư mục ẩn (bắt đầu bằng dấu chấm).
 - **Slug project** (chủ dự án chốt 21/10/2026): chỉ `[a-z0-9-]` (không bắt đầu/kết thúc/đôi dấu gạch), tối đa 60 ký tự, và không trùng tên thiết bị dành riêng của Windows (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). Mọi nơi dùng slug đều kiểm tra và trả **422** `Slug không hợp lệ: …` (đọc, sửa, xoá, nhân bản, tải file, xem trước, lint, dựng, và `/files/projects/<slug>/…`; slug trong thân `PUT` cũng vậy). Đường dẫn `/files` có `..`, đường dẫn tuyệt đối, ổ đĩa hoặc thư mục ẩn cũng 422; đường dẫn đúng dạng mà không có file thì 404. Tiêu đề trùng tên thiết bị Windows ("Con", "NUL"…) được thêm hậu tố `-video`; hậu tố chống trùng (`-2`, `-3`…) không làm slug vượt 60 ký tự.
 - **Thiếu FFmpeg** (chủ dự án chốt 21/10/2026): server không sập. `/health` báo `ffmpeg: false`, `missing: ["ffmpeg"]`. `POST /render` trả **503** kèm lời nhắn cài (`winget install Gyan.FFmpeg`, mở lại terminal, xem README.md) và **không tạo job**; cũng trả 503 nếu FFmpeg thiếu encoder/filter bắt buộc hoặc thiếu ffprobe. Tải giọng/nhạc và `POST /music` trả 503 (cần ffprobe để kiểm tra file). Project chưa đủ vẫn nhận 422 trước 503. Những việc không cần FFmpeg (CRUD, ảnh, xem trước, lint, `/files`, từ nhạy cảm) vẫn chạy.
 - Chưa làm (ngoài đặc tả M2): endpoint riêng cho `publish.txt` (đã có qua `/files`).
 
 **Bổ sung cho giao diện M3** (quyết định khi làm M3, chờ chủ dự án xác nhận khi duyệt):
-- `GET /music/{file}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `file` là tên file trong `GET /music`); `POST /projects/{slug}/music/from-library` `{file}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- `GET /music/{id}/audio` phát bài trong thư viện (nghe thử, hỗ trợ Range; `id` là `id` trong `GET /music`; sai định dạng → 422, không có → 404; M4 đổi từ tên file sang id, route cũ đã bỏ); `POST /projects/{slug}/music/from-library` `{id}` chép bài vào project và đặt ghi công `"tên bài – nghệ sĩ (nguồn)"`.
+- **`POST /projects/{slug}/thumbnail/preview.jpg`** (chủ dự án chốt 23/10/2026): dùng đúng bộ vẽ của video (`pipeline/thumbnail.py`), JPEG 1080×1920; giao diện tự cắt khung 3:4 (y=240..1680) và 3:2 (y=600..1320). 404 nếu không có project; 422 nếu chưa có khối `thumbnail` (cả bản nháp lẫn đã lưu), cảnh nền vượt số cảnh hoặc chưa có ảnh, hoặc không vẽ được (thiếu logo…); `lines` phải 2–3 dòng (sai thì 422).
+- **`POST /projects/{slug}/build/clean`** (chủ dự án chốt 23/10/2026): xoá mọi thứ trong `build/` **trừ `timing.json` và `timing.json.key`** (căn chữ là bước đắt nhất); không động `renders/`, ảnh, giọng, nhạc, `project.json`. Trả dung lượng trước/sau/giải phóng, danh sách file giữ lại và số mục không xoá được (`failed`). 404 nếu không có project; **409** khi project đang được dựng (không xoá gì). Không có lệnh CLI tương ứng.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
 - `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
@@ -472,8 +540,8 @@ Hiện trong UI với nút **Sao chép** từng khối.
 |---|---|
 | **Dự án** (`/`) | Lưới thẻ project (ảnh cảnh 1, tiêu đề, ngày, trạng thái xuất). Nút **Tạo video mới**, **Nhân bản**. Thanh trạng thái môi trường từ `/health` (FFmpeg ✓, Whisper ✓, GPU ✓) |
 | **Soạn video** (`/p/:slug`) | Cột trái: danh sách cảnh, kéo để đổi thứ tự. Giữa: trình sửa cảnh đang chọn — ô thả ảnh, các dòng thẻ chữ (chữ, cỡ, màu), vị trí thẻ, nhãn cố định, lời đọc (có đếm số chữ và gợi ý cú pháp `|`, `{}`), công tắc **Cú lật**. Phải: **ảnh xem trước** cảnh (gọi `preview.png`, cập nhật sau 600 ms ngừng gõ) |
-| **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn |
-| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất |
+| **Âm thanh** (tab) | Tải giọng đọc (có trình phát), chọn nhạc từ thư viện hoặc tải mới, ô `music.start`, nút nghe thử 10 s đoạn nhạc được chọn (P3, mục 6.1: nếu `music.start` trống và lần dựng gần nhất có `music_start_source = "auto"` thì hiện "Lần dựng gần nhất app chọn giây X", nghe thử phát từ X và có nút **Dùng giá trị này** điền X vào `music.start`; chưa có lần dựng nào thì phát từ giây 0 kèm ghi chú bấm Xem nhanh) |
+| **Xuất video** (tab) | Kết quả lint; nút **Xem nhanh** (dựng 10 giây đầu), nút phụ **Xem nhanh cả video** và **Xuất bản đẹp 50fps**, công tắc **Thêm outro**; thanh tiến độ theo bước (SSE); trình phát video; nút tải `video.mp4`, `captions.srt`; khối `publish.txt` có nút sao chép; lịch sử các lần xuất (bản 10 s ghi "Xem nhanh 10 giây đầu"); khối kết quả hiện độ lớn "—" khi không đo; **Ảnh bìa** (nhập 2–3 dòng, chọn cảnh nền, chữ series, màu dòng cuối, xem trước hai khung 3:4 và 3:2 sau 600 ms ngừng gõ, nút tải `cover_9x16.jpg` và `youtube_3x2.jpg` từ lần xuất gần nhất có bìa, nút Bỏ ảnh bìa); nút **Dọn file tạm** (hỏi xác nhận, báo dung lượng đã giải phóng, khoá khi đang dựng; mục 9) |
 | **Cài đặt** | Danh sách từ nhạy cảm, model Whisper, fps mặc định, màu chủ đề mặc định |
 
 Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
@@ -507,7 +575,8 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
     - Đoạn thừa trên 8 s thì dừng và hỏi.
     - Lint cảnh báo khi lời đọc có 751 ký tự, không cảnh báo khi 750.
   - `thumbnail` (mục 4e): khối chữ tiêu đề nằm trọn trong y=600..1320; logo và nhãn series nằm trong y=240..1680; đầu ra đúng kích thước 1080×1920 (`cover_9x16.jpg`) và 1080×720 (`youtube_3x2.jpg`).
-- **Golden test thủ công (M1):** chủ dự án đặt bộ file tập "muỗi" vào `workspace/samples/muoi/`, chạy CLI, so với bản đã đăng.
+- **Golden test (chủ dự án chốt 26/10/2026): kiểm bằng mắt/tai, không có ngưỡng số.** Chủ dự án xem **Xem nhanh cả video** tập "muỗi" (`workspace/samples/muoi/`, aligner `auto`) trên **mỗi máy** và đánh dấu cụm nào thấy chữ karaoke nổi lệch so với lời đọc. **Đạt** khi không cụm nào bị đánh dấu. Dựng bằng CLI: `python -m cli render workspace/samples/muoi --preview` (hoặc project sao chép của nó). Không còn mốc đánh tay, `golden_marks.json` hay lệnh `golden-import`. Claude Code chỉ chuẩn bị video và bảng cụm (số cụm từ 1, cảnh từ 1, chữ) làm phiếu xem; không tự chấm đạt hay rớt.
+  - **Mặc định Whisper mỗi máy** = model nhẹ nhất đạt (máy cũ thử `small` trước). Đợt này không đổi mặc định trong code: chỉ báo, chờ chủ dự án chốt.
 - **Vitest:** hàm tiện ích frontend (định dạng thời gian, gọi API).
 
 ---
@@ -564,7 +633,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - **Font:** chỉ có ba bản (500/700/800) trong `backend/hbt/fonts/`; đổi sang `.woff2` bằng fontTools (cài trong `backend/.venv`). Độ đậm 400 dùng bản 500, 600 dùng bản 700.
 - **Lưu tự động:** giữ bản nháp trên máy, `PUT` sau 1 s; trước khi tải file, đổi thứ tự cảnh hoặc dựng thì lưu ngay. Ctrl+S lưu ngay, Alt+↑/↓ chuyển cảnh.
 - **Xoá cảnh:** API không có thao tác xoá cảnh. Giao diện đưa cảnh cần xoá xuống cuối bằng `POST /scenes/reorder` (máy chủ đổi tên ảnh) rồi `PUT` bỏ cảnh cuối; ảnh mồ côi của cảnh bị xoá vẫn nằm trong `images/` và bị ghi đè khi thêm cảnh mới.
-- **Nghe thử nhạc thư viện:** `GET /music/{file}/audio` (`file` là tên file, bảng `GET /music` chưa có trường `id`).
+- **Nghe thử nhạc thư viện:** `GET /music/{id}/audio` (M3 dùng tên file; M4 đổi sang `id`, bảng `GET /music` có trường `id`).
 - **Bản đẹp:** chọn 30/50/60 fps, mặc định theo fps của project; nút "Xem nhanh" là nút đen duy nhất, "Xuất bản đẹp" là nút vàng duy nhất.
 - **Thiếu so với bản nháp lời chủ dự án:** chưa có chuyển trang trượt 200 ms (mục 7); biến thể `lucide-react` như trên.
 - **Kiểm thử trình duyệt thật:** kịch bản Playwright chạy trên Edge có sẵn (không lưu trong repo), dựng đủ 8 cảnh, xem nhanh và bản đẹp 1080×1920 50 fps (261 s), tải lại trang, tối/sáng.
@@ -583,11 +652,22 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 - [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
 - [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
 - [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
-- [ ] Lint nội dung + trang chỉnh danh sách từ
-- [ ] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động
-- [ ] `publish.txt` + nút sao chép
-- [ ] `thumbnail.py` (mục 4e)
-- **Xong khi:** phụ đề lệch < 0,05 s trên tập "muỗi"; kịch bản có chữ "bia" hiện cảnh báo.
+- [x] Lint nội dung + trang chỉnh danh sách từ
+- [x] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động (Đợt 2a/2b)
+- [x] `publish.txt` + nút sao chép (khối `[Thumbnail]` đủ 3 dòng)
+- [x] `thumbnail.py` (mục 4e): ảnh bìa, API xem trước, UI tab Xuất video; dọn `build/` bằng nút trong UI
+- **Xong khi:** chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, không cụm nào thấy lệch (golden test, mục 10b); kịch bản có chữ "bia" hiện cảnh báo.
+
+**Kế hoạch M4 (chủ dự án chốt 23/10/2026):**
+- **Đợt 2 (máy cũ):**
+  - (a) Thư viện nhạc có id: slug từ tiêu đề, bỏ dấu tiếng Việt, trùng thì `-2`, tạo một lần. `file` là đường dẫn tương đối trong `library/music/`, cho thư mục con; từ chối tuyệt đối, ổ đĩa, `..`, `\`. Bỏ route `/music/{file}/audio` (dùng `/music/{id}/audio`). `.gitignore`: `library/music/**` + `!library/music/index.json` + chặn `*.mp3 *.m4a *.ogg *.flac *.aac`.
+  - (b) Tự chọn đoạn nhạc theo 6.1 (đã có) + `music.start`; ghi công từ thư viện; không thêm trường mới.
+  - (c) Lint từ nhạy cảm theo mục 7 (`sensitive_words.json`, warn/block theo danh mục), trang Cài đặt, áp cả dòng chữ bìa.
+  - [x] (d) Xem nhanh 10 s đầu (chủ dự án chốt 23/10/2026): nút Xem nhanh mặc định chỉ dựng 10 s đầu (540×960, 30 fps như cũ), giữ tuỳ chọn xem nhanh cả video; căn chữ và điểm nhạc (`music_start`) vẫn tính trên cả video; thời gian dựng tuỳ máy. Chi tiết kỹ thuật ghi vào mục 4 và 9 khi làm.
+- **Đợt 1 (Whisper theo mục 5.2, cache `timing.json`, `bench-align`, cắt đuôi giọng bằng Whisper)** — chia đôi (chủ dự án chốt 24/10/2026, vì máy mới đang hỏng):
+  - **1a (máy cũ, không GPU):** toàn bộ code Đợt 1; đường CPU chạy thật (`small`, `int8`); đường CUDA viết theo đặc tả nhưng chỉ kiểm bằng test giả lập.
+  - **1b (máy mới, khi sửa xong):** kiểm đường CUDA thật (`large-v3`, `int8_float16`), chạy `bench-align --prompt both` để đo `large-v3` CUDA **không prompt và có prompt**, kiểm độ lệch đều 0,3–0,4 s của `large-v3` (so bằng cách xem video nếu cần), chốt mặc định theo số đo và golden test.
+- **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
 ---
 

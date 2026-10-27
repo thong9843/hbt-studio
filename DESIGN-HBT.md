@@ -32,7 +32,7 @@ Tỉ lệ tương phản đã đo: chữ chính 18,9 / 17,7 · chữ phụ 6,1�
 
 ## 3. Chữ
 
-Font: **Be Vietnam Pro** (400, 500, 600, 700, 800), đã kèm `backend/hbt/fonts/` (giấy phép OFL); giao diện nạp bản `.woff2` đóng gói sẵn trong `frontend/public/fonts/`, không tải từ Google lúc chạy.
+Font: **Be Vietnam Pro** (400, 500, 600, 700, 800), đã kèm `backend/hbt/fonts/` (giấy phép `OFL-BeVietnamPro.txt`; font tiêu đề ảnh bìa Bricolage Grotesque có `OFL-BricolageGrotesque.txt`); giao diện nạp bản `.woff2` đóng gói sẵn trong `frontend/public/fonts/`, không tải từ Google lúc chạy.
 
 | Vai trò | Cỡ / dòng | Độ đậm | Ghi chú |
 |---|---|---|---|

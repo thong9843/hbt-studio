@@ -1,9 +1,13 @@
+import hashlib
 import json
+import shutil
+import subprocess
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from hbt.config import BRAND_DIR
 from hbt.pipeline import ffutil, render
 from hbt.pipeline.ffutil import measure_lufs, media_duration, probe, run_ffmpeg
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
@@ -100,6 +104,51 @@ def test_scene_clip_full_quality_frame_count(tmp_path):
         "50/1",
         "50",
     )
+
+
+def _clip_filter(monkeypatch, tmp_path, q):
+    """Chạy `scene_clip` với ffmpeg giả; trả về chuỗi filter_complex đã dùng."""
+    seen: list = []
+    monkeypatch.setattr(render, "run_ffmpeg", lambda args: seen.append([str(a) for a in args]))
+    monkeypatch.setattr(render.cache, "publish_atomic", lambda *a, **k: None)
+    render.scene_clip(tmp_path / "b.png", tmp_path / "t.png", 1.0, 1, q, False, tmp_path / "c.mp4")
+    args = seen[0]
+    return args[args.index("-filter_complex") + 1]
+
+
+def test_preview_clip_upscales_x2_before_zoompan(monkeypatch, tmp_path):
+    fc = _clip_filter(monkeypatch, tmp_path, render.quality_for(True, 50))
+    assert fc.startswith("[0]scale=2160:3840:flags=lanczos,zoompan=")
+    assert ":s=540x960:fps=30" in fc
+
+
+def test_full_quality_clip_keeps_x3_upscale_before_zoompan(monkeypatch, tmp_path):
+    fc = _clip_filter(monkeypatch, tmp_path, render.quality_for(False, 50))
+    assert fc.startswith("[0]scale=3240:5760:flags=lanczos,zoompan=")
+    assert ":s=1080x1920:fps=50" in fc
+
+
+def test_outro_clip_follows_fps(tmp_path):
+    (tmp_path / "outro").mkdir()
+    for name in (render.OUTRO_FILE, render.OUTRO_FILE_60):
+        (tmp_path / "outro" / name).write_bytes(b"x")
+    pick = {fps: render.outro_clip_for(fps, tmp_path).name for fps in (30, 50, 60)}
+    assert pick == {30: render.OUTRO_FILE, 50: render.OUTRO_FILE, 60: render.OUTRO_FILE_60}
+
+
+def test_outro_60_falls_back_to_the_50_clip_when_missing(tmp_path):
+    (tmp_path / "outro").mkdir()
+    (tmp_path / "outro" / render.OUTRO_FILE).write_bytes(b"x")
+    assert render.outro_clip_for(60, tmp_path).name == render.OUTRO_FILE
+
+
+@needs_ffmpeg
+def test_shipped_outro_clips_have_the_right_fps_and_length():
+    brand = BRAND_DIR / "outro"
+    for name, fps in ((render.OUTRO_FILE, 50), (render.OUTRO_FILE_60, 60)):
+        vs = probe(brand / name)["streams"][0]
+        assert (vs["width"], vs["height"], vs["r_frame_rate"]) == (1080, 1920, f"{fps}/1")
+        assert int(vs["nb_frames"]) == 4 * fps
 
 
 # ---------------------------------------------------------------- dựng đầu-cuối (Xem nhanh)
@@ -258,6 +307,58 @@ def test_voice_trim_end_beyond_the_file_is_an_error(tmp_path):
         render_project(pdir, opts)
 
 
+def add_music(pdir, parts, start=None):
+    """Gắn nhạc giả `music.wav` (parts như write_wav) vào project.json."""
+    write_wav(pdir / "music.wav", parts)
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["music"] = {"file": "music.wav", "start": start, "credit": "Bài thử"}
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def read_meta(res):
+    return json.loads((res.job_dir / "meta.json").read_text(encoding="utf-8"))
+
+
+@needs_ffmpeg
+def test_manual_music_start_is_used_and_recorded(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)], start=3.0)
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert meta["music_start"] == 3.0 and meta["music_start_source"] == "manual"
+    assert meta["music_sha256"] == hashlib.sha256((pdir / "music.wav").read_bytes()).hexdigest()
+    assert "Nhạc bắt đầu từ 3.0 s (đặt tay)" in res.log.read_text(encoding="utf-8")
+    assert not res.warnings
+
+
+@needs_ffmpeg
+def test_auto_music_start_is_picked_and_recorded(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)])
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert meta["music_start"] == 5.0 and meta["music_start_source"] == "auto"
+    assert "Nhạc bắt đầu từ 5.0 s (tự chọn" in res.log.read_text(encoding="utf-8")
+
+
+@needs_ffmpeg
+def test_no_music_records_no_music_start(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    meta = read_meta(render_project(pdir, opts))
+    assert meta["music_start"] is None and meta["music_start_source"] is None
+    assert meta["music_sha256"] is None
+
+
+@needs_ffmpeg
+def test_warns_when_music_is_shorter_than_video_but_still_renders(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_music(pdir, [("tone", 5, 0.4)], start=0.0)  # video dài khoảng 7 s
+    res = render_project(pdir, opts)
+    assert any(w.startswith("Nhạc ngắn hơn video") for w in res.warnings)
+    assert res.video.is_file()
+
+
 @needs_ffmpeg
 def test_second_render_reuses_cache(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
@@ -319,3 +420,152 @@ def test_ffmpeg_not_found_error_carries_the_install_hint(monkeypatch, tmp_path):
             call()
         assert "winget install Gyan.FFmpeg" in str(e.value) and "README.md" in str(e.value)
     assert issubclass(ffutil.FFmpegNotFound, ffutil.FFmpegError)
+
+
+# ---------------------------------------------------------------- Xem nhanh 10 s đầu (d)
+BODY8 = body_len(8)
+
+
+def frame_at(video, t):
+    cmd = [
+        ffutil.ffmpeg_exe(), "-v", "error", "-ss", str(t), "-i", str(video),
+        "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ]  # fmt: skip
+    out = subprocess.run(cmd, capture_output=True, check=True).stdout
+    return np.frombuffer(out, dtype=np.uint8).astype(np.float64)
+
+
+def pcm(video):
+    cmd = [
+        ffutil.ffmpeg_exe(), "-v", "error", "-i", str(video),
+        "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-",
+    ]  # fmt: skip
+    data = subprocess.run(cmd, capture_output=True, check=True).stdout
+    return np.frombuffer(data, dtype="<i2").astype(np.float64) / 32768.0
+
+
+def rms(x):
+    return float(np.sqrt((x**2).mean())) if len(x) else 0.0
+
+
+@needs_ffmpeg
+def test_head_preview_renders_only_the_first_seconds(tmp_path):
+    pdir, opts = make_project(tmp_path, n=8)  # outro bật theo project, phải bị bỏ
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 60, 0.4)])
+    opts.preview_seconds = 10
+    res = render_project(pdir, opts)
+    log = res.log.read_text(encoding="utf-8")
+    meta = read_meta(res)
+
+    assert res.duration == pytest.approx(10.0, abs=0.2)
+    vs = next(s for s in probe(res.video)["streams"] if s["codec_type"] == "video")
+    assert (vs["width"], vs["height"], vs["r_frame_rate"]) == (540, 960, "30/1")
+    assert res.srt is None and not (res.job_dir / "captions.srt").exists()
+    assert res.lufs is None and meta["lufs"] is None
+    assert res.preview_seconds == 10 and meta["preview_seconds"] == 10
+    built = len(list((pdir / "build" / "clips").glob("c*.mp4")))
+    assert 3 <= built < 8 and f"dựng {built}/8 cảnh, không outro" in log
+    assert "Phần có lời dài" in log and f"{BODY8:.2f}" in log  # căn chữ trên cả video
+    assert meta["music_start"] == 5.0 and meta["music_start_source"] == "auto"
+
+
+@needs_ffmpeg
+def test_head_preview_matches_the_full_preview_and_fades_out(tmp_path):
+    pdir, opts = make_project(tmp_path, n=8, outro=False)
+    add_music(pdir, [("tone", 5, 0.02), ("tone", 60, 0.4)])
+    opts.preview_seconds = 10
+    head = render_project(pdir, opts)
+    opts.preview_seconds = None
+    full = render_project(pdir, opts)  # clip cắt dở của bản 10 s không được dùng lại cho bản đủ
+    assert full.duration == pytest.approx(BODY8, abs=0.15)
+    assert full.preview_seconds is None and read_meta(full)["preview_seconds"] is None
+
+    for t in (0.5, 3.0, 6.0, 9.5):  # cùng khung hình (sai khác nhỏ do mã hoá)
+        diff = np.abs(frame_at(head.video, t) - frame_at(full.video, t)).mean()
+        assert diff < 3.0, (t, diff)
+    a, b = read_meta(head), read_meta(full)
+    assert (a["music_start"], a["music_start_source"]) == (
+        b["music_start"],
+        b["music_start_source"],
+    )
+    assert a["music_sha256"] == b["music_sha256"]
+
+    audio = pcm(head.video)
+    assert rms(audio[-400:]) < 0.25 * rms(audio[8 * 4000 : 9 * 4000])  # 0,05 s cuối đã nhỏ dần
+
+
+@needs_ffmpeg
+def test_preview_seconds_not_shorter_than_the_video_renders_the_whole_video(tmp_path):
+    pdir, opts = make_project(tmp_path)  # lời đọc khoảng 7 s, outro bật
+    opts.preview_seconds = 10
+    res = render_project(pdir, opts)
+    assert res.duration == pytest.approx(BODY + 4.0 - 0.5, abs=0.1)  # có outro như xem nhanh đủ
+    assert res.preview_seconds is None and read_meta(res)["preview_seconds"] is None
+    assert res.srt is not None and res.lufs is not None
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize(("preview", "seconds"), [(False, 10), (True, 0), (True, -1), (True, 61)])
+def test_preview_seconds_is_validated(tmp_path, preview, seconds):
+    pdir, opts = make_project(tmp_path)
+    opts.preview, opts.preview_seconds = preview, seconds
+    with pytest.raises(RenderError, match="preview_seconds"):
+        render_project(pdir, opts)
+
+
+# ---------------------------------------------------------------- ảnh bìa (4e)
+def add_thumbnail(pdir, brand_dir, with_logo=True):
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["thumbnail"] = {"scene": 2, "lines": ["bạn có phải", "người được", "muỗi yêu?"]}
+    data["series"] = "Loạt thử"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if with_logo:
+        shutil.copy(BRAND_DIR / "hbt-logo-mark.png", brand_dir / "hbt-logo-mark.png")
+
+
+@needs_ffmpeg
+def test_render_writes_both_covers_and_records_them(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_thumbnail(pdir, opts.brand_dir)
+    res = render_project(pdir, opts)
+    assert res.cover.name == "cover_9x16.jpg" and res.youtube_cover.name == "youtube_3x2.jpg"
+    assert Image.open(res.cover).size == (1080, 1920)
+    assert Image.open(res.youtube_cover).size == (1080, 720)
+    meta = read_meta(res)
+    assert (meta["cover_9x16"], meta["youtube_3x2"]) == ("cover_9x16.jpg", "youtube_3x2.jpg")
+    text = res.publish.read_text(encoding="utf-8")
+    assert "Dòng chữ bìa: bạn có phải / người được / muỗi yêu?" in text
+    assert "TikTok: cover_9x16.jpg\nYouTube Shorts: youtube_3x2.jpg" in text
+    assert "Ảnh bìa: cover_9x16.jpg" in res.log.read_text(encoding="utf-8")
+
+
+@needs_ffmpeg
+def test_no_thumbnail_block_means_no_cover(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    res = render_project(pdir, opts)
+    meta = read_meta(res)
+    assert res.cover is None and meta["cover_9x16"] is None and meta["youtube_3x2"] is None
+    assert not list(res.job_dir.glob("*.jpg"))
+
+
+@needs_ffmpeg
+def test_cover_failure_is_a_warning_and_the_video_still_renders(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_thumbnail(pdir, opts.brand_dir, with_logo=False)  # thiếu logo → không vẽ được bìa
+    res = render_project(pdir, opts)
+    assert res.video.is_file() and res.cover is None and res.youtube_cover is None
+    assert any(w.startswith("Không vẽ được ảnh bìa") for w in res.warnings)
+    meta = read_meta(res)
+    assert meta["cover_9x16"] is None and meta["youtube_3x2"] is None
+    assert not list(res.job_dir.glob("*.jpg"))
+
+
+@needs_ffmpeg
+def test_head_preview_skips_the_covers(tmp_path):
+    pdir, opts = make_project(tmp_path, n=8, outro=False)
+    add_thumbnail(pdir, opts.brand_dir)
+    opts.preview_seconds = 10
+    res = render_project(pdir, opts)
+    assert res.cover is None and read_meta(res)["cover_9x16"] is None
+    assert not list(res.job_dir.glob("*.jpg"))

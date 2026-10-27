@@ -87,7 +87,7 @@ flowchart LR
 | **M1** · Bộ dựng | Port `reference/pipeline` → `render.py`, CLI `hbt render <project>` | 2 | Dựng lại video "muỗi" từ project mẫu, ra file 50fps, -14 LUFS |
 | **M2** · API | CRUD project, tải file, job dựng + SSE, ảnh xem trước từng cảnh | 1,5 | Gọi API bằng curl dựng được video |
 | **M3** · Giao diện | Danh sách project, trình soạn cảnh, nhạc, xuất video, xem video | 2,5 | Làm trọn 1 video chỉ bằng giao diện |
-| **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Phụ đề lệch < 0,05 giây; cảnh báo khi kịch bản có "bia", "máu"… |
+| **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, không cụm nào thấy lệch; cảnh báo khi kịch bản có "bia", "máu"… |
 | **Tổng** | | **~8 buổi** | |
 
 ## 7. Rủi ro
@@ -165,6 +165,21 @@ flowchart LR
 | 22/10/2026 | Xem nhanh dùng `veryfast`, CRF 30, AAC 96 kbps (bản đẹp không đổi) | 3,7 MB cho video 50 giây, trước đó 39,8 MB; thời gian dựng không đổi |
 | 22/10/2026 | A4: dựng bản đẹp "muỗi" mất 143 s trên máy cũ khi rảnh (M1: 145 s) | Không suy giảm hiệu năng; 261 s ở M3 do trình duyệt và máy chủ dev đang chạy |
 | 22/10/2026 | Chuyển người code sang Gemini; eb3842c đánh dấu M3 xong quá sớm, trạng thái đúng là đang khép | Tránh coi M3 đã xong khi chưa làm A1–A6 và chưa CI |
+| 24/10/2026 | M4 Đợt 1 chia 1a (máy cũ, mọi code, chạy thật đường CPU) và 1b (máy mới: kiểm CUDA thật, `bench-align`, chốt mặc định); máy mới đang hỏng | Không chờ máy mới; đường CUDA chỉ kiểm bằng test giả lập tới khi có máy |
+| 24/10/2026 | Whisper chạy trong tiến trình con; `whisper_timeout_seconds` cố định, mặc định 900 s; bậc rơi CUDA → CPU `small` `int8` → khoảng lặng, mỗi bậc ghi log lý do (IMPLEMENT 5.2) | Kill được khi hết giờ hoặc huỷ job; model tự giải phóng khi tiến trình thoát |
+| 24/10/2026 | Cắt đuôi giọng bằng Whisper: chỉ khi token cuối khớp thật, cắt tại `end + 0,35 s`, đệm để tổng 1,6 s sau chữ cuối; không khớp thì chỉ cảnh báo; > 8 s dùng `needs_confirmation` (IMPLEMENT 4d) | Token cuối chỉ nội suy thì mốc `end` không đáng tin, tránh cắt nhầm lời |
+| 24/10/2026 | **Bỏ `initial_prompt` cho mọi model Whisper** (điểm lệch tham số reference, IMPLEMENT 5.2); `bench-align --prompt` mặc định `off`, giữ `on`/`both` để so ở 1b; mặc định `auto` (CPU `small` `int8`, CUDA `large-v3` `int8_float16`) giữ nguyên, chốt cuối theo golden test | Đo trên "muỗi": có prompt cả small/medium/large-v3 bỏ sót nửa đầu (khớp 61–63%), bỏ prompt thì khớp 89–91% |
+| 24/10/2026 | Mốc cảnh Whisper không hợp lệ thì coi là Whisper lỗi và rơi về khoảng lặng; cắt 3,78 s cuối "muỗi" bằng Whisper được xác nhận là phần thừa; lưu phần cắt ở `renders/<job>/trimmed_tail.wav`; thanh tiến độ Whisper chạy 6→20% | Hỏng mốc cảnh không được làm dựng lỗi; chủ dự án cần nghe lại phần cắt |
+| 26/10/2026 | Nạp DLL CUDA trên Windows: `whisper_worker` gọi `os.add_dll_directory` và thêm `site-packages
+vidia\*in` vào PATH của riêng tiến trình con, trước khi import `faster_whisper`; không sửa PATH hệ thống (IMPLEMENT 0) | Máy mới báo `cublas64_12.dll` không nạp được dù DLL có trong venv, nên rơi xuống `small` CPU |
+| 26/10/2026 | Đổi golden sang kiểm bằng mắt/tai: chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, đạt khi không cụm nào thấy lệch; bỏ ngưỡng số 0,05 s và ≤ 0,2 s, bỏ mốc đánh tay (IMPLEMENT 10b). Mặc định Whisper mỗi máy = model nhẹ nhất đạt, chốt sau khi có kết quả | Đánh mốc tay quá tốn công; yêu cầu thật là chữ nổi khớp lời đọc |
+| 26/10/2026 | Xem nhanh phóng ×2 (2160×3840 `lanczos`) trước zoompan (`render.scene_clip`); bản đẹp giữ ×3, không đổi tham số bản đẹp (IMPLEMENT 4) | Xem nhanh bỏ bước phóng nên zoompan làm tròn vị trí cắt về pixel nguyên của ảnh 1080: hình rung 0,19–0,39 px, gấp đôi video đã đăng; ×2 giảm còn 0,05–0,09 px, thêm khoảng 7 s dựng trên máy cũ |
+| 26/10/2026 | Phụ đề karaoke: chữ đang đọc đổi màu vàng `#FFD43B`, đọc xong trở lại trắng; bỏ nền viên thuốc vàng và chữ tối (IMPLEMENT 5.3); giữ font, cỡ, viền, bóng, dòng, `caption_y`, mốc thời gian, `captions.srt` | Chữ vàng viền tối dễ đọc hơn, ít che hình hơn nền vàng đặc |
+| 26/10/2026 | Outro 60 fps: dựng sẵn `brand/outro/outro_4s_60fps.mp4` bằng mã `outro_reference.py` (đổi `FPS=60`, không sửa `reference/`); xuất 60 fps dùng clip 60, 50 và 30 fps dùng clip 50 (IMPLEMENT 4c) | Đổi 50→60 bằng `fps=` lặp khung, outro giật nhẹ 10 Hz |
+| 26/10/2026 | Khối JSON kịch bản (dán 1 lần điền voice, card, labels, punch, publish, thumbnail) làm ở mốc riêng sau khi đóng M4, trước v1.0.0 (chỉ ghi, chưa làm) | Giảm công nhập tay từng trường |
+| 26/10/2026 | `caption_y` mặc định 1420 → 1400 (tâm khối chữ); giữ quy tắc đáy thẻ > 1100 thì 230 (IMPLEMENT 5.3) | Đo bằng Pillow: khối 2 dòng ở 1420 có đáy tới 1519, vượt vùng an toàn TikTok (y ≤ 1500); ở 1400 đáy tối đa 1499 |
+| 26/10/2026 | `library/music/index.json` vào `.prettierignore` (dữ liệu do app ghi) | Lint Prettier báo lỗi định dạng trên file app ghi |
+| 27/10/2026 | **Đóng M4 theo phạm vi máy cũ.** Lệch đặc tả đã duyệt: golden chỉ trên máy cũ (ĐẠT, xem bằng mắt/tai); ba việc của máy mới tách thành việc riêng, làm khi máy mới sẵn sàng, trên nhánh riêng tách từ `main`, không chặn M5: (1) kiểm đường CUDA thật (`large-v3`, `int8_float16`, nạp DLL b6); (2) `bench-align` trên máy mới (`small`/`medium`/`large-v3`, không prompt và có prompt); (3) golden máy mới (xem Xem nhanh cả video "muỗi"), rồi chốt mặc định Whisper cho máy mới | Máy mới đã chứng minh rơi đúng xuống CPU `small` khi CUDA lỗi; không để việc phần cứng chặn các mốc sau |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -185,5 +200,5 @@ flowchart LR
 | M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
-| M4 | ☐ | |
+| M4 | ☑ | Xong 27/10/2026 theo phạm vi máy cũ, chờ chủ dự án duyệt (chưa merge, chưa tag). Kiểm chứng: 630 pytest + 95 Vitest, CI xanh, golden máy cũ ĐẠT (xem bằng mắt/tai). Lệch đặc tả đã duyệt: golden chỉ máy cũ; 1b CUDA thật, `bench-align` máy mới và golden máy mới tách thành việc riêng trên nhánh riêng từ `main`, không chặn M5 (Nhật ký 27/10) |
 

@@ -15,9 +15,9 @@ router = APIRouter(tags=["lint"])
 
 @router.post("/projects/{slug}/lint")
 def lint(slug: str, state: State):
-    """Kết quả kiểm tra. M2 mới có quy tắc độ dài lời đọc; bộ kiểm tra từ nhạy cảm thêm ở M4."""
+    """Kết quả kiểm tra: độ dài lời đọc, từ nhạy cảm (danh sách hiện hành), số chưa có cách đọc."""
     project = state.storage.load(slug)
-    issues = [asdict(i) for i in lint_project(project)]
+    issues = [asdict(i) for i in lint_project(project, state.sensitive.load())]
     counts = {
         level: sum(1 for i in issues if i["level"] == level) for level in ("info", "warn", "block")
     }

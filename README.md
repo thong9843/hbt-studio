@@ -37,12 +37,19 @@ backend\.venv\Scripts\pip install -e "backend[dev]"
 copy .env.example .env
 ```
 
-Muốn phụ đề chính xác bằng Whisper (dùng từ M4), cài thêm:
+Muốn phụ đề chính xác bằng Whisper (mặc định `WHISPER_MODEL=auto`, `WHISPER_DEVICE=auto`), cài thêm:
 
 ```powershell
 backend\.venv\Scripts\pip install -e "backend[whisper]"
+```
+
+Máy có GPU NVIDIA cài thêm thư viện CUDA 12 (máy không có GPU **không** cần):
+
+```powershell
 backend\.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 ```
+
+`auto` chọn theo phần cứng: có CUDA thì `large-v3` trên GPU (`int8_float16`), không thì `small` trên CPU (`int8`). Model tải về `models/` ở lần chạy đầu (`small` khoảng 0,5 GB), những lần sau nạp thẳng từ đó. Whisper lỗi hoặc quá giới hạn thời gian (Cài đặt, mặc định 900 giây) thì app căn theo khoảng lặng; lỗi CUDA thì thử CPU trước. Phương pháp đã dùng hiện ở kết quả dựng. Đã thử với `faster-whisper 1.2.1`, `ctranslate2 4.8.3`. Đo thật từng model: `backend\.venv\Scripts\python -m cli bench-align workspace/projects/<slug> --models small,medium`.
 
 Cần driver NVIDIA hỗ trợ CUDA 12. Không có GPU thì app vẫn chạy, chỉ chậm hơn hoặc dùng chế độ căn theo khoảng lặng.
 

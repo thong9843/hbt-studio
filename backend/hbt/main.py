@@ -44,12 +44,15 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
     brand_dir = brand_dir or BRAND_DIR
     app_settings = AppSettingsStore(settings.workspace_dir, settings.default_fps)
     storage = Storage(settings.workspace_dir, settings.default_fps, app_settings)
+    sensitive = SensitiveStore(settings.workspace_dir)
     state = AppState(
         settings=settings,
         storage=storage,
-        jobs=JobManager(storage, settings.library_dir, brand_dir),
+        jobs=JobManager(
+            storage, settings.library_dir, brand_dir, sensitive=sensitive, app_settings=app_settings
+        ),
         library=MusicLibrary(settings.library_dir),
-        sensitive=SensitiveStore(settings.workspace_dir),
+        sensitive=sensitive,
         app_settings=app_settings,
         brand_dir=brand_dir,
     )
