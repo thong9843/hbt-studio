@@ -34,6 +34,8 @@ class ProjectSummary(BaseModel):
     thumb: str | None  # URL ảnh cảnh 1; None → giao diện dùng ảnh mặc định HBT
     last_render: dict | None
     error: str | None = None
+    cover: str | None = None  # URL cover_9x16.jpg của lần dựng gần nhất có bìa
+    last_final: dict | None = None  # bản đẹp mới nhất (cùng dạng last_render), không có → None
 
 
 @router.get("/projects", response_model=list[ProjectSummary])
@@ -41,8 +43,10 @@ def list_projects(state: State):
     items = []
     for item in state.storage.list_projects():
         item["thumb"] = file_url(item["thumb"])
-        if item["last_render"]:
-            item["last_render"]["video"] = file_url(item["last_render"]["video"])
+        item["cover"] = file_url(item["cover"])
+        for key in ("last_render", "last_final"):
+            if item[key]:
+                item[key]["video"] = file_url(item[key]["video"])
         items.append(item)
     return items
 

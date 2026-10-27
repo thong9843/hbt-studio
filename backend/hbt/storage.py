@@ -394,11 +394,12 @@ class Storage:
         path = self.project_dir(slug) / music.file if music and music.file else None
         return sha256_file(path) if path is not None and path.is_file() else None
 
-    def last_render(self, slug: str) -> dict | None:
-        best = None
+    def _renders_newest_first(self, slug: str) -> list[tuple[str, Path, dict]]:
+        """(created_at, thư mục, meta) của các lần xuất có video, mới nhất trước."""
         renders = self.project_dir(slug) / "renders"
         if not renders.is_dir():
-            return None
+            return []
+        found = []
         for d in renders.iterdir():
             video = d / "video.mp4"
             if not video.is_file():
@@ -409,19 +410,38 @@ class Storage:
                     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     pass
-            created = meta.get("created_at") or _now_iso(video.stat().st_mtime)
-            if best is None or created > best["created_at"]:
-                best = {
-                    "job_id": d.name,
-                    "preview": bool(meta.get("preview", False)),
-                    "fps": meta.get("fps"),
-                    "duration": meta.get("duration"),
-                    "render_seconds": meta.get("render_seconds"),
-                    "align_cached": meta.get("align_cached"),
-                    "created_at": created,
-                    "video": self.rel(video),
-                }
-        return best
+            found.append((meta.get("created_at") or _now_iso(video.stat().st_mtime), d, meta))
+        return sorted(found, key=lambda r: r[0], reverse=True)
+
+    def _render_brief(self, created: str, d: Path, meta: dict) -> dict:
+        return {
+            "job_id": d.name,
+            "preview": bool(meta.get("preview", False)),
+            "fps": meta.get("fps"),
+            "duration": meta.get("duration"),
+            "render_seconds": meta.get("render_seconds"),
+            "align_cached": meta.get("align_cached"),
+            "created_at": created,
+            "video": self.rel(d / "video.mp4"),
+        }
+
+    def render_summary(self, slug: str) -> dict:
+        """`last_render` (lần xuất mới nhất), `last_final` (bản đẹp mới nhất, không phải Xem nhanh)
+        và `cover` (cover_9x16.jpg của lần xuất gần nhất CÓ bìa); thiếu thì None."""
+        last_render = last_final = cover = None
+        for created, d, meta in self._renders_newest_first(slug):
+            if last_render is None:
+                last_render = self._render_brief(created, d, meta)
+            if last_final is None and not meta.get("preview", False):
+                last_final = self._render_brief(created, d, meta)
+            if cover is None and (d / "cover_9x16.jpg").is_file():
+                cover = self.rel(d / "cover_9x16.jpg")
+            if last_render and last_final and cover:
+                break
+        return {"last_render": last_render, "last_final": last_final, "cover": cover}
+
+    def last_render(self, slug: str) -> dict | None:
+        return self.render_summary(slug)["last_render"]
 
     def list_projects(self) -> list[dict]:
         out = []
@@ -436,7 +456,7 @@ class Storage:
                 "title": d.name,
                 "updated_at": _now_iso(pj.stat().st_mtime),
                 "thumb": None,
-                "last_render": self.last_render(d.name),
+                **self.render_summary(d.name),
             }
             try:
                 project = self.load(d.name)
