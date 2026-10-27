@@ -35,6 +35,10 @@ export const vi = {
     main: 'Điều hướng chính',
     env: 'Trạng thái môi trường',
   },
+  ui: {
+    busy: 'Đang chạy',
+    loading: 'Đang tải',
+  },
   health: {
     title: 'Trạng thái môi trường',
     loading: 'Đang kiểm tra…',
