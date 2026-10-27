@@ -298,6 +298,24 @@ class FrameReader:
         self.proc.wait()
 
 
+PARTIAL_UNLINK_TRIES = 5
+PARTIAL_UNLINK_DELAY = 0.1  # giây giữa các lần thử
+
+
+def _remove_partial(partial: Path) -> None:
+    """Xoá file dở sau khi bộ mã hoá đã dừng. Trên Windows file có thể còn bị giữ một lúc
+    (antivirus…): thử lại vài lần; vẫn lỗi thì chỉ cảnh báo, không che exception đang bay."""
+    for attempt in range(PARTIAL_UNLINK_TRIES):
+        try:
+            partial.unlink(missing_ok=True)
+            return
+        except OSError as e:
+            if attempt + 1 == PARTIAL_UNLINK_TRIES:
+                print(f"CẢNH BÁO: không xoá được {partial.name}: {e}", file=sys.stderr)
+            else:
+                time.sleep(PARTIAL_UNLINK_DELAY)
+
+
 def slide_frame(a: np.ndarray, b: np.ndarray, lb: int, tn: int) -> np.ndarray:
     """Khung chuyển cảnh `lb` (0..tn−1): A trượt sang trái, B vào từ phải, easeInOutCubic.
 
@@ -405,6 +423,8 @@ def compose(
         enc.wait()
         if token is not None:
             token.untrack(enc)
+        if not finished:  # huỷ (check_current ném trong vòng ghi) hoặc lỗi giữa chừng
+            _remove_partial(partial)
     try:
         cancel.check_current()  # bộ mã hoá chết vì bị huỷ thì không phải lỗi mã hoá
         code = enc.returncode
