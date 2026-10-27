@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -183,6 +183,14 @@ export function ProjectsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
+  // Nút "Tạo video" ở thanh trái mở hộp tạo cũ qua `/?new=1` (nối lại đúng ở Đợt 3a).
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('new')) {
+      setCreating(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: api.listProjects,

@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Shell } from '../components/Shell';
+import { AppShell } from '../components/AppShell';
 import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
@@ -10,7 +10,7 @@ import { SettingsPage } from '../pages/SettingsPage';
 export function App() {
   return (
     <Routes>
-      <Route element={<Shell />}>
+      <Route element={<AppShell />}>
         <Route index element={<ProjectsPage />} />
         <Route path="p/:slug" element={<ComposePage />}>
           <Route index element={<ScenesTab />} />
