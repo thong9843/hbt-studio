@@ -98,6 +98,7 @@ def fake_whisper(monkeypatch):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_auto_uses_whisper_and_records_how(tmp_path, fake_whisper):
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
     res = render_project(pdir, opts)
@@ -114,6 +115,7 @@ def test_auto_uses_whisper_and_records_how(tmp_path, fake_whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_whisper_failure_falls_back_to_silence_and_says_why(tmp_path, fake_whisper):
     fake_whisper.fail = WhisperFailed("large-v3 (cuda, int8_float16): lỗi lúc chạy: cublas")
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
@@ -134,6 +136,7 @@ def test_aligner_whisper_does_not_fall_back(tmp_path, fake_whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_aligner_silence_never_calls_whisper(tmp_path, fake_whisper):
     pdir, opts = make_project(tmp_path, aligner="silence", outro=False)
     assert render_project(pdir, opts).aligner == "silence"
@@ -141,6 +144,7 @@ def test_aligner_silence_never_calls_whisper(tmp_path, fake_whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_timing_cache_hit_skips_whisper(tmp_path, fake_whisper):
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
     render_project(pdir, opts)
@@ -152,6 +156,7 @@ def test_timing_cache_hit_skips_whisper(tmp_path, fake_whisper):
 
 @needs_ffmpeg
 @pytest.mark.parametrize("change", ["script", "model", "timeout", "aligner"])
+@pytest.mark.slow
 def test_timing_cache_miss(tmp_path, fake_whisper, change):
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
     render_project(pdir, opts)
@@ -172,6 +177,7 @@ def test_timing_cache_miss(tmp_path, fake_whisper, change):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_timing_cache_miss_when_voice_changes(tmp_path, fake_whisper):
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
     render_project(pdir, opts)
@@ -185,6 +191,7 @@ def test_timing_cache_miss_when_voice_changes(tmp_path, fake_whisper):
     ("app", "env", "expected"),
     [("auto", "auto", "auto"), ("auto", "medium", "medium"), ("small", "medium", "small")],
 )
+@pytest.mark.slow
 def test_model_setting_precedence_reaches_whisper(
     tmp_path, fake_whisper, monkeypatch, app, env, expected
 ):
@@ -252,6 +259,7 @@ class ZeroWidthWhisper(FakeWhisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_unusable_scene_marks_fall_back_to_silence_instead_of_failing(tmp_path, monkeypatch):
     monkeypatch.setattr(render, "run_whisper", ZeroWidthWhisper())
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
@@ -270,6 +278,7 @@ def test_unusable_scene_marks_fail_when_whisper_is_forced(tmp_path, monkeypatch)
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_progress_bar_runs_6_to_20_percent_while_whisper_listens(tmp_path, monkeypatch):
     fake = FakeWhisper()
     fake.progress = (0.25, 0.5, 1.0)
@@ -285,6 +294,7 @@ def test_progress_bar_runs_6_to_20_percent_while_whisper_listens(tmp_path, monke
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_path_sends_no_initial_prompt(tmp_path, fake_whisper):
     """Đo 24/10/2026: initial_prompt làm Whisper bỏ sót nửa đầu ở small/medium/large-v3."""
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)

@@ -466,6 +466,7 @@ def test_cancel_queued_and_running_jobs_via_api(client):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_full_flow_render_sse_and_outputs(client):
     slug = complete_project(client)
     r = client.post(f"/api/projects/{slug}/render", json={"preview": True})

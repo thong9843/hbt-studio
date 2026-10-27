@@ -215,6 +215,7 @@ def make_project(
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_preview_render_end_to_end(tmp_path):
     pdir, opts = make_project(tmp_path)
     steps = []
@@ -238,6 +239,7 @@ def test_preview_render_end_to_end(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_without_outro(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     res = render_project(pdir, opts)
@@ -246,6 +248,7 @@ def test_render_without_outro(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_outro_option_overrides_project_setting(tmp_path):
     pdir, opts = make_project(tmp_path, outro=True)
     opts.outro = False
@@ -253,6 +256,7 @@ def test_outro_option_overrides_project_setting(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_without_outro_voice_still_builds(tmp_path):
     pdir, opts = make_project(tmp_path, outro_voice=False)
     res = render_project(pdir, opts)
@@ -261,6 +265,7 @@ def test_render_without_outro_voice_still_builds(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_trims_extra_tail_and_logs(tmp_path):
     # 8 cảnh + đuôi thừa 3 s: đủ điều kiện tự cắt (chi phí giảm ≥ 1,0, đoạn cuối ≥ 1,5 s)
     pdir, opts = make_project(tmp_path, n=8, tail=[("gap", 0.8), ("tone", 3.0)], outro=False)
@@ -273,6 +278,7 @@ def test_render_trims_extra_tail_and_logs(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_short_script_with_tail_warns_and_keeps_audio(tmp_path):
     pdir, opts = make_project(tmp_path, tail=[("gap", 0.8), ("tone", 3.0)], outro=False)
     res = render_project(pdir, opts)
@@ -282,6 +288,7 @@ def test_short_script_with_tail_warns_and_keeps_audio(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_voice_trim_end_cuts_before_alignment(tmp_path):
     speech_end = 0.3 + 3 + 2 * 0.8  # giây trên file gốc
     pdir, opts = make_project(
@@ -321,6 +328,7 @@ def read_meta(res):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_manual_music_start_is_used_and_recorded(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)], start=3.0)
@@ -333,6 +341,7 @@ def test_manual_music_start_is_used_and_recorded(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_auto_music_start_is_picked_and_recorded(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     add_music(pdir, [("tone", 5, 0.02), ("tone", 40, 0.4)])
@@ -343,6 +352,7 @@ def test_auto_music_start_is_picked_and_recorded(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_no_music_records_no_music_start(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     meta = read_meta(render_project(pdir, opts))
@@ -351,6 +361,7 @@ def test_no_music_records_no_music_start(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_warns_when_music_is_shorter_than_video_but_still_renders(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     add_music(pdir, [("tone", 5, 0.4)], start=0.0)  # video dài khoảng 7 s
@@ -360,6 +371,7 @@ def test_warns_when_music_is_shorter_than_video_but_still_renders(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_second_render_reuses_cache(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     render_project(pdir, opts)
@@ -399,6 +411,7 @@ def test_rejects_unsupported_fps(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_measured_loudness_is_reported(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     res = render_project(pdir, opts)
@@ -449,6 +462,7 @@ def rms(x):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_head_preview_renders_only_the_first_seconds(tmp_path):
     pdir, opts = make_project(tmp_path, n=8)  # outro bật theo project, phải bị bỏ
     add_music(pdir, [("tone", 5, 0.02), ("tone", 60, 0.4)])
@@ -470,6 +484,7 @@ def test_head_preview_renders_only_the_first_seconds(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_head_preview_matches_the_full_preview_and_fades_out(tmp_path):
     pdir, opts = make_project(tmp_path, n=8, outro=False)
     add_music(pdir, [("tone", 5, 0.02), ("tone", 60, 0.4)])
@@ -495,6 +510,7 @@ def test_head_preview_matches_the_full_preview_and_fades_out(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_preview_seconds_not_shorter_than_the_video_renders_the_whole_video(tmp_path):
     pdir, opts = make_project(tmp_path)  # lời đọc khoảng 7 s, outro bật
     opts.preview_seconds = 10
@@ -525,6 +541,7 @@ def add_thumbnail(pdir, brand_dir, with_logo=True):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_writes_both_covers_and_records_them(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     add_thumbnail(pdir, opts.brand_dir)
@@ -541,6 +558,7 @@ def test_render_writes_both_covers_and_records_them(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_no_thumbnail_block_means_no_cover(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     res = render_project(pdir, opts)
@@ -550,6 +568,7 @@ def test_no_thumbnail_block_means_no_cover(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_cover_failure_is_a_warning_and_the_video_still_renders(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     add_thumbnail(pdir, opts.brand_dir, with_logo=False)  # thiếu logo → không vẽ được bìa
@@ -562,6 +581,7 @@ def test_cover_failure_is_a_warning_and_the_video_still_renders(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_head_preview_skips_the_covers(tmp_path):
     pdir, opts = make_project(tmp_path, n=8, outro=False)
     add_thumbnail(pdir, opts.brand_dir)

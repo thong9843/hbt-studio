@@ -33,9 +33,16 @@
   6. Báo hash commit cuối của `main` và tag.
 - Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
 
+## Quy trình theo đợt (chốt 27/10/2026)
+- Mỗi commit: `npm run lint` + test liên quan (chỉ sửa frontend → Vitest; sửa backend → `pytest -m "not slow"`). Có thể dùng `npm run test:fast` (pytest không slow + Vitest). Cuối đợt chạy đầy đủ **một lần**: `set -o pipefail && npm run lint && npm run test`. CI vẫn chạy đầy đủ, kể cả test `slow`.
+- Test `slow` = dựng/căn chữ thật, từ 3 s trở lên mỗi test theo `pytest --durations=0` trên máy cũ; gắn `@pytest.mark.slow`. Thêm test dựng thật mới thì tự đo và gắn marker.
+- Kế hoạch đợt được duyệt xong thì làm hết các commit, báo **một lần** cuối đợt. Chỉ dừng khi: có điểm đặc tả chưa rõ, test đỏ không tự sửa được, cần đụng `pipeline/` hoặc `models.py`.
+- Cuối đợt được phép push nhánh `feat/mX-…` (không merge, không tag, không chờ CI). Merge và tag vẫn theo 6 bước đóng mốc.
+
 ## Lệnh hay dùng
 ```
 npm run dev                                   # chạy backend + frontend
-npm run test                                  # pytest + vitest
+npm run test                                  # pytest + vitest (đầy đủ)
+npm run test:fast                             # pytest -m "not slow" + vitest
 backend\.venv\Scripts\python -m cli render workspace/projects/<slug> --preview
 ```
