@@ -677,7 +677,7 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 
 - [ ] **Đợt 0 · Tài liệu:** PLAN/IMPLEMENT mục M5 và mục 13, DESIGN-HBT.md v2, CLAUDE.md (`docs(M5)`); sửa dòng nhật ký 26/10 bị vỡ (`docs(plan)`).
 - [ ] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
-- [ ] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo.
+- [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
 - [ ] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới.
 - [ ] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn).
 - [ ] **Đợt 3c:** Âm thanh.
@@ -744,7 +744,7 @@ Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự độn
 | `--brand` | `#B22228` (chữ trắng) | như sáng | Nút Tạo video, logo, mũi tên khác biệt |
 | `--tint-red` | nền `#FDECEC`, chữ `#9C1D22` | — | Nhãn "Đã xuất" |
 | `--tint-yel` | nền `#FFF3D1`, chữ `#6B4A00` | — | Nhãn "Đã xem nhanh", cảnh báo |
-| `--ok` | chấm `#22A55B`; ô `#E6F5EC` / `#1A7F45` | chấm `#3CCB7F` | Môi trường sẵn sàng, "Sẵn sàng" |
+| `--ok` | chấm `#22A55B`; ô `#E6F5EC` / `#187A42` | chấm `#3CCB7F` | Môi trường sẵn sàng, "Sẵn sàng" |
 | `--danger` | `#B3261E` | `#FF6B6B` | Lỗi, xoá, mức Chặn (luôn kèm chữ / biểu tượng) |
 
 **Hình dạng, chữ, bố cục**
@@ -932,5 +932,16 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 **6c. Cờ cache căn chữ:** `aligner_info` chưa có (đọc lại từ `timing.json` y hệt lần đầu, `RenderResult` cũng không có cờ). `jobs.py` đủ thông tin mà không đụng pipeline: **`align_cached` = mtime của `build/timing.json` không đổi trước/sau `_render`** (thiếu file trước đó → `False`).
 
 **6d. Ghi `render_seconds`:** `meta.json` do pipeline ghi ở cuối `render.py`. Trong `jobs.py` (`_run`, nhánh `else:` sau khi có `result`, **trước `job._finish(DONE, …)`**) ghi thêm `render_seconds` (= `result.seconds`, làm tròn 1 chữ số) và `align_cached` vào `result.job_dir / "meta.json"`. Ghi an toàn (ghi file tạm rồi `os.replace`); lỗi chỉ ghi log, **không làm hỏng job**. Chỉ ghi khi job thành công (Xem nhanh hay bản đẹp) và `meta.json` đã có; job huỷ hoặc lỗi thì không ghi, không tạo `meta.json`, không đổi trường pipeline đã ghi. `render_seconds` lấy từ `result.seconds` (thời gian dựng thật, **không** tính xếp hàng). `align_cached` chỉ `True` khi `build/timing.json` có trước job và mtime không đổi sau job. `storage` (`/renders`) trả thêm hai trường. Không đụng `backend/hbt/pipeline/`.
+
+### 13.B7 Quyết định Đợt 2 (chủ dự án duyệt 27/10/2026)
+
+1. **Tên token và màu Tailwind cũ là bí danh tạm.** `tokens.css` có khối bí danh cuối file (`--surface` → `--card`, `--surface-2` → `--soft`, `--text-muted` → `--muted`, `--border` → `--line`, `--brand-red` → `--brand`, `--brand-cream`, `--brand-ink`); `tailwind.config.ts` giữ `surface`, `surface-2`, `text-muted`, `border`, `brand-red`, `brand-cream`, `brand-ink`, `rounded-frame`. Màn cũ vì thế còn chạy. **Xoá hết ở Đợt 5**, kèm test `grep` không còn tên cũ trong `frontend/src` và `tokens.css`.
+2. **Thay `Shell.tsx` bằng `AppShell` ngay Đợt 2.** "Trang chủ" tạm trỏ `/` (chưa đánh dấu đang chọn). Nút **Tạo video** tạm mở hộp tạo cũ qua `/?new=1` (`ProjectsPage` đọc rồi xoá tham số). Nối đúng ở Đợt 3a.
+3. **Thẻ tiến độ dựng ở thanh trái chỉ là khung nhận props** (`render: { percent, step } | null` truyền qua `AppShell` → `SideNav`; test ẩn/hiện theo props). Context job toàn cục và giữ SSE khi đổi màn làm ở Đợt 3d.
+4. **Bỏ `refetchInterval` của `/health`.** Chấm Môi trường chỉ lấy khi mở app và khi tab lấy lại focus (`refetchOnWindowFocus: true` riêng cho truy vấn này; mặc định toàn app vẫn `false`). Có test: 5 phút giả lập không có request thứ hai.
+5. **Trang mẫu thành phần `/dev/ui`** (`pages/Gallery.tsx`), route chỉ đăng ký khi `import.meta.env.DEV` và nạp bằng `lazy`. Kiểm: sau `npm run build`, `grep -ri gallery frontend/dist` rỗng. Chuỗi chữ của trang nằm ở `vi.ui.kit` trong `i18n/vi.ts` nên vẫn vào bundle (vài trăm byte, không có mã trang).
+6. **Không thêm gói npm.** Dialog, Drawer, Menu, Toast tự viết (`components/ui/overlay.ts`: focus vào ô đầu, bẫy Tab, Esc đóng, trả focus, giữ 120 ms để chạy hoạt ảnh đóng). `ConfirmDialog` và `Toast` giữ API cũ (thêm tuỳ chọn `undo`, 8 s).
+7. **Đo lại tương phản theo token** (`tokens.test.ts`, ≥ 4,5:1 sáng và tối, 25 cặp). Cặp "Sẵn sàng" `#1A7F45` trên `#E6F5EC` chỉ đạt 4,47:1 nên đổi chữ sang `#187A42` (DESIGN-HBT.md mục 2 và bảng 13.B1 đã sửa). Các giá trị khác giữ nguyên.
+8. **Test chạy nhanh:** `@pytest.mark.slow` cho test dựng/căn chữ thật từ 3 s (đo `--durations=0` trên máy cũ), `npm run test:fast` bỏ chúng; `npm run test` và CI vẫn chạy đủ. Vitest đọc `tokens.css` và `ui.css` bằng `?raw` nên `vite.config.ts` bật `css.include` cho hai file này.
 
 **X6 (đổi mốc so sánh):** `PIPELINE_VERSION` không đổi so với tag `v0.5.1`, và `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (v0.5.1 đã sửa `render.py`; `b240e97` không còn là mốc).

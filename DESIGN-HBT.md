@@ -28,7 +28,7 @@
 | `--brand`                         | `#B22228` (chữ trắng)                     | như sáng                                  | Nút Tạo video, logo, mũi tên khác biệt. **Không dùng cho lỗi**          |
 | `--tint-red`                      | nền `#FDECEC`, chữ `#9C1D22`             | —                                         | Nhãn "Đã xuất"                                                          |
 | `--tint-yel`                      | nền `#FFF3D1`, chữ `#6B4A00`             | —                                         | Nhãn "Đã xem nhanh", cảnh báo                                           |
-| `--ok`                            | chấm `#22A55B`; ô `#E6F5EC` / chữ `#1A7F45` | chấm `#3CCB7F`                          | Môi trường sẵn sàng, "Sẵn sàng"                                         |
+| `--ok`                            | chấm `#22A55B`; ô `#E6F5EC` / chữ `#187A42` | chấm `#3CCB7F`                          | Môi trường sẵn sàng, "Sẵn sàng"                                         |
 | `--danger`                        | `#B3261E`                                 | `#FF6B6B`                                 | Lỗi, xoá, mức Chặn (luôn kèm chữ hoặc biểu tượng)                       |
 
 Chế độ sáng/tối theo hệ thống; mọi màn phải đủ cả hai. Tối: ô `--tint-*` dùng nền `--soft` và giữ chữ + biểu tượng để vẫn phân biệt được.
