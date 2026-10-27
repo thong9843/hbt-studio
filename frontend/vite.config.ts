@@ -15,6 +15,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    css: false,
+    // Chỉ hai file CSS này được đọc thật (test token và luật hiệu năng đọc bằng ?raw); còn lại bỏ qua cho nhanh.
+    css: { include: [/styles\/tokens\.css/, /components\/ui\/ui\.css/] },
   },
 });

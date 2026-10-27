@@ -137,3 +137,10 @@
     @apply inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent;
   }
 }
+
+/* Giảm chuyển động: nút cũ (.btn) bỏ nhấn thu nhỏ; thành phần mới tự xử lý trong ui.css */
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transform: none !important;
+  }
+}
