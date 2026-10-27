@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from hbt.api import assets, files, health, lint, music, projects
+from hbt.api import assets, files, health, lint, music, projects, script
 from hbt.api import render as render_api
 from hbt.api import settings as settings_api
 from hbt.app_settings import AppSettingsStore
@@ -85,7 +85,7 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
         ]
         return JSONResponse({"detail": "; ".join(parts) or "Dữ liệu không hợp lệ"}, status_code=422)
 
-    for module in (health, projects, assets, lint, settings_api, render_api, music, files):
+    for module in (health, projects, assets, lint, settings_api, render_api, music, files, script):
         app.include_router(module.router, prefix="/api")
     return app
 

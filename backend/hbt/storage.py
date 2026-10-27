@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
-COPY_EXCLUDE = ("build", "renders")  # nhân bản không chép file trung gian và các lần xuất
+COPY_EXCLUDE = ("build", "renders", "backups")  # nhân bản không chép file tạm, lần xuất, sao lưu
 
 
 class StorageError(Exception):
