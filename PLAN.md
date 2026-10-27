@@ -179,6 +179,7 @@ vidia\*in` vào PATH của riêng tiến trình con, trước khi import `faste
 | 26/10/2026 | Khối JSON kịch bản (dán 1 lần điền voice, card, labels, punch, publish, thumbnail) làm ở mốc riêng sau khi đóng M4, trước v1.0.0 (chỉ ghi, chưa làm) | Giảm công nhập tay từng trường |
 | 26/10/2026 | `caption_y` mặc định 1420 → 1400 (tâm khối chữ); giữ quy tắc đáy thẻ > 1100 thì 230 (IMPLEMENT 5.3) | Đo bằng Pillow: khối 2 dòng ở 1420 có đáy tới 1519, vượt vùng an toàn TikTok (y ≤ 1500); ở 1400 đáy tối đa 1499 |
 | 26/10/2026 | `library/music/index.json` vào `.prettierignore` (dữ liệu do app ghi) | Lint Prettier báo lỗi định dạng trên file app ghi |
+| 27/10/2026 | **Đóng M4 theo phạm vi máy cũ.** Lệch đặc tả đã duyệt: golden chỉ trên máy cũ (ĐẠT, xem bằng mắt/tai); ba việc của máy mới tách thành việc riêng, làm khi máy mới sẵn sàng, trên nhánh riêng tách từ `main`, không chặn M5: (1) kiểm đường CUDA thật (`large-v3`, `int8_float16`, nạp DLL b6); (2) `bench-align` trên máy mới (`small`/`medium`/`large-v3`, không prompt và có prompt); (3) golden máy mới (xem Xem nhanh cả video "muỗi"), rồi chốt mặc định Whisper cho máy mới | Máy mới đã chứng minh rơi đúng xuống CPU `small` khi CUDA lỗi; không để việc phần cứng chặn các mốc sau |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -199,5 +200,5 @@ vidia\*in` vào PATH của riêng tiến trình con, trước khi import `faste
 | M1 | ☑ | Chủ dự án duyệt có điều kiện 21/10/2026; các điều kiện đã làm xong · tag `v0.2.0`. Golden "muỗi": 50 fps, 1080×1920, −13,8 LUFS, có outro, dựng 148 s; 7 mốc cắt cảnh khớp bản đã đăng ≤ 4 ms, 40,3 s đúng, 27,0 s còn lệch nửa nhịp (Whisper ở M4) |
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
-| M4 | ☐ | |
+| M4 | ☑ | Xong 27/10/2026 theo phạm vi máy cũ, chờ chủ dự án duyệt (chưa merge, chưa tag). Kiểm chứng: 630 pytest + 95 Vitest, CI xanh, golden máy cũ ĐẠT (xem bằng mắt/tai). Lệch đặc tả đã duyệt: golden chỉ máy cũ; 1b CUDA thật, `bench-align` máy mới và golden máy mới tách thành việc riêng trên nhánh riêng từ `main`, không chặn M5 (Nhật ký 27/10) |
 
