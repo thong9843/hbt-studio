@@ -89,6 +89,29 @@ flowchart LR
 | **M3** · Giao diện | Danh sách project, trình soạn cảnh, nhạc, xuất video, xem video | 2,5 | Làm trọn 1 video chỉ bằng giao diện |
 | **M4** · Hoàn thiện | Whisper, kiểm tra từ nhạy cảm, sinh title/description, thư viện nhạc | 1,5 | Chủ dự án xem Xem nhanh cả video "muỗi" trên mỗi máy, không cụm nào thấy lệch; cảnh báo khi kịch bản có "bia", "máu"… |
 | **Tổng** | | **~8 buổi** | |
+| **M5** · Giao diện mới + khối JSON | Giao diện mới + khối JSON kịch bản (dán / thả file). Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0` | — | X1–X8 (mục "Mốc M5" dưới đây) |
+
+### Mốc M5 · Giao diện mới + khối JSON kịch bản
+
+Đặc tả: `IMPLEMENT.md` mục 13 và `DESIGN-HBT.md` v2.
+
+- **Mục tiêu:** giao diện trẻ trung, hiện đại, nút nổi bật, ít chữ; dán JSON kịch bản vào app thay cho `workspace/import_cards.py`.
+- **Lấy:** thanh trái cố định (có **Trang chủ**); trình soạn 2 cột nhập + xem trước 9:16 cố định; nút chính lớn cố định (Xem nhanh / Xuất bản đẹp), sáng khi đủ nguyên liệu; chọn bằng chip (fps, vị trí / cỡ / màu thẻ, series, nhạc có nút nghe); bộ đếm ký tự lời đọc (750) và từng dòng thẻ; thả nhiều ảnh một lần + màn trống có hướng dẫn; lịch sử dựng và lưới dự án có ảnh bìa + nhãn trạng thái; dòng ước tính thời gian dựng; hộp Dán JSON kịch bản; hiệu ứng tương tác nhẹ cho mọi thành phần; chế độ tối.
+- **Không lấy:** tín dụng / gói trả phí, AI viết lại (GĐ2), chợ template, chọn nền tảng Reddit/Threads (PostV).
+- **Giữ nguyên:** mục 3 (local, 3 điểm duyệt, kịch bản là nguồn chữ, không đổi tham số bản đẹp); không database, không đăng nhập; **không sửa `backend/hbt/pipeline/`** (giữ `PIPELINE_VERSION`).
+
+**Kiểm chứng M5 (tiêu chí xong):**
+
+| # | Tiêu chí |
+|---|---|
+| X1 | Làm trọn video "muỗi" trên giao diện mới, không mở terminal: thả 8 ảnh một lần, dán JSON thẻ chữ (dạng ngắn và dạng đầy đủ), Xem nhanh, Xuất bản đẹp |
+| X2 | `script/check` không ghi gì (mtime `project.json` giữ nguyên); `script/apply` tạo sao lưu, giữ tối đa 10; Hoàn tác đưa `project.json` về đúng dữ liệu trước khi áp |
+| X3 | Cùng một file JSON thẻ chữ của "muỗi": kết quả `scenes[].card/punch` giống `import_cards.py` |
+| X4 | Mọi thành phần bấm được có đủ trạng thái thường / hover / nhấn / focus / tắt (IMPLEMENT 13.B3); Tab đi hết màn, thấy vòng focus |
+| X5 | Hiệu năng: khi rảnh không có hoạt ảnh và không có request định kỳ (ngoài SSE lúc dựng); tuân luật 13.B3.2 |
+| X6 | `PIPELINE_VERSION` không đổi (cache cũ dùng lại được); `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (mốc so sánh là `v0.5.1`, đã sửa `render.py`; không còn là `b240e97`) |
+| X7 | Đủ chế độ sáng và tối ở mọi màn |
+| X8 | `npm run lint && npm run test` xanh; CI xanh; chủ dự án xem duyệt từng màn |
 
 ## 7. Rủi ro
 
@@ -179,6 +202,12 @@ flowchart LR
 | 26/10/2026 | `caption_y` mặc định 1420 → 1400 (tâm khối chữ); giữ quy tắc đáy thẻ > 1100 thì 230 (IMPLEMENT 5.3) | Đo bằng Pillow: khối 2 dòng ở 1420 có đáy tới 1519, vượt vùng an toàn TikTok (y ≤ 1500); ở 1400 đáy tối đa 1499 |
 | 26/10/2026 | `library/music/index.json` vào `.prettierignore` (dữ liệu do app ghi) | Lint Prettier báo lỗi định dạng trên file app ghi |
 | 27/10/2026 | **Đóng M4 theo phạm vi máy cũ.** Lệch đặc tả đã duyệt: golden chỉ trên máy cũ (ĐẠT, xem bằng mắt/tai); ba việc của máy mới tách thành việc riêng, làm khi máy mới sẵn sàng, trên nhánh riêng tách từ `main`, không chặn M5: (1) kiểm đường CUDA thật (`large-v3`, `int8_float16`, nạp DLL b6); (2) `bench-align` trên máy mới (`small`/`medium`/`large-v3`, không prompt và có prompt); (3) golden máy mới (xem Xem nhanh cả video "muỗi"), rồi chốt mặc định Whisper cho máy mới | Máy mới đã chứng minh rơi đúng xuống CPU `small` khi CUDA lỗi; không để việc phần cứng chặn các mốc sau |
+| 26/10/2026 | M5 = làm mới giao diện + khối JSON kịch bản, sau khi đóng M4, trước `v1.0.0` | Giảm công nhập tay; giao diện trẻ trung, ít chữ hơn |
+| 27/10/2026 | Duyệt bảng thay đổi 6 màn + mockup v2; **giao diện theo mockup v2, không bắt buộc theo DESIGN-HBT v1.1** → viết lại DESIGN-HBT.md v2; thêm màn Trang chủ | Mockup v2 được chủ dự án duyệt |
+| 27/10/2026 | Khối JSON: nhận cả dạng đầy đủ và mảng ngắn; lệch số cảnh xử lý theo IMPLEMENT 13.B4.5; dòng dài: cảnh báo theo ký tự + lỗi khi tràn thật (một từ đơn > 888 px, K6; dòng tự xuống hàng chỉ cảnh báo, K6b); hoàn tác trong phiên + 10 bản sao lưu; kiểm bằng API backend; trường lạ là lỗi (`ScriptIn` riêng với `extra="forbid"`, không đổi `models.py`) | Khớp `import_cards.py` (X3); không phá `PUT`/`load` đang dựa vào `extra="ignore"` |
+| 27/10/2026 | Mọi nút/ô/dòng có hiệu ứng hover/nhấn/focus, tối ưu nhẹ máy (IMPLEMENT 13.B3) | Giao diện mượt trên máy cũ |
+| 27/10/2026 | **O1** ước tính thời gian dựng = B′ (`jobs.py` ghi `render_seconds`, `align_cached` vào `meta.json`, không đổi `PIPELINE_VERSION`); **O2** tag M5 = `v0.6.0`; **O3** dưới 1280 px thanh trái thu còn biểu tượng, dưới 1024 px xem trước thành ngăn kéo | Không đụng pipeline, giữ cache cũ |
+| 27/10/2026 | Lưới dự án: `ProjectSummary` thêm `cover` (bìa lần dựng gần nhất có bìa) và `last_final` (bản đẹp mới nhất); nhãn "Đã xuất · fps" / "Đã xem nhanh" / "Chưa dựng" (IMPLEMENT 13.B2, 13.B6). Mốc "không đổi pipeline" của M5 là tag `v0.5.1`, không phải `b240e97` | `last_render` có thể là Xem nhanh 10 s không có bìa; `v0.5.1` đã sửa `render.py` |
 | 20/10/2026 | Phụ đề karaoke mặc định cho mọi video, căn bằng **faster-whisper** | Hết lệch 0,1–0,2 giây so với cách ước lượng cũ |
 | 20/10/2026 | Thương hiệu **HBT** (logo trong `brand/`), giao diện **học phong cách Nike** qua `DESIGN.md` | Đẹp, trực quan; không dùng tài sản thương hiệu Nike |
 | 20/10/2026 | Ghim `getdesign@0.6.20`, duyệt `DESIGN.md` trước khi commit | Giảm rủi ro chạy code và nội dung bên thứ ba |
@@ -200,4 +229,5 @@ flowchart LR
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
 | M4 | ☑ | Xong 27/10/2026 theo phạm vi máy cũ, chờ chủ dự án duyệt (chưa merge, chưa tag). Kiểm chứng: 630 pytest + 95 Vitest, CI xanh, golden máy cũ ĐẠT (xem bằng mắt/tai). Lệch đặc tả đã duyệt: golden chỉ máy cũ; 1b CUDA thật, `bench-align` máy mới và golden máy mới tách thành việc riêng trên nhánh riêng từ `main`, không chặn M5 (Nhật ký 27/10) |
+| M5 | ◐ | Đang làm từ 27/10/2026, nhánh `feat/m5-ui-json`, tag dự kiến `v0.6.0`. Đợt 0 (tài liệu) xong; Đợt 1–5 chưa làm (IMPLEMENT mục 11 "M5") |
 
