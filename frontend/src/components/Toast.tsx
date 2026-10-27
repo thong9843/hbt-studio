@@ -1,24 +1,33 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ToastContext, type ToastApi } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { describeError } from '../utils/errors';
 import { AlertIcon, CheckIcon, XIcon } from './icons';
+import { IconButton } from './ui/IconButton';
+import './ui/ui.css';
 
 interface Item {
   id: number;
   kind: 'info' | 'error';
   message: string;
   hint: string | null;
-  retry?: () => void;
+  action?: { label: string; run: () => void };
 }
 
-const SHOW_MS = 3000;
-const SHOW_ERROR_MS = 8000; // lỗi có gợi ý cần thời gian đọc hơn 3 giây
+export const TOAST_MS = 3000;
+export const TOAST_UNDO_MS = 8000; // thông báo có Hoàn tác cần thời gian bấm
+export const TOAST_ERROR_MS = 8000; // lỗi có gợi ý cần thời gian đọc hơn 3 giây
 
-/** Toast ở góc dưới phải (DESIGN-HBT.md mục 6). Lỗi có nút "Thử lại" nếu làm được. */
+/** Thông báo ở góc dưới phải: trượt lên 8 px + hiện 200 ms (DESIGN-HBT.md mục 6). */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Item[]>([]);
   const nextId = useRef(1);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const live = timers.current;
+    return () => live.forEach(clearTimeout);
+  }, []);
 
   const dismiss = useCallback((id: number) => setItems((xs) => xs.filter((x) => x.id !== id)), []);
 
@@ -26,17 +35,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (item: Omit<Item, 'id'>, ms: number) => {
       const id = nextId.current++;
       setItems((xs) => [...xs.slice(-3), { ...item, id }]);
-      setTimeout(() => dismiss(id), ms);
+      const t = setTimeout(() => {
+        timers.current.delete(t);
+        dismiss(id);
+      }, ms);
+      timers.current.add(t);
     },
     [dismiss],
   );
 
   const api: ToastApi = useMemo(
     () => ({
-      info: (message) => push({ kind: 'info', message, hint: null }, SHOW_MS),
+      info: (message, options) =>
+        push(
+          {
+            kind: 'info',
+            message,
+            hint: null,
+            action: options?.undo ? { label: vi.common.undo, run: options.undo } : undefined,
+          },
+          options?.undo ? TOAST_UNDO_MS : TOAST_MS,
+        ),
       error: (error, retry) => {
         const { message, hint } = describeError(error);
-        push({ kind: 'error', message, hint, retry }, SHOW_ERROR_MS);
+        push(
+          {
+            kind: 'error',
+            message,
+            hint,
+            action: retry ? { label: vi.common.retry, run: retry } : undefined,
+          },
+          TOAST_ERROR_MS,
+        );
       },
     }),
     [push],
@@ -50,9 +80,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-3 rounded-card p-4 shadow-lg ${
-              t.kind === 'error' ? 'bg-danger text-bg' : 'bg-primary text-on-primary'
-            }`}
+            className={`ui-toast pointer-events-auto ${t.kind === 'error' ? 'ui-toast-error' : ''}`}
           >
             <span className="mt-0.5 shrink-0">
               {t.kind === 'error' ? <AlertIcon /> : <CheckIcon />}
@@ -60,27 +88,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="min-w-0 flex-1 text-small">
               <p className="font-bold">{t.message}</p>
               {t.hint && <p className="mt-1 opacity-90">{t.hint}</p>}
-              {t.retry && (
+              {t.action && (
                 <button
                   type="button"
-                  className="mt-2 rounded-full border border-current px-3 py-1 font-bold"
+                  className="mt-2 min-h-9 rounded-full border border-current px-4 font-bold"
                   onClick={() => {
                     dismiss(t.id);
-                    t.retry?.();
+                    t.action?.run();
                   }}
                 >
-                  {vi.common.retry}
+                  {t.action.label}
                 </button>
               )}
             </div>
-            <button
-              type="button"
-              aria-label={vi.common.closeNotice}
-              className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+            <IconButton
+              label={vi.common.closeNotice}
+              small
+              className="-m-1 text-current"
               onClick={() => dismiss(t.id)}
             >
               <XIcon size={18} />
-            </button>
+            </IconButton>
           </div>
         ))}
       </div>
