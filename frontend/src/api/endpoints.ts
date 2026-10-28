@@ -67,7 +67,7 @@ export const api = {
 
   uploadAsset: (
     slug: string,
-    kind: 'image' | 'voice' | 'music',
+    kind: 'image' | 'cover' | 'voice' | 'music',
     file: File,
     sceneIndex?: number,
   ) => {

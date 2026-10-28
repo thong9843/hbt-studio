@@ -168,6 +168,135 @@ describe('Export tab: cover', () => {
   });
 });
 
+describe('Export tab: uploaded cover image', () => {
+  const DROP = 'Thả ảnh (PNG, JPG, WEBP) hoặc bấm để chọn';
+  const png = () => new File(['x'], 'bia.png', { type: 'image/png' });
+  const withImage = (image: string | null) => thumb({ image });
+
+  it('uploads a dropped image as kind=cover after saving the draft, then shows it', async () => {
+    const calls: string[] = [];
+    let form: FormData | undefined;
+    const base = thumb();
+    const { previews } = open({
+      thumbnail: base,
+      extra: {
+        'PUT /api/projects/muoi': (_u: string, init?: RequestInit) => {
+          calls.push('PUT');
+          return jsonResponse(JSON.parse(String(init?.body)));
+        },
+        'POST /api/projects/muoi/assets': (_u: string, init?: RequestInit) => {
+          calls.push('POST');
+          form = init?.body as FormData;
+          return jsonResponse({
+            kind: 'cover',
+            path: 'images/cover.png',
+            project: project({ thumbnail: withImage('images/cover.png') }),
+          });
+        },
+      },
+    });
+    const user = userEvent.setup();
+    await user.upload(await screen.findByLabelText(DROP), png());
+    await waitFor(() => expect(form).toBeDefined());
+    expect(form?.get('kind')).toBe('cover');
+    expect((form?.get('file') as File).name).toBe('bia.png');
+    expect(form?.get('scene_index')).toBeNull();
+    expect(calls.indexOf('PUT')).toBeLessThan(calls.indexOf('POST'));
+    const img = await screen.findByAltText('Ảnh bìa tải lên');
+    expect(img.getAttribute('src')).toMatch(/projects\/muoi\/images\/cover\.png\?v=1$/);
+    expect(screen.getByText('Đang dùng ảnh tải lên')).toBeInTheDocument();
+    expect(screen.getByLabelText('Đổi ảnh')).toBeInTheDocument();
+    await waitFor(() => expect(previews.length).toBeGreaterThan(1)); // vẽ lại bìa với ảnh mới
+    expect(previews.at(-1)?.thumbnail.image).toBe('images/cover.png');
+  });
+
+  it('keeps the typed lines when the upload response arrives', async () => {
+    open({
+      thumbnail: thumb(),
+      extra: {
+        'POST /api/projects/muoi/assets': () =>
+          jsonResponse({
+            kind: 'cover',
+            path: 'images/cover.png',
+            project: project({ thumbnail: withImage('images/cover.png') }),
+          }),
+      },
+    });
+    const user = userEvent.setup();
+    const first = await screen.findByLabelText('Dòng 1');
+    await user.upload(await screen.findByLabelText(DROP), png());
+    await screen.findByAltText('Ảnh bìa tải lên');
+    expect(first).toHaveValue('bạn có phải');
+  });
+
+  it('shows the uploaded image, disables the scene chips and explains why', async () => {
+    open({ thumbnail: withImage('images/cover.webp') });
+    expect(await screen.findByAltText('Ảnh bìa tải lên')).toBeInTheDocument();
+    expect(screen.getByText('Đang dùng ảnh tải lên, không dùng ảnh cảnh.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cảnh 2' })).toBeDisabled();
+    expect(screen.getByLabelText('Đổi ảnh')).toBeInTheDocument();
+  });
+
+  it('has no preview image and keeps the scene chips on while there is no upload', async () => {
+    open({ thumbnail: thumb() });
+    expect(await screen.findByLabelText(DROP)).toBeInTheDocument();
+    expect(screen.queryByAltText('Ảnh bìa tải lên')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cảnh 2' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Bỏ ảnh' })).not.toBeInTheDocument();
+  });
+
+  it('"Bỏ ảnh" saves image = null and brings the scene chips back', async () => {
+    const { saved } = open({ thumbnail: withImage('images/cover.png') });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Bỏ ảnh' }));
+    await waitFor(() => expect(saved.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect(saved.at(-1)?.thumbnail?.image).toBeNull();
+    expect(saved.at(-1)?.thumbnail?.lines).toEqual(['bạn có phải', 'người được', 'muỗi yêu?']);
+    expect(screen.queryByAltText('Ảnh bìa tải lên')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cảnh 2' })).toBeEnabled();
+    expect(screen.getByLabelText(DROP)).toBeInTheDocument();
+  });
+
+  it('shows the server refusal (400) and keeps the old state', async () => {
+    open({
+      thumbnail: thumb(),
+      extra: {
+        'POST /api/projects/muoi/assets': () =>
+          new Response(
+            JSON.stringify({
+              detail: 'Ảnh bìa quá nhỏ (300×400); cạnh ngắn cần từ 540 px trở lên',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          ),
+      },
+    });
+    const user = userEvent.setup();
+    await user.upload(await screen.findByLabelText(DROP), png());
+    expect(await screen.findByText(/cạnh ngắn cần từ 540 px/)).toBeInTheDocument();
+    expect(screen.queryByAltText('Ảnh bìa tải lên')).not.toBeInTheDocument();
+  });
+
+  it('rejects a file that is not an image without calling the server', async () => {
+    let posted = false;
+    open({
+      thumbnail: thumb(),
+      extra: {
+        'POST /api/projects/muoi/assets': () => {
+          posted = true;
+          return jsonResponse({});
+        },
+      },
+    });
+    const user = userEvent.setup({ applyAccept: false });
+    await user.upload(
+      await screen.findByLabelText(DROP),
+      new File(['x'], 'a.pdf', { type: 'application/pdf' }),
+    );
+    expect(await screen.findByText('Chỉ nhận một ảnh PNG, JPG hoặc WEBP.')).toBeInTheDocument();
+    expect(posted).toBe(false);
+  });
+});
+
 describe('Export tab: clean build files', () => {
   it('asks first, and cancelling does nothing', async () => {
     const { cleans } = open();
