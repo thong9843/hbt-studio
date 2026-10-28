@@ -113,6 +113,15 @@ flowchart LR
 | X7 | Đủ chế độ sáng và tối ở mọi màn |
 | X8 | `npm run lint && npm run test` xanh; CI xanh; chủ dự án xem duyệt từng màn |
 
+**Số test cuối Đợt 5 (máy cũ, 28/10/2026):**
+
+| Bộ | Kết quả |
+|---|---|
+| pytest (đầy đủ, gồm `slow`) | 743 passed (686 không `slow`) |
+| Vitest | 57 file, 743 test |
+| e2e Playwright (Edge) | 7/7 |
+| `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` | rỗng (X6); `PIPELINE_VERSION = 0112661f2845` |
+
 ## 7. Rủi ro
 
 | Rủi ro | Cách giảm |

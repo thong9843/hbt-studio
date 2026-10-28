@@ -462,6 +462,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 | POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
 | POST | `/projects/{slug}/build/clean` | dọn `build/` → `{before_bytes, after_bytes, freed_bytes, kept, failed}` |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
+| GET | `/jobs` | chỉ đọc: job đang chạy và đang chờ, cũ nhất trước: `[{id, slug, kind: preview|final, status: queued|running, progress, step}]` (giao diện gọi một lần khi mở app để nối lại thẻ tiến độ) |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
 | GET | `/jobs/{id}/events` | SSE: `event: progress` `data: {progress, step, message}` |
 | POST | `/jobs/{id}/cancel` | huỷ (kill tiến trình ffmpeg con) |
@@ -683,7 +684,7 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 - [x] **Đợt 3c:** Âm thanh (+ nút Sáng/Tối, sửa thẻ trống Trang chủ). Xong 28/10/2026 (quyết định ở 13.B10).
 - [x] **Đợt 3d:** Xuất video (lịch sử lưới, ước tính) + Cài đặt. Xong 28/10/2026 (quyết định ở 13.B11).
 - [x] **Đợt 4:** Hộp Dán JSON + menu Bản sao lưu. Xong 28/10/2026 (quyết định ở 13.B12).
-- [ ] **Đợt 5:** soát chế độ tối, Tab/focus, hiệu năng (13.B3.2 luật 9), e2e, `chore(M5): done`, rồi 6 bước đóng mốc.
+- [x] **Đợt 5:** xoá bí danh, Tab/focus, `GET /jobs` + nối lại job, cảnh báo rời Cài đặt, Button/`/dev/ui`, e2e. Xong 28/10/2026 (quyết định ở 13.B13); còn 6 bước đóng mốc.
 - **Xong khi:** tiêu chí X1–X8 ở PLAN.md mục "Kiểm chứng M5" đều đạt và chủ dự án duyệt từng màn.
 
 **Test cần có (M5):**
@@ -1006,3 +1007,15 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 7. **Test:** Vitest cho endpoints, `scriptDiff`, hộp Dán + Kiểm tra, Áp dụng (409/422/khoá/Hoàn tác), Bản sao lưu, test quét `script.legacy.test.ts` (không lớp cũ, không chữ tiếng Việt cứng trong JSX). E2E `e2e/script-json.spec.ts` (dự án `e2e-dan-json-…`, xoá cuối bài bằng `DELETE`): dán fixture `dao-phuc-sinh.cards.json` → Áp dụng → tải lại còn dữ liệu → Khôi phục bản trước. Sau đợt này e2e có 6 kịch bản.
 8. **Việc của chủ dự án:** xoá tay `workspace/import_cards.py` (nằm ngoài git).
 9. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) không có mockup `workspace/mockup/` cho hộp này, làm theo 13.B2 + 13.B4.6; (b) dòng "Giữ nguyên:" do giao diện suy ra (ảnh, file giọng, nhạc, cài đặt, tên & series luôn; nội dung đăng / ảnh bìa nếu JSON không đổi chúng), không phải backend trả; (c) Hoàn tác và Khôi phục đều tạo thêm một bản sao lưu `restore`, nên chiếm chỗ trong 10 bản; (d) mở lại trang giữa lúc đang dựng thì giao diện không biết job (chưa có API liệt kê job), chỉ dựa vào 409; (e) menu ⋯ mới có một mục; (f) `script/check` chạy mỗi lần bấm Kiểm tra hoặc chọn Thêm cảnh / Bỏ phần thừa, không chạy khi gõ (không poll); (g) CI của `4a88794` và các commit Đợt 4 chưa kiểm được (`gh` chưa đăng nhập).
+
+
+### 13.B13 Quyết định Đợt 5 (chủ dự án duyệt 28/10/2026)
+
+1. **Xoá bí danh** (13.B7.1): khối bí danh cuối `tokens.css`, các khoá `surface`, `surface-2`, `text-muted`, `border`, `brand-red`, `brand-cream`, `brand-ink`, `frame` trong `tailwind.config.ts`, và mọi lớp `.btn*` / `.input` / `.label` / `.card` / `.chip*` / `.spinner` cũ trong `index.css` (chỉ giữ `.num`). Không màu nào đổi giá trị: các lớp cũ không còn nơi dùng. Test `legacyAliases.test.ts` quét `frontend/src` + `tailwind.config.ts`, chỉ bắt đúng tên cũ (`bg-surface`, `text-text-muted`, `border-border`, `rounded-frame`, `var(--surface)`…), không bắt `border`, `border-line`, `text-muted`, `rounded-card`. `manifest.webmanifest` giữ `#f7eeda` (không phải token).
+2. **Tab/focus:** `Menu` giữ Tab/Shift+Tab trong menu khi đang mở (như mũi tên, thêm Home/End); Esc trả focus về nút ⋯. `Dialog`/`Drawer` đã giữ focus (`useModal`). Vòng focus toàn cục là `:focus-visible` trong `index.css`. E2E `e2e/focus.spec.ts` (kịch bản thứ 7): thứ tự Tab ở thanh trái, Dialog "Video mới", Menu ⋯ và hộp Bản sao lưu giữ focus bên trong, Esc trả focus về nút đã mở.
+3. **`GET /jobs`** (chỉ đọc, `JobManager.active()`): job đang chạy và đang chờ, cũ nhất trước: `{id, slug, kind: preview|final, status, progress, step}`. `RenderJobProvider` gọi **đúng một lần** khi mở app, nối lại SSE của job đang chạy (không có thì job đầu hàng), đặt `slug` để khoá ⋯ / Hoàn tác / Khôi phục / Dán JSON. Không đè job người dùng tự bắt đầu trước khi API trả lời; lỗi mạng thì bỏ qua (409 của máy chủ vẫn là lưới an toàn). Không đụng `pipeline/` hay `models.py`.
+4. **Cảnh báo rời Cài đặt** (`components/settings/LeaveGuard.tsx`): có thay đổi chưa Lưu thì đổi màn trong app → `ConfirmDialog` ("Ở lại" / "Rời đi"); đóng hoặc tải lại tab → `beforeunload`. Chỉ gắn khi có thay đổi, gỡ khi Lưu xong hoặc rời màn. Cần data router nên `main.tsx` dùng `createBrowserRouter` (một route `*` bọc `ToastProvider` + `App`; `App` giữ `<Routes>`). Chữ ở `vi.settings.leave`.
+5. **CLAUDE.md** nêu hai máy theo mục 0.
+6. **Button** luôn render `<button>`; liên kết dùng `<a class="ui-btn">` / `<Link className="ui-btn">` (test quét không truyền `href`/`to`/`as` vào `<Button>`). **`/dev/ui`** nhớ `data-theme` của app lúc mở và trả lại khi đóng (và ở chip "Theo hệ thống"), không xoá lựa chọn Sáng/Tối. Đóng mục (f) của 13.B10.9.
+7. **Số test cuối đợt** (máy cũ, 28/10/2026): pytest 743 passed (686 không `slow`); Vitest 57 file, 743 test; e2e 7/7. `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng; `PIPELINE_VERSION = 0112661f2845`.
+8. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) nếu có nhiều job (đang chờ), chỉ job đầu hàng được nối lại; khi nó xong thì khoá của job xếp sau chỉ còn dựa vào 409; (b) cảnh báo rời Cài đặt chỉ khi đổi đường dẫn (đổi tham số tìm kiếm không hỏi), "dirty" đặt khi có sửa và không tự bỏ nếu sửa về giá trị cũ; (c) chưa kiểm Esc khi hai hộp chồng nhau (vd Dán JSON + xác nhận); (d) `npm run e2e` chạy dựng Xem nhanh thật (FFmpeg) ở kịch bản export-settings; (e) CI của các commit Đợt 4–5 chưa kiểm được (`gh` chưa đăng nhập); (f) `library/music/index.json` vẫn sửa dở, không commit, không stash.
