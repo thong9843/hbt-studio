@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -129,6 +129,53 @@ describe('Drawer', () => {
     expect(screen.getByRole('dialog', { name: 'Xem trước' })).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('hộp chồng nhau', () => {
+  function Stacked() {
+    const [outer, setOuter] = useState(false);
+    const [inner, setInner] = useState(false);
+    return (
+      <>
+        <Button onClick={() => setOuter(true)}>Mở ngoài</Button>
+        <Dialog open={outer} onClose={() => setOuter(false)} title="Hộp ngoài">
+          <Button onClick={() => setInner(true)}>Mở trong</Button>
+          <Button>Việc khác</Button>
+        </Dialog>
+        <Dialog open={inner} onClose={() => setInner(false)} title="Hộp trong">
+          <Button>Đồng ý</Button>
+        </Dialog>
+      </>
+    );
+  }
+
+  it('Esc closes only the top dialog and returns focus to the button that opened it', async () => {
+    render(<Stacked />);
+    await userEvent.click(screen.getByRole('button', { name: 'Mở ngoài' }));
+    const openInner = screen.getByRole('button', { name: 'Mở trong' });
+    await userEvent.click(openInner);
+    expect(screen.getByRole('dialog', { name: 'Hộp trong' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Hộp trong' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Hộp ngoài' })).toBeInTheDocument();
+    expect(openInner).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Hộp ngoài' })).toBeNull());
+    expect(screen.getByRole('button', { name: 'Mở ngoài' })).toHaveFocus();
+  });
+
+  it('Tab stays inside the top dialog while two are open', async () => {
+    render(<Stacked />);
+    await userEvent.click(screen.getByRole('button', { name: 'Mở ngoài' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mở trong' }));
+    const inner = screen.getByRole('dialog', { name: 'Hộp trong' });
+    for (let i = 0; i < 5; i++) {
+      await userEvent.tab();
+      expect(inner.contains(document.activeElement)).toBe(true);
+    }
   });
 });
 

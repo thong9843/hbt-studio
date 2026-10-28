@@ -19,9 +19,13 @@ export function usePresence(open: boolean, ms = CLOSE_MS): { mounted: boolean; c
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+/** Các hộp đang mở, hộp trên cùng ở cuối: Esc và Tab chỉ tác động hộp trên cùng. */
+const openModals: object[] = [];
+
 /**
  * Hộp thoại và ngăn kéo: focus vào ô đầu, Tab xoay vòng trong hộp, Esc đóng,
- * đóng xong trả focus về phần tử đã mở nó.
+ * đóng xong trả focus về phần tử đã mở nó. Hai hộp chồng nhau: chỉ hộp trên cùng nhận Esc / Tab,
+ * hộp dưới giữ nguyên (kể cả focus) cho tới khi hộp trên đóng.
  */
 export function useModal(ref: RefObject<HTMLElement | null>, active: boolean, onClose: () => void) {
   const closeRef = useRef(onClose);
@@ -32,10 +36,13 @@ export function useModal(ref: RefObject<HTMLElement | null>, active: boolean, on
     const root = ref.current;
     if (!root) return;
     const opener = document.activeElement as HTMLElement | null;
+    const token = {};
+    openModals.push(token);
     const items = () => Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
     (root.querySelector<HTMLElement>('[data-autofocus]') ?? items()[0] ?? root).focus();
 
     const onKey = (e: KeyboardEvent) => {
+      if (openModals[openModals.length - 1] !== token) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current();
@@ -61,6 +68,8 @@ export function useModal(ref: RefObject<HTMLElement | null>, active: boolean, on
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      const at = openModals.indexOf(token);
+      if (at >= 0) openModals.splice(at, 1);
       opener?.focus?.();
     };
   }, [active, ref]);
