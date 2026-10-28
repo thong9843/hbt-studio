@@ -135,4 +135,31 @@ describe('Cài đặt: cảnh báo khi rời mà chưa Lưu', () => {
     await screen.findByText('Trang chủ mẫu');
     expect(beforeUnload()).toBe(false);
   });
+
+  it('is not dirty any more after editing back to the saved value', async () => {
+    const router = open();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '60 fps' }));
+    expect(beforeUnload()).toBe(true);
+    expect(screen.getByText('Chưa lưu')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '50 fps' }));
+    expect(beforeUnload()).toBe(false);
+    expect(screen.queryByText('Chưa lưu')).toBeNull();
+    await user.click(screen.getByRole('link', { name: 'Về trang chủ' }));
+    expect(await screen.findByText('Trang chủ mẫu')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  it('compares with the last saved value, not the first loaded one', async () => {
+    open();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '60 fps' }));
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+    expect(await screen.findByText('Đã lưu')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '50 fps' })); // khác bản vừa lưu (60)
+    expect(beforeUnload()).toBe(true);
+    await user.click(screen.getByRole('button', { name: '60 fps' }));
+    expect(beforeUnload()).toBe(false);
+  });
 });

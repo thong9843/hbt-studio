@@ -30,11 +30,29 @@ function toWords(groups: WordGroup[]): SensitiveWords {
   };
 }
 
+/** So sâu hai giá trị JSON (đối tượng, mảng, số, chuỗi); đủ cho cài đặt. */
+function isDeepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every(
+    (k) =>
+      Object.prototype.hasOwnProperty.call(b, k) &&
+      isDeepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  );
+}
+
 function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords }) {
   const queryClient = useQueryClient();
   const [value, setValue] = useState(app);
   const [groups, setGroups] = useState(() => toGroups(words));
-  const [dirty, setDirty] = useState(false);
+  // Giá trị đã lưu (nạp từ máy chủ, đổi sau mỗi lần Lưu thành công). "Chưa lưu" = đang soạn khác
+  // giá trị này (so sâu), nên sửa rồi trả về giá trị cũ thì không còn chưa lưu.
+  const [saved, setSaved] = useState(() => ({ app, words: toWords(toGroups(words)) }));
+  const dirty = !isDeepEqual(value, saved.app) || !isDeepEqual(toWords(groups), saved.words);
   // `useBlocker` chỉ chạy trong data router (main.tsx); test dùng MemoryRouter thì bỏ qua.
   const hasDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
   const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth() });
@@ -51,13 +69,12 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
     onSuccess: ({ savedApp, savedWords }) => {
       queryClient.setQueryData(['app-settings'], savedApp);
       queryClient.setQueryData(['sensitive-words'], savedWords);
-      setDirty(false);
+      setSaved({ app: savedApp, words: toWords(toGroups(savedWords)) });
     },
   });
 
   const change = (patch: Partial<AppSettings>) => {
     setValue((v) => ({ ...v, ...patch }));
-    setDirty(true);
     save.reset();
   };
 
@@ -78,7 +95,6 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         groups={groups}
         onChange={(next) => {
           setGroups(next);
-          setDirty(true);
           save.reset();
         }}
       />
