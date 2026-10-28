@@ -18,7 +18,7 @@ const TONE: Record<ProjectStatusKind, BadgeTone> = {
 };
 
 /** Ảnh thẻ; ảnh không tải được thì rơi về ô HBT đúng một lần (không thử lại). */
-function CardImage({ src }: { src: string | null }) {
+export function CardImage({ src }: { src: string | null }) {
   const [failed, setFailed] = useState<string | null>(null);
   if (src && failed !== src) {
     return (

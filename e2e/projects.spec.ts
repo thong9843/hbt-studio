@@ -8,7 +8,7 @@ test('tạo project, thêm 3 cảnh, lưu, tải lại vẫn đủ dữ liệu',
   const title = `E2E ${Date.now()}`;
   let slug = '';
   try {
-    await page.goto('/');
+    await page.goto('/projects');
     await page.getByRole('button', { name: vi.projects.create }).first().click();
     await page.getByLabel(vi.projects.dialog.name).fill(title);
     await page

@@ -35,7 +35,8 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
   return renderWithProviders(
     <Routes>
       <Route element={<AppShell render={render} />}>
-        <Route path="/" element={<ProjectsPage />} />
+        <Route path="/" element={<Where />} />
+        <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
@@ -120,12 +121,17 @@ describe('AppShell, wide (>= 1280 px)', () => {
     ).toBeInTheDocument();
   });
 
-  it('marks Projects as current at "/" and leaves Home unmarked until the Home screen exists', () => {
+  it('marks Home as current at "/" and Projects at "/projects"', () => {
     stubFetch(routes());
-    shell('/');
-    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Trang chủ' })).not.toHaveAttribute('aria-current');
+    const first = shell('/');
+    expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
+    first.unmount();
+    shell('/projects');
+    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('href', '/projects');
+    expect(screen.getByRole('link', { name: 'Trang chủ' })).not.toHaveAttribute('aria-current');
   });
 
   it('opens the new-video dialog from the red button, on any screen', async () => {

@@ -154,7 +154,7 @@ function EditorProvider({ initial }: { initial: Project }) {
     <ProjectEditorContext.Provider value={editor}>
       <main className="mx-auto max-w-[1280px] px-6 py-6">
         <div className="flex flex-wrap items-center gap-4">
-          <Link to="/" className="btn btn-ghost btn-sm">
+          <Link to="/projects" className="btn btn-ghost btn-sm">
             <ArrowLeftIcon size={18} />
             {vi.compose.back}
           </Link>
@@ -207,7 +207,7 @@ export function ComposePage() {
     return (
       <main className="mx-auto max-w-3xl px-6 py-10">
         <ErrorNote error={error} />
-        <Link to="/" className="btn btn-secondary mt-4">
+        <Link to="/projects" className="btn btn-secondary mt-4">
           {vi.compose.back}
         </Link>
       </main>

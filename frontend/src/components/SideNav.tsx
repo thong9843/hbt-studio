@@ -40,15 +40,12 @@ function NavItem({
   icon,
   label,
   mini,
-  current,
 }: {
   to: string;
   end?: boolean;
   icon: ReactNode;
   label: string;
   mini: boolean;
-  /** Ép trạng thái "đang chọn" (null = để NavLink tự suy). */
-  current?: boolean | null;
 }) {
   const body = (
     <>
@@ -57,13 +54,6 @@ function NavItem({
     </>
   );
   const cls = cx('ui-nav-item', mini && 'justify-center px-0');
-  if (current === false) {
-    return (
-      <Link to={to} className={cls} title={mini ? label : undefined}>
-        {body}
-      </Link>
-    );
-  }
   return (
     <NavLink to={to} end={end} className={cls} title={mini ? label : undefined}>
       {body}
@@ -197,9 +187,8 @@ export function SideNav({ mini, render }: Props) {
 
       <nav aria-label={vi.nav.main} className="mt-4 flex-1 overflow-y-auto">
         <div className="space-y-1">
-          {/* "Trang chủ" tạm trỏ về "/" (màn Trang chủ làm ở Đợt 3a), nên chưa đánh dấu đang chọn. */}
-          <NavItem to="/" current={false} icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
-          <NavItem to="/" end icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
+          <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
+          <NavItem to="/projects" icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
         </div>
         {slug && <OpenProject slug={slug} mini={mini} />}
         <div className="mt-2">

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
 import { PlusIcon } from '../components/icons';
 import { ProjectCard, ProjectCardSkeleton } from '../components/ProjectCard';
@@ -13,33 +14,6 @@ import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 
 const SKELETONS = [0, 1, 2, 3];
-
-function EmptyProjects({ onCreate }: { onCreate: () => void }) {
-  const t = vi.projects.empty;
-  return (
-    <div className="flex flex-col items-center gap-8 rounded-card bg-card px-6 py-16 text-center">
-      <img src="/brand/hbt-logo-mark.png" alt="" className="h-20 w-auto" />
-      <h2 className="text-hero font-extrabold uppercase">
-        <span className="block">{t.heroLine1}</span>
-        <span className="block">{t.heroLine2}</span>
-      </h2>
-      <p className="text-body text-muted">{t.lead}</p>
-      <Button tone="brand" size="lg" icon={<PlusIcon />} onClick={onCreate}>
-        {t.create}
-      </Button>
-      <ol className="mt-4 grid w-full max-w-[720px] grid-cols-1 gap-3 min-[640px]:grid-cols-3">
-        {t.steps.map((step, i) => (
-          <li key={step} className="ui-inner flex items-center gap-3 p-4 text-left">
-            <span className="num flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-small font-bold text-on-primary">
-              {i + 1}
-            </span>
-            <span className="text-small font-bold">{step}</span>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
 
 export function ProjectsPage() {
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
