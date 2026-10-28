@@ -86,7 +86,7 @@ describe('NewProjectDialog', () => {
     const create = created();
     stubFetch({ 'POST /api/projects': create });
     await openDialog(user);
-    const preset = screen.getByRole('button', { name: 'Vì sao Trái Đất…' });
+    const preset = screen.getByRole('button', { name: 'Vì sao Trái Đất' });
     await user.click(preset);
     expect(preset).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: '3' }));
@@ -97,10 +97,25 @@ describe('NewProjectDialog', () => {
     await screen.findByText('trang soạn');
     expect(JSON.parse(String(create.mock.calls[0][1]?.body))).toEqual({
       title: 'Bầu trời',
-      series: 'Vì sao Trái Đất…',
+      series: 'Vì sao Trái Đất',
       scene_count: 12,
     });
   });
+
+  it.each(['Vì Sao', 'Vì sao Trái Đất', 'Vì sao vậy ta?'])(
+    'chip "%s" stores exactly its own text as series (it is printed on the cover)',
+    async (label) => {
+      const user = userEvent.setup();
+      const create = created();
+      stubFetch({ 'POST /api/projects': create });
+      await openDialog(user);
+      await user.click(screen.getByRole('button', { name: label }));
+      await user.type(screen.getByLabelText('Tiêu đề'), 'X');
+      await user.click(screen.getByRole('button', { name: 'Tạo' }));
+      await screen.findByText('trang soạn');
+      expect(JSON.parse(String(create.mock.calls[0][1]?.body)).series).toBe(label);
+    },
+  );
 
   it('offers exactly the scene counts 3 to 12', async () => {
     const user = userEvent.setup();
