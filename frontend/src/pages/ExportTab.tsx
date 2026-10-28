@@ -7,7 +7,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { ThumbnailEditor } from '../components/ThumbnailEditor';
 import { AlertIcon, CopyIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
-import { ProgressBar } from '../components/ProgressBar';
+import { Progress } from '../components/ui/Progress';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { useRenderJob } from '../hooks/renderJob';
@@ -473,12 +473,12 @@ export function ExportTab() {
       {jobId && (
         <section className="space-y-4" aria-live="polite">
           <h2>{X.progress}</h2>
-          <ProgressBar
-            label={X.progress}
-            value={pct}
-            step={stepName}
-            message={running && mine ? rj.message : undefined}
-          />
+          <Progress value={pct} label={X.progress} />
+          <p className="text-small">
+            <span className="tabular-nums">{Math.round(pct)}%</span>
+            {stepName && <span> · {stepName}</span>}
+            {running && mine && rj.message && <span className="text-muted"> — {rj.message}</span>}
+          </p>
           {running && mine && (
             <button
               type="button"
