@@ -44,6 +44,9 @@ export function VoicePanel({ sceneIndex, voice, totalChars, onChange }: Props) {
           aria-label={T.label}
           rows={7}
           value={voice}
+          limit={VOICE_CHAR_LIMIT}
+          count={totalChars}
+          countTitle={T.totalBar}
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
@@ -59,16 +62,11 @@ export function VoicePanel({ sceneIndex, voice, totalChars, onChange }: Props) {
         </span>
       </div>
       <div className="ui-inner space-y-2 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-small font-bold tabular-nums">
-            {T.total(totalChars, VOICE_CHAR_LIMIT)}
-          </span>
-          {over && (
-            <Badge tone="yel" role="alert" title={T.overTitle}>
-              {T.over}
-            </Badge>
-          )}
-        </div>
+        {over && (
+          <Badge tone="yel" role="alert" title={T.overTitle}>
+            {T.over}
+          </Badge>
+        )}
         <Progress value={(totalChars / VOICE_CHAR_LIMIT) * 100} label={T.totalBar} />
       </div>
     </section>

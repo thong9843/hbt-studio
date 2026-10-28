@@ -29,7 +29,7 @@ describe('VoicePanel', () => {
   it('counts the scene characters the way the backend does and shows the whole-video bar', () => {
     render(<Voice initial="Muỗi | thích {100}" total={26} />);
     expect(screen.getByText('14 ký tự')).toBeInTheDocument();
-    expect(screen.getByText('Cả video 26/750')).toBeInTheDocument();
+    expect(screen.getByText('26/750')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Số ký tự lời đọc cả video' })).toHaveAttribute(
       'aria-valuenow',
       '3',

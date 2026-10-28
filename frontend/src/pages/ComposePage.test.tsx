@@ -81,7 +81,7 @@ describe('Compose page', () => {
     routes();
     page();
     await screen.findByLabelText('Lời đọc cảnh');
-    expect(screen.getByText('Cả video 26/750')).toBeInTheDocument();
+    expect(screen.getByText('26/750')).toBeInTheDocument();
   });
 
   it('draws the draft preview 600 ms after typing stops, not on every key', async () => {

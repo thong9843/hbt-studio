@@ -384,6 +384,30 @@ textarea.ui-input {
   font-weight: 600;
   color: var(--danger);
 }
+.ui-control {
+  position: relative;
+}
+/* Bộ đếm nằm trong ô: không che chữ nhờ padding, không chặn chuột. */
+.ui-input[data-counter] {
+  padding-right: 72px;
+}
+textarea.ui-input[data-counter] {
+  padding-right: 14px;
+  padding-bottom: 30px;
+}
+.ui-control > .ui-counter {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ui-control[data-kind='textarea'] > .ui-counter {
+  top: auto;
+  bottom: 8px;
+  right: 18px;
+  transform: none;
+}
 .ui-counter {
   font-size: 12px;
   font-variant-numeric: tabular-nums;

@@ -261,7 +261,6 @@ export const vi = {
       breakTitle: 'Chèn dấu | để ngắt cụm phụ đề',
       numberChip: 'Cách đọc số',
       numberTitle: 'Viết dạng 100{một trăm}: chữ hiện khác chữ đọc',
-      total: (n: number, limit: number) => `Cả video ${n}/${limit}`,
       totalBar: 'Số ký tự lời đọc cả video',
       over: 'Vượt 750 ký tự',
       overTitle: 'Vượt 750 ký tự, gói giọng đọc có thể không đủ',
