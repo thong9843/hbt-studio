@@ -126,6 +126,18 @@ describe('HomePage', () => {
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('/renders');
   });
 
+  it('"Lần xuất gần nhất" uses the fixed dark hero tokens, not the mode-dependent --primary', async () => {
+    stubFetch({
+      'GET /api/projects': [summary('muoi', 'Muỗi', { last_final: render() })],
+      'GET /api/projects/muoi': brief,
+    });
+    page();
+    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
+    expect(card).toHaveClass('bg-hero', 'text-on-hero');
+    expect(card).not.toHaveClass('bg-primary');
+    expect(card).not.toHaveClass('text-on-primary');
+  });
+
   it('shows "—" for build time on an old render and a notice when nothing was ever rendered', async () => {
     stubFetch({
       'GET /api/projects': [

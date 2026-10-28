@@ -31,6 +31,9 @@
   --on-danger: #ffffff;
   --danger-soft: #fdecea;
   --focus: #f4b630;
+  /* Thẻ nền tối cố định ở cả hai chế độ ("Lần xuất gần nhất"); không đảo theo --primary */
+  --hero: #16120f;
+  --on-hero: #ffffff;
 
   /* Bóng (mục 4); chế độ tối bỏ bóng, dùng viền --line */
   --shadow-card: 0 1px 2px rgba(22, 18, 15, 0.04), 0 8px 24px rgba(22, 18, 15, 0.05);

@@ -33,6 +33,8 @@ export default {
         'on-danger': 'var(--on-danger)',
         'danger-soft': 'var(--danger-soft)',
         focus: 'var(--focus)',
+        hero: 'var(--hero)',
+        'on-hero': 'var(--on-hero)',
         // Bí danh tên cũ (M3), xoá ở Đợt 5.
         surface: 'var(--surface)',
         'surface-2': 'var(--surface-2)',

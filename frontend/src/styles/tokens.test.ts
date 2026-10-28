@@ -150,6 +150,7 @@ const PAIRS: [string, string][] = [
   ['--muted', '--soft'],
   ['--muted', '--soft-2'],
   ['--on-primary', '--primary'],
+  ['--on-hero', '--hero'],
   ['--on-accent', '--accent'],
   ['--on-brand', '--brand'],
   ['--on-tint-red', '--tint-red'],
@@ -170,6 +171,17 @@ describe.each(['light', 'dark'] as const)('contrast (%s)', (theme) => {
       ratio,
       `${fg} ${get(fg)} / ${bg} ${get(bg)} = ${ratio.toFixed(2)}`,
     ).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('hero card tokens', () => {
+  it('stay dark in both modes (never follow --primary)', () => {
+    for (const dark of [darkMedia, darkAttr]) {
+      expect(dark['--hero']).toBeUndefined();
+      expect(dark['--on-hero']).toBeUndefined();
+    }
+    expect(resolver('dark')('--hero')).toBe(resolver('light')('--hero'));
+    expect(luminance(resolver('dark')('--hero'))).toBeLessThan(0.05);
   });
 });
 

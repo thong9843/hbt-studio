@@ -112,7 +112,7 @@ function LastExport({ project, render }: { project: ProjectSummary; render: Rend
   return (
     <section
       aria-label={t.title}
-      className="flex flex-col gap-4 rounded-card bg-primary p-6 text-on-primary"
+      className="flex flex-col gap-4 rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
     >
       <p className="text-tiny font-semibold opacity-80">{vi.home.lastExport}</p>
       <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
