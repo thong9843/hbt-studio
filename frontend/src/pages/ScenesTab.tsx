@@ -12,6 +12,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Drawer } from '../components/ui/Drawer';
 import { IconButton } from '../components/ui/IconButton';
+import { useEstimateLine } from '../hooks/useEstimates';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { useImageDrop } from '../hooks/useImageDrop';
@@ -109,6 +110,7 @@ export function ScenesTab() {
       scenes: p.scenes.map((s, i) => (i === index ? fn(s) : s)),
     }));
 
+  const estimateLine = useEstimateLine(project);
   const action = primaryActionState(project);
   const preview = (
     <PreviewPane
@@ -121,7 +123,10 @@ export function ScenesTab() {
       blockedReason={action.enabled ? undefined : action.reason}
       onPrev={() => setSelected(Math.max(0, index - 1))}
       onNext={() => setSelected(Math.min(count - 1, index + 1))}
-      onGoExport={() => navigate(`/p/${project.slug}/export`)}
+      estimate={estimateLine}
+      onGoExport={(auto) =>
+        navigate(`/p/${project.slug}/export`, auto ? { state: { auto } } : undefined)
+      }
     />
   );
 

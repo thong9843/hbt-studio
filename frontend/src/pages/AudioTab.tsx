@@ -9,6 +9,7 @@ import { PreviewPane } from '../components/compose/PreviewPane';
 import { EyeIcon } from '../components/icons';
 import { Button } from '../components/ui/Button';
 import { Drawer } from '../components/ui/Drawer';
+import { useEstimateLine } from '../hooks/useEstimates';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { vi } from '../i18n/vi';
@@ -38,6 +39,7 @@ export function AudioTab() {
 
   const count = project.scenes.length;
   const index = Math.min(selected, count - 1);
+  const estimateLine = useEstimateLine(project);
   const action = primaryActionState(project);
   const preview = (
     <PreviewPane
@@ -50,7 +52,10 @@ export function AudioTab() {
       blockedReason={action.enabled ? undefined : action.reason}
       onPrev={() => setSelected(Math.max(0, index - 1))}
       onNext={() => setSelected(Math.min(count - 1, index + 1))}
-      onGoExport={() => navigate(`/p/${project.slug}/export`)}
+      estimate={estimateLine}
+      onGoExport={(auto) =>
+        navigate(`/p/${project.slug}/export`, auto ? { state: { auto } } : undefined)
+      }
     />
   );
 

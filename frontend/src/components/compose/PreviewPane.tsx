@@ -25,12 +25,14 @@ interface Props {
   blockedReason?: string;
   onPrev: () => void;
   onNext: () => void;
-  /** Chuyển sang tab Xuất video (Đợt 3b không tự dựng). */
-  onGoExport: () => void;
+  /** Dòng ước tính thời gian dựng (từ lịch sử `/renders`); bỏ trống = để trống chỗ. */
+  estimate?: string;
+  /** Chuyển sang tab Xuất video; `auto: 'preview'` = Xem nhanh tự dựng ở đó, bản đẹp chỉ chuyển tab. */
+  onGoExport: (auto?: 'preview') => void;
 }
 
 /**
- * Cột 3: hai nút chính, chỗ cho dòng ước tính (Đợt 3d), khung 9:16 xem trước vẽ lại 600 ms sau khi
+ * Cột 3: hai nút chính, dòng ước tính, khung 9:16 xem trước vẽ lại 600 ms sau khi
  * ngừng gõ (huỷ yêu cầu cũ), nút Vùng an toàn và ‹ n/N ›.
  */
 export function PreviewPane({
@@ -41,6 +43,7 @@ export function PreviewPane({
   theme,
   imageVersion,
   blockedReason,
+  estimate,
   onPrev,
   onNext,
   onGoExport,
@@ -95,7 +98,7 @@ export function PreviewPane({
           className="w-full"
           disabled={off}
           reason={blockedReason}
-          onClick={onGoExport}
+          onClick={() => onGoExport('preview')}
         >
           {T.fast}
         </Button>
@@ -105,15 +108,13 @@ export function PreviewPane({
           className="w-full"
           disabled={off}
           reason={blockedReason}
-          onClick={onGoExport}
+          onClick={() => onGoExport()}
         >
           {T.final}
         </Button>
-        {/* Chỗ cho dòng ước tính thời gian dựng (Đợt 3d). */}
-        <p
-          data-slot="estimate"
-          className="min-h-5 text-center text-small tabular-nums text-muted"
-        />
+        <p data-slot="estimate" className="min-h-5 text-center text-small tabular-nums text-muted">
+          {estimate}
+        </p>
       </div>
 
       <div className="ui-frame mx-auto">

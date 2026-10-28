@@ -30,6 +30,12 @@ export const vi = {
       network: 'Hãy chạy npm run dev rồi tải lại trang.',
     },
   },
+  estimate: {
+    waiting: 'Đang ước tính…',
+    remaining: (time: string) => `Còn ≈ ${time}`,
+    line: (fast: string, final: string, fps: number) =>
+      `Xem nhanh ≈ ${fast} · Bản đẹp ${fps} fps ≈ ${final}`,
+  },
   nav: {
     home: 'Trang chủ',
     projects: 'Dự án',
@@ -43,6 +49,7 @@ export const vi = {
     env: 'Trạng thái môi trường',
     renderProgress: 'Đang dựng',
     renderProgressBar: 'Tiến độ dựng',
+    cancelRender: 'Huỷ',
     theme: {
       light: 'Sáng',
       dark: 'Tối',

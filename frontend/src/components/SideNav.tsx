@@ -17,6 +17,7 @@ import {
   SunIcon,
   UploadIcon,
 } from './icons';
+import { Button } from './ui/Button';
 import { Progress } from './ui/Progress';
 import { cx } from './ui/cx';
 import './ui/ui.css';
@@ -27,6 +28,10 @@ const ENV_ITEMS = ['ffmpeg', 'whisper', 'gpu'] as const satisfies readonly (keyo
 export interface RenderProgress {
   percent: number;
   step: string;
+  /** Dòng "Còn ≈ …" hoặc "Đang ước tính…"; bỏ trống = không hiện. */
+  remaining?: string;
+  /** Có thì hiện nút Huỷ. */
+  onCancel?: () => void;
 }
 
 interface Props {
@@ -174,6 +179,16 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
         {render.step && <span> · {render.step}</span>}
       </p>
       <Progress value={render.percent} label={vi.nav.renderProgressBar} />
+      {(render.remaining || render.onCancel) && (
+        <p className="mt-2 flex items-center justify-between gap-2 text-tiny text-muted">
+          <span className="tabular-nums">{render.remaining}</span>
+          {render.onCancel && (
+            <Button tone="soft" size="sm" onClick={render.onCancel}>
+              {vi.nav.cancelRender}
+            </Button>
+          )}
+        </p>
+      )}
     </div>
   );
 }

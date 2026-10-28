@@ -31,7 +31,12 @@ const file = (name: string) => new File(['x'], name, { type: 'image/png' });
 const HEADING = 'Cảnh 1 · Thẻ chữ';
 
 function Where() {
-  return <output data-testid="where">{useLocation().pathname}</output>;
+  const l = useLocation();
+  return (
+    <output data-testid="where" data-auto={(l.state as { auto?: string } | null)?.auto ?? ''}>
+      {l.pathname}
+    </output>
+  );
 }
 
 function setup(initial: Project, extra: Record<string, unknown> = {}) {
@@ -130,7 +135,7 @@ describe('Soạn video — luồng', () => {
     expect(fast).toHaveAttribute('title', 'Thiếu ảnh cảnh 3 · Thiếu giọng đọc');
   });
 
-  it('when ready, Xem nhanh only switches to the export tab (no render started)', async () => {
+  it('when ready, Xem nhanh switches to the export tab asking it to build, but starts no render itself', async () => {
     const ready = project({
       voice: 'voice.wav',
       scenes: [scene({ image: 'a.png' }), scene({ image: 'b.png' }), scene({ image: 'c.png' })],
@@ -140,7 +145,45 @@ describe('Soạn video — luồng', () => {
     await screen.findByRole('heading', { name: HEADING });
     await user.click(screen.getByRole('button', { name: 'Xem nhanh' }));
     expect(screen.getByTestId('where')).toHaveTextContent('/p/muoi/export');
-    expect(JSON.stringify(mock.mock.calls)).not.toMatch(/\/render"|\/renders/);
+    expect(screen.getByTestId('where')).toHaveAttribute('data-auto', 'preview');
+    expect(mock.mock.calls.some(([u]) => String(u).endsWith('/render'))).toBe(false);
+  });
+
+  it('Xuất bản đẹp only switches tab: no auto flag', async () => {
+    const ready = project({
+      voice: 'voice.wav',
+      scenes: [scene({ image: 'a.png' }), scene({ image: 'b.png' }), scene({ image: 'c.png' })],
+    });
+    setup(ready);
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: HEADING });
+    await user.click(screen.getByRole('button', { name: 'Xuất bản đẹp' }));
+    expect(screen.getByTestId('where')).toHaveTextContent('/p/muoi/export');
+    expect(screen.getByTestId('where')).toHaveAttribute('data-auto', '');
+  });
+
+  it('shows the estimate line from the render history, requested once', async () => {
+    const ready = project({ voice: 'voice.wav', scenes: [scene({ image: 'a.png' })] });
+    const { mock } = setup(ready, {
+      'GET /api/projects/muoi/renders': [
+        {
+          job_id: 'j1',
+          preview: false,
+          preview_seconds: null,
+          fps: 50,
+          duration: 50,
+          render_seconds: 100,
+          created_at: '2026-10-23T10:00:00Z',
+        },
+      ],
+    });
+    await screen.findByRole('heading', { name: HEADING });
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="estimate"]')).toHaveTextContent(
+        'Xem nhanh ≈ 40 giây · Bản đẹp 50 fps ≈ 1 phút 40 giây',
+      ),
+    );
+    expect(mock.mock.calls.filter(([u]) => String(u).endsWith('/renders'))).toHaveLength(1);
   });
 
   it('renames the project from the header and autosaves', async () => {

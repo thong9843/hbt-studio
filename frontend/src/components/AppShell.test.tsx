@@ -241,6 +241,44 @@ describe('render progress card', () => {
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
+  it('shows "Đang ước tính…" at 0%, then "Còn ≈ …" and a Huỷ button that cancels', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    const mock = stubFetch({
+      ...routes(),
+      'POST /api/projects/muoi/render': { job_id: 'j1' },
+      'POST /api/jobs/j1/cancel': { id: 'j1', status: 'cancelled' },
+    });
+    function Starter() {
+      const rj = useRenderJob();
+      return (
+        <button type="button" onClick={() => void rj.start('muoi', { preview: true }, 100)}>
+          go
+        </button>
+      );
+    }
+    renderWithProviders(
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Starter />} />
+        </Route>
+      </Routes>,
+      '/',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'go' }));
+    const card = await screen.findByRole('status', { name: 'Đang dựng' });
+    expect(card).toHaveTextContent('Đang ước tính…');
+    act(() =>
+      FakeEventSource.instances[0].emit('progress', { progress: 25, step: 'Ghép', message: '' }),
+    );
+    expect(card).toHaveTextContent('Còn ≈ 1 phút 15 giây');
+    await userEvent.click(within(card).getByRole('button', { name: 'Huỷ' }));
+    expect(mock).toHaveBeenCalledWith(
+      '/api/jobs/j1/cancel',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('collapses to a bare bar with a tooltip in mini mode', () => {
     renderWithProviders(<RenderCard mini render={{ percent: 70, step: 'Mã hoá' }} />);
     expect(screen.queryByRole('status')).toBeNull();
