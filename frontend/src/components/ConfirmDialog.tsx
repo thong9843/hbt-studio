@@ -6,6 +6,8 @@ interface Props {
   title: string;
   message: string;
   confirmLabel: string;
+  /** Mặc định "Huỷ". */
+  cancelLabel?: string;
   danger?: boolean;
   busy?: boolean;
   onConfirm: () => void;
@@ -17,6 +19,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
+  cancelLabel,
   danger,
   busy,
   onConfirm,
@@ -31,7 +34,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button tone="soft" data-autofocus onClick={onCancel}>
-            {vi.common.cancel}
+            {cancelLabel ?? vi.common.cancel}
           </Button>
           <Button tone={danger ? 'danger' : 'ink'} disabled={busy} onClick={onConfirm}>
             {confirmLabel}

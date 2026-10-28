@@ -596,7 +596,10 @@ textarea.ui-input {
   .ui-chip,
   .ui-icon-btn,
   .ui-card-link,
-  .ui-nav-item {
+  .ui-nav-item,
+  .ui-scene,
+  .ui-scene-img,
+  .ui-scene-add {
     transform: none !important;
   }
   .ui-switch::after {
@@ -612,4 +615,146 @@ textarea.ui-input {
   .ui-progress-bar {
     transition: none;
   }
+}
+
+/* ---- Soạn video: dải cảnh (thẻ ~120: ảnh 54×96, số cảnh) ---- */
+.ui-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+  border: 2px dashed transparent;
+  border-radius: var(--radius-card);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+/* Khi kéo file vào: nền --tint-yel + viền vàng nét đứt (tĩnh) */
+.ui-strip[data-active='true'] {
+  background: var(--tint-yel);
+  border-color: var(--accent);
+}
+.ui-scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  width: 66px;
+  height: 124px;
+  padding: 6px 6px 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  outline: 3px solid transparent;
+  transition:
+    outline-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-scene[aria-current='true'] {
+  outline-color: var(--accent);
+}
+.ui-scene[data-dragging='true'] {
+  z-index: 10;
+  opacity: 0.9;
+  transform: translateY(-4px);
+}
+/* Chỗ thả: vạch vàng ở mép trái */
+.ui-scene[data-over='true']::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ui-scene:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-scene-img {
+  position: relative;
+  width: 54px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-scene:hover .ui-scene-img {
+    transform: scale(1.04);
+  }
+}
+.ui-scene-no {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ui-scene-grip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text-2);
+  cursor: grab;
+  opacity: 0.85;
+  transition: opacity var(--dur) var(--ease);
+}
+.ui-scene-grip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  opacity: 1;
+}
+.ui-scene-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 66px;
+  height: 124px;
+  border: 2px dashed var(--line-input);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-scene-add:not(:disabled):hover {
+    background: var(--soft);
+  }
+}
+.ui-scene-add:not(:disabled):active {
+  transform: scale(0.97);
+}
+.ui-scene-add:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-scene-add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
