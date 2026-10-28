@@ -219,6 +219,16 @@ export interface Job {
   preview_seconds: number | null;
 }
 
+/** Một dòng của `GET /jobs`: job đang chạy hoặc đang chờ. */
+export interface ActiveJob {
+  id: string;
+  slug: string;
+  kind: 'preview' | 'final';
+  status: 'queued' | 'running';
+  progress: number;
+  step: string;
+}
+
 export interface RenderOptions {
   preview?: boolean;
   /** Xem nhanh chỉ dựng chừng này giây đầu; bỏ trống = cả video. */

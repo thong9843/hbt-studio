@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api/endpoints';
 import type { Job, RenderOptions } from '../api/types';
 import { RenderJobContext, type RenderJobApi } from '../hooks/renderJob';
@@ -49,6 +49,29 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  // Mở app (hoặc tải lại trang) khi backend vẫn đang dựng: hỏi `GET /jobs` đúng một lần rồi nối lại
+  // SSE của job đầu hàng. Không poll (13.B3.2 luật 6); lỗi mạng thì bỏ qua, 409 của máy chủ vẫn chặn.
+  const resumed = useRef(false);
+  const jobIdRef = useRef(jobId);
+  jobIdRef.current = jobId;
+  useEffect(() => {
+    if (resumed.current) return;
+    resumed.current = true;
+    api
+      .listActiveJobs()
+      .then((rows) => {
+        const head = Array.isArray(rows)
+          ? (rows.find((r) => r.status === 'running') ?? rows[0])
+          : null;
+        if (!head || jobIdRef.current !== null) return; // người dùng đã tự bắt đầu một job
+        setSlug(head.slug);
+        setOptions({ preview: head.kind === 'preview' });
+        setFinished(null);
+        setJobId(head.id);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const cancel = useCallback(() => cancelJob(), [cancelJob]);
 

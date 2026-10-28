@@ -117,4 +117,15 @@ describe('BackupsDialog (menu ⋯ → Bản sao lưu)', () => {
     expect((await screen.findAllByText(/đang được dựng/)).length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Tiêu đề')).toHaveValue('Muỗi');
   });
+
+  it('locks Khôi phục after a page reload while the backend is still rendering (GET /jobs)', async () => {
+    const { dialog } = await openBackups({
+      'GET /api/jobs': [
+        { id: 'j9', slug: 'muoi', kind: 'final', status: 'running', progress: 20, step: 'Ghép' },
+      ],
+    });
+    const buttons = await within(dialog).findAllByRole('button', { name: 'Khôi phục' });
+    await waitFor(() => buttons.forEach((b) => expect(b).toBeDisabled()));
+    expect(within(dialog).getByText('Đang dựng, đợi xong hoặc huỷ job rồi khôi phục')).toBeTruthy();
+  });
 });

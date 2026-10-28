@@ -68,4 +68,60 @@ describe('RenderJobProvider', () => {
     expect(result.current.running).toBe(false);
     expect(FakeEventSource.instances).toHaveLength(0);
   });
+
+  describe('nối lại job sau khi mở / tải lại trang', () => {
+    const active = (id: string, status: string, kind = 'final') => ({
+      id,
+      slug: 'muoi',
+      kind,
+      status,
+      progress: 35,
+      step: 'Ghép cảnh',
+    });
+
+    it('asks GET /jobs once, reattaches SSE of the running job and never polls', async () => {
+      const fetchMock = stubFetch({
+        'GET /api/jobs': [active('q2', 'queued'), active('j1', 'running', 'preview')],
+      });
+      const { result } = renderHook(() => useRenderJob(), { wrapper });
+      await waitFor(() => expect(result.current.running).toBe(true));
+      expect(result.current.slug).toBe('muoi');
+      expect(result.current.jobId).toBe('j1');
+      expect(result.current.options.preview).toBe(true);
+      expect(FakeEventSource.instances.map((i) => i.url)).toEqual(['/api/jobs/j1/events']);
+
+      await new Promise((r) => setTimeout(r, 60));
+      const listCalls = fetchMock.mock.calls.filter(([u]) => String(u) === '/api/jobs');
+      expect(listCalls).toHaveLength(1);
+    });
+
+    it('stays idle when nothing is running or the request fails', async () => {
+      stubFetch({ 'GET /api/jobs': [] });
+      const idle = renderHook(() => useRenderJob(), { wrapper });
+      await new Promise((r) => setTimeout(r, 40));
+      expect(idle.result.current.running).toBe(false);
+      expect(FakeEventSource.instances).toHaveLength(0);
+      idle.unmount();
+
+      stubFetch({}); // GET /api/jobs → 599
+      const broken = renderHook(() => useRenderJob(), { wrapper });
+      await new Promise((r) => setTimeout(r, 40));
+      expect(broken.result.current.running).toBe(false);
+      expect(FakeEventSource.instances).toHaveLength(0);
+    });
+
+    it('does not override a job the user starts before GET /jobs answers', async () => {
+      let release: (rows: unknown) => void = () => undefined;
+      const slow = new Promise((r) => (release = r));
+      stubFetch({
+        'GET /api/jobs': async () => Response.json(await slow),
+        'POST /api/projects/muoi/render': { job_id: 'mine' },
+      });
+      const { result } = renderHook(() => useRenderJob(), { wrapper });
+      await act(() => result.current.start('muoi', {}));
+      release([active('old', 'running')]);
+      await new Promise((r) => setTimeout(r, 40));
+      expect(result.current.jobId).toBe('mine');
+    });
+  });
 });
