@@ -4,11 +4,13 @@ import { Link, Outlet, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { Project } from '../api/types';
 import { PublishDrawer } from '../components/compose/PublishDrawer';
+import { BackupsDialog } from '../components/script/BackupsDialog';
 import { PasteJsonDialog } from '../components/script/PasteJsonDialog';
 import { ErrorNote } from '../components/ErrorNote';
-import { ArrowLeftIcon } from '../components/icons';
+import { ArrowLeftIcon, MoreIcon } from '../components/icons';
 import { SaveIndicator } from '../components/SaveIndicator';
 import { Button } from '../components/ui/Button';
+import { Menu } from '../components/ui/Menu';
 import { Input } from '../components/ui/Field';
 import { ProjectEditorContext, type ProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
@@ -150,6 +152,7 @@ function EditorProvider({ initial }: { initial: Project }) {
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [backupsOpen, setBackupsOpen] = useState(false);
   return (
     <ProjectEditorContext.Provider value={editor}>
       <main className="mx-auto max-w-[1440px] px-6 py-5">
@@ -177,12 +180,24 @@ function EditorProvider({ initial }: { initial: Project }) {
           <Button tone="soft" size="sm" onClick={() => setPublishOpen(true)}>
             {vi.compose.publishPanel.open}
           </Button>
+          <Menu
+            label={vi.script.menu}
+            icon={<MoreIcon size={20} />}
+            items={[
+              {
+                key: 'backups',
+                label: vi.script.backups.menu,
+                onSelect: () => setBackupsOpen(true),
+              },
+            ]}
+          />
         </header>
         <div className="mt-5">
           <Outlet />
         </div>
         <PublishDrawer open={publishOpen} onClose={() => setPublishOpen(false)} />
         <PasteJsonDialog open={pasteOpen} onClose={() => setPasteOpen(false)} />
+        <BackupsDialog open={backupsOpen} onClose={() => setBackupsOpen(false)} />
       </main>
     </ProjectEditorContext.Provider>
   );

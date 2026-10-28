@@ -313,6 +313,7 @@ export const vi = {
     pickFile: 'Chọn file .json',
     dropFile: 'Thả file .json vào đây',
     notJsonFile: 'Chỉ nhận file .json',
+    readFailed: 'Không đọc được file',
     check: 'Kiểm tra',
     checking: 'Đang kiểm…',
     back: 'Sửa JSON',
