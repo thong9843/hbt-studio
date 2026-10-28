@@ -2,278 +2,100 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
-import type { AppSettings, Fps, SensitiveCategory, SensitiveWords } from '../api/types';
+import type { AppSettings, SensitiveWords } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { SaveIndicator } from '../components/SaveIndicator';
-import { useAutosave } from '../hooks/useAutosave';
+import { FpsCard, HEX, ThemeCard, WhisperCard } from '../components/settings/GeneralCards';
+import { WordsCard, type WordGroup } from '../components/settings/WordsCard';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
+import { Skeleton } from '../components/ui/Skeleton';
 import { vi } from '../i18n/vi';
 
 const S = vi.settings;
-const HEX = /^#[0-9a-fA-F]{6}$/;
-const FPS: Fps[] = [30, 50, 60];
-const MODELS: AppSettings['whisper_model'][] = ['auto', 'small', 'medium', 'large-v3'];
 
-/** Dòng giải thích Whisper sẽ chạy thế nào trên máy này (health.gpu / health.whisper). */
-function whisperNote(health: { gpu: boolean; whisper: boolean } | undefined): string {
-  const G = S.general;
-  if (!health) return G.whisperNoteUnknown;
-  if (!health.whisper) return G.whisperNoteMissing;
-  return health.gpu ? G.whisperNoteGpu : G.whisperNoteCpu;
+function toGroups(words: SensitiveWords): WordGroup[] {
+  return words.categories.map((c, i) => ({ ...c, key: `c${i}` }));
 }
 
-function GeneralSection({ initial }: { initial: AppSettings }) {
+function toWords(groups: WordGroup[]): SensitiveWords {
+  return {
+    categories: groups.map((g) => ({
+      id: g.id,
+      level: g.level,
+      words: g.words.map((w) => w.trim()).filter(Boolean),
+      hint: g.hint,
+    })),
+  };
+}
+
+function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords }) {
   const queryClient = useQueryClient();
-  const [value, setValue] = useState(initial);
-  const { status, error, schedule } = useAutosave(async (v: AppSettings) => {
-    const saved = await api.saveAppSettings(v);
-    queryClient.setQueryData(['app-settings'], saved);
+  const [value, setValue] = useState(app);
+  const [groups, setGroups] = useState(() => toGroups(words));
+  const [dirty, setDirty] = useState(false);
+  const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth() });
+
+  const validColors = HEX.test(value.theme.primary) && HEX.test(value.theme.accent);
+  const save = useMutation({
+    mutationFn: async () => {
+      const [savedApp, savedWords] = await Promise.all([
+        api.saveAppSettings(value),
+        api.saveSensitiveWords(toWords(groups)),
+      ]);
+      return { savedApp, savedWords };
+    },
+    onSuccess: ({ savedApp, savedWords }) => {
+      queryClient.setQueryData(['app-settings'], savedApp);
+      queryClient.setQueryData(['sensitive-words'], savedWords);
+      setDirty(false);
+    },
   });
 
   const change = (patch: Partial<AppSettings>) => {
-    const next = { ...value, ...patch };
-    setValue(next);
-    // Màu chưa đủ #RRGGBB thì chưa gửi lên máy chủ.
-    if (HEX.test(next.theme.primary) && HEX.test(next.theme.accent)) schedule(next);
+    setValue((v) => ({ ...v, ...patch }));
+    setDirty(true);
+    save.reset();
   };
 
-  const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth() });
-  const slow = value.whisper_model === 'medium' || value.whisper_model === 'large-v3';
-  const G = S.general;
   return (
-    <section className="space-y-5">
-      <div className="flex items-center gap-4">
-        <h2>{G.title}</h2>
-        <SaveIndicator status={status} error={error} />
+    <form
+      className="space-y-[18px]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (validColors) save.mutate();
+      }}
+    >
+      <div className="grid gap-[18px] min-[900px]:grid-cols-2">
+        <FpsCard value={value} onChange={change} />
+        <ThemeCard value={value} onChange={change} />
       </div>
-      <div className="grid gap-5 sm:grid-cols-2">
-        <div>
-          <label className="label" htmlFor="set-fps">
-            {G.fps}
-          </label>
-          <select
-            id="set-fps"
-            className="input"
-            value={value.default_fps}
-            onChange={(e) => change({ default_fps: Number(e.target.value) as Fps })}
-          >
-            {FPS.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div />
-        {(
-          [
-            ['primary', G.primary],
-            ['accent', G.accent],
-          ] as const
-        ).map(([key, text]) => (
-          <div key={key}>
-            <label className="label" htmlFor={`set-${key}`}>
-              {text}
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                aria-label={text}
-                className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-border bg-bg p-0.5"
-                value={HEX.test(value.theme[key]) ? value.theme[key] : '#000000'}
-                onChange={(e) =>
-                  change({ theme: { ...value.theme, [key]: e.target.value.toUpperCase() } })
-                }
-              />
-              <input
-                id={`set-${key}`}
-                className="input font-mono"
-                maxLength={7}
-                value={value.theme[key]}
-                onChange={(e) => change({ theme: { ...value.theme, [key]: e.target.value } })}
-              />
-            </div>
-          </div>
-        ))}
-        <div>
-          <label className="label" htmlFor="set-whisper">
-            {G.whisperModel}
-          </label>
-          <select
-            id="set-whisper"
-            className="input"
-            value={value.whisper_model}
-            onChange={(e) =>
-              change({ whisper_model: e.target.value as AppSettings['whisper_model'] })
-            }
-          >
-            {MODELS.map((m) => (
-              <option key={m} value={m}>
-                {m === 'auto' ? G.whisperAuto : m}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label" htmlFor="set-timeout">
-            {G.whisperTimeout}
-          </label>
-          <input
-            id="set-timeout"
-            type="number"
-            min={30}
-            max={7200}
-            className="input"
-            value={value.whisper_timeout_seconds}
-            onChange={(e) =>
-              change({
-                whisper_timeout_seconds: Math.min(
-                  7200,
-                  Math.max(30, Number(e.target.value) || 900),
-                ),
-              })
-            }
-          />
-        </div>
-      </div>
-      {slow && (
-        <p
-          role="note"
-          className="rounded-input bg-warn-bg px-4 py-2 text-small font-bold text-warn"
-        >
-          {G.whisperSlowWarning}
-        </p>
-      )}
-      <p className="text-small text-text-muted">{whisperNote(health.data)}</p>
-    </section>
-  );
-}
-
-function WordsSection({ initial }: { initial: SensitiveWords }) {
-  const W = S.words;
-  const queryClient = useQueryClient();
-  // Mỗi nhóm giữ ô văn bản riêng để gõ xuống dòng thoải mái.
-  const [categories, setCategories] = useState(
-    initial.categories.map((c) => ({ ...c, text: c.words.join('\n') })),
-  );
-  const save = useMutation({
-    mutationFn: () => {
-      const body: SensitiveWords = {
-        categories: categories.map<SensitiveCategory>(({ text, ...c }) => ({
-          ...c,
-          words: text
-            .split('\n')
-            .map((w) => w.trim())
-            .filter(Boolean),
-        })),
-      };
-      return api.saveSensitiveWords(body);
-    },
-    onSuccess: (saved) => queryClient.setQueryData(['sensitive-words'], saved),
-  });
-  const patch = (i: number, p: Partial<(typeof categories)[number]>) =>
-    setCategories((cs) => cs.map((c, k) => (k === i ? { ...c, ...p } : c)));
-
-  return (
-    <section className="space-y-5">
-      <h2>{W.title}</h2>
-      <p className="text-small text-text-muted">{W.help}</p>
-      <ul className="space-y-4">
-        {categories.map((c, i) => (
-          <li key={i} className="card space-y-3 p-4">
-            <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
-              <div>
-                <label className="label" htmlFor={`sw-id-${i}`}>
-                  {W.id}
-                </label>
-                <input
-                  id={`sw-id-${i}`}
-                  className="input font-mono"
-                  value={c.id}
-                  onChange={(e) => patch(i, { id: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label" htmlFor={`sw-level-${i}`}>
-                  {W.level}
-                </label>
-                <select
-                  id={`sw-level-${i}`}
-                  className="input"
-                  value={c.level}
-                  onChange={(e) =>
-                    patch(i, { level: e.target.value as SensitiveCategory['level'] })
-                  }
-                >
-                  {(['info', 'warn', 'block'] as const).map((l) => (
-                    <option key={l} value={l}>
-                      {W.levels[l]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm self-end"
-                onClick={() => setCategories((cs) => cs.filter((_, k) => k !== i))}
-              >
-                {W.removeCategory}
-              </button>
-            </div>
-            <div>
-              <label className="label" htmlFor={`sw-words-${i}`}>
-                {W.list}
-              </label>
-              <textarea
-                id={`sw-words-${i}`}
-                rows={4}
-                className="input"
-                value={c.text}
-                onChange={(e) => patch(i, { text: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor={`sw-hint-${i}`}>
-                {W.hint}
-              </label>
-              <input
-                id={`sw-hint-${i}`}
-                className="input"
-                value={c.hint}
-                onChange={(e) => patch(i, { hint: e.target.value })}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
+      <WhisperCard value={value} onChange={change} health={health.data} />
+      <WordsCard
+        groups={groups}
+        onChange={(next) => {
+          setGroups(next);
+          setDirty(true);
+          save.reset();
+        }}
+      />
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() =>
-            setCategories((cs) => [
-              ...cs,
-              { id: `nhom_${cs.length + 1}`, level: 'warn', words: [], hint: '', text: '' },
-            ])
-          }
+        <Button
+          type="submit"
+          tone="ink"
+          size="lg"
+          busy={save.isPending}
+          disabled={!validColors}
+          reason={validColors ? undefined : S.invalidColor}
         >
-          + {W.addCategory}
-        </button>
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={save.isPending}
-          onClick={() => save.mutate()}
-        >
-          {W.save}
-        </button>
-        {save.isSuccess && (
-          <span role="status" className="chip chip-ok">
-            {W.saved}
-          </span>
-        )}
+          {S.save}
+        </Button>
+        <span role="status" aria-live="polite">
+          {save.isSuccess && <Badge tone="ok">{S.saved}</Badge>}
+          {dirty && !save.isSuccess && !save.isPending && <Badge tone="yel">{S.dirty}</Badge>}
+        </span>
       </div>
       <ErrorNote error={save.error} />
-    </section>
+    </form>
   );
 }
 
@@ -295,18 +117,16 @@ export function SettingsPage() {
   }, [app.data, words.data]);
 
   return (
-    <main className="mx-auto max-w-3xl space-y-12 px-6 py-10">
-      <h1>{S.title}</h1>
+    <main className="mx-auto max-w-3xl space-y-6 px-6 py-8">
+      <h1 className="text-h1 font-extrabold uppercase">{S.title}</h1>
       <ErrorNote error={app.error ?? words.error} />
       {!ready && !app.error && !words.error && (
-        <p className="text-text-muted">{vi.common.loading}</p>
+        <div role="status" aria-label={vi.common.loading} className="space-y-4">
+          <Skeleton height={96} />
+          <Skeleton height={160} />
+        </div>
       )}
-      {ready && app.data && words.data && (
-        <>
-          <GeneralSection initial={app.data} />
-          <WordsSection initial={words.data} />
-        </>
-      )}
+      {ready && app.data && words.data && <SettingsForm app={app.data} words={words.data} />}
     </main>
   );
 }
