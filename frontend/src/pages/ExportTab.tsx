@@ -157,16 +157,18 @@ export function ExportTab() {
   const firstImage = project.scenes[0]?.image;
   const fallbackImage = firstImage ? projectFileUrl(slug, firstImage) : null;
 
-  // Đang xem: dòng lịch sử được chọn, không thì job vừa xong của dự án này.
+  // Đang xem: dòng lịch sử được chọn, không thì job vừa xong của dự án này, không thì lần xuất mới
+  // nhất trong lịch sử (nên tải lại trang vẫn còn trình phát và nút tải).
   const out = finished?.status === 'done' ? finished.output : null;
-  const media: Media | null = played?.video
+  const shown = played?.video ? played : !out ? (history.find((r) => r.video) ?? null) : null;
+  const media: Media | null = shown?.video
     ? {
-        key: played.job_id,
-        video: played.video,
-        srt: played.srt,
-        cover: played.cover,
-        youtube_cover: played.youtube_cover,
-        publish: played.publish,
+        key: shown.job_id,
+        video: shown.video,
+        srt: shown.srt,
+        cover: shown.cover,
+        youtube_cover: shown.youtube_cover,
+        publish: shown.publish,
       }
     : out && finished
       ? {
@@ -178,8 +180,8 @@ export function ExportTab() {
           publish: out.publish,
         }
       : null;
-  const info = played ? recordInfo(played) : finished ? jobInfo(finished) : null;
-  const currentId = played?.job_id ?? (finished?.status === 'done' ? finished.id : null);
+  const info = shown ? recordInfo(shown) : finished ? jobInfo(finished) : null;
+  const currentId = shown?.job_id ?? (finished?.status === 'done' ? finished.id : null);
 
   const pct = finished?.progress ?? (mine ? rj.percent : 0);
   const stepName = finished?.step ?? (mine ? rj.step : '');
@@ -258,6 +260,29 @@ export function ExportTab() {
               {X.finalLabel(finalFps)}
             </Button>
           </div>
+          {media && (
+            <div
+              role="group"
+              aria-label={X.downloads}
+              data-slot="downloads"
+              className="flex flex-wrap gap-2"
+            >
+              <DownloadLink href={media.video} file="video.mp4" label={X.result.video} />
+              {media.srt && (
+                <DownloadLink href={media.srt} file="captions.srt" label={X.result.srt} />
+              )}
+              {media.cover && (
+                <DownloadLink href={media.cover} file="cover_9x16.jpg" label={X.result.cover} />
+              )}
+              {media.youtube_cover && (
+                <DownloadLink
+                  href={media.youtube_cover}
+                  file="youtube_3x2.jpg"
+                  label={X.result.youtubeCover}
+                />
+              )}
+            </div>
+          )}
           {reason && (
             <p className="flex items-center gap-2 text-small font-bold text-danger">
               <AlertIcon size={18} />
@@ -334,36 +359,15 @@ export function ExportTab() {
 
         <Card as="section" className="space-y-3">
           {media ? (
-            <>
-              <div className="ui-frame mx-auto overflow-hidden bg-black">
-                <video
-                  key={media.key}
-                  controls
-                  aria-label={X.player}
-                  className="h-full w-full bg-black object-contain"
-                  src={media.video}
-                />
-              </div>
-              <div className="space-y-2">
-                <p className="ui-label !mb-0">{X.downloads}</p>
-                <div className="flex flex-wrap gap-2">
-                  <DownloadLink href={media.video} file="video.mp4" label={X.result.video} />
-                  {media.srt && (
-                    <DownloadLink href={media.srt} file="captions.srt" label={X.result.srt} />
-                  )}
-                  {media.cover && (
-                    <DownloadLink href={media.cover} file="cover_9x16.jpg" label={X.result.cover} />
-                  )}
-                  {media.youtube_cover && (
-                    <DownloadLink
-                      href={media.youtube_cover}
-                      file="youtube_3x2.jpg"
-                      label={X.result.youtubeCover}
-                    />
-                  )}
-                </div>
-              </div>
-            </>
+            <div className="ui-frame mx-auto overflow-hidden bg-black">
+              <video
+                key={media.key}
+                controls
+                aria-label={X.player}
+                className="h-full w-full bg-black object-contain"
+                src={media.video}
+              />
+            </div>
           ) : (
             <p className="text-small text-muted">{X.noPlayer}</p>
           )}

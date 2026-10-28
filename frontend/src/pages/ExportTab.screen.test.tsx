@@ -272,3 +272,74 @@ describe('Xuất video: lịch sử dạng lưới', () => {
     expect(screen.queryByRole('link', { name: 'Tải captions.srt' })).toBeNull();
   });
 });
+
+describe('Xuất video: nút tải nằm trong khung Xuất', () => {
+  const j1 = '/api/files/projects/muoi/renders/j1';
+
+  it('puts the download buttons in the same card as "Xuất bản đẹp", right below the render buttons', async () => {
+    open({ renders: [record({ job_id: 'j1' })] });
+    const final = await screen.findByRole('button', { name: /Xuất bản đẹp 50fps/ });
+    const card = final.closest('section') as HTMLElement;
+    const group = await within(card).findByRole('group', { name: 'Tải về' });
+    expect(within(group).getByRole('link', { name: 'Tải video.mp4' })).toBeInTheDocument();
+    expect(within(group).getByRole('link', { name: 'Tải captions.srt' })).toBeInTheDocument();
+    expect(within(group).getByRole('link', { name: 'Tải cover_9x16.jpg' })).toBeInTheDocument();
+    // Sau nút Xuất bản đẹp trong cùng khung; nút tải là nút phụ (không vàng), nút chính vẫn là vàng.
+    expect(final.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const a of within(group).getAllByRole('link')) {
+      expect(a.tagName).toBe('A');
+      expect(a).toHaveClass('ui-btn', 'ui-btn-soft');
+      expect(a).not.toHaveClass('ui-btn-accent');
+    }
+    expect(final).toHaveClass('ui-btn-accent');
+  });
+
+  it('has no second download block under the player', async () => {
+    open({ renders: [record({ job_id: 'j1' })] });
+    await screen.findByLabelText('Trình phát video đã dựng');
+    expect(screen.getAllByRole('link', { name: 'Tải video.mp4' })).toHaveLength(1);
+    expect(screen.getAllByRole('group', { name: 'Tải về' })).toHaveLength(1);
+    const player = screen.getByLabelText('Trình phát video đã dựng').closest('section')!;
+    expect(within(player).queryByRole('link')).toBeNull();
+  });
+
+  it('survives a page reload: the newest render is shown with the right /files links', async () => {
+    open({
+      renders: [
+        record({ job_id: 'j1' }),
+        record({
+          job_id: 'j0',
+          created_at: '2026-10-22T10:00:00Z',
+          video: '/api/files/projects/muoi/renders/j0/video.mp4',
+        }),
+      ],
+    });
+    const link = await screen.findByRole('link', { name: 'Tải video.mp4' });
+    expect(link).toHaveAttribute('href', `${j1}/video.mp4`);
+    expect(screen.getByRole('link', { name: 'Tải captions.srt' })).toHaveAttribute(
+      'href',
+      `${j1}/captions.srt`,
+    );
+    expect(screen.getByRole('link', { name: 'Tải cover_9x16.jpg' })).toHaveAttribute(
+      'href',
+      `${j1}/cover_9x16.jpg`,
+    );
+    expect(screen.getByLabelText('Trình phát video đã dựng')).toHaveAttribute(
+      'src',
+      `${j1}/video.mp4`,
+    );
+  });
+
+  it('hides the buttons of files that do not exist (no cover, no srt)', async () => {
+    open({ renders: [record({ job_id: 'j1', cover: null, srt: null })] });
+    await screen.findByRole('link', { name: 'Tải video.mp4' });
+    expect(screen.queryByRole('link', { name: 'Tải cover_9x16.jpg' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Tải captions.srt' })).toBeNull();
+  });
+
+  it('shows no download group before anything was rendered', async () => {
+    open({ renders: [] });
+    await screen.findByRole('button', { name: /Xuất bản đẹp 50fps/ });
+    expect(screen.queryByRole('group', { name: 'Tải về' })).toBeNull();
+  });
+});
