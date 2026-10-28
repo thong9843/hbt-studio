@@ -810,3 +810,35 @@ textarea.ui-input {
   opacity: 0;
   cursor: pointer;
 }
+
+/* ---- Khung xem trước 9:16 và lớp Vùng an toàn (lớp phủ tĩnh, không hoạt ảnh) ---- */
+.ui-frame {
+  position: relative;
+  width: 288px;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: var(--radius-preview);
+  background: var(--soft);
+}
+.ui-safe {
+  position: absolute;
+  background: var(--scrim);
+  pointer-events: none;
+}
+.ui-safe-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  border-bottom: 2px dashed var(--accent);
+}
+.ui-safe-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed var(--accent);
+}
+.ui-safe-right {
+  right: 0;
+  border-left: 2px dashed var(--accent);
+}
