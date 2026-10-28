@@ -680,7 +680,7 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 - [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
 - [x] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới. Xong 28/10/2026 (quyết định ở 13.B8).
 - [x] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn). Xong 28/10/2026 (quyết định ở 13.B9).
-- [ ] **Đợt 3c:** Âm thanh.
+- [x] **Đợt 3c:** Âm thanh (+ nút Sáng/Tối, sửa thẻ trống Trang chủ). Xong 28/10/2026 (quyết định ở 13.B10).
 - [ ] **Đợt 3d:** Xuất video (lịch sử lưới, ước tính) + Cài đặt.
 - [ ] **Đợt 4:** Hộp Dán JSON + menu Bản sao lưu.
 - [ ] **Đợt 5:** soát chế độ tối, Tab/focus, hiệu năng (13.B3.2 luật 9), e2e, `chore(M5): done`, rồi 6 bước đóng mốc.
@@ -969,3 +969,16 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 8. **Đổi thứ tự khi đang dựng:** API trả 409 thì hiện Toast kèm gợi ý và nút Thử lại.
 9. **Thanh trái 72 px dưới 1280 px** đã làm ở Đợt 2 (`AppShell`), Đợt 3b không thêm commit riêng.
 10. **Backlog:** bản thu nhỏ `?w=` cho ảnh cảnh ở dải (luật 13.B3.2 mục 7), hiện dùng ảnh gốc với `loading="lazy"` `decoding="async"`; màn cũ không có "nhân bản cảnh" nên Đợt 3b không thêm; dọn khoá i18n cũ (`compose.tabs`, `compose.editor`…).
+
+### 13.B10 Quyết định Đợt 3c (chủ dự án duyệt 28/10/2026)
+
+1. **Nút Sáng/Tối** ở đáy thanh trái (trên chấm Môi trường). Chữ và biểu tượng là **chế độ hiện tại** (Sáng + mặt trời / Tối + trăng); `aria-pressed` = đang tối; `aria-label` "Đổi sang chế độ tối/sáng"; thu 72 px chỉ còn biểu tượng (có `title`). Lần đầu theo `prefers-color-scheme` và **không ghi gì**; bấm rồi thì ghi `localStorage['hbt-theme']` (`light` | `dark`, bọc `try/catch`) và đặt `data-theme` trên `<html>` (dùng lại khối `[data-theme]` của `tokens.css`). Script chặn nhỏ trong `<head>` của `index.html` đặt `data-theme` trước lần vẽ đầu, chịu được `localStorage` ném lỗi. Test: `themeBoot.test.ts` (thứ tự script, khoá, lỗi lưu trữ), `ThemeToggle.test.tsx`.
+2. **Khối trống cạnh "Tiếp tục làm"** (hiện khi chưa có lần xuất nào, chữ "Chưa có lần xuất nào") dùng `bg-hero text-on-hero` như thẻ "Lần xuất gần nhất"; test lớp và test tương phản `--on-hero`/`--hero` ≥ 4,5:1 cả hai chế độ.
+3. **Màn Âm thanh** (`pages/AudioTab.tsx` + `components/audio/*`), bố cục 3 cột `1fr 1fr 300px`: [Giọng đọc + Điểm bắt đầu nhạc] · [Nhạc nền] · `PreviewPane` dùng lại của Soạn video (‹ n/N ›); dưới 1024 px thành ngăn kéo. Xem nhanh / Xuất bản đẹp chỉ chuyển sang tab Xuất video. Không dùng `.btn`/`.input`/`.card` (test quét `AudioTab.legacy.test.ts`).
+4. **Giọng đọc:** trình phát; khi lần dựng gần nhất có `trimmed_tail` thì hiện nhãn "Đã cắt đuôi" + nút Nghe (phát file qua `/api/files`); chưa dựng lần nào hoặc không cắt thì ẩn. Ô "Cắt đuôi tại giây" (`voice.trim_end`) và vùng thả giọng mới giữ như cũ.
+5. **Điểm bắt đầu nhạc:** chip Tự chọn / Đặt tay (Tự chọn = `music.start = null`). "Lần trước: giây X" + Nghe + **Dùng** chỉ khi lần dựng gần nhất có `music_start_source = "auto"` và `music_matches_current`; **Dùng** chuyển sang Đặt tay và điền X. Thiếu dữ liệu thì ẩn dòng (bỏ các câu giải thích dài của bản cũ).
+6. **Nhạc nền:** danh sách bài từ `GET /music` (▶, tên, tác giả · nguồn, nhãn tâm trạng, Chọn / Đang dùng); chip lọc tâm trạng lấy từ `moods` **đã có** trong `index.json` và **ẩn khi không bài nào có `moods`**; "Đang dùng" suy từ `music.credit` = `Tên – Tác giả (Nguồn)` (dạng backend tự điền); chip **Không nhạc**; ô Ghi công; **Tải nhạc** = hộp tải file từ máy (không tải từ mạng) rồi dùng luôn.
+7. **Nghe thử:** một đoạn phát tại một thời điểm (bắt đầu đoạn mới thì dừng đoạn cũ); `<audio preload="none">`, không tải trước. Lịch sử dựng (`/renders`) lấy đúng một lần khi mở màn, không poll.
+8. **Không làm (thuộc 3d):** "Còn ≈ … · Huỷ", nối thẻ tiến độ, ước tính. Chip "Ý MỚI" của mockup là ghi chú, không vẽ.
+9. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) không thấy `workspace/mockup/audio.png`, màn làm theo 13.B2 + bổ sung của chủ dự án; (b) `/renders` không trả `trimmed_tail_seconds` (chỉ job trả) nên nhãn "Đã cắt đuôi" chưa có số giây, thêm cần sửa backend; (c) "Đang dùng" suy từ chuỗi ghi công nên mất khi người dùng sửa ô Ghi công; (d) chưa có trường "bài đang dùng" trong `project.json`; (e) khối cần sửa màu ở Trang chủ không có chữ "Có thể bạn muốn", đã áp cho khối trống cạnh "Tiếp tục làm" (nền `bg-primary` cũ); (f) trang `/dev/ui` gỡ `data-theme` khi đóng nên có thể làm mất chế độ đã chọn trong phiên dev.
+
