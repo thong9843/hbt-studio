@@ -26,12 +26,13 @@ function Host() {
   );
 }
 
-function setup(initial: Project) {
+function setup(initial: Project, renders: unknown[] = []) {
   const mock = stubFetch({
     'GET /api/projects/muoi': initial,
     'PUT /api/projects/muoi': (_u: string, init?: RequestInit) =>
       new Response(String(init?.body), { headers: { 'Content-Type': 'application/json' } }),
     'POST /api/projects/muoi/thumbnail/preview.jpg': jpg,
+    'GET /api/projects/muoi/renders': renders,
   });
   renderWithProviders(
     <Routes>
@@ -58,12 +59,34 @@ describe('PublishDrawer ("Bìa & đăng")', () => {
     expect(state().publish).toEqual({ hook: 'Bạn biết chưa?', hashtags: ['muoi', 'khoahoc'] });
   });
 
-  it('keeps the thumbnail editor: add, lines, scene chip, remove — without download links', async () => {
+  it('offers both cover files from the newest render that has them', async () => {
+    setup(project({ thumbnail: { scene: 1, lines: ['A', 'B'], series: '', accent: '#FFD43B' } }), [
+      { job_id: 'new', created_at: '2026-10-02T10:00:00Z', cover: null, youtube_cover: null },
+      {
+        job_id: 'old',
+        created_at: '2026-10-01T10:00:00Z',
+        cover: '/api/files/projects/muoi/renders/old/cover_9x16.jpg',
+        youtube_cover: '/api/files/projects/muoi/renders/old/youtube_3x2.jpg',
+      },
+    ]);
+    const drawer = await screen.findByRole('dialog', { name: 'Bìa & đăng' });
+    const jpg916 = await within(drawer).findByRole('link', { name: /cover_9x16\.jpg/ });
+    expect(jpg916).toHaveAttribute('href', '/api/files/projects/muoi/renders/old/cover_9x16.jpg');
+    expect(jpg916).toHaveAttribute('download', 'cover_9x16.jpg');
+    expect(within(drawer).getByRole('link', { name: /youtube_3x2\.jpg/ })).toBeInTheDocument();
+  });
+
+  it('says there is no cover file yet when no render has one', async () => {
+    setup(project({ thumbnail: { scene: 1, lines: ['A', 'B'], series: '', accent: '#FFD43B' } }));
+    const drawer = await screen.findByRole('dialog', { name: 'Bìa & đăng' });
+    expect(await within(drawer).findByText(/Chưa có file ảnh bìa/)).toBeInTheDocument();
+    expect(within(drawer).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('keeps the thumbnail editor: add, lines, scene chip, remove', async () => {
     const user = userEvent.setup();
     setup(project());
     const drawer = await screen.findByRole('dialog', { name: 'Bìa & đăng' });
-    expect(within(drawer).queryByRole('link')).not.toBeInTheDocument();
-    expect(within(drawer).queryByText(/Chưa có file ảnh bìa/)).not.toBeInTheDocument();
     await user.click(within(drawer).getByRole('button', { name: 'Thêm ảnh bìa' }));
     await user.type(within(drawer).getByLabelText('Dòng 1'), 'MUỖI');
     await user.type(within(drawer).getByLabelText('Dòng 2'), 'THÍCH BẠN');

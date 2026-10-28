@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useProjectEditor } from '../../hooks/projectEditor';
+import { useLatestCovers } from '../../hooks/useCovers';
 import { vi } from '../../i18n/vi';
 import { parseHashtags } from '../../utils/hashtags';
 import { ThumbnailEditor } from '../ThumbnailEditor';
@@ -39,12 +40,18 @@ function PostFields() {
   );
 }
 
-/** Ngăn kéo "Bìa & đăng" từ thanh đầu: ảnh bìa (ThumbnailEditor) và câu mở đầu + hashtag. */
+/**
+ * Ngăn kéo "Bìa & đăng" từ thanh đầu: ảnh bìa (ThumbnailEditor, có nút tải hai file từ lần dựng
+ * gần nhất có bìa) và câu mở đầu + hashtag.
+ */
 export function PublishDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { project } = useProjectEditor();
+  // Chỉ lấy lịch sử dựng khi ngăn kéo mở, để màn Soạn video lúc rảnh không thêm request.
+  const covers = useLatestCovers(project.slug, open);
   return (
     <Drawer open={open} onClose={onClose} title={T.title} wide>
       <div className="space-y-8">
-        <ThumbnailEditor />
+        <ThumbnailEditor covers={covers} />
         <PostFields />
       </div>
     </Drawer>
