@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,8 @@ from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
+DELETE_ATTEMPTS = 5  # xoá project: số lần thử khi Windows còn giữ file
+DELETE_RETRY_SECONDS = 0.1
 KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
 RENDER_ID_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -287,7 +290,21 @@ class Storage:
         folder = self.project_dir(slug)
         if not (folder / "project.json").is_file():
             raise NotFound(f"Không có project '{slug}'")
-        shutil.rmtree(folder)
+        # Windows: file vừa ghi/đang đọc (vd ảnh xem trước) làm rmtree lỗi trong chốc lát.
+        for attempt in range(DELETE_ATTEMPTS):
+            try:
+                shutil.rmtree(folder)
+                return
+            except FileNotFoundError:
+                if not folder.exists():
+                    return
+            except OSError as e:
+                if attempt == DELETE_ATTEMPTS - 1:
+                    raise Conflict(
+                        "Không xoá được vì file đang mở (đóng chương trình đang dùng "
+                        "dự án này rồi thử lại)"
+                    ) from e
+            time.sleep(DELETE_RETRY_SECONDS)
 
     def delete_scene(self, slug: str, scene_index: int) -> Project:
         """Xoá một cảnh trong project (giữ ràng buộc MIN_SCENES..MAX_SCENES)."""

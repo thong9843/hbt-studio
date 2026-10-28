@@ -142,6 +142,38 @@ def test_delete(store):
         store.delete(p.slug)
 
 
+def test_delete_retries_while_a_file_is_briefly_locked(store, monkeypatch):
+    import shutil
+
+    p = store.create("Muỗi")
+    real = shutil.rmtree
+    calls = {"n": 0}
+
+    def flaky(path, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError(32, "đang được dùng")
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr("hbt.storage.shutil.rmtree", flaky)
+    monkeypatch.setattr("hbt.storage.DELETE_RETRY_SECONDS", 0)
+    store.delete(p.slug)
+    assert calls["n"] == 3 and not store.project_dir(p.slug).exists()
+
+
+def test_delete_gives_conflict_not_500_when_the_file_stays_locked(store, monkeypatch):
+    p = store.create("Muỗi")
+
+    def locked(path, *a, **kw):
+        raise PermissionError(32, "đang được dùng")
+
+    monkeypatch.setattr("hbt.storage.shutil.rmtree", locked)
+    monkeypatch.setattr("hbt.storage.DELETE_RETRY_SECONDS", 0)
+    with pytest.raises(Conflict, match="đang mở"):
+        store.delete(p.slug)
+    assert (store.project_dir(p.slug) / "project.json").is_file()
+
+
 def test_duplicate_copies_media_but_not_build_or_renders(store, tmp_path):
     p = store.create("Muỗi")
     rel, _ = store.save_asset(p.slug, "image", png(tmp_path / "img.png"), "a.png", scene_index=0)
