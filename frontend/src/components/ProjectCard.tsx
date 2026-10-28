@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ProjectSummary } from '../api/types';
 import { vi } from '../i18n/vi';
@@ -16,6 +17,29 @@ const TONE: Record<ProjectStatusKind, BadgeTone> = {
   broken: 'danger',
 };
 
+/** Ảnh thẻ; ảnh không tải được thì rơi về ô HBT đúng một lần (không thử lại). */
+function CardImage({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (src && failed !== src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="h-full w-full object-cover"
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(src)}
+      />
+    );
+  }
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+      <img src="/brand/hbt-logo-mark.png" alt="" className="h-14 w-auto opacity-80" />
+      <span className="text-small font-semibold text-muted">{vi.projects.noImage}</span>
+    </div>
+  );
+}
+
 interface Props {
   project: ProjectSummary;
   onDuplicate: () => void;
@@ -33,20 +57,7 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy }: Props) {
     <Card as="li" padded={false} className="ui-card-link overflow-hidden">
       <Link to={href} aria-label={`${t.open}: ${project.title}`} className="block">
         <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
-          {image ? (
-            <img
-              src={image}
-              alt=""
-              className="h-full w-full object-cover"
-              loading="lazy"
-              decoding="async"
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-              <img src="/brand/hbt-logo-mark.png" alt="" className="h-14 w-auto opacity-80" />
-              <span className="text-small font-semibold text-muted">{t.noImage}</span>
-            </div>
-          )}
+          <CardImage src={image} />
         </div>
       </Link>
       <div className="flex items-start gap-2 p-4">

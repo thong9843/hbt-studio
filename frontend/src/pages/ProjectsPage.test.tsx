@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -90,6 +90,28 @@ describe('ProjectsPage', () => {
     expect(img('Chỉ ảnh')).toHaveAttribute('src', '/api/files/b/1.png');
     expect(img('Trống')).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
     expect(within(card('Trống')).getByText('Chưa có ảnh')).toBeInTheDocument();
+  });
+
+  it('falls back to the HBT tile once when the image fails to load', async () => {
+    stubFetch({
+      'GET /api/projects': [
+        summary('a', 'Ảnh hỏng', { thumb: '/api/files/projects/a/images/x.png' }),
+      ],
+    });
+    page();
+    await screen.findByText('Ảnh hỏng');
+    const img = card('Ảnh hỏng').querySelector('img') as HTMLImageElement;
+    expect(img).toHaveAttribute('src', '/api/files/projects/a/images/x.png');
+    fireEvent.error(img);
+    const after = card('Ảnh hỏng').querySelector('img') as HTMLImageElement;
+    expect(after).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
+    expect(within(card('Ảnh hỏng')).getByText('Chưa có ảnh')).toBeInTheDocument();
+    // Lỗi của ô HBT không làm vòng lặp: vẫn là ô HBT.
+    fireEvent.error(after);
+    expect(card('Ảnh hỏng').querySelector('img')).toHaveAttribute(
+      'src',
+      '/brand/hbt-logo-mark.png',
+    );
   });
 
   it('links the card to the editor and shows the date', async () => {
