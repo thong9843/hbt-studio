@@ -679,7 +679,7 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 - [x] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
 - [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
 - [x] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới. Xong 28/10/2026 (quyết định ở 13.B8).
-- [ ] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn).
+- [x] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn). Xong 28/10/2026 (quyết định ở 13.B9).
 - [ ] **Đợt 3c:** Âm thanh.
 - [ ] **Đợt 3d:** Xuất video (lịch sử lưới, ước tính) + Cài đặt.
 - [ ] **Đợt 4:** Hộp Dán JSON + menu Bản sao lưu.
@@ -956,3 +956,16 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 6. **Nợ UI → Đợt 3d:** menu ⋯ của thẻ chưa khoá khi đang dựng (cần context job toàn cục); tạm bắt lỗi 409 và hiện Toast.
 7. **Backlog:** bản thu nhỏ `?w=` cho `cover` (luật 13.B3.2 mục 7); hiện dùng bản gốc với `loading="lazy"` `decoding="async"`.
 8. **Quy trình từ 28/10/2026:** trong đợt đã duyệt không dừng để hỏi hay cho xem từng màn; điểm chưa rõ tự chọn phương án an toàn nhất và ghi vào mục "Cần chốt" của báo cáo cuối đợt. Chỉ dừng giữa chừng khi test đỏ không tự sửa được hoặc phải sửa `pipeline/` / `models.py`.
+
+### 13.B9 Quyết định Đợt 3b (chủ dự án duyệt 28/10/2026)
+
+1. **Thẻ "Lần xuất gần nhất" (Trang chủ)** dùng token mới `--hero` / `--on-hero` (nền tối cố định, không phủ ở khối tối) thay cho `--primary`, vì `--primary` đảo sang sáng ở chế độ tối. Viền `--card-border` (trong suốt ở sáng, `--line` ở tối). `tokens.test.ts` kiểm tương phản ≥ 4,5:1 và token không bị phủ.
+2. **Bộ đếm ký tự dòng thẻ** (xl 10, l 15, m 22, s 26; chỉ cảnh báo) dùng chung bộ ca `shared/char_cases.json` với pytest (`test_script.py`, K5) và Vitest (`charCount.test.ts`). Đếm số ký tự Unicode sau NFC; `Input` có `limit` cũng đếm theo NFC.
+3. **Bố cục Soạn video:** dải cảnh ngang (`components/compose/SceneStrip.tsx`, kéo bằng tay nắm hoặc bàn phím) · 3 cột `1fr 1fr 300px` (thẻ chữ · lời đọc + Tuỳ chọn · xem trước 9:16 cố định) · dưới 1024 px xem trước thành ngăn kéo (không vẽ khi chưa mở). Màn dùng `components/ui/*`, không còn `.btn` / `.input` / `.chip` / `.spinner` (có test quét mã nguồn). **Bỏ hàng tab trong `ComposePage`** vì thanh trái đã có Soạn video / Âm thanh / Xuất video. Thanh đầu: nút quay lại, tên dự án, "Đã lưu", nút **Bìa & đăng**; **Dán JSON và menu ⋯ chưa hiện** (Đợt 4).
+4. **Xem nhanh / Xuất bản đẹp** ở cột 3 chỉ chuyển sang tab Xuất video; tắt kèm lý do khi thiếu nguyên liệu ("Thiếu ảnh cảnh 3 · Thiếu giọng đọc", `utils/blockers.ts`). **Dòng ước tính để Đợt 3d**: Đợt 3b không gọi `/renders`, chỉ chừa `data-slot="estimate"` trong `PreviewPane`.
+5. **Ngăn kéo "Bìa & đăng"** chứa `ThumbnailEditor` (không có nút tải file vì không đọc lịch sử dựng; tab Xuất vẫn có) và ô **Câu mở đầu** + **Hashtag** (`publish.hook`, `publish.hashtags`; app cũ chưa có chỗ sửa hai trường này). Hashtag gõ có hoặc không có `#`, lưu không `#`.
+6. **Thả nhiều ảnh (13.B2.1):** `utils/dropImages.ts` xếp tên tự nhiên; gán từ cảnh 1; hộp ghi đè (một lần) rồi hộp thêm cảnh cho ảnh dư (hai hộp nối tiếp, "Bỏ ảnh dư" thì chỉ gán vào cảnh đang có); phần vượt 12 bỏ và báo; tải lần lượt từng file, tiến độ `n/N`; thêm cảnh được lưu ngay trước khi tải ảnh.
+7. **Vùng an toàn** là lớp phủ CSS tĩnh trên khung xem trước (y 100–1500, mép phải 120 px, phần trăm của 1080×1920), không gọi API.
+8. **Đổi thứ tự khi đang dựng:** API trả 409 thì hiện Toast kèm gợi ý và nút Thử lại.
+9. **Thanh trái 72 px dưới 1280 px** đã làm ở Đợt 2 (`AppShell`), Đợt 3b không thêm commit riêng.
+10. **Backlog:** bản thu nhỏ `?w=` cho ảnh cảnh ở dải (luật 13.B3.2 mục 7), hiện dùng ảnh gốc với `loading="lazy"` `decoding="async"`; màn cũ không có "nhân bản cảnh" nên Đợt 3b không thêm; dọn khoá i18n cũ (`compose.tabs`, `compose.editor`…).
