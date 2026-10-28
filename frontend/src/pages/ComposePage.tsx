@@ -1,11 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Outlet, useParams } from 'react-router-dom';
+import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { Project } from '../api/types';
 import { PublishDrawer } from '../components/compose/PublishDrawer';
 import { BackupsDialog } from '../components/script/BackupsDialog';
 import { PasteJsonDialog } from '../components/script/PasteJsonDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { ArrowLeftIcon, MoreIcon } from '../components/icons';
 import { SaveIndicator } from '../components/SaveIndicator';
@@ -13,6 +14,7 @@ import { Button } from '../components/ui/Button';
 import { Menu } from '../components/ui/Menu';
 import { Input } from '../components/ui/Field';
 import { ProjectEditorContext, type ProjectEditor } from '../hooks/projectEditor';
+import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useAutosave } from '../hooks/useAutosave';
 import { vi } from '../i18n/vi';
@@ -153,6 +155,27 @@ function EditorProvider({ initial }: { initial: Project }) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [backupsOpen, setBackupsOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const job = useRenderJob();
+  const rendering = job.running && job.slug === slug;
+  const removeProject = useMutation({
+    mutationFn: async () => {
+      await flush(); // không để lần lưu tự động nào còn chờ sau khi dự án đã bị xoá
+      await api.deleteProject(slug);
+    },
+    onSuccess: () => {
+      toast.info(vi.projects.deleted);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.removeQueries({ queryKey: ['project', slug] });
+      navigate('/projects');
+    },
+    onError: (e) => {
+      setConfirmDelete(false);
+      toast.error(e);
+    },
+  });
   return (
     <ProjectEditorContext.Provider value={editor}>
       <main className="mx-auto max-w-[1440px] px-6 py-5">
@@ -189,6 +212,14 @@ function EditorProvider({ initial }: { initial: Project }) {
                 label: vi.script.backups.menu,
                 onSelect: () => setBackupsOpen(true),
               },
+              {
+                key: 'delete',
+                label: vi.compose.deleteProject,
+                danger: true,
+                disabled: rendering,
+                reason: rendering ? vi.projects.renderingReason : undefined,
+                onSelect: () => setConfirmDelete(true),
+              },
             ]}
           />
         </header>
@@ -198,6 +229,17 @@ function EditorProvider({ initial }: { initial: Project }) {
         <PublishDrawer open={publishOpen} onClose={() => setPublishOpen(false)} />
         <PasteJsonDialog open={pasteOpen} onClose={() => setPasteOpen(false)} />
         <BackupsDialog open={backupsOpen} onClose={() => setBackupsOpen(false)} />
+        {confirmDelete && (
+          <ConfirmDialog
+            title={vi.projects.deleteTitle}
+            message={vi.projects.confirmDelete(project.title)}
+            confirmLabel={vi.projects.delete}
+            danger
+            busy={removeProject.isPending}
+            onConfirm={() => removeProject.mutate()}
+            onCancel={() => !removeProject.isPending && setConfirmDelete(false)}
+          />
+        )}
       </main>
     </ProjectEditorContext.Provider>
   );

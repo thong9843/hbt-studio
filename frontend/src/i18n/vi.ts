@@ -175,6 +175,7 @@ export const vi = {
     },
   },
   compose: {
+    deleteProject: 'Xoá dự án',
     back: 'Tất cả dự án',
     loading: 'Đang mở dự án…',
     saveStatus: {
