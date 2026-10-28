@@ -176,23 +176,23 @@ class Storage:
 
     def clean_build(self, slug: str) -> dict:
         """Xoá file trung gian trong `build/`, luôn giữ `timing.json` và `timing.json.key`
-        (căn chữ là bước đắt nhất). Không động tới renders/, ảnh, giọng, nhạc, project.json."""
-        build = self.project_dir(slug) / "build"
+        (căn chữ là bước đắt nhất), và xoá nốt `renders/.deleting-*` (lần xuất xoá dở).
+        Không động tới lần xuất thật, ảnh, giọng, nhạc, project.json."""
+        folder = self.project_dir(slug)
+        build = folder / "build"
+        renders = folder / "renders"
         keep = set(KEEP_IN_BUILD)
-        before = _tree_size(build)
+        leftovers = _deleting_leftovers(renders)
+        before = _tree_size(build) + sum(_tree_size(d) for d in leftovers)
         failed = 0
         if build.is_dir() and not build.is_symlink():
             for entry in build.iterdir():
                 if entry.name in keep:
                     continue
-                try:
-                    if entry.is_dir() and not entry.is_symlink():
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                except OSError:
-                    failed += 1
-        after = _tree_size(build)
+                failed += _remove(entry)
+        for d in leftovers:
+            failed += _remove(d)
+        after = _tree_size(build) + sum(_tree_size(d) for d in _deleting_leftovers(renders))
         kept = sorted(n for n in keep if (build / n).is_file())
         return {
             "before_bytes": before,
@@ -534,6 +534,29 @@ class Storage:
             raise BadRequest("`kind` phải là image, voice hoặc music")
         self.save(slug, project)
         return rel, project
+
+
+def _deleting_leftovers(renders: Path) -> list[Path]:
+    """Thư mục `renders/.deleting-*` còn sót (xoá lần xuất dở); không theo liên kết."""
+    if not renders.is_dir() or renders.is_symlink():
+        return []
+    return [
+        d
+        for d in renders.iterdir()
+        if d.name.startswith(TRASH_PREFIX) and d.is_dir() and not d.is_symlink()
+    ]
+
+
+def _remove(entry: Path) -> int:
+    """Xoá file hoặc thư mục; trả 1 nếu không xoá được (file đang bị khoá)."""
+    try:
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    except OSError:
+        return 1
+    return 0
 
 
 def _tree_size(folder: Path) -> int:

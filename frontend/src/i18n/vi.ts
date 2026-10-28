@@ -532,11 +532,11 @@ export const vi = {
     },
     clean: {
       title: 'Dọn file tạm',
-      help: 'Xoá các file trung gian trong build/ để lấy lại dung lượng. Giữ nguyên mốc thời gian chữ (timing.json), video đã xuất, ảnh, giọng, nhạc. Lần dựng sau sẽ lâu hơn một chút.',
+      help: 'Xoá các file trung gian trong build/ và thư mục lần xuất xoá dở để lấy lại dung lượng. Giữ nguyên mốc thời gian chữ (timing.json), video đã xuất, ảnh, giọng, nhạc. Lần dựng sau sẽ lâu hơn một chút.',
       button: 'Dọn file tạm',
       confirmTitle: 'Dọn file tạm?',
       confirmMessage:
-        'Các file trung gian trong build/ sẽ bị xoá. Video đã xuất, ảnh, giọng, nhạc và mốc thời gian chữ được giữ lại.',
+        'Các file trung gian trong build/ và thư mục lần xuất xoá dở sẽ bị xoá. Video đã xuất, ảnh, giọng, nhạc và mốc thời gian chữ được giữ lại.',
       confirm: 'Dọn',
       busy: 'Đang dọn…',
       done: (size: string) => `Đã giải phóng ${size}`,

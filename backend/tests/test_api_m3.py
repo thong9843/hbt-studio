@@ -350,6 +350,26 @@ def test_clean_build_keeps_timing_and_everything_else(client):  # noqa: F811
     assert again["freed_bytes"] == 0 and again["failed"] == 0
 
 
+def test_clean_build_also_removes_deleting_leftovers(client):  # noqa: F811
+    slug = complete_project(client)
+    folder, build = fill_build(client, slug)
+    leftover = folder / "renders" / ".deleting-20261026-103538"
+    (leftover / "sub").mkdir(parents=True)
+    (leftover / "video.mp4").write_bytes(b"x" * 500)
+    (leftover / "sub" / "a.bin").write_bytes(b"y" * 300)
+    r = client.post(f"/api/projects/{slug}/build/clean")
+    assert r.status_code == 200
+    body = r.json()
+    timing = (build / "timing.json").stat().st_size + (build / "timing.json.key").stat().st_size
+    assert not leftover.exists()
+    assert (folder / "renders" / "j1" / "video.mp4").is_file()  # lần xuất thật còn nguyên
+    assert body["after_bytes"] == timing and body["failed"] == 0
+    assert body["freed_bytes"] == body["before_bytes"] - timing
+    assert body["freed_bytes"] >= 800  # tính cả thư mục .deleting-*
+    assert body["kept"] == ["timing.json", "timing.json.key"]
+    assert client.get(f"/api/projects/{slug}/renders").status_code == 200
+
+
 def test_clean_build_without_a_build_folder(client):  # noqa: F811
     slug = client.post("/api/projects", json={"title": "Chưa dựng"}).json()["slug"]
     body = client.post(f"/api/projects/{slug}/build/clean").json()
