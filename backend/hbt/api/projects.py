@@ -194,6 +194,15 @@ def clean_build(slug: str, state: State):
     return state.storage.clean_build(slug)
 
 
+@router.delete("/projects/{slug}/renders/{job_id}", status_code=204)
+def delete_render(slug: str, job_id: str, state: State) -> Response:
+    """Xoá một lần xuất (cả thư mục). 404 không có; 409 đang dựng / đang chờ / file đang mở."""
+    if any(j.id == job_id for j in state.jobs.active()):
+        raise Conflict("Lần xuất này đang dựng hoặc đang chờ, hãy huỷ job trước khi xoá")
+    state.storage.delete_render(slug, job_id)
+    return Response(status_code=204)
+
+
 @router.get("/projects/{slug}/renders")
 def list_renders(slug: str, state: State):
     """Lịch sử các lần xuất (mới nhất trước); đường dẫn file đã đổi thành URL."""

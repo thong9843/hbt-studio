@@ -38,6 +38,10 @@ log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
+RENDER_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+)  # job_id app + tên CLI (20261026-…-preview)
+TRASH_PREFIX = ".deleting-"  # thư mục lần xuất đang xoá: bị bỏ qua khi liệt kê
 COPY_EXCLUDE = ("build", "renders", "backups")  # nhân bản không chép file tạm, lần xuất, sao lưu
 
 
@@ -334,7 +338,7 @@ class Storage:
         current_music = self._music_sha256(slug)
         for d in renders.iterdir():
             video = d / "video.mp4"
-            if not video.is_file():
+            if d.name.startswith(TRASH_PREFIX) or not video.is_file():
                 continue
             meta: dict = {}
             if (d / "meta.json").is_file():
@@ -395,6 +399,31 @@ class Storage:
         path = self.project_dir(slug) / music.file if music and music.file else None
         return sha256_file(path) if path is not None and path.is_file() else None
 
+    def delete_render(self, slug: str, job_id: str) -> None:
+        """Xoá cả thư mục `renders/<job_id>/` (video, bìa, publish.txt, meta). Không đụng `build/`,
+        `timing.json`, `backups/`. Đổi tên thư mục trước: Windows từ chối nếu có file đang mở
+        (trình phát…) nên không bao giờ xoá dở dang → Conflict."""
+        if not RENDER_ID_RE.fullmatch(job_id):
+            raise Unprocessable("Mã lần xuất không hợp lệ")
+        renders = (self.project_dir(slug) / "renders").resolve()
+        target = (renders / job_id).resolve()
+        if target.parent != renders:
+            raise Unprocessable("Mã lần xuất không hợp lệ")
+        if not self.project_dir(slug).joinpath("project.json").is_file():
+            raise NotFound(f"Không có project '{slug}'")
+        if not target.is_dir():
+            raise NotFound(f"Không có lần xuất '{job_id}'")
+        trash = renders / f"{TRASH_PREFIX}{job_id}"
+        shutil.rmtree(trash, ignore_errors=True)  # dư của lần xoá trước (nếu có)
+        try:
+            target.rename(trash)
+        except OSError as e:
+            raise Conflict(
+                "Không xoá được vì file đang mở (đóng trình phát hoặc chương trình đang dùng "
+                "video này rồi thử lại)"
+            ) from e
+        shutil.rmtree(trash, ignore_errors=True)
+
     def _renders_newest_first(self, slug: str) -> list[tuple[str, Path, dict]]:
         """(created_at, thư mục, meta) của các lần xuất có video, mới nhất trước."""
         renders = self.project_dir(slug) / "renders"
@@ -403,7 +432,7 @@ class Storage:
         found = []
         for d in renders.iterdir():
             video = d / "video.mp4"
-            if not video.is_file():
+            if d.name.startswith(TRASH_PREFIX) or not video.is_file():
                 continue
             meta = {}
             if (d / "meta.json").is_file():
