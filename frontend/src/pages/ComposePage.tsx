@@ -4,6 +4,7 @@ import { Link, Outlet, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { Project } from '../api/types';
 import { PublishDrawer } from '../components/compose/PublishDrawer';
+import { PasteJsonDialog } from '../components/script/PasteJsonDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { ArrowLeftIcon } from '../components/icons';
 import { SaveIndicator } from '../components/SaveIndicator';
@@ -148,6 +149,7 @@ function EditorProvider({ initial }: { initial: Project }) {
   );
 
   const [publishOpen, setPublishOpen] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
   return (
     <ProjectEditorContext.Provider value={editor}>
       <main className="mx-auto max-w-[1440px] px-6 py-5">
@@ -169,7 +171,10 @@ function EditorProvider({ initial }: { initial: Project }) {
             />
           </div>
           <SaveIndicator status={status} error={error} />
-          <Button tone="soft" size="sm" className="ml-auto" onClick={() => setPublishOpen(true)}>
+          <Button tone="soft" size="sm" className="ml-auto" onClick={() => setPasteOpen(true)}>
+            {vi.script.open}
+          </Button>
+          <Button tone="soft" size="sm" onClick={() => setPublishOpen(true)}>
             {vi.compose.publishPanel.open}
           </Button>
         </header>
@@ -177,6 +182,7 @@ function EditorProvider({ initial }: { initial: Project }) {
           <Outlet />
         </div>
         <PublishDrawer open={publishOpen} onClose={() => setPublishOpen(false)} />
+        <PasteJsonDialog open={pasteOpen} onClose={() => setPasteOpen(false)} />
       </main>
     </ProjectEditorContext.Provider>
   );

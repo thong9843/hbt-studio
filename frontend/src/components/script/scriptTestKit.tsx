@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import type { ScriptCheck } from '../../api/types';
 import { ComposePage } from '../../pages/ComposePage';
+import { ToastProvider } from '../Toast';
 import { stubFetch } from '../../test/fakes';
 import { project } from '../../test/project';
 import { renderWithProviders } from '../../test/render';
@@ -27,11 +28,13 @@ export function setup(child: ReactNode, routes: Record<string, unknown> = {}) {
     ...routes,
   });
   renderWithProviders(
-    <Routes>
-      <Route path="/p/:slug" element={<ComposePage />}>
-        <Route index element={child} />
-      </Route>
-    </Routes>,
+    <ToastProvider>
+      <Routes>
+        <Route path="/p/:slug" element={<ComposePage />}>
+          <Route index element={child} />
+        </Route>
+      </Routes>
+    </ToastProvider>,
     '/p/muoi',
   );
   return mock;

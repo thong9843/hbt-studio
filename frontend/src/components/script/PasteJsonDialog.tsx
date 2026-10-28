@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
-import type { ScriptCheck, ScriptExtra } from '../../api/types';
+import type { ScriptCheck, ScriptExtra, ScriptIssue } from '../../api/types';
+import { ApiError } from '../../api/client';
 import { api } from '../../api/endpoints';
 import { useProjectEditor } from '../../hooks/projectEditor';
+import { useRenderJob } from '../../hooks/renderJob';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
+import { appliedScenes } from '../../utils/scriptDiff';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Textarea } from '../ui/Field';
@@ -31,8 +34,12 @@ interface Props {
  * `script/check` đọc `project.json` thẳng từ đĩa.
  */
 export function PasteJsonDialog({ open, onClose }: Props) {
-  const { project, flush } = useProjectEditor();
+  const { project, flush, applyServer, bumpImages } = useProjectEditor();
+  const job = useRenderJob();
   const toast = useToast();
+  /** Đang dựng chính dự án này: không áp, không hoàn tác (backend cũng trả 409). */
+  const locked = (job.running || job.starting) && job.slug === project.slug;
+  const [applying, setApplying] = useState(false);
   const [text, setText] = useState('');
   const [step, setStep] = useState<'paste' | 'check'>('paste');
   const [extra, setExtra] = useState<ScriptExtra | null>(null);
@@ -70,6 +77,48 @@ export function PasteJsonDialog({ open, onClose }: Props) {
     }
   };
 
+  const undo = async (backupId: string) => {
+    try {
+      await flush();
+      const res = await api.restoreBackup(project.slug, backupId);
+      applyServer(() => res.project);
+      bumpImages();
+      toast.info(T.undone);
+    } catch (e) {
+      toast.error(e);
+    }
+  };
+
+  const apply = async () => {
+    if (!check) return;
+    const n = appliedScenes(check);
+    setApplying(true);
+    try {
+      const res = await api.applyScript(project.slug, text, check.base_hash, extra ?? undefined);
+      applyServer(() => res.project);
+      bumpImages();
+      toast.info(T.applied(n), locked ? undefined : { undo: () => void undo(res.backup_id) });
+      setText('');
+      edit();
+      onClose();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 422) {
+        const errors = (e.body as { errors?: ScriptIssue[] } | null)?.errors;
+        if (errors) setCheck({ ...check, ok: false, errors });
+        else toast.error(e);
+      } else {
+        toast.error(e);
+        // Hash lệch (dự án đổi sau lần kiểm): kiểm lại để lấy hash mới. Đang dựng thì giữ nguyên.
+        if (e instanceof ApiError && e.status === 409 && !locked) {
+          toast.info(T.staleRecheck);
+          await runCheck(extra);
+        }
+      }
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const edit = () => {
     setStep('paste');
     setCheck(null);
@@ -88,9 +137,32 @@ export function PasteJsonDialog({ open, onClose }: Props) {
             {checking ? T.checking : T.check}
           </Button>
         ) : (
-          <Button tone="soft" onClick={edit}>
-            {T.back}
-          </Button>
+          <>
+            {check && !check.ok && (
+              <span role="status" className="mr-auto self-center text-small font-bold text-danger">
+                {T.hasErrors}
+              </span>
+            )}
+            {locked && (
+              <span role="status" className="mr-auto self-center text-small font-bold text-muted">
+                {T.busy}
+              </span>
+            )}
+            <Button tone="soft" onClick={edit}>
+              {T.back}
+            </Button>
+            <Button
+              disabled={!check?.ok || locked || applying || checking}
+              title={locked ? T.busy : !check?.ok ? T.hasErrors : undefined}
+              onClick={() => void apply()}
+            >
+              {applying
+                ? T.applying
+                : check && appliedScenes(check) > 0
+                  ? T.applyN(appliedScenes(check))
+                  : T.apply}
+            </Button>
+          </>
         )
       }
     >

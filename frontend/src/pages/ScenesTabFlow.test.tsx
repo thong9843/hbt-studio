@@ -116,13 +116,13 @@ describe('Soạn video — luồng', () => {
     expect(screen.getByRole('button', { name: 'Thử lại' })).toBeInTheDocument();
   });
 
-  it('opens "Bìa & đăng" from the header bar; Dán JSON and the ⋯ menu stay hidden (Đợt 4)', async () => {
+  it('opens "Bìa & đăng" and "Dán JSON" from the header bar', async () => {
     setup(project());
     const user = userEvent.setup();
     await screen.findByRole('heading', { name: HEADING });
-    expect(screen.queryByRole('button', { name: /Dán JSON/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Bản sao lưu|Hoàn tác/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '⋯' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dán JSON' }));
+    expect(await screen.findByRole('dialog', { name: 'Dán JSON kịch bản' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'Bìa & đăng' }));
     expect(await screen.findByRole('dialog', { name: 'Bìa & đăng' })).toBeInTheDocument();
   });
