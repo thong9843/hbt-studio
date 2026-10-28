@@ -118,3 +118,87 @@ def test_save_covers_outputs_and_crop(bg, tmp_path):
     assert cover.stat().st_size < 5 << 20 and "icc_profile" not in a.info
     same = np.abs(np.asarray(a.crop(th.CROP_3X2)).astype(int) - np.asarray(b).astype(int)).mean()
     assert same < 2.0  # youtube_3x2 là dải y=600..1320 của cùng ảnh
+
+
+# ---------------------------------------------------------------- ảnh bìa tải lên
+def _old_background(path):
+    """Cách dựng nền trước khi có ảnh tải lên (v1.0.0): kéo giãn về 1080×1920."""
+    from PIL import ImageEnhance
+
+    bg = Image.open(path).convert("RGB").resize((th.W, th.H), Image.LANCZOS)
+    bg = ImageEnhance.Brightness(bg).enhance(0.82)
+    return ImageEnhance.Color(bg).enhance(1.1)
+
+
+def _gradient(path, size):
+    w, h = size
+    xs = np.linspace(0, 255, w, dtype=np.uint8)[None, :].repeat(h, 0)
+    ys = np.linspace(0, 255, h, dtype=np.uint8)[:, None].repeat(w, 1)
+    Image.fromarray(np.dstack([xs, ys, xs // 2 + ys // 2]), "RGB").save(path)
+    return path
+
+
+@pytest.mark.parametrize("size", [(1080, 1920), (1000, 1800), (1600, 900)])
+def test_scene_background_is_unchanged_without_an_uploaded_image(tmp_path, size):
+    src = _gradient(tmp_path / "bg.png", size)
+    default = th._background(src)
+    assert default.convert("RGB").size == (th.W, th.H)
+    explicit = th._background(src, False)
+    assert np.array_equal(np.asarray(default), np.asarray(explicit))
+    # cùng nền với công thức cũ ở vùng không có dải tối (đỉnh và đáy)
+    old = np.asarray(_old_background(src)).astype(int)
+    new = np.asarray(default.convert("RGB")).astype(int)
+    assert np.abs(old[:380] - new[:380]).max() == 0 and np.abs(old[1540:] - new[1540:]).max() == 0
+
+
+def test_cover_without_image_is_pixel_identical_with_or_without_the_flag(bg):
+    a = th.render_cover(bg, LINES3, "Vì sao vậy ta?")
+    b = th.render_cover(bg, LINES3, "Vì sao vậy ta?", fit_background=False)
+    assert np.array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_uploaded_background_is_cropped_in_the_middle_not_stretched(tmp_path):
+    src = tmp_path / "wide.png"  # 1920×1080: trái đỏ, giữa xanh, phải đỏ
+    arr = np.zeros((1080, 1920, 3), np.uint8)
+    arr[...] = (255, 0, 0)
+    arr[:, 660:1260] = (0, 0, 255)
+    Image.fromarray(arr, "RGB").save(src)
+    im = th._background(src, True).convert("RGB")
+    assert im.size == (th.W, th.H)
+    px = np.asarray(im).astype(int)
+    assert px[100, 540, 2] > px[100, 540, 0] * 3  # giữa là xanh
+
+
+@pytest.mark.parametrize(
+    "size", [(1080, 1920), (2160, 3840), (1000, 1000), (1920, 1080), (720, 1280)]
+)
+def test_uploaded_background_any_ratio_gives_9x16(tmp_path, size):
+    src = _gradient(tmp_path / "x.png", size)
+    assert th._background(src, True).size == (th.W, th.H)
+
+
+def test_uploaded_background_honours_exif_orientation(tmp_path):
+    src = tmp_path / "phone.jpg"
+    im = Image.new("RGB", (1920, 1080), (0, 0, 255))
+    im.paste((255, 0, 0), (0, 0, 960, 1080))  # nửa trái đỏ
+    exif = Image.Exif()
+    exif[0x0112] = 6  # xoay 90° theo chiều kim đồng hồ khi hiển thị
+    im.save(src, exif=exif, quality=95)
+    out = np.asarray(th._background(src, True).convert("RGB")).astype(int)
+    # sau khi xoay: nửa trái (đỏ) thành nửa trên
+    assert out[200, 540, 0] > out[200, 540, 2] and out[1700, 540, 2] > out[1700, 540, 0]
+
+
+def test_cover_background_picks_uploaded_image_or_scene(tmp_path):
+    from types import SimpleNamespace as NS
+
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "cover.png").write_bytes(b"x")
+    scenes = [NS(image="images/a.png"), NS(image="images/b.png")]
+    up = NS(image="images/cover.png", scene=2)
+    assert th.cover_background(up, scenes, tmp_path) == (tmp_path / "images/cover.png", True)
+    plain = NS(image=None, scene=2)
+    assert th.cover_background(plain, scenes, tmp_path) == (tmp_path / "images/b.png", False)
+    gone = NS(image="images/cover.jpg", scene=1)
+    with pytest.raises(FileNotFoundError):
+        th.cover_background(gone, scenes, tmp_path)

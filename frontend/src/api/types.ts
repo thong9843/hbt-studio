@@ -78,6 +78,8 @@ export interface Thumbnail {
   lines: string[];
   series: string;
   accent: string;
+  /** Ảnh bìa riêng đã tải lên (`images/cover.<ext>`); trống = dùng ảnh của cảnh `scene`. */
+  image?: string | null;
 }
 
 export interface BuildClean {

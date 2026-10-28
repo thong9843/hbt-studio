@@ -395,3 +395,18 @@ def test_clean_build_is_refused_while_rendering(client):  # noqa: F811
     assert r.status_code == 409 and (build / "voice.wav").is_file()  # không xoá gì
     client.post(f"/api/jobs/{job}/cancel")
     assert client.post(f"/api/projects/{slug}/build/clean").status_code == 200
+
+
+def test_thumbnail_preview_uses_the_uploaded_cover_image(client):  # noqa: F811
+    slug = with_thumbnail(client)
+    folder = client.app.state.hbt.storage.project_dir(slug)
+    Image.new("RGB", (1600, 900), (220, 0, 0)).save(folder / "images" / "cover.png")
+    url = f"/api/projects/{slug}/thumbnail/preview.jpg?w=270"
+    draft = {"thumbnail": {"scene": 1, "lines": ["một", "hai"], "image": "images/cover.png"}}
+    r = client.post(url, json=draft)
+    assert r.status_code == 200
+    top = Image.open(io.BytesIO(r.content)).convert("RGB").getpixel((135, 20))
+    assert top[0] > top[1] * 2  # đỏ của ảnh bìa riêng, không phải màu ảnh cảnh 1
+    (folder / "images" / "cover.png").unlink()
+    r = client.post(url, json=draft)
+    assert r.status_code == 422 and "Thiếu ảnh bìa" in r.json()["detail"]

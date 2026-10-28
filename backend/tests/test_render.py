@@ -589,3 +589,71 @@ def test_head_preview_skips_the_covers(tmp_path):
     res = render_project(pdir, opts)
     assert res.cover is None and read_meta(res)["cover_9x16"] is None
     assert not list(res.job_dir.glob("*.jpg"))
+
+
+# ---------------------------------------------------------------- ảnh bìa tải lên
+def _cover_project(tmp_path, **thumb):
+    """Dự án tối thiểu để gọi `make_covers`: 3 cảnh xanh lá, bìa riêng màu đỏ (16:9)."""
+    from hbt.models import Project
+
+    pdir = tmp_path / "p"
+    (pdir / "images").mkdir(parents=True)
+    for i in range(3):
+        Image.new("RGB", (540, 960), (0, 160, 0)).save(pdir / "images" / f"s{i + 1}.png")
+    Image.new("RGB", (1600, 900), (200, 0, 0)).save(pdir / "images" / "cover.png")
+    project = Project.model_validate(
+        {
+            "slug": "p",
+            "title": "P",
+            "voice": "voice.wav",
+            "scenes": [{"image": f"images/s{i + 1}.png", "voice": "Xin chào."} for i in range(3)],
+            "thumbnail": {"scene": 2, "lines": ["một", "hai"], **thumb},
+        }
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    return project, pdir, out
+
+
+def _mean_rgb(path):
+    return (
+        np.asarray(Image.open(path).convert("RGB").crop((0, 0, 1080, 200))).reshape(-1, 3).mean(0)
+    )
+
+
+def test_make_covers_uses_the_uploaded_image_instead_of_the_scene(tmp_path):
+    project, pdir, out = _cover_project(tmp_path, image="images/cover.png")
+    cover, youtube = render.make_covers(project, pdir, out, BRAND_DIR)
+    r, g, _ = _mean_rgb(cover)
+    assert r > g * 2  # nền đỏ của ảnh tải lên, không phải xanh lá của cảnh 2
+    assert Image.open(cover).size == (1080, 1920) and Image.open(youtube).size == (1080, 720)
+
+
+def test_make_covers_without_image_uses_the_scene_as_before(tmp_path):
+    project, pdir, out = _cover_project(tmp_path)
+    cover, _ = render.make_covers(project, pdir, out, BRAND_DIR)
+    r, g, _ = _mean_rgb(cover)
+    assert g > r * 2
+
+
+def test_make_covers_missing_uploaded_file_raises_instead_of_using_the_scene(tmp_path):
+    project, pdir, out = _cover_project(tmp_path, image="images/cover.png")
+    (pdir / "images" / "cover.png").unlink()
+    with pytest.raises(FileNotFoundError):
+        render.make_covers(project, pdir, out, BRAND_DIR)
+    assert not list(out.glob("*.jpg"))
+
+
+@needs_ffmpeg
+@pytest.mark.slow
+def test_missing_uploaded_cover_is_a_warning_and_the_video_still_renders(tmp_path):
+    pdir, opts = make_project(tmp_path, outro=False)
+    add_thumbnail(pdir, opts.brand_dir)
+    path = pdir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["thumbnail"]["image"] = "images/cover.png"  # file không tồn tại
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    res = render_project(pdir, opts)
+    assert res.video.is_file() and res.cover is None and res.youtube_cover is None
+    assert any(w.startswith("Không vẽ được ảnh bìa") for w in res.warnings)
+    assert not list(res.job_dir.glob("*.jpg"))

@@ -23,7 +23,9 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    field_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from hbt.models import (
     MAX_SCENES,
@@ -48,7 +50,7 @@ Extra = Literal["add", "trim"]
 # Trường project không đổi được qua JSON (K4). Ở cấp cảnh, `voice` là lời đọc nên được phép.
 FORBIDDEN_FIELDS = frozenset(
     {"image", "voice", "music", "settings", "title", "slug", "series", "theme", "version"}
-)
+)  # gồm cả `thumbnail.image`
 
 _UNION_TAG = re.compile(r"^(literal\[.*|int|str|float|bool|none)$")
 _ERROR_TEXT = {
@@ -91,6 +93,12 @@ class ScriptPublish(Publish):
 
 class ScriptThumbnail(Thumbnail):
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("image", mode="before")
+    @classmethod
+    def _image_is_forbidden(cls, v: Any) -> Any:
+        # Ảnh bìa riêng chỉ đổi bằng cách tải lên (K4), kể cả `"image": null`.
+        raise PydanticCustomError("extra_forbidden", "Extra inputs are not permitted")
 
 
 class ScriptScene(_Strict):
@@ -388,7 +396,10 @@ def check_script(
             )
         current["publish"] = pub
     if "thumbnail" in script.model_fields_set:
-        thumb = script.thumbnail.model_dump(mode="json")
+        thumb = script.thumbnail.model_dump(mode="json", exclude={"image"})
+        thumb["image"] = (current["thumbnail"] or {}).get(
+            "image"
+        )  # thay khối vẫn giữ ảnh bìa riêng
         if thumb != current["thumbnail"]:
             res.diff.append(
                 {

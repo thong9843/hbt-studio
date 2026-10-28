@@ -114,7 +114,8 @@ Mỗi project là 1 thư mục `workspace/projects/<slug>/`:
 
 ```
 project.json
-images/scene-01.png …        # ảnh gốc người dùng tải lên
+images/<hash16>.png …       # ảnh cảnh người dùng tải lên: tên = 16 ký tự đầu hash nội dung (`content_hash_16`)
+images/cover.<ext>           # (tuỳ chọn) ảnh bìa riêng, 13.B15
 voice.<ext>  music.<ext>
 build/                       # file trung gian (xoá được), có cache theo hash
 renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
@@ -134,7 +135,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
   "settings": { "fps": 50, "captions": true, "aligner": "auto", "sfx_on_punch": true, "outro": true },
   "scenes": [
     {
-      "image": "images/scene-01.png",
+      "image": "images/3f9a1c0e5b7d2a84.png",
       "card": { "y": "top", "lines": [
         { "text": "Bạn là người", "size": "s" },
         { "text": "“được muỗi yêu”?", "size": "l", "color": "accent" } ] },
@@ -144,7 +145,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
       "caption_y": null
     },
     {
-      "image": "images/scene-05.png",
+      "image": "images/a17c4e90d2b86f35.png",
       "card": { "y": "top", "lines": [
         { "text": "Mùi da thu hút muỗi", "size": "s" },
         { "text": "gấp 100 lần", "size": "xl", "color": "accent" } ] },
@@ -176,6 +177,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
 | `voice` (gốc project) | `"voice.mp3"` hoặc `{"file", "trim_end"}`: file giọng; `trim_end` = giây của file gốc để cắt đuôi (mục 4d.3) |
 | `scenes[].voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
 | `punch` | `true` = cảnh "cú lật": phóng giật + hiện thẻ nhanh + whoosh |
+| `thumbnail.image` | `null` = nền bìa là ảnh của cảnh `thumbnail.scene`; hoặc `images/cover.(png\|jpg\|jpeg\|webp)` = ảnh bìa riêng tải lên (13.B15) |
 | `caption_y` | `null` = tự động (1400; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
 | `music.start` | `null` = tự chọn đoạn hay; hoặc số giây |
 
@@ -273,7 +275,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
   - `cover_9x16.jpg`: 1080×1920, JPG chất lượng 93, sRGB, dưới 5 MB, dùng cho TikTok/Reels.
   - `youtube_3x2.jpg`: 1080×720, là dải cắt giữa y=600..1320 của cùng ảnh, dùng cho YouTube Shorts.
 - **Dữ liệu** (`project.json` → `thumbnail`, mục 3.1): `scene` (cảnh làm nền, mặc định 1), `lines` (2–3 dòng tiêu đề), `series` (chữ trên nhãn series), `accent` (màu dòng cuối, mặc định `#FFD43B`).
-- **Nền:** ảnh của cảnh được chọn (`thumbnail.scene`), độ sáng ×0,82, bão hoà ×1,1, thêm dải tối mềm quanh y=960 (alpha tối đa 0,5).
+- **Nền:** ảnh bìa riêng `thumbnail.image` nếu có (cắt giữa, 13.B15), không thì ảnh của cảnh được chọn (`thumbnail.scene`), độ sáng ×0,82, bão hoà ×1,1, thêm dải tối mềm quanh y=960 (alpha tối đa 0,5).
 - **Tiêu đề:** 2–3 dòng IN HOA, căn giữa, font **Bricolage Grotesque** 800 (width 78).
   - Font này (OFL) phải được thêm vào `backend/hbt/fonts/` kèm giấy phép. Khi chưa có thì dự phòng Be Vietnam Pro ExtraBold.
   - Dòng lớn nhất cỡ tối đa 185 px và vừa trong 950 px. Dòng cuối (từ khoá) màu `accent` (mặc định vàng `#FFD43B`), lớn hơn ×1,12 (tối đa 205 px) nếu vẫn vừa 950 px.
@@ -456,7 +458,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 | POST | `/projects` | `{title, series?, scene_count=8}` → tạo project rỗng |
 | GET / PUT / DELETE | `/projects/{slug}` | đọc / lưu toàn bộ `project.json` / xoá |
 | POST | `/projects/{slug}/duplicate` | nhân bản làm template |
-| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
+| POST | `/projects/{slug}/assets` | multipart: `kind=image|cover|voice|music`, `scene_index` (từ 0, với ảnh); `cover` = ảnh bìa riêng (13.B15) |
 | GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
 | POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
@@ -844,7 +846,7 @@ Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự độn
 | Trường vắng | Giữ nguyên giá trị cũ |
 | Trường có mặt | Ghi đè **cả trường** (`card` thay toàn bộ; `labels: []` xoá hết nhãn; `publish`, `thumbnail` thay cả khối) |
 | `null` | Chỉ hợp lệ ở `caption_y` (= tự động); ở mọi nơi khác (`voice`, `card`, `labels`, `punch`, `publish`, `thumbnail`, `hbt_script`) là lỗi K3 |
-| Không đổi qua JSON | `image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
+| Không đổi qua JSON | `image` (cảnh) và `thumbnail.image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
 | Chuẩn hoá | NFC mọi chuỗi; hashtag bỏ `#` đầu và khoảng trắng hai đầu |
 | Đếm ký tự | Số ký tự Unicode sau NFC (Python `len`, JS `[...s.normalize('NFC')].length`); dùng chung bộ ca test cho hai phía |
 | Mô hình đầu vào | **`ScriptIn` riêng trong `backend/hbt/script.py`, `extra="forbid"`** (cho K4), chặt cả các khối con (`card`, `lines`, `labels`, `publish`, `thumbnail` là lớp con `extra="forbid"` của lớp trong `models.py`, nên `colour` hay `pucnh` ở bất kỳ cấp nào đều là K4). **Không đổi `models.py`** (`Project` giữ `extra="ignore"`); K12 vẫn kiểm bản sau gộp bằng `Project.model_validate` |
@@ -1037,3 +1039,21 @@ Nhánh `feat/v1-polish` (từ `main` `015b385`, tag `v0.6.0`), tag `v1.0.0`. Kh�
 5. **README** thêm mục "Hướng dẫn dùng (v1.0)": cài đặt, quy trình làm video thủ công, Dán JSON, lệnh, sự cố; chỉ chữ.
 6. **Không làm (sau `v1.0.0`):** bìa từ ảnh tải lên (cần `models.py` và `thumbnail.py`), "bài đang dùng", các việc máy mới (CUDA, `bench-align`, golden), PostV.
 
+### 13.B15 Quyết định đợt ảnh bìa tải lên (chủ dự án duyệt 28/10/2026)
+
+Nhánh `feat/cover-upload` (từ `main` `0e38efc`, tag `v1.0.0`), tag `v1.1.0`. Ngoại lệ có duyệt với "không sửa `pipeline/`, `models.py`": `Thumbnail.image`, `pipeline/thumbnail.py` và **chỉ** `make_covers` trong `pipeline/render.py`.
+
+1. **Dữ liệu:** `thumbnail.image: str | None = None`, chỉ nhận `images/cover.(png|jpg|jpeg|webp)` (regex đầy đủ, sai thì lỗi K12). `project.json` cũ không có trường này đọc bình thường.
+2. **API:** `POST /projects/{slug}/assets` `kind=cover` lưu `images/cover.<ext>` (`png|jpg|webp`, kiểm bằng Pillow, ≤ 30 MB, 413), cạnh ngắn < 540 px → 400. Chưa có khối `thumbnail` → 422 "Hãy bật ảnh bìa…". Đang dựng → 409. Cùng đuôi thì ghi đè; khác đuôi thì xoá `cover.*` cũ. Không thêm endpoint `DELETE`. `duplicate` chép cùng thư mục `images/`; `build/clean` không đụng.
+3. **Bỏ ảnh:** giao diện chỉ đặt `thumbnail.image = null` (lưu tự động); **file vẫn nằm trong `images/`** (bị ghi đè ở lần tải sau).
+4. **Bộ vẽ:** `thumbnail.cover_background(thumb, scenes, project_dir)` chọn nền (dùng cho xem trước API); `render_cover(..., fit_background=True)` cắt giữa kiểu cover (`ImageOps.fit`, LANCZOS, tâm 0,5/0,5) sau `exif_transpose`, không kéo giãn. Ảnh của cảnh vẫn dùng cách cũ (`resize` về 1080×1920). Mất file ảnh bìa lúc dựng: chỉ cảnh báo `Không vẽ được ảnh bìa: …`, video vẫn xuất, **không** quay về ảnh cảnh. Xem trước API trả 422 "Thiếu ảnh bìa …".
+5. **`PIPELINE_VERSION` đổi** `0112661f2845` → `1ca0e11133c9` vì băm nguyên file `render.py`; cache `build/` nguội một lần. `git diff v1.0.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py` chỉ gồm `thumbnail.py`, `make_covers` và `Thumbnail.image`.
+6. **Đối chiếu "muỗi"** (máy cũ, bản đẹp 50 fps, dựng nguội, có khối `thumbnail` ở cả hai bên; v1.0.0 qua `git worktree`): framemd5 hình (2293 khung) và tiếng (1976 khung) giống hệt; `captions.srt` giống; `video.mp4`, `cover_9x16.jpg`, `youtube_3x2.jpg` giống từng byte. Thời gian dựng 173 s (v1.0.0) và 167 s (nhánh).
+7. **Khối JSON:** `thumbnail.image` là trường cấm (K4, kể cả `null`); dán khối `thumbnail` thay cả khối nhưng **giữ** `image` hiện có (không hiện trong khác biệt).
+8. **Giao diện:** trong `ThumbnailEditor` (ngăn "Bìa & đăng" và tab Xuất video): vùng thả ảnh (`CoverDrop`), ảnh xem trước nhỏ (`?v=` tăng sau mỗi lần tải), nút **Bỏ ảnh**; có ảnh thì chip cảnh nền bị tắt kèm chú thích. Lưu bản nháp trước khi tải. Không thêm gói npm; thẻ Trang chủ không đổi.
+9. **Không làm:** chọn vị trí cắt (có thể thêm `thumbnail.focus` sau).
+10. **Tồn (ghi 28/10/2026):**
+    - (a) Thả ảnh bìa ngay sau một lần tải lỗi đôi khi không gửi đi; e2e đang chờ `networkidle` để né. Sửa ở đợt fix riêng, trước PostV.
+    - (b) e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`), chưa rõ gốc; chạy lại 3/3 và cả bộ 9/9 đều đạt.
+    - (c) Backlog: `make_covers` (`render.py`) tự chọn ảnh nền bằng 2 dòng, trong khi xem trước dùng `thumbnail.cover_background`; gộp về một hàm khi được phép sửa `render.py` lại.
+    - (d) Tên ảnh cảnh thật là `images/<hash16>.<ext>`. Mục 3 đã sửa; các dòng ở mục 9 (Quy ước đánh số cảnh, `POST /assets`, `scenes/reorder`) còn ghi `scene-NN`, cần đối chiếu với `storage.py` rồi sửa.

@@ -1,11 +1,14 @@
+import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../api/endpoints';
+import { api, projectFileUrl } from '../api/endpoints';
 import type { Thumbnail } from '../api/types';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { vi } from '../i18n/vi';
 import { errorMessage } from '../utils/errors';
 import { sceneNumber } from '../utils/scene';
+import { CoverDrop } from './CoverDrop';
+import { ErrorNote } from './ErrorNote';
 import { DownloadIcon } from './icons';
 import { Button } from './ui/Button';
 import { Chip } from './ui/Chip';
@@ -37,8 +40,17 @@ function usableLines(t: Thumbnail): boolean {
   return t.lines.filter((l) => l.trim() !== '').length >= 2;
 }
 
-function CoverPreview({ slug, thumbnail }: { slug: string; thumbnail: Thumbnail }) {
-  const key = JSON.stringify(thumbnail);
+function CoverPreview({
+  slug,
+  thumbnail,
+  version,
+}: {
+  slug: string;
+  thumbnail: Thumbnail;
+  /** Tăng sau mỗi lần tải ảnh bìa mới (tên file không đổi nên khoá JSON không đổi). */
+  version: number;
+}) {
+  const key = JSON.stringify({ thumbnail, version });
   const settled = useDebouncedValue(key, THUMB_PREVIEW_DELAY_MS);
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,7 +65,7 @@ function CoverPreview({ slug, thumbnail }: { slug: string; thumbnail: Thumbnail 
   );
 
   useEffect(() => {
-    const draft = JSON.parse(settled) as Thumbnail;
+    const draft = (JSON.parse(settled) as { thumbnail: Thumbnail }).thumbnail;
     if (!usableLines(draft)) return;
     const controller = new AbortController();
     setLoading(true);
@@ -121,6 +133,18 @@ export function ThumbnailEditor({
   const editor = useProjectEditor();
   const { project } = editor;
   const thumb = project.thumbnail;
+  const [coverVersion, setCoverVersion] = useState(0);
+  const upload = useMutation({
+    mutationFn: async (f: File) => {
+      await editor.flush(); // máy chủ chỉ nhận ảnh bìa khi khối thumbnail đã được lưu
+      return api.uploadAsset(project.slug, 'cover', f);
+    },
+    onSuccess: (res) => {
+      const image = res.project.thumbnail?.image ?? null;
+      editor.applyServer((p) => (p.thumbnail ? { ...p, thumbnail: { ...p.thumbnail, image } } : p));
+      setCoverVersion((v) => v + 1);
+    },
+  });
 
   const patch = (change: Partial<Thumbnail>) =>
     editor.update((p) => (p.thumbnail ? { ...p, thumbnail: { ...p.thumbnail, ...change } } : p));
@@ -169,6 +193,7 @@ export function ThumbnailEditor({
                 <Chip
                   key={i}
                   small
+                  disabled={!!thumb.image}
                   selected={thumb.scene === sceneNumber(i)}
                   onClick={() => patch({ scene: sceneNumber(i) })}
                 >
@@ -176,6 +201,32 @@ export function ThumbnailEditor({
                 </Chip>
               ))}
             </div>
+            {thumb.image && <p className="text-small text-muted">{T.sceneOff}</p>}
+          </div>
+          <div className="space-y-2">
+            <p className="ui-label !mb-0">{T.image}</p>
+            {thumb.image && (
+              <div className="ui-inner flex items-center gap-3 p-3">
+                <img
+                  src={`${projectFileUrl(project.slug, thumb.image)}?v=${coverVersion}`}
+                  alt={T.imageAlt}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-24 w-[54px] shrink-0 rounded-[10px] object-cover"
+                />
+                <p className="min-w-0 flex-1 text-small font-bold">{T.imageUsing}</p>
+                <Button tone="ghost" size="sm" onClick={() => patch({ image: null })}>
+                  {T.imageRemove}
+                </Button>
+              </div>
+            )}
+            <CoverDrop
+              label={thumb.image ? T.imageReplace : T.imageDrop}
+              busy={upload.isPending}
+              onFile={(f) => upload.mutate(f)}
+            />
+            <p className="text-small text-muted">{T.imageHelp}</p>
+            <ErrorNote error={upload.error} />
           </div>
           <div className="grid grid-cols-[1fr_auto] items-end gap-3">
             <Input
@@ -194,7 +245,7 @@ export function ThumbnailEditor({
               onChange={(e) => patch({ accent: e.target.value.toUpperCase() })}
             />
           </div>
-          <CoverPreview slug={project.slug} thumbnail={thumb} />
+          <CoverPreview slug={project.slug} thumbnail={thumb} version={coverVersion} />
           <div className="flex flex-wrap items-center gap-3">
             {covers === undefined ? null : covers ? (
               <>

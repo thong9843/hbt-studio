@@ -37,6 +37,7 @@ from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+COVER_MIN_SIDE = 540  # px; ảnh bìa tải lên có cạnh ngắn hơn thì từ chối
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 DELETE_ATTEMPTS = 5  # xoá project: số lần thử khi Windows còn giữ file
 DELETE_RETRY_SECONDS = 0.1
@@ -538,6 +539,18 @@ class Storage:
             else:
                 src.unlink(missing_ok=True)
             project.scenes[scene_index].image = rel
+        elif kind == "cover":
+            if project.thumbnail is None:
+                raise Unprocessable("Hãy bật ảnh bìa (thêm khối thumbnail) trước khi tải ảnh bìa")
+            ext = _image_extension(src)
+            _check_cover_size(src)
+            rel = f"images/cover.{ext}"
+            (folder / "images").mkdir(exist_ok=True)
+            os.replace(src, folder / rel)  # ghi đè bản cũ cùng đuôi
+            for old in (folder / "images").glob("cover.*"):  # bản cũ khác đuôi
+                if old.name != f"cover.{ext}" and old.is_file():
+                    old.unlink()
+            project.thumbnail.image = rel
         elif kind in ("voice", "music"):
             ext = _audio_extension(src, filename)
             rel = f"{kind}.{ext}"
@@ -548,7 +561,7 @@ class Storage:
             else:
                 project.music = Music(file=rel)
         else:
-            raise BadRequest("`kind` phải là image, voice hoặc music")
+            raise BadRequest("`kind` phải là image, cover, voice hoặc music")
         self.save(slug, project)
         return rel, project
 
@@ -598,6 +611,16 @@ def _image_extension(path: Path) -> str:
     if fmt not in IMAGE_FORMATS:
         raise BadRequest("Ảnh phải là PNG, JPG hoặc WEBP")
     return IMAGE_FORMATS[fmt]
+
+
+def _check_cover_size(path: Path) -> None:
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+    except (Image.DecompressionBombError, OSError) as e:
+        raise BadRequest("File không phải ảnh hợp lệ") from e
+    if min(w, h) < COVER_MIN_SIDE:
+        raise BadRequest(f"Ảnh bìa quá nhỏ ({w}×{h}); cạnh ngắn cần từ {COVER_MIN_SIDE} px trở lên")
 
 
 def _audio_extension(path: Path, filename: str) -> str:
