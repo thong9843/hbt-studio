@@ -46,6 +46,20 @@ describe('UiKit page (/dev/ui)', () => {
     expect(root).not.toHaveAttribute('data-theme');
   });
 
+  it('keeps the theme the user picked in the app: restores it on "Theo hệ thống" and on leaving', async () => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme', 'dark'); // lựa chọn từ nút Sáng/Tối của app
+    const { unmount } = renderWithProviders(withToast(<UiKit />));
+    expect(root).toHaveAttribute('data-theme', 'dark');
+    await userEvent.click(screen.getByRole('button', { name: 'Sáng' }));
+    expect(root).toHaveAttribute('data-theme', 'light');
+    await userEvent.click(screen.getByRole('button', { name: 'Theo hệ thống' }));
+    expect(root).toHaveAttribute('data-theme', 'dark');
+    await userEvent.click(screen.getByRole('button', { name: 'Sáng' }));
+    unmount();
+    expect(root).toHaveAttribute('data-theme', 'dark');
+  });
+
   it('opens and closes the dialog and the drawer', async () => {
     renderWithProviders(withToast(<UiKit />));
     await userEvent.click(screen.getByRole('button', { name: 'Mở hộp thoại' }));

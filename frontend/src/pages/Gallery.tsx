@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MoreIcon, MoonIcon, PlayIcon, PlusIcon, SunIcon } from '../components/icons';
 import { Badge } from '../components/ui/Badge';
 import { Button, type ButtonTone } from '../components/ui/Button';
@@ -42,12 +42,25 @@ export default function UiKit() {
   const [drawer, setDrawer] = useState(false);
   const [pct, setPct] = useState(40);
 
+  // Chế độ đang dùng của app (nút Sáng/Tối ghi `data-theme`): nhớ lúc mở, trả lại khi đóng trang,
+  // để trang mẫu không làm mất lựa chọn của người dùng.
+  const original = useRef(document.documentElement.getAttribute('data-theme'));
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'system') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', theme);
-    return () => root.removeAttribute('data-theme');
+    const base = original.current;
+    if (theme === 'system') {
+      if (base === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', base);
+    } else root.setAttribute('data-theme', theme);
   }, [theme]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const base = original.current;
+    return () => {
+      if (base === null) root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', base);
+    };
+  }, []);
 
   const tones: ButtonTone[] = ['ink', 'accent', 'brand', 'soft', 'danger', 'ghost'];
 
