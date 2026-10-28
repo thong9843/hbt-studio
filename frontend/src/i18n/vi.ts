@@ -308,6 +308,7 @@ export const vi = {
       trim: 'Cắt đuôi tại giây',
       trimHelp: 'Giây trên file gốc. Để trống nếu không cần.',
       trimmed: 'Đã cắt đuôi',
+      trimmedSeconds: (seconds: string) => `Đã cắt đuôi ${seconds} s`,
       listenTrimmed: 'Nghe phần đã cắt',
     },
     start: {

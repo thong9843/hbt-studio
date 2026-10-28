@@ -54,7 +54,11 @@ export function VoiceCard({ latest }: { latest: RenderRecord | undefined }) {
 
       {tail && (
         <div className="ui-inner flex items-center justify-between gap-3 p-3">
-          <Badge tone="yel">{T.trimmed}</Badge>
+          <Badge tone="yel">
+            {latest?.trimmed_tail_seconds
+              ? T.trimmedSeconds(latest.trimmed_tail_seconds.toFixed(1).replace('.', ','))
+              : T.trimmed}
+          </Badge>
           <ClipButton src={tail} label={T.listenTrimmed}>
             {vi.audio.play}
           </ClipButton>

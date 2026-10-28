@@ -164,6 +164,19 @@ describe('Âm thanh: giọng đọc', () => {
     expect(audio).not.toBeNull();
   });
 
+  it('shows how many seconds were cut when the render recorded it', async () => {
+    open({
+      proj: project({ voice: 'voice.mp3' }),
+      renders: [
+        render({
+          trimmed_tail: '/api/files/projects/muoi/renders/j1/trimmed_tail.wav',
+          trimmed_tail_seconds: 3.78,
+        }),
+      ],
+    });
+    expect(await screen.findByText('Đã cắt đuôi 3,8 s')).toBeInTheDocument();
+  });
+
   it('hides the trimmed tail when there is no render or nothing was cut', async () => {
     open({ proj: project({ voice: 'voice.mp3' }), renders: [render({ trimmed_tail: null })] });
     await screen.findByRole('heading', { name: 'Giọng đọc' });
