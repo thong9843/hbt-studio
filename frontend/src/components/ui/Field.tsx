@@ -19,9 +19,9 @@ interface Common {
 type InputProps = Common & InputHTMLAttributes<HTMLInputElement>;
 type AreaProps = Common & TextareaHTMLAttributes<HTMLTextAreaElement>;
 
-/** Đếm theo ký tự Unicode (không đếm hai đơn vị cho ký tự ngoài BMP). */
+/** Đếm theo ký tự Unicode sau NFC, khớp backend (13.B4.2). */
 function length(value: unknown): number {
-  return typeof value === 'string' ? [...value].length : 0;
+  return typeof value === 'string' ? [...value.normalize('NFC')].length : 0;
 }
 
 function Meta({

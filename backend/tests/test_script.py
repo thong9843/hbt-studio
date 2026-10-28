@@ -10,10 +10,11 @@ from pathlib import Path
 import pytest
 
 from hbt.models import Project
-from hbt.script import TEXT_W, check_script, parse_script
+from hbt.script import LINE_CHAR_LIMIT, TEXT_W, check_script, parse_script
 from hbt.sensitive import Category, SensitiveWords
 
 DATA = Path(__file__).parent / "data"
+SHARED = Path(__file__).parents[2] / "shared"
 
 
 def make_project(n: int = 4, **over) -> Project:
@@ -241,6 +242,21 @@ def test_k5_counts_nfc_characters():
     assert len(text) > 10
     res = run([scene(text, "xl")] + [{}] * 3)
     assert not [w for w in res.warnings if w["code"] == "K5"]
+
+
+def _char_cases():
+    return json.loads((SHARED / "char_cases.json").read_text(encoding="utf-8"))
+
+
+def test_k5_shared_char_cases_match_frontend_counter():
+    """Cùng `shared/char_cases.json` với Vitest (charCount.test.ts): bộ đếm khớp K5."""
+    data = _char_cases()
+    assert data["limits"] == LINE_CHAR_LIMIT
+    for case in data["cases"]:
+        assert len(unicodedata.normalize("NFC", case["text"])) == case["count"], case["name"]
+        lines = [scene(case["text"], case["size"])] + [{}] * 3
+        warned = any(w["code"] == "K5" for w in run(lines).warnings)
+        assert warned == case["warn"], case["name"]
 
 
 def test_k6_single_word_too_wide_is_error():
