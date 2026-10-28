@@ -21,7 +21,7 @@ interface Props {
   align?: 'start' | 'end';
 }
 
-/** Nút ⋯ mở danh sách việc. Mũi tên lên/xuống đổi dòng, Esc đóng và trả focus về nút. */
+/** Nút ⋯ mở danh sách việc. Mũi tên lên/xuống và Tab đổi dòng (focus không ra khỏi menu), Esc đóng và trả focus về nút. */
 export function Menu({ label, icon, items, align = 'end' }: Props) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -44,20 +44,24 @@ export function Menu({ label, icon, items, align = 'end' }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) return;
     if (e.key === 'Escape') {
       e.stopPropagation();
       close();
-    } else if (e.key === 'Tab') {
-      setOpen(false);
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    } else if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      // Tab xoay vòng trong menu như mũi tên (focus không ra ngoài khi menu còn mở).
       e.preventDefault();
       const list = Array.from(
         root.current?.querySelectorAll<HTMLElement>('[role=menuitem]:not([disabled])') ?? [],
       );
       if (list.length === 0) return;
       const at = list.indexOf(document.activeElement as HTMLElement);
-      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const step = e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1;
       list[(at + step + list.length) % list.length].focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      const list = root.current?.querySelectorAll<HTMLElement>('[role=menuitem]:not([disabled])');
+      if (list?.length) list[e.key === 'Home' ? 0 : list.length - 1].focus();
     }
   };
 

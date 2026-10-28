@@ -165,6 +165,39 @@ describe('Menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Xoá…' })).toHaveFocus();
   });
 
+  it('keeps Tab and Shift+Tab inside the open menu', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Thêm việc' }));
+    expect(screen.getByRole('menuitem', { name: 'Nhân bản' })).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole('menuitem', { name: 'Xoá…' })).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole('menuitem', { name: 'Nhân bản' })).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(screen.getByRole('menuitem', { name: 'Xoá…' })).toHaveFocus();
+    await userEvent.keyboard('{Home}');
+    expect(screen.getByRole('menuitem', { name: 'Nhân bản' })).toHaveFocus();
+    await userEvent.keyboard('{End}');
+    expect(screen.getByRole('menuitem', { name: 'Xoá…' })).toHaveFocus();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('does not hijack Tab while the menu is closed', async () => {
+    render(
+      <>
+        <Menu
+          label="Thêm việc"
+          icon={<svg />}
+          items={[{ key: 'a', label: 'A', onSelect: vi.fn() }]}
+        />
+        <button type="button">Sau</button>
+      </>,
+    );
+    screen.getByRole('button', { name: 'Thêm việc' }).focus();
+    await userEvent.tab();
+    expect(screen.getByRole('button', { name: 'Sau' })).toHaveFocus();
+  });
+
   it('runs the chosen item, closes, and returns focus to the button', async () => {
     const { a } = setup();
     const btn = screen.getByRole('button', { name: 'Thêm việc' });
