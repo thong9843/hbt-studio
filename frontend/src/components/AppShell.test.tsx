@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectsPage } from '../pages/ProjectsPage';
-import { stubFetch } from '../test/fakes';
+import { useRenderJob } from '../hooks/renderJob';
+import { FakeEventSource, stubFetch } from '../test/fakes';
 import { renderWithProviders } from '../test/render';
 import { AppShell } from './AppShell';
 import { RenderCard } from './SideNav';
@@ -204,6 +205,40 @@ describe('render progress card', () => {
     first.unmount();
     shell('/', { percent: 10, step: 'Căn chữ' });
     expect(screen.getByRole('status', { name: 'Đang dựng' })).toHaveTextContent('Căn chữ');
+  });
+
+  it('follows the global job and survives a change of screen', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetch({ ...routes(), 'POST /api/projects/muoi/render': { job_id: 'j1' } });
+    function Starter() {
+      const rj = useRenderJob();
+      return (
+        <button type="button" onClick={() => void rj.start('muoi', { preview: true })}>
+          go
+        </button>
+      );
+    }
+    renderWithProviders(
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Starter />} />
+          <Route path="/projects" element={<Where />} />
+        </Route>
+      </Routes>,
+      '/',
+    );
+    expect(screen.queryByRole('status', { name: 'Đang dựng' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'go' }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() =>
+      FakeEventSource.instances[0].emit('progress', { progress: 55, step: 'Mã hoá', message: '' }),
+    );
+    await userEvent.click(screen.getByRole('link', { name: 'Dự án' }));
+    const card = screen.getByRole('status', { name: 'Đang dựng' });
+    expect(card).toHaveTextContent('55%');
+    expect(card).toHaveTextContent('Mã hoá');
+    expect(FakeEventSource.instances).toHaveLength(1);
   });
 
   it('collapses to a bare bar with a tooltip in mini mode', () => {

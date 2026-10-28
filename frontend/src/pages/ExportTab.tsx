@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { fetchHealth, fetchText } from '../api/client';
 import { api } from '../api/endpoints';
@@ -10,7 +10,7 @@ import { AlertIcon, CopyIcon, DownloadIcon, PlayIcon, StopIcon } from '../compon
 import { ProgressBar } from '../components/ProgressBar';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
-import { useJob } from '../hooks/useJob';
+import { useRenderJob } from '../hooks/renderJob';
 import { vi } from '../i18n/vi';
 import { alignerLabel, alignerNotes } from '../utils/aligner';
 import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
@@ -342,23 +342,19 @@ export function ExportTab() {
   const toast = useToast();
   const { project } = editor;
   const slug = project.slug;
-  const queryClient = useQueryClient();
   const outro = project.settings.outro;
   const [finalFps, setFinalFps] = useState<Fps>(
     (FPS as number[]).includes(project.settings.fps) ? (project.settings.fps as Fps) : 50,
   );
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [lastOptions, setLastOptions] = useState<RenderOptions>({});
-  const [finished, setFinished] = useState<Job | null>(null);
+  const rj = useRenderJob();
+  const mine = rj.slug === slug;
+  const jobId = mine ? rj.jobId : null;
+  const lastOptions = rj.options;
+  const finished = mine ? rj.finished : null;
+  const connectionError = mine ? rj.connectionError : null;
   const [played, setPlayed] = useState<RenderRecord | null>(null);
   const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth(), retry: false });
   const renders = useQuery({ queryKey: ['renders', slug], queryFn: () => api.listRenders(slug) });
-
-  const { progress, job, connectionError, cancel } = useJob(jobId, (j) => {
-    setFinished(j);
-    void queryClient.invalidateQueries({ queryKey: ['renders', slug] });
-    if (j.status === 'done') toast.info(X.done);
-  });
 
   const lint = useQuery({
     queryKey: ['lint', slug, editor.savedCount],
@@ -371,18 +367,13 @@ export function ExportTab() {
   const start = useMutation({
     mutationFn: async (options: RenderOptions) => {
       await editor.flush();
-      return api.startRender(slug, options);
+      await rj.start(slug, options);
     },
-    onSuccess: (res, options) => {
-      setLastOptions(options);
-      setFinished(null);
-      setPlayed(null);
-      setJobId(res.job_id);
-    },
+    onSuccess: () => setPlayed(null),
     onError: (e, options) => toast.error(e, () => start.mutate(options)),
   });
 
-  const running = jobId !== null && finished === null && !connectionError;
+  const running = rj.running;
   const cannotStart = running || start.isPending || blocked || noFfmpeg;
   const reason = blocked ? X.blocked : noFfmpeg ? X.missingFfmpeg : undefined;
   const launch = (options: RenderOptions) => start.mutate({ ...options, outro });
@@ -392,7 +383,8 @@ export function ExportTab() {
     withCovers?.cover && withCovers.youtube_cover
       ? { cover: withCovers.cover, youtube: withCovers.youtube_cover }
       : null;
-  const pct = job?.progress ?? progress.progress;
+  const pct = finished?.progress ?? (mine ? rj.percent : 0);
+  const stepName = finished?.step ?? (mine ? rj.step : '');
 
   return (
     <div className="max-w-4xl space-y-12">
@@ -484,11 +476,15 @@ export function ExportTab() {
           <ProgressBar
             label={X.progress}
             value={pct}
-            step={job?.step ?? progress.step}
-            message={running ? progress.message : undefined}
+            step={stepName}
+            message={running && mine ? rj.message : undefined}
           />
-          {running && (
-            <button type="button" className="btn btn-outline btn-sm" onClick={() => void cancel()}>
+          {running && mine && (
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => void rj.cancel()}
+            >
               <StopIcon size={18} />
               {X.cancel}
             </button>
