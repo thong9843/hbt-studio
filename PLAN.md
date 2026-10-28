@@ -118,7 +118,7 @@ flowchart LR
 | Bộ | Kết quả |
 |---|---|
 | pytest (đầy đủ, gồm `slow`) | 757 passed (700 không `slow`) |
-| Vitest | 57 file, 757 test |
+| Vitest | 58 file, 761 test |
 | e2e Playwright (Edge) | 7/7 |
 | `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` | rỗng (X6); `PIPELINE_VERSION = 0112661f2845` |
 
@@ -239,5 +239,5 @@ flowchart LR
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
 | M4 | ☑ | Xong 27/10/2026 theo phạm vi máy cũ, chờ chủ dự án duyệt (chưa merge, chưa tag). Kiểm chứng: 630 pytest + 95 Vitest, CI xanh, golden máy cũ ĐẠT (xem bằng mắt/tai). Lệch đặc tả đã duyệt: golden chỉ máy cũ; 1b CUDA thật, `bench-align` máy mới và golden máy mới tách thành việc riêng trên nhánh riêng từ `main`, không chặn M5 (Nhật ký 27/10) |
-| M5 | ☑ | Xong 28/10/2026, nhánh `feat/m5-ui-json`, chờ CI xanh và chủ dự án cho phép merge + tag `v0.6.0` (chưa merge, chưa tag). Đợt 0–5 xong. Kiểm chứng: pytest 757 passed, Vitest 57 file / 757 test, e2e 7/7, `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng, `PIPELINE_VERSION = 0112661f2845` |
+| M5 | ☑ | Xong 28/10/2026, nhánh `feat/m5-ui-json`, chờ CI xanh và chủ dự án cho phép merge + tag `v0.6.0` (chưa merge, chưa tag). Đợt 0–5 xong. Kiểm chứng: pytest 757 passed, Vitest 58 file / 761 test, e2e 7/7, `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng, `PIPELINE_VERSION = 0112661f2845` |
 
