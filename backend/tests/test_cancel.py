@@ -168,6 +168,7 @@ def test_run_ffmpeg_is_interrupted_by_cancel():
 # ---------------------------------------------------------------- dựng đầu-cuối bị huỷ
 @needs_ffmpeg
 @pytest.mark.parametrize("step", ["Clip từng cảnh", "Ghép cuối"])
+@pytest.mark.slow
 def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step, monkeypatch):
     recorder = record_subprocesses(monkeypatch)
     pdir, opts = make_project(tmp_path, n=8)
@@ -207,6 +208,7 @@ def test_render_cancelled_midway_leaves_nothing_running(tmp_path, step, monkeypa
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_render_without_token_is_unaffected(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     res = render_project(pdir, opts)
@@ -215,6 +217,7 @@ def test_render_without_token_is_unaffected(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_job_id_names_the_render_folder_and_meta_is_written(tmp_path):
     pdir, opts = make_project(tmp_path, outro=False)
     opts.job_id = "abc123"

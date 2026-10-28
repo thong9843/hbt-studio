@@ -16,6 +16,15 @@
       crossorigin="anonymous"
     />
     <title>HBT Studio</title>
+    <script>
+      /* Áp chế độ đã lưu trước lần vẽ đầu để không nháy màn. Khoá khớp src/utils/theme.ts. */
+      (function () {
+        try {
+          var t = localStorage.getItem('hbt-theme');
+          if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

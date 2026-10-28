@@ -228,6 +228,7 @@ def test_shutdown_cancels_running_work(env):
 
 # ---------------------------------------------------------------- dựng thật
 @needs_ffmpeg
+@pytest.mark.slow
 def test_real_preview_job_end_to_end(env):
     store, _ = env
     m = manager(env)
@@ -250,6 +251,7 @@ def test_real_preview_job_end_to_end(env):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_real_head_preview_job_reports_seconds_and_no_srt(tmp_path):
     pdir, opts = make_project(tmp_path / "src", n=8)
     store = Storage(tmp_path / "workspace")

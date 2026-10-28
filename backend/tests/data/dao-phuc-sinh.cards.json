@@ -1,0 +1,87 @@
+[
+  {
+    "punch": true,
+    "card": {
+      "y": "upper",
+      "lines": [
+        { "text": "Giữa Thái Bình Dương", "size": "m", "color": "ink" },
+        { "text": "GẦN 900 TƯỢNG ĐÁ", "size": "l", "color": "primary" },
+        { "text": "đảo Phục Sinh", "size": "m", "color": "accent" }
+      ]
+    }
+  },
+  {
+    "punch": false,
+    "card": {
+      "y": "top",
+      "lines": [
+        { "text": "Cập bến đúng", "size": "s", "color": "ink" },
+        { "text": "NGÀY PHỤC SINH", "size": "l", "color": "primary" },
+        { "text": "tên bản địa: Rapa Nui", "size": "m", "color": "accent" }
+      ]
+    }
+  },
+  {
+    "punch": false,
+    "card": {
+      "y": "top",
+      "lines": [
+        { "text": "HƠN 3.500 KM", "size": "xl", "color": "primary" },
+        { "text": "từ bờ biển Chile", "size": "m", "color": "ink" }
+      ]
+    }
+  },
+  {
+    "punch": false,
+    "card": {
+      "y": "top",
+      "lines": [
+        { "text": "Đá núi lửa", "size": "s", "color": "ink" },
+        { "text": "CAO 4 MÉT", "size": "xl", "color": "primary" },
+        { "text": "nặng khoảng 12 tấn", "size": "m", "color": "ink" }
+      ]
+    }
+  },
+  {
+    "punch": true,
+    "card": {
+      "y": "upper",
+      "lines": [
+        { "text": "Không chỉ có đầu", "size": "m", "color": "ink" },
+        { "text": "THÂN BỊ VÙI", "size": "xl", "color": "primary" },
+        { "text": "sâu dưới lòng đất", "size": "m", "color": "ink" }
+      ]
+    }
+  },
+  {
+    "punch": false,
+    "card": {
+      "y": "top",
+      "lines": [
+        { "text": "Không bánh xe", "size": "m", "color": "ink" },
+        { "text": "DI CHUYỂN THẾ NÀO?", "size": "l", "color": "primary" }
+      ]
+    }
+  },
+  {
+    "punch": true,
+    "card": {
+      "y": "upper",
+      "lines": [
+        { "text": "18 người kéo dây", "size": "m", "color": "ink" },
+        { "text": "TƯỢNG BIẾT ĐI", "size": "xl", "color": "primary" },
+        { "text": "lắc lư từng bước", "size": "m", "color": "accent" }
+      ]
+    }
+  },
+  {
+    "punch": false,
+    "card": {
+      "y": "middle",
+      "lines": [
+        { "text": "BẠN MUỐN ĐẾN?", "size": "l", "color": "primary" },
+        { "text": "Bình luận cho mình nhé!", "size": "m", "color": "ink" }
+      ]
+    }
+  }
+]

@@ -32,6 +32,9 @@ hbt = ["fonts/*", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "slow: dựng/căn chữ thật, >= 3 s mỗi test trên máy cũ (pytest --durations=0). Chạy nhanh: pytest -m \"not slow\"",
+]
 
 [tool.ruff]
 line-length = 100

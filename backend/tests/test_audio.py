@@ -208,6 +208,7 @@ def test_outro_audio_without_voice_still_builds(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_outro_audio_length_is_deterministic(tmp_path):
     # Hồi quy: cách cũ (`apad=whole_dur`) đôi khi chỉ ra 2,05 s khi không có lời; dựng nhiều lần.
     voice = tmp_path / "ov.wav"

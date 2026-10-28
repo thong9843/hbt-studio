@@ -465,7 +465,32 @@ def test_cancel_queued_and_running_jobs_via_api(client):
     assert client.delete(f"/api/projects/{slug}").status_code == 204  # hết bận
 
 
+def test_list_active_jobs_is_read_only(client):
+    assert client.get("/api/jobs").json() == []
+    fake = FakeRender()
+    client.app.state.hbt.jobs._render = fake
+    client.app.state.hbt.jobs._tool_check = None
+    slug = complete_project(client)
+    a = client.post(f"/api/projects/{slug}/render", json={"preview": True}).json()["job_id"]
+    assert fake.started.wait(5)
+    b = client.post(f"/api/projects/{slug}/render").json()["job_id"]
+
+    rows = client.get("/api/jobs").json()
+    assert [(r["id"], r["slug"], r["kind"], r["status"]) for r in rows] == [
+        (a, slug, "preview", "running"),
+        (b, slug, "final", "queued"),
+    ]
+    assert all(isinstance(r["progress"], float | int) for r in rows)
+    assert client.get("/api/jobs").json() == rows  # đọc không đổi gì
+    assert client.post("/api/jobs").status_code == 405
+
+    client.post(f"/api/jobs/{b}/cancel")
+    client.post(f"/api/jobs/{a}/cancel")
+    assert client.get("/api/jobs").json() == []  # xong thì không còn trong danh sách
+
+
 @needs_ffmpeg
+@pytest.mark.slow
 def test_full_flow_render_sse_and_outputs(client):
     slug = complete_project(client)
     r = client.post(f"/api/projects/{slug}/render", json={"preview": True})

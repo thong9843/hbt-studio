@@ -53,6 +53,7 @@ def whisper(monkeypatch):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_extra_tail_is_cut_and_padded_to_1_6_s_after_the_last_word(tmp_path, whisper):
     whisper(extra=AD)
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False, tail=TAIL_AUDIO)
@@ -64,6 +65,7 @@ def test_extra_tail_is_cut_and_padded_to_1_6_s_after_the_last_word(tmp_path, whi
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_no_extra_tail_means_no_cut_and_no_warning(tmp_path, whisper):
     whisper()
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
@@ -74,6 +76,7 @@ def test_no_extra_tail_means_no_cut_and_no_warning(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_unmatched_last_token_is_never_cut_only_warned(tmp_path, whisper):
     whisper(extra=AD, drop_last=True)
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False, tail=TAIL_AUDIO)
@@ -84,6 +87,7 @@ def test_unmatched_last_token_is_never_cut_only_warned(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_unmatched_last_token_without_extra_audio_is_silent(tmp_path, whisper):
     whisper(drop_last=True)
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
@@ -104,6 +108,7 @@ def test_trim_longer_than_8_s_needs_confirmation(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_long_trim_goes_ahead_once_confirmed(tmp_path, whisper):
     whisper(extra=LONG_AD)
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False, tail=LONG_TAIL)
@@ -114,6 +119,7 @@ def test_long_trim_goes_ahead_once_confirmed(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_manual_trim_end_wins_over_whisper_trimming(tmp_path, whisper):
     whisper()
     pdir, opts = make_project(

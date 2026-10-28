@@ -18,6 +18,7 @@ def mp4_files(pdir):
     return sorted(p.name for p in job_dir.glob("*.mp4"))
 
 
+@pytest.mark.slow
 def test_cancel_between_frame_writes_leaves_no_partial_video(tmp_path):
     """Huỷ bật từ chính luồng dựng, đúng lúc luồng đang ở giữa hai lần ghi khung (check_current
     ném RenderCancelled trong vòng ghi, không qua BrokenPipe) — đường từng để lại file dở."""
@@ -33,6 +34,7 @@ def test_cancel_between_frame_writes_leaves_no_partial_video(tmp_path):
     assert mp4_files(pdir) == []
 
 
+@pytest.mark.slow
 def test_cancel_with_slow_frame_production_leaves_no_partial_video(tmp_path, monkeypatch):
     """Máy chậm: mỗi khung tốn thêm thời gian nên luồng hầu như luôn ở giữa hai lần ghi."""
     real_get = render.FrameReader.get
@@ -68,6 +70,7 @@ def test_cancel_with_slow_frame_production_leaves_no_partial_video(tmp_path, mon
     assert mp4_files(pdir) == []
 
 
+@pytest.mark.slow
 def test_real_error_mid_loop_removes_partial_and_keeps_original_error(tmp_path, monkeypatch):
     real_get = render.FrameReader.get
     calls = {"n": 0}

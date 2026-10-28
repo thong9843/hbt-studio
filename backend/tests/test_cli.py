@@ -169,6 +169,7 @@ def test_cli_stops_on_a_blocked_word_before_rendering(tmp_path, capsys):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_cli_still_renders_with_warn_and_info_words(tmp_path, capsys):
     from tests.test_render import make_project
 

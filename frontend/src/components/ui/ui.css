@@ -1,0 +1,895 @@
+/* Thành phần nền v2 (DESIGN-HBT.md mục 6, IMPLEMENT 13.B3). Luật hiệu năng:
+   chỉ transition transform / opacity / màu; 90-200 ms; không blur, không hoạt ảnh lặp
+   (trừ vòng xoay khi đang chạy việc). Hover chỉ bật trên thiết bị có chuột. */
+
+.ui-focus {
+  outline: none;
+}
+.ui-focus:focus-visible,
+.ui-btn:focus-visible,
+.ui-chip:focus-visible,
+.ui-icon-btn:focus-visible,
+.ui-nav-item:focus-visible,
+.ui-card-link:focus-visible,
+.ui-row:focus-visible,
+.ui-switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Trên nền vàng vòng focus đổi sang màu chữ (mục 6) */
+.ui-btn-accent:focus-visible,
+.ui-chip-on-accent:focus-visible {
+  outline-color: var(--text);
+}
+
+/* ---- Nút ---- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 24px;
+  border-radius: var(--radius-pill);
+  border: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-btn-lg {
+  min-height: 54px;
+  padding: 0 28px;
+}
+.ui-btn-sm {
+  min-height: 36px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+.ui-btn-ink {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.ui-btn-accent {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.ui-btn-brand {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+.ui-btn-soft {
+  background: var(--soft);
+  color: var(--text);
+}
+.ui-btn-danger {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+.ui-btn-ghost {
+  background: transparent;
+  color: var(--text);
+}
+/* Hover: nền đậm hoặc sáng 8% (lớp phủ ::before đổi opacity, không đổi filter) */
+.ui-btn,
+.ui-chip,
+.ui-icon-btn {
+  position: relative;
+  isolation: isolate;
+  cursor: pointer;
+}
+.ui-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  z-index: -1;
+  transition: opacity var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-btn:not(:disabled):not([aria-disabled='true']):hover {
+    transform: translateY(-1px);
+  }
+  .ui-btn:not(:disabled):not([aria-disabled='true']):hover::before {
+    opacity: 0.08;
+  }
+  .ui-btn-soft:not(:disabled):hover {
+    background: var(--line-input);
+  }
+  .ui-btn-ghost:not(:disabled):hover {
+    background: var(--soft);
+  }
+}
+.ui-btn:not(:disabled):not([aria-disabled='true']):active {
+  transform: scale(0.97);
+}
+.ui-btn:disabled,
+.ui-btn[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ui-spin 800ms linear infinite;
+}
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Nút icon tròn ---- */
+.ui-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-icon-btn-sm {
+  width: 36px;
+  height: 36px;
+}
+@media (hover: hover) {
+  .ui-icon-btn:not(:disabled):hover {
+    background: var(--soft);
+  }
+}
+.ui-icon-btn:not(:disabled):active {
+  transform: scale(0.94);
+}
+.ui-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Chip ---- */
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-chip-sm {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+@media (hover: hover) {
+  .ui-chip:not(:disabled):not([aria-pressed='true']):hover {
+    background: var(--line-input);
+  }
+}
+.ui-chip:not(:disabled):active {
+  transform: scale(0.97);
+}
+.ui-chip[aria-pressed='true'],
+.ui-chip[aria-checked='true'] {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.ui-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Công tắc ---- */
+.ui-switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--line-input);
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--card);
+  transition: transform var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-switch:not(:disabled):hover {
+    background: var(--muted);
+  }
+  .ui-switch[aria-checked='true']:not(:disabled):hover {
+    background: var(--text-2);
+  }
+}
+.ui-switch[aria-checked='true'] {
+  background: var(--primary);
+}
+.ui-switch[aria-checked='true']::after {
+  transform: translateX(20px);
+  background: var(--on-primary);
+}
+.ui-switch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Thẻ ---- */
+.ui-card {
+  position: relative;
+  border-radius: var(--radius-card);
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+}
+.ui-card-pad {
+  padding: 24px;
+}
+/* Thẻ bấm được: bóng đậm hơn bằng lớp ::after đổi opacity (không đổi box-shadow) */
+.ui-card-link {
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease);
+}
+.ui-card-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--shadow-card-hover);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-card-link:hover {
+    transform: translateY(-2px);
+  }
+  .ui-card-link:hover::after {
+    opacity: 1;
+  }
+}
+.ui-card-link:active {
+  transform: scale(0.99);
+}
+.ui-inner {
+  border-radius: var(--radius-inner);
+  background: var(--soft-2);
+}
+
+/* ---- Nhãn ---- */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--soft);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ui-badge-red {
+  background: var(--tint-red);
+  color: var(--on-tint-red);
+}
+.ui-badge-yel {
+  background: var(--tint-yel);
+  color: var(--on-tint-yel);
+}
+.ui-badge-ok {
+  background: var(--ok-soft);
+  color: var(--on-ok-soft);
+}
+.ui-badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---- Ô nhập ---- */
+.ui-field {
+  display: block;
+}
+.ui-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ui-input {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: var(--soft-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  transition: border-color var(--dur) var(--ease);
+}
+textarea.ui-input {
+  min-height: 96px;
+  resize: vertical;
+}
+.ui-input::placeholder {
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .ui-input:not(:disabled):not(:focus):hover {
+    border-color: var(--line-input);
+  }
+}
+/* Viền --text + quầng --accent 3 px mờ .35 (dùng outline, không đổi box-shadow) */
+.ui-input:focus {
+  outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 0;
+  border-color: var(--text);
+}
+.ui-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.ui-input[data-over='true'] {
+  border-color: var(--accent);
+}
+.ui-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-field-error {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.ui-counter {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.ui-counter[data-over='true'] {
+  color: var(--on-tint-yel);
+  background: var(--tint-yel);
+  border-radius: var(--radius-pill);
+  padding: 0 8px;
+}
+
+/* ---- Dòng danh sách / menu ---- */
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-row:not(:disabled):hover {
+    background: var(--soft-2);
+  }
+}
+.ui-row:not(:disabled):active {
+  background: var(--soft);
+}
+.ui-row:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-row-danger {
+  color: var(--danger);
+}
+
+/* ---- Thanh tiến độ: scaleX, tuyến tính 300 ms, không sọc chạy ---- */
+.ui-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--soft);
+}
+.ui-progress-bar {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 300ms linear;
+}
+
+/* ---- Khung xương: tĩnh, không lấp lánh ---- */
+.ui-skeleton {
+  border-radius: var(--radius-inner);
+  background: var(--soft);
+}
+
+/* ---- Hộp thoại / ngăn kéo ---- */
+.ui-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+  animation: ui-fade var(--dur) var(--ease) both;
+}
+.ui-scrim[data-closing='true'] {
+  animation: ui-fade-out 120ms var(--ease) both;
+}
+.ui-scrim-end {
+  justify-content: flex-end;
+  padding: 0;
+}
+.ui-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 28px;
+  border-radius: var(--radius-dialog);
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  animation: ui-pop var(--dur-pop) var(--ease) both;
+}
+.ui-drawer {
+  width: min(360px, 100vw);
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+  border-left: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  animation: ui-slide var(--dur-slow) var(--ease) both;
+}
+.ui-drawer-wide {
+  width: min(480px, 100vw);
+}
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ui-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ui-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes ui-slide {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* ---- Menu ---- */
+.ui-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 200px;
+  padding: 6px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow-pop);
+  animation: ui-fade var(--dur) var(--ease) both;
+}
+
+/* ---- Thông báo: trượt lên 8 px + hiện 200 ms ---- */
+.ui-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-inner);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-pop);
+  animation: ui-rise var(--dur-slow) var(--ease) both;
+}
+.ui-toast-error {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+@keyframes ui-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---- Thanh trái ---- */
+.ui-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-nav-item:hover {
+    background: var(--soft);
+  }
+}
+.ui-nav-item:active {
+  transform: scale(0.98);
+}
+.ui-nav-item[aria-current='page'] {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+/* Giảm chuyển động: bỏ transform và hoạt ảnh trượt, giữ đổi màu (luật 5) */
+@media (prefers-reduced-motion: reduce) {
+  .ui-btn,
+  .ui-chip,
+  .ui-icon-btn,
+  .ui-card-link,
+  .ui-nav-item,
+  .ui-scene,
+  .ui-scene-img,
+  .ui-scene-add,
+  .ui-dot {
+    transform: none !important;
+  }
+  .ui-switch::after {
+    transition: none;
+  }
+  .ui-dialog,
+  .ui-drawer,
+  .ui-toast,
+  .ui-menu,
+  .ui-scrim {
+    animation: none !important;
+  }
+  .ui-progress-bar {
+    transition: none;
+  }
+}
+
+/* ---- Soạn video: dải cảnh (thẻ ~120: ảnh 54×96, số cảnh) ---- */
+.ui-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+  border: 2px dashed transparent;
+  border-radius: var(--radius-card);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+/* Khi kéo file vào: nền --tint-yel + viền vàng nét đứt (tĩnh) */
+.ui-strip[data-active='true'] {
+  background: var(--tint-yel);
+  border-color: var(--accent);
+}
+.ui-scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  width: 66px;
+  height: 124px;
+  padding: 6px 6px 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  outline: 3px solid transparent;
+  transition:
+    outline-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-scene[aria-current='true'] {
+  outline-color: var(--accent);
+}
+.ui-scene[data-dragging='true'] {
+  z-index: 10;
+  opacity: 0.9;
+  transform: translateY(-4px);
+}
+/* Chỗ thả: vạch vàng ở mép trái */
+.ui-scene[data-over='true']::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ui-scene:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-scene-img {
+  position: relative;
+  width: 54px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-scene:hover .ui-scene-img {
+    transform: scale(1.04);
+  }
+}
+.ui-scene-no {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ui-scene-grip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text-2);
+  cursor: grab;
+  opacity: 0.85;
+  transition: opacity var(--dur) var(--ease);
+}
+.ui-scene-grip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  opacity: 1;
+}
+.ui-scene-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 66px;
+  height: 124px;
+  border: 2px dashed var(--line-input);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-scene-add:not(:disabled):hover {
+    background: var(--soft);
+  }
+}
+.ui-scene-add:not(:disabled):active {
+  transform: scale(0.97);
+}
+.ui-scene-add:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-scene-add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Chấm màu thẻ chữ (Mực / Chính / Nhấn / Tuỳ chọn) ---- */
+.ui-dot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--line-input);
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--text);
+  cursor: pointer;
+  outline: 3px solid transparent;
+  outline-offset: 1px;
+  transition:
+    transform var(--dur-press) var(--ease),
+    outline-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-dot:hover {
+    border-color: var(--text);
+  }
+}
+.ui-dot:active {
+  transform: scale(0.94);
+}
+.ui-dot[aria-pressed='true'],
+.ui-dot[data-on='true'] {
+  outline-color: var(--accent);
+  border-color: var(--text);
+}
+.ui-dot:focus-visible,
+.ui-dot:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-dot input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---- Khung xem trước 9:16 và lớp Vùng an toàn (lớp phủ tĩnh, không hoạt ảnh) ---- */
+.ui-frame {
+  position: relative;
+  width: 288px;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: var(--radius-preview);
+  background: var(--soft);
+}
+.ui-safe {
+  position: absolute;
+  background: var(--scrim);
+  pointer-events: none;
+}
+.ui-safe-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  border-bottom: 2px dashed var(--accent);
+}
+.ui-safe-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed var(--accent);
+}
+.ui-safe-right {
+  right: 0;
+  border-left: 2px dashed var(--accent);
+}
+
+/* ---- Âm thanh: vùng thả file nhỏ ---- */
+.ui-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 16px;
+  border: 2px dashed var(--line);
+  border-radius: 16px;
+  background: var(--soft-2);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-drop:hover {
+    background: var(--soft);
+  }
+}
+.ui-drop:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Khi kéo file vào: nền --tint-yel + viền vàng nét đứt (tĩnh) */
+.ui-drop[data-active='true'] {
+  background: var(--tint-yel);
+  border-color: var(--accent);
+}
+
+/* ---- Xuất video: thẻ lịch sử đang xem (viền vàng tĩnh, không hoạt ảnh) ---- */
+.ui-history-on {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* ---- Khối ghi chú vàng (cảnh báo khi dựng) ---- */
+.ui-note-yel {
+  border-radius: var(--radius-inner, 16px);
+  background: var(--tint-yel);
+  color: var(--on-tint-yel);
+}

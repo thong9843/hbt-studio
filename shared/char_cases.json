@@ -1,0 +1,102 @@
+{
+  "_comment": "B\u1ed9 ca \u0111\u1ebfm k\u00fd t\u1ef1 d\u00f2ng th\u1ebb (K5), d\u00f9ng chung cho pytest (backend/tests/test_script.py) v\u00e0 Vitest (frontend/src/utils/charCount.test.ts). Gi\u1edbi h\u1ea1n: xl 10, l 15, m 22, s 26; \u0111\u1ebfm s\u1ed1 k\u00fd t\u1ef1 Unicode sau NFC.",
+  "limits": {
+    "xl": 10,
+    "l": 15,
+    "m": 22,
+    "s": 26
+  },
+  "cases": [
+    {
+      "name": "10 k\u00fd t\u1ef1 c\u1ee1 xl v\u1eeba \u0111\u1ee7",
+      "size": "xl",
+      "text": "aaaaaaaaaa",
+      "count": 10,
+      "warn": false
+    },
+    {
+      "name": "11 k\u00fd t\u1ef1 c\u1ee1 xl v\u01b0\u1ee3t",
+      "size": "xl",
+      "text": "aaaaaaaaaaa",
+      "count": 11,
+      "warn": true
+    },
+    {
+      "name": "15/10 c\u1ee1 xl kh\u00f4ng c\u1ea3nh b\u00e1o",
+      "size": "xl",
+      "text": "15/10",
+      "count": 5,
+      "warn": false
+    },
+    {
+      "name": "g\u1ea5p 100 l\u1ea7n c\u1ee1 xl = 11",
+      "size": "xl",
+      "text": "g\u1ea5p 100 l\u1ea7n",
+      "count": 11,
+      "warn": true
+    },
+    {
+      "name": "15 k\u00fd t\u1ef1 c\u1ee1 l v\u1eeba \u0111\u1ee7",
+      "size": "l",
+      "text": "aaaaaaaaaaaaaaa",
+      "count": 15,
+      "warn": false
+    },
+    {
+      "name": "16 k\u00fd t\u1ef1 c\u1ee1 l v\u01b0\u1ee3t",
+      "size": "l",
+      "text": "aaaaaaaaaaaaaaaa",
+      "count": 16,
+      "warn": true
+    },
+    {
+      "name": "\u201c\u0111\u01b0\u1ee3c mu\u1ed7i y\u00eau\u201d? c\u1ee1 l = 16",
+      "size": "l",
+      "text": "\u201c\u0111\u01b0\u1ee3c mu\u1ed7i y\u00eau\u201d?",
+      "count": 16,
+      "warn": true
+    },
+    {
+      "name": "22 k\u00fd t\u1ef1 c\u1ee1 m v\u1eeba \u0111\u1ee7",
+      "size": "m",
+      "text": "aaaaaaaaaaaaaaaaaaaaaa",
+      "count": 22,
+      "warn": false
+    },
+    {
+      "name": "23 k\u00fd t\u1ef1 c\u1ee1 m v\u01b0\u1ee3t",
+      "size": "m",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaa",
+      "count": 23,
+      "warn": true
+    },
+    {
+      "name": "26 k\u00fd t\u1ef1 c\u1ee1 s v\u1eeba \u0111\u1ee7",
+      "size": "s",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "count": 26,
+      "warn": false
+    },
+    {
+      "name": "27 k\u00fd t\u1ef1 c\u1ee1 s v\u01b0\u1ee3t",
+      "size": "s",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "count": 27,
+      "warn": true
+    },
+    {
+      "name": "ch\u1eef t\u1ed5 h\u1ee3p (NFD) \u0111\u1ebfm sau NFC",
+      "size": "xl",
+      "text": "\u0110A\u0323I DU\u031bO\u031bNG!",
+      "count": 10,
+      "warn": false
+    },
+    {
+      "name": "d\u00f2ng r\u1ed7ng kh\u00f4ng c\u1ea3nh b\u00e1o",
+      "size": "xl",
+      "text": "",
+      "count": 0,
+      "warn": false
+    }
+  ]
+}

@@ -5,6 +5,9 @@ Job nằm trong bộ nhớ (mất khi khởi động lại server); file đã xu
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import shutil
 import threading
 import time
@@ -24,6 +27,8 @@ from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
+
+log = logging.getLogger(__name__)
 
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
 LOG_TAIL = 20
@@ -110,6 +115,34 @@ class Job:
             return True
 
 
+def _timing_mtime(folder: Path) -> int | None:
+    """Giờ sửa của `build/timing.json` (ns); None nếu chưa có."""
+    try:
+        return (folder / "build" / "timing.json").stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def write_run_stats(job_dir: Path, render_seconds: float, align_cached: bool) -> None:
+    """Gộp `render_seconds`, `align_cached` vào `meta.json` pipeline đã ghi (B′, IMPLEMENT 13.B5).
+
+    Chỉ thêm hai trường, không đụng trường khác; ghi file tạm rồi `os.replace`. Không có
+    `meta.json` thì thôi. Lỗi chỉ ghi log, không làm hỏng job."""
+    meta = job_dir / "meta.json"
+    tmp = meta.with_name(meta.name + ".tmp")
+    try:
+        if not meta.is_file():
+            return
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        data["render_seconds"] = round(render_seconds, 1)
+        data["align_cached"] = align_cached
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, meta)
+    except Exception:  # noqa: BLE001
+        log.warning("Không ghi được thống kê dựng vào %s", meta, exc_info=True)
+        tmp.unlink(missing_ok=True)
+
+
 def check_render_tools() -> None:
     """Đủ FFmpeg (và ffprobe) để dựng chưa? Thiếu thì ServiceUnavailable kèm lời nhắn cài."""
     from hbt.api.health import check_ffmpeg
@@ -157,6 +190,12 @@ class JobManager:
     def is_busy(self, slug: str) -> bool:
         with self._lock:
             return any(j.slug == slug and not j.finished for j in self._jobs.values())
+
+    def active(self) -> list[Job]:
+        """Job đang chạy hoặc đang chờ, cũ nhất trước (chỉ đọc)."""
+        with self._lock:
+            jobs = [j for j in self._jobs.values() if not j.finished]
+        return sorted(jobs, key=lambda j: j.created_at)
 
     # ---------------------------------------------------------------- tạo / huỷ
     def submit(
@@ -244,6 +283,7 @@ class JobManager:
             whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
             job_id=job.id,
         )
+        timing_before = _timing_mtime(folder)
         try:
             result = self._render(folder, opts, progress=job._progress, cancel_token=job.token)
         except RenderCancelled:
@@ -277,4 +317,7 @@ class JobManager:
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,
             }
+            # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
+            align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
+            write_run_stats(result.job_dir, result.seconds, align_cached)
             job._finish(DONE, output=output)

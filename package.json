@@ -18,6 +18,7 @@
     "test": "npm run test:py && npm run test:web",
     "test:py": "node scripts/py.mjs -m pytest backend",
     "test:web": "npm -w frontend run test",
+    "test:fast": "node scripts/py.mjs -m pytest backend -m \"not slow\" && npm run test:web",
     "e2e": "playwright test"
   },
   "devDependencies": {

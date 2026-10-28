@@ -1,27 +1,53 @@
-/* Token giao diện theo DESIGN-HBT.md mục 2-4. Sáng/tối theo hệ thống (prefers-color-scheme). */
+/* Token giao diện v2 theo DESIGN-HBT.md v2.0 mục 2-4 (IMPLEMENT 13.B1).
+   Sáng/tối theo hệ thống; `data-theme="light|dark"` trên <html> ép một chế độ (trang /dev/ui).
+   Khối tối được khai hai lần (media query và data-theme) vì CSS thuần không dùng chung được;
+   tokens.test.ts kiểm hai khối khớp nhau. */
 :root {
   /* Màu (mục 2) */
-  --bg: #ffffff;
-  --surface: #f5f5f5;
-  --surface-2: #ebebeb;
-  --text: #111111;
-  --text-muted: #5c5c5c;
-  --border: #e0e0e0;
-  --primary: #111111;
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --nav: #ffffff;
+  --soft: #f0f0f3;
+  --soft-2: #f5f5f7;
+  --line: #ececf0;
+  --line-input: #d9d9de;
+  --text: #16120f;
+  --text-2: #3a3540;
+  --muted: #6e6a72;
+  --primary: #16120f;
   --on-primary: #ffffff;
   --accent: #f4b630;
-  --on-accent: #111111;
-  --brand-red: #b22228;
-  --brand-cream: #f7eeda;
-  --brand-ink: #1e1816;
+  --on-accent: #16120f;
+  --brand: #b22228;
+  --on-brand: #ffffff;
+  --tint-red: #fdecec;
+  --on-tint-red: #9c1d22;
+  --tint-yel: #fff3d1;
+  --on-tint-yel: #6b4a00;
+  --ok: #22a55b;
+  --ok-soft: #e6f5ec;
+  --on-ok-soft: #187a42;
   --danger: #b3261e;
-  --focus: #111111;
+  --on-danger: #ffffff;
+  --danger-soft: #fdecea;
+  --focus: #f4b630;
+  /* Thẻ nền tối cố định ở cả hai chế độ ("Lần xuất gần nhất"); không đảo theo --primary */
+  --hero: #16120f;
+  --on-hero: #ffffff;
 
-  /* Khoảng cách: thang 4 px (mục 4) */
+  /* Bóng (mục 4); chế độ tối bỏ bóng, dùng viền --line */
+  --shadow-card: 0 1px 2px rgba(22, 18, 15, 0.04), 0 8px 24px rgba(22, 18, 15, 0.05);
+  --shadow-card-hover: 0 2px 4px rgba(22, 18, 15, 0.06), 0 16px 40px rgba(22, 18, 15, 0.1);
+  --shadow-pop: 0 24px 64px rgba(22, 18, 15, 0.25);
+  --card-border: transparent;
+  --scrim: rgba(22, 18, 15, 0.5);
+
+  /* Khoảng cách: thang 4 px */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
@@ -29,38 +55,89 @@
   --space-24: 96px;
 
   /* Bo góc (mục 4) */
+  --radius-card: 24px;
+  --radius-dialog: 28px;
+  --radius-preview: 28px;
+  --radius-inner: 16px;
+  --radius-input: 14px;
   --radius-pill: 999px;
-  --radius-input: 12px;
-  --radius-card: 20px;
-  --radius-preview: 16px;
-  --radius-frame: 24px;
 
-  /* Chuyển động (mục 7) */
+  /* Bố cục */
+  --nav-w: 232px;
+  --nav-w-mini: 72px;
+
+  /* Chuyển động (luật 13.B3.2): 90-200 ms, một đường cong */
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --dur: 180ms;
+  --dur-press: 90ms;
+  --dur: 150ms;
+  --dur-pop: 180ms;
+  --dur-slow: 200ms;
 
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e0e0e;
-    --surface: #171717;
-    --surface-2: #222222;
-    --text: #f5f5f5;
-    --text-muted: #a3a3a3;
-    --border: #2e2e2e;
-    --primary: #f5f5f5;
-    --on-primary: #111111;
+  :root:not([data-theme='light']) {
+    --bg: #0f0f12;
+    --card: #18181c;
+    --nav: #16161a;
+    --soft: #26262c;
+    --soft-2: #1f1f25;
+    --line: #26262c;
+    --line-input: #3a3a42;
+    --text: #f4f4f6;
+    --text-2: #c9c9d1;
+    --muted: #a0a0aa;
+    --primary: #f4f4f6;
+    --on-primary: #0f0f12;
+    --ok: #3ccb7f;
+    --ok-soft: #26262c;
+    --on-ok-soft: #3ccb7f;
+    --tint-red: #26262c;
+    --on-tint-red: #ff8a8f;
+    --tint-yel: #26262c;
+    --on-tint-yel: #f4b630;
     --danger: #ff6b6b;
-    --focus: #f4b630;
+    --on-danger: #0f0f12;
+    --danger-soft: #26262c;
+    --shadow-card: none;
+    --shadow-card-hover: none;
+    --shadow-pop: none;
+    --card-border: var(--line);
+    --scrim: rgba(0, 0, 0, 0.6);
 
     color-scheme: dark;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur: 0ms;
-  }
+:root[data-theme='dark'] {
+  --bg: #0f0f12;
+  --card: #18181c;
+  --nav: #16161a;
+  --soft: #26262c;
+  --soft-2: #1f1f25;
+  --line: #26262c;
+  --line-input: #3a3a42;
+  --text: #f4f4f6;
+  --text-2: #c9c9d1;
+  --muted: #a0a0aa;
+  --primary: #f4f4f6;
+  --on-primary: #0f0f12;
+  --ok: #3ccb7f;
+  --ok-soft: #26262c;
+  --on-ok-soft: #3ccb7f;
+  --tint-red: #26262c;
+  --on-tint-red: #ff8a8f;
+  --tint-yel: #26262c;
+  --on-tint-yel: #f4b630;
+  --danger: #ff6b6b;
+  --on-danger: #0f0f12;
+  --danger-soft: #26262c;
+  --shadow-card: none;
+  --shadow-card-hover: none;
+  --shadow-pop: none;
+  --card-border: var(--line);
+  --scrim: rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
 }

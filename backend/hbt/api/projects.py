@@ -34,6 +34,8 @@ class ProjectSummary(BaseModel):
     thumb: str | None  # URL ảnh cảnh 1; None → giao diện dùng ảnh mặc định HBT
     last_render: dict | None
     error: str | None = None
+    cover: str | None = None  # URL cover_9x16.jpg của lần dựng gần nhất có bìa
+    last_final: dict | None = None  # bản đẹp mới nhất (cùng dạng last_render), không có → None
 
 
 @router.get("/projects", response_model=list[ProjectSummary])
@@ -41,8 +43,10 @@ def list_projects(state: State):
     items = []
     for item in state.storage.list_projects():
         item["thumb"] = file_url(item["thumb"])
-        if item["last_render"]:
-            item["last_render"]["video"] = file_url(item["last_render"]["video"])
+        item["cover"] = file_url(item["cover"])
+        for key in ("last_render", "last_final"):
+            if item[key]:
+                item[key]["video"] = file_url(item[key]["video"])
         items.append(item)
     return items
 
@@ -188,6 +192,15 @@ def clean_build(slug: str, state: State):
     if state.jobs.is_busy(slug):
         raise Conflict("Project đang được dựng, hãy đợi xong hoặc huỷ job rồi mới dọn file tạm")
     return state.storage.clean_build(slug)
+
+
+@router.delete("/projects/{slug}/renders/{job_id}", status_code=204)
+def delete_render(slug: str, job_id: str, state: State) -> Response:
+    """Xoá một lần xuất (cả thư mục). 404 không có; 409 đang dựng / đang chờ / file đang mở."""
+    if any(j.id == job_id for j in state.jobs.active()):
+        raise Conflict("Lần xuất này đang dựng hoặc đang chờ, hãy huỷ job trước khi xoá")
+    state.storage.delete_render(slug, job_id)
+    return Response(status_code=204)
 
 
 @router.get("/projects/{slug}/renders")

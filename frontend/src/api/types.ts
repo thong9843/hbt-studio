@@ -107,6 +107,11 @@ export interface RenderSummary {
   preview: boolean;
   fps: number | null;
   duration: number | null;
+  /** null = bản dựng cũ không ghi (IMPLEMENT 13.B6). */
+  render_seconds?: number | null;
+  align_cached?: boolean | null;
+  /** Số giây giọng bị cắt đuôi; null = không cắt hoặc bản dựng cũ không ghi. */
+  trimmed_tail_seconds?: number | null;
   created_at: string;
   video: string | null;
 }
@@ -117,6 +122,10 @@ export interface ProjectSummary {
   updated_at: string;
   thumb: string | null;
   last_render: RenderSummary | null;
+  /** Bản đẹp mới nhất (không phải xem nhanh), cùng dạng `last_render`. */
+  last_final: RenderSummary | null;
+  /** Bìa 9:16 của lần dựng gần nhất có bìa. */
+  cover: string | null;
   error: string | null;
 }
 
@@ -210,6 +219,16 @@ export interface Job {
   preview_seconds: number | null;
 }
 
+/** Một dòng của `GET /jobs`: job đang chạy hoặc đang chờ. */
+export interface ActiveJob {
+  id: string;
+  slug: string;
+  kind: 'preview' | 'final';
+  status: 'queued' | 'running';
+  progress: number;
+  step: string;
+}
+
 export interface RenderOptions {
   preview?: boolean;
   /** Xem nhanh chỉ dựng chừng này giây đầu; bỏ trống = cả video. */
@@ -252,4 +271,47 @@ export interface NewMusicInput {
   url?: string;
   moods?: string;
   bpm?: number | null;
+}
+
+/** Khối JSON kịch bản (IMPLEMENT 13.B4). */
+export type ScriptExtra = 'add' | 'trim';
+
+export interface ScriptIssue {
+  code: string;
+  /** Chỉ số cảnh từ 0; `null` = áp cho cả video. */
+  scene_index: number | null;
+  field: string;
+  message: string;
+  /** K10: `block` = sẽ chặn xuất, `warn` = lưu ý. */
+  level?: 'block' | 'warn';
+}
+
+export interface ScriptDiffItem {
+  scene_index: number | null;
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface ScriptCheck {
+  ok: boolean;
+  base_hash: string;
+  counts: { json: number; project: number; after: number };
+  errors: ScriptIssue[];
+  warnings: ScriptIssue[];
+  diff: ScriptDiffItem[];
+  /** Chỉ số (từ 0) các cảnh đổi lời đọc, sẽ căn chữ lại. */
+  realign_scenes: number[];
+}
+
+export interface ScriptApplied {
+  project: Project;
+  backup_id: string;
+  base_hash: string;
+}
+
+export interface BackupEntry {
+  id: string;
+  created_at: string;
+  reason: 'apply' | 'restore' | null;
 }

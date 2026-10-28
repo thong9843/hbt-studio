@@ -38,7 +38,11 @@ log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
-COPY_EXCLUDE = ("build", "renders")  # nhân bản không chép file trung gian và các lần xuất
+RENDER_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+)  # job_id app + tên CLI (20261026-…-preview)
+TRASH_PREFIX = ".deleting-"  # thư mục lần xuất đang xoá: bị bỏ qua khi liệt kê
+COPY_EXCLUDE = ("build", "renders", "backups")  # nhân bản không chép file tạm, lần xuất, sao lưu
 
 
 class StorageError(Exception):
@@ -334,7 +338,7 @@ class Storage:
         current_music = self._music_sha256(slug)
         for d in renders.iterdir():
             video = d / "video.mp4"
-            if not video.is_file():
+            if d.name.startswith(TRASH_PREFIX) or not video.is_file():
                 continue
             meta: dict = {}
             if (d / "meta.json").is_file():
@@ -355,6 +359,9 @@ class Storage:
                 "preview_seconds": meta.get("preview_seconds"),
                 "music_start": meta.get("music_start"),
                 "music_start_source": meta.get("music_start_source"),
+                "render_seconds": meta.get("render_seconds"),  # bản dựng cũ không có → None
+                "align_cached": meta.get("align_cached"),
+                "trimmed_tail_seconds": meta.get("trimmed_tail_seconds"),
                 # nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này không
                 "music_matches_current": current_music is not None
                 and meta.get("music_sha256") == current_music,
@@ -392,14 +399,40 @@ class Storage:
         path = self.project_dir(slug) / music.file if music and music.file else None
         return sha256_file(path) if path is not None and path.is_file() else None
 
-    def last_render(self, slug: str) -> dict | None:
-        best = None
+    def delete_render(self, slug: str, job_id: str) -> None:
+        """Xoá cả thư mục `renders/<job_id>/` (video, bìa, publish.txt, meta). Không đụng `build/`,
+        `timing.json`, `backups/`. Đổi tên thư mục trước: Windows từ chối nếu có file đang mở
+        (trình phát…) nên không bao giờ xoá dở dang → Conflict."""
+        if not RENDER_ID_RE.fullmatch(job_id):
+            raise Unprocessable("Mã lần xuất không hợp lệ")
+        renders = (self.project_dir(slug) / "renders").resolve()
+        target = (renders / job_id).resolve()
+        if target.parent != renders:
+            raise Unprocessable("Mã lần xuất không hợp lệ")
+        if not self.project_dir(slug).joinpath("project.json").is_file():
+            raise NotFound(f"Không có project '{slug}'")
+        if not target.is_dir():
+            raise NotFound(f"Không có lần xuất '{job_id}'")
+        trash = renders / f"{TRASH_PREFIX}{job_id}"
+        shutil.rmtree(trash, ignore_errors=True)  # dư của lần xoá trước (nếu có)
+        try:
+            target.rename(trash)
+        except OSError as e:
+            raise Conflict(
+                "Không xoá được vì file đang mở (đóng trình phát hoặc chương trình đang dùng "
+                "video này rồi thử lại)"
+            ) from e
+        shutil.rmtree(trash, ignore_errors=True)
+
+    def _renders_newest_first(self, slug: str) -> list[tuple[str, Path, dict]]:
+        """(created_at, thư mục, meta) của các lần xuất có video, mới nhất trước."""
         renders = self.project_dir(slug) / "renders"
         if not renders.is_dir():
-            return None
+            return []
+        found = []
         for d in renders.iterdir():
             video = d / "video.mp4"
-            if not video.is_file():
+            if d.name.startswith(TRASH_PREFIX) or not video.is_file():
                 continue
             meta = {}
             if (d / "meta.json").is_file():
@@ -407,17 +440,39 @@ class Storage:
                     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     pass
-            created = meta.get("created_at") or _now_iso(video.stat().st_mtime)
-            if best is None or created > best["created_at"]:
-                best = {
-                    "job_id": d.name,
-                    "preview": bool(meta.get("preview", False)),
-                    "fps": meta.get("fps"),
-                    "duration": meta.get("duration"),
-                    "created_at": created,
-                    "video": self.rel(video),
-                }
-        return best
+            found.append((meta.get("created_at") or _now_iso(video.stat().st_mtime), d, meta))
+        return sorted(found, key=lambda r: r[0], reverse=True)
+
+    def _render_brief(self, created: str, d: Path, meta: dict) -> dict:
+        return {
+            "job_id": d.name,
+            "preview": bool(meta.get("preview", False)),
+            "fps": meta.get("fps"),
+            "duration": meta.get("duration"),
+            "render_seconds": meta.get("render_seconds"),
+            "align_cached": meta.get("align_cached"),
+            "trimmed_tail_seconds": meta.get("trimmed_tail_seconds"),  # bản cũ / không cắt → None
+            "created_at": created,
+            "video": self.rel(d / "video.mp4"),
+        }
+
+    def render_summary(self, slug: str) -> dict:
+        """`last_render` (lần xuất mới nhất), `last_final` (bản đẹp mới nhất, không phải Xem nhanh)
+        và `cover` (cover_9x16.jpg của lần xuất gần nhất CÓ bìa); thiếu thì None."""
+        last_render = last_final = cover = None
+        for created, d, meta in self._renders_newest_first(slug):
+            if last_render is None:
+                last_render = self._render_brief(created, d, meta)
+            if last_final is None and not meta.get("preview", False):
+                last_final = self._render_brief(created, d, meta)
+            if cover is None and (d / "cover_9x16.jpg").is_file():
+                cover = self.rel(d / "cover_9x16.jpg")
+            if last_render and last_final and cover:
+                break
+        return {"last_render": last_render, "last_final": last_final, "cover": cover}
+
+    def last_render(self, slug: str) -> dict | None:
+        return self.render_summary(slug)["last_render"]
 
     def list_projects(self) -> list[dict]:
         out = []
@@ -432,7 +487,7 @@ class Storage:
                 "title": d.name,
                 "updated_at": _now_iso(pj.stat().st_mtime),
                 "thumb": None,
-                "last_render": self.last_render(d.name),
+                **self.render_summary(d.name),
             }
             try:
                 project = self.load(d.name)

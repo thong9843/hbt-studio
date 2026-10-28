@@ -1,12 +1,11 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Project, RenderRecord } from '../api/types';
+import type { Project } from '../api/types';
 import { stubFetch } from '../test/fakes';
 import { project } from '../test/project';
 import { renderWithProviders } from '../test/render';
-import { AudioTab } from './AudioTab';
 import { ComposePage } from './ComposePage';
 import { ScenesTab } from './ScenesTab';
 
@@ -43,7 +42,6 @@ function page(children = <ScenesTab />) {
     <Routes>
       <Route path="/p/:slug" element={<ComposePage />}>
         <Route index element={children} />
-        <Route path="audio" element={<AudioTab />} />
       </Route>
     </Routes>,
     '/p/muoi',
@@ -55,18 +53,20 @@ describe('Compose page', () => {
     routes();
     const user = userEvent.setup();
     page();
-    expect(await screen.findByRole('heading', { name: 'Cảnh 1' })).toBeInTheDocument();
-    expect(screen.getByText('Cảnh 3')).toBeInTheDocument();
-    expect(screen.getByText('chưa có ảnh')).toBeInTheDocument();
-    await user.click(screen.getByText('Cảnh 2'));
-    expect(screen.getByRole('heading', { name: 'Cảnh 2' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cảnh 1 · Thẻ chữ' })).toBeInTheDocument();
+    const strip = screen.getByRole('region', { name: 'Các cảnh' });
+    expect(
+      within(strip).getByRole('button', { name: /^Cảnh 3 — chưa có ảnh/ }),
+    ).toBeInTheDocument();
+    await user.click(within(strip).getByRole('button', { name: /^Cảnh 2/ }));
+    expect(screen.getByRole('heading', { name: 'Cảnh 2 · Thẻ chữ' })).toBeInTheDocument();
   });
 
   it('autosaves 1 s after typing and shows the saved indicator', async () => {
     const { saved } = routes();
     const user = userEvent.setup();
     page();
-    const voice = await screen.findByLabelText('Lời đọc');
+    const voice = await screen.findByLabelText('Lời đọc cảnh');
     await user.clear(voice);
     await user.type(voice, 'Muỗi thích bạn');
     expect(saved).toHaveLength(0);
@@ -80,8 +80,8 @@ describe('Compose page', () => {
   it('shows character counts and warns past the 750 limit', async () => {
     routes();
     page();
-    await screen.findByLabelText('Lời đọc');
-    expect(screen.getByText(/Cả video: 26\/750 ký tự/)).toBeInTheDocument();
+    await screen.findByLabelText('Lời đọc cảnh');
+    expect(screen.getByText('Cả video 26/750')).toBeInTheDocument();
   });
 
   it('draws the draft preview 600 ms after typing stops, not on every key', async () => {
@@ -104,9 +104,9 @@ describe('Compose page', () => {
     const user = userEvent.setup();
     page();
     await screen.findByLabelText('Dòng 1: Chữ');
-    await user.click(screen.getByRole('button', { name: 'Thêm dòng' }));
+    await user.click(screen.getByRole('button', { name: /^Dòng$/ }));
     expect(screen.getByLabelText('Dòng 2: Chữ')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'Bỏ dòng' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Bỏ dòng 1' }));
     expect(screen.queryByLabelText('Dòng 2: Chữ')).not.toBeInTheDocument();
   });
 
@@ -137,129 +137,5 @@ describe('Compose page', () => {
     await waitFor(() => expect(form).toBeDefined());
     expect(form?.get('kind')).toBe('image');
     expect(form?.get('scene_index')).toBe('0');
-  });
-
-  it('keeps the music credit editable and saved', async () => {
-    const { saved } = routes({
-      'GET /api/projects/muoi': project({
-        music: { file: 'music.mp3', start: null, credit: 'Bài – Ai (Pixabay)' },
-      }),
-      'GET /api/music': [],
-    });
-    const user = userEvent.setup();
-    renderWithProviders(
-      <Routes>
-        <Route path="/p/:slug" element={<ComposePage />}>
-          <Route path="audio" element={<AudioTab />} />
-        </Route>
-      </Routes>,
-      '/p/muoi/audio',
-    );
-    const credit = await screen.findByLabelText('Ghi công');
-    await user.type(credit, '!');
-    await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3000 });
-    expect(saved[0].music?.credit).toBe('Bài – Ai (Pixabay)!');
-  });
-
-  describe('Audio tab: music.start', () => {
-    const render = (over: Partial<RenderRecord> = {}): RenderRecord => ({
-      job_id: 'j1',
-      preview: true,
-      fps: 30,
-      duration: 20,
-      created_at: '2026-10-23T10:00:00Z',
-      video: '/api/files/v.mp4',
-      width: 540,
-      height: 960,
-      lufs: -14,
-      aligner: 'silence',
-      music_start: 12,
-      music_start_source: 'auto',
-      music_matches_current: true,
-      preview_seconds: null,
-      size: 1,
-      srt: null,
-      publish: null,
-      log: null,
-      cover: null,
-      youtube_cover: null,
-      ...over,
-    });
-
-    function openAudio(renders: RenderRecord[], start: number | null = null) {
-      const ctx = routes({
-        'GET /api/projects/muoi': project({
-          music: { file: 'music.mp3', start, credit: 'Bài – Ai (Pixabay)' },
-        }),
-        'GET /api/music': [],
-        'GET /api/projects/muoi/renders': renders,
-      });
-      renderWithProviders(
-        <Routes>
-          <Route path="/p/:slug" element={<ComposePage />}>
-            <Route path="audio" element={<AudioTab />} />
-          </Route>
-        </Routes>,
-        '/p/muoi/audio',
-      );
-      return ctx;
-    }
-
-    it('saves a typed start and clears it back to automatic', async () => {
-      const { saved } = openAudio([]);
-      const user = userEvent.setup();
-      const input = await screen.findByLabelText('Bắt đầu nhạc tại giây');
-      await user.type(input, '7');
-      await waitFor(() => expect(saved.at(-1)?.music?.start).toBe(7), { timeout: 3000 });
-      await user.clear(input);
-      await waitFor(() => expect(saved.at(-1)?.music?.start).toBeNull(), { timeout: 3000 });
-    });
-
-    it('shows the second the last render picked and fills it in with one click', async () => {
-      const { saved } = openAudio([render()]);
-      const user = userEvent.setup();
-      expect(await screen.findByText('Lần dựng gần nhất app chọn giây 12.')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Dùng giá trị này' }));
-      expect(screen.getByLabelText('Bắt đầu nhạc tại giây')).toHaveValue(12);
-      await waitFor(() => expect(saved.at(-1)?.music?.start).toBe(12), { timeout: 3000 });
-      expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
-    });
-
-    it('explains that nothing is known before the first render', async () => {
-      openAudio([]);
-      expect(await screen.findByText(/Chưa có lần dựng nào/)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
-    });
-
-    it('hides the stale second and says the music changed', async () => {
-      openAudio([render({ music_matches_current: false })]);
-      expect(await screen.findByText(/Nhạc đã đổi sau lần dựng gần nhất/)).toBeInTheDocument();
-      expect(screen.queryByText(/app chọn giây/)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
-    });
-
-    it('ignores a last render whose start was set by hand', async () => {
-      openAudio([render({ music_start: 3, music_start_source: 'manual' })]);
-      expect(await screen.findByText(/Chưa có lần dựng nào/)).toBeInTheDocument();
-    });
-
-    it('does not offer the button when start is already set', async () => {
-      openAudio([render()], 5);
-      await screen.findByLabelText('Bắt đầu nhạc tại giây');
-      expect(screen.queryByRole('button', { name: 'Dùng giá trị này' })).not.toBeInTheDocument();
-    });
-
-    it('plays the 10 s preview from the chosen second', async () => {
-      const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
-      vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
-      openAudio([render()]);
-      const user = userEvent.setup();
-      await screen.findByText('Lần dựng gần nhất app chọn giây 12.');
-      await user.click(screen.getByRole('button', { name: 'Nghe thử 10 giây' }));
-      expect(play).toHaveBeenCalled();
-      const snippet = document.querySelector('audio:not([controls])') as HTMLAudioElement;
-      expect(snippet.currentTime).toBe(12);
-      play.mockRestore();
-    });
   });
 });

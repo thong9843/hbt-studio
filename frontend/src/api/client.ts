@@ -1,10 +1,13 @@
 export class ApiError extends Error {
   readonly status: number;
+  /** Thân JSON của lỗi (vd `errors[]` của script/apply); `null` khi không đọc được. */
+  readonly body: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body: unknown = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -13,13 +16,15 @@ type FetchFn = typeof fetch;
 async function throwIfNotOk(res: Response): Promise<void> {
   if (res.ok) return;
   let detail = res.statusText;
+  let body: unknown = null;
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body.detail === 'string') detail = body.detail;
+    body = await res.json();
+    const d = (body as { detail?: unknown }).detail;
+    if (typeof d === 'string') detail = d;
   } catch {
     // Thân lỗi không phải JSON — giữ statusText.
   }
-  throw new ApiError(res.status, detail);
+  throw new ApiError(res.status, detail, body);
 }
 
 export async function apiRequest<T>(

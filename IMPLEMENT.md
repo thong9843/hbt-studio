@@ -462,6 +462,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 | POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
 | POST | `/projects/{slug}/build/clean` | dọn `build/` → `{before_bytes, after_bytes, freed_bytes, kept, failed}` |
 | POST | `/projects/{slug}/render` | `{preview: bool, fps?: 30|60}` → `{job_id}` |
+| GET | `/jobs` | chỉ đọc: job đang chạy và đang chờ, cũ nhất trước: `[{id, slug, kind: preview|final, status: queued|running, progress, step}]` (giao diện gọi một lần khi mở app để nối lại thẻ tiến độ) |
 | GET | `/jobs/{id}` | `{status: queued|running|done|failed|cancelled, progress, step, log_tail, output}` |
 | GET | `/jobs/{id}/events` | SSE: `event: progress` `data: {progress, step, message}` |
 | POST | `/jobs/{id}/cancel` | huỷ (kill tiến trình ffmpeg con) |
@@ -503,6 +504,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 - **`POST /projects/{slug}/thumbnail/preview.jpg`** (chủ dự án chốt 23/10/2026): dùng đúng bộ vẽ của video (`pipeline/thumbnail.py`), JPEG 1080×1920; giao diện tự cắt khung 3:4 (y=240..1680) và 3:2 (y=600..1320). 404 nếu không có project; 422 nếu chưa có khối `thumbnail` (cả bản nháp lẫn đã lưu), cảnh nền vượt số cảnh hoặc chưa có ảnh, hoặc không vẽ được (thiếu logo…); `lines` phải 2–3 dòng (sai thì 422).
 - **`POST /projects/{slug}/build/clean`** (chủ dự án chốt 23/10/2026): xoá mọi thứ trong `build/` **trừ `timing.json` và `timing.json.key`** (căn chữ là bước đắt nhất); không động `renders/`, ảnh, giọng, nhạc, `project.json`. Trả dung lượng trước/sau/giải phóng, danh sách file giữ lại và số mục không xoá được (`failed`). 404 nếu không có project; **409** khi project đang được dựng (không xoá gì). Không có lệnh CLI tương ứng.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
+- **`DELETE /projects/{slug}/renders/{job_id}`** (Đợt 5, 13.B13.7): xoá cả thư mục `renders/<job_id>/` (video, bìa, publish.txt, meta); không đụng `build/`, `timing.json`, `backups/`. `job_id` khớp `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` và đường dẫn đã resolve phải nằm trong `renders/` của dự án (sai → 422). 204 · 404 không có lần xuất · 409 job đó đang chạy / đang chờ, hoặc Windows khoá file (đổi tên thư mục thất bại nên không xoá dở dang). `last_final` và `cover` của `GET /projects` tự tính lại.
 - `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
 - `GET|PUT /settings/app`: `{default_fps, theme{primary,accent}, whisper_model, whisper_timeout_seconds}` lưu ở `workspace/settings/app.json`. `default_fps` và `theme` áp dụng cho project tạo mới; hai trường Whisper chỉ được lưu, M4 mới dùng.
@@ -512,6 +514,8 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 ## 10. Giao diện
 
 ### 10.1 Thương hiệu & phong cách
+
+> Từ M5: giao diện theo §13 + DESIGN-HBT.md v2.
 
 **Thương hiệu là HBT, phong cách học theo Nike.**
 
@@ -669,6 +673,35 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
   - **1b (máy mới, khi sửa xong):** kiểm đường CUDA thật (`large-v3`, `int8_float16`), chạy `bench-align --prompt both` để đo `large-v3` CUDA **không prompt và có prompt**, kiểm độ lệch đều 0,3–0,4 s của `large-v3` (so bằng cách xem video nếu cần), chốt mặc định theo số đo và golden test.
 - **Đợt 3:** thumbnail (4e), `publish.txt` có khối [Thumbnail], lệnh dọn `build/`, golden test trên cả hai máy.
 
+### M5 · Giao diện mới + khối JSON kịch bản
+
+Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0`. Đặc tả đầy đủ ở mục 13. Mỗi commit: `npm run lint && npm run test` xanh. Không sửa `backend/hbt/pipeline/` (giữ `PIPELINE_VERSION` của `v0.5.1`).
+
+- [ ] **Đợt 0 · Tài liệu:** PLAN/IMPLEMENT mục M5 và mục 13, DESIGN-HBT.md v2, CLAUDE.md (`docs(M5)`); sửa dòng nhật ký 26/10 bị vỡ (`docs(plan)`).
+- [x] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
+- [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
+- [x] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới. Xong 28/10/2026 (quyết định ở 13.B8).
+- [x] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn). Xong 28/10/2026 (quyết định ở 13.B9).
+- [x] **Đợt 3c:** Âm thanh (+ nút Sáng/Tối, sửa thẻ trống Trang chủ). Xong 28/10/2026 (quyết định ở 13.B10).
+- [x] **Đợt 3d:** Xuất video (lịch sử lưới, ước tính) + Cài đặt. Xong 28/10/2026 (quyết định ở 13.B11).
+- [x] **Đợt 4:** Hộp Dán JSON + menu Bản sao lưu. Xong 28/10/2026 (quyết định ở 13.B12).
+- [x] **Đợt 5:** xoá bí danh, Tab/focus, `GET /jobs` + nối lại job, cảnh báo rời Cài đặt, Button/`/dev/ui`, e2e. Xong 28/10/2026 (quyết định ở 13.B13); còn 6 bước đóng mốc.
+- **Xong khi:** tiêu chí X1–X8 ở PLAN.md mục "Kiểm chứng M5" đều đạt và chủ dự án duyệt từng màn.
+
+**Test cần có (M5):**
+
+> Chạy `pytest` toàn bộ chỉ một lần tại một thời điểm và không dựng video khi đang chạy test: `test_cancel.py` đếm tiến trình ffmpeg trên toàn máy nên đỏ nếu có ffmpeg khác chạy cùng lúc (đã gặp ở Đợt 1 khi chạy hai pytest song song).
+
+| Loại                                | Ca                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pytest `test_script.py`             | Dạng đầy đủ và mảng ngắn cho cùng kết quả · trường vắng giữ nguyên · `card` ghi đè cả khối · `labels: []` xoá · `caption_y: null` · `hbt_script: 2` lỗi · trường lạ (`pucnh`) lỗi · trường cấm (`image`, `music`) lỗi · K3 từng giá trị sai · K5 "“được muỗi yêu”?" cỡ l = 16 → cảnh báo, "gấp 100 lần" cỡ xl = 11 → cảnh báo, 15/10 không cảnh báo · K6 một từ đơn > 888 px → lỗi · K6b dòng tự xuống hàng → cảnh báo, không lỗi · K7 · K8 · K9 751 ký tự cảnh báo, 750 không · K10 "ma tuý" → cảnh báo chặn xuất · K11 · K12 · NFC (chữ tổ hợp) · hashtag `#muoi` → `muoi` · ít phần tử → áp n cảnh + cảnh báo · nhiều phần tử → lỗi; `add` → thêm cảnh; `trim` → bỏ thừa · sau gộp ngoài 3–12 → lỗi · `realign_scenes` đúng cảnh đổi lời |
+| pytest `test_api_script.py`         | `check` không đổi mtime `project.json` · `apply` tạo sao lưu + trả `backup_id` · 409 khi đang dựng · 409 khi `base_hash` cũ · 422 khi có lỗi (không ghi) · slug sai 422 · `restore` trả đúng dữ liệu trước `apply` và tự sao lưu bản hiện tại · tạo 11 bản → còn 10 · `id` có `..` → 422 · `duplicate` không chép `backups/` · `build/clean` không xoá `backups/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| pytest đối chiếu                    | JSON thẻ chữ "muỗi" và **kết quả mong đợi sinh một lần từ `import_cards.py`** (chỉ JSON, không media) trong `backend/tests/data/`: `card/punch` sau gộp phải giống (X3). `import_cards.py` nằm trong `workspace/` (bị ignore) nên test không import nó                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| pytest (B′, B6)                     | Job xong có `render_seconds` > 0 và `align_cached` trong `meta.json`; `/renders` trả hai trường; ghi `meta.json` lỗi không làm hỏng job · `PIPELINE_VERSION` bằng giá trị của `v0.5.1` và `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (X6) · `GET /projects` trả `cover` (lần dựng gần nhất có bìa) và `last_final`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Vitest                              | Đếm ký tự dùng chung bộ ca với pytest (`shared/char_cases.json`) · sắp tên file tự nhiên · gán ảnh khi thả nhiều (có ảnh sẵn, dư ảnh, > 12) · định dạng dòng khác biệt · tính ước tính (trung vị, không lịch sử, bản cũ thiếu trường) · trạng thái nút chính (thiếu nguyên liệu → tắt + lý do) · nhãn dự án (Đã xuất · fps / Đã xem nhanh / Chưa dựng)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| e2e Playwright (Edge, máy cá nhân)  | Luồng X1 trên bản sao "muỗi"; dán JSON → kiểm → áp → hoàn tác; sáng/tối; Tab qua thanh trái và hộp thoại                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Thủ công                            | DevTools Performance khi rảnh (13.B3.2 luật 9); chủ dự án xem từng màn                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
 ---
 
 ## 12. Giai đoạn 2 — interface để sẵn (chưa làm)
@@ -687,3 +720,308 @@ class VoiceProvider(Protocol):    # VieNeu-TTS local / Vbee API / thủ công
     def synthesize(self, text: str, voice_id: str) -> bytes: ...
 ```
 Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự động đều phải qua 3 điểm duyệt (kịch bản → ảnh → video).
+
+---
+
+## 13. M5: giao diện mới + khối JSON kịch bản
+
+> Đặc tả duyệt 27/10/2026 (gồm O1–O3), nhánh `feat/m5-ui-json`, tag `v0.6.0`. Mã K1–K12, tên trường, tên API và mã lỗi dưới đây là chuẩn; đổi thì hỏi chủ dự án. Hệ thiết kế đầy đủ ở `DESIGN-HBT.md` v2.
+> Mốc cơ sở của "không đổi pipeline" là tag **`v0.5.1`** (đã sửa `render.py`), không phải `b240e97`.
+> Mục tiêu: giao diện trẻ trung, nút nổi bật, ít chữ; dán JSON kịch bản vào app thay cho `workspace/import_cards.py`. Không database, không đăng nhập; **không sửa `backend/hbt/pipeline/`**.
+
+### 13.B1 Hệ thiết kế v2 (thay DESIGN-HBT v1.1)
+
+**Màu** (biến CSS trong `frontend/src/styles/tokens.css`)
+
+| Token | Sáng | Tối | Dùng cho |
+|---|---|---|---|
+| `--bg` | `#F5F5F7` | `#0F0F12` | Nền trang |
+| `--card` | `#FFFFFF` | `#18181C` | Thẻ, thanh trái (tối: `#16161A`) |
+| `--soft` | `#F0F0F3` | `#26262C` | Chip, nút phụ, ô nhỏ |
+| `--soft-2` | `#F5F5F7` | `#1F1F25` | Khối lồng trong thẻ, ô nhập nền |
+| `--line` | `#ECECF0` | `#26262C` | Viền thanh trái, viền thẻ (tối) |
+| `--text` / `--text-2` / `--muted` | `#16120F` / `#3A3540` / `#6E6A72` | `#F4F4F6` / `#C9C9D1` / `#A0A0AA` | Chữ chính / phụ / nhãn |
+| `--primary` / `--on-primary` | `#16120F` / `#FFFFFF` | `#F4F4F6` / `#0F0F12` | Nút chính (Xem nhanh), chip đang chọn, mục thanh trái đang chọn |
+| `--accent` | `#F4B630` (chữ `#16120F`) | như sáng | Xuất bản đẹp, thanh tiến độ, cảnh đang chọn, vòng focus |
+| `--brand` | `#B22228` (chữ trắng) | như sáng | Nút Tạo video, logo, mũi tên khác biệt |
+| `--tint-red` | nền `#FDECEC`, chữ `#9C1D22` | — | Nhãn "Đã xuất" |
+| `--tint-yel` | nền `#FFF3D1`, chữ `#6B4A00` | — | Nhãn "Đã xem nhanh", cảnh báo |
+| `--ok` | chấm `#22A55B`; ô `#E6F5EC` / `#187A42` | chấm `#3CCB7F` | Môi trường sẵn sàng, "Sẵn sàng" |
+| `--danger` | `#B3261E` | `#FF6B6B` | Lỗi, xoá, mức Chặn (luôn kèm chữ / biểu tượng) |
+
+**Hình dạng, chữ, bố cục**
+
+| Hạng mục | Quy cách |
+|---|---|
+| Bo góc | Thẻ 24 · hộp thoại 28 · khung xem trước 28 · khối lồng 16–18 · ô nhập 14 · nút, chip, nhãn 999 |
+| Bóng | Thẻ: `0 1px 2px rgba(22,18,15,.04), 0 8px 24px rgba(22,18,15,.05)`; menu/hộp thoại: `0 24px 64px rgba(22,18,15,.25)`. Tối: không bóng, viền 1 px `--line` |
+| Font | Be Vietnam Pro (file 500/700/800 sẵn có; 400→500, 600→700 như M3) |
+| Cỡ chữ | Hero 56/62 800 (màn trống) · tiêu đề Trang chủ 40/48 800 · H1 32/40 800 CHỮ HOA (Dự án, Cài đặt) · tiêu đề trang soạn 22 800 · H2 16/22 700 · nội dung 14–15 · nhãn 12/600 `--muted` · số liệu `tabular-nums` |
+| Nút | Cao 48 (nút chính ở cột xem trước 54); chip 36 (nhỏ 32); nút icon 36–44 tròn; vùng chạm ≥ 36, ưu tiên 44 |
+| Thanh trái | Rộng 232, nền `--card`, viền phải 1 px. Thứ tự: logo `brand/hbt-logo-mark.png` (36 px) + "HBT Studio" · nút **Tạo video** (đỏ) · Trang chủ · Dự án · [khối dự án đang mở: tên + Soạn video / Âm thanh / Xuất video] · Cài đặt · [thẻ tiến độ dựng khi có job] · Môi trường (FFmpeg / Whisper / GPU, chấm + chữ) |
+| Soạn video / Âm thanh | Thanh đầu 48 · dải cảnh (thẻ cao ~120: ảnh 54×96, số cảnh, nút +, vùng thả) · 3 cột `1fr 1fr 300px`, khoảng cách 18 · cột phải: 2 nút chính + dòng ước tính + khung 288×512 + ‹ n/8 › |
+| Dưới 1280 px | Thanh trái thu còn biểu tượng (72 px); dưới 1024 cột xem trước thành ngăn kéo |
+
+### 13.B2 Màn hình (theo mockup v2)
+
+| Màn | Thành phần | API |
+|---|---|---|
+| **Trang chủ** (mới) | Tiêu đề "HÔM NAY LÀM VIDEO GÌ?"; thẻ **Tiếp tục làm** (dự án sửa gần nhất: bìa/ảnh cảnh 1, tên, nhãn trạng thái, series, chấm Ảnh n/8 · Giọng · Nhạc · Ảnh bìa, nút Mở dự án / Xem video); thẻ tối **Lần xuất gần nhất** (tên, fps, độ dài, LUFS, thời gian dựng, Xem video); **Gần đây** 4 dự án + "Xem tất cả" | `GET /projects`, `GET /projects/{slug}/renders` (dự án đầu), `/health` |
+| **Dự án** | Lưới 4 thẻ/hàng: ảnh 9:16 (`cover` của lần dựng gần nhất có bìa; không có thì ảnh cảnh 1; không có ảnh thì ô HBT + "0/8 ảnh"), tên 2 dòng, nhãn trạng thái, ngày, menu ⋯ (Nhân bản, Xoá… có xác nhận, khoá khi đang dựng). **Nhãn:** "Đã xuất · fps" nếu `last_final` có; không có thì "Đã xem nhanh" nếu `last_render` có; còn lại "Chưa dựng" | `GET /projects` (thêm `cover`, `last_final`, xem 13.B6), `duplicate`, `DELETE` |
+| **Dự án trống** | Hero "TẠO VIDEO / ĐẦU TIÊN", 1 câu, nút Tạo video, 3 bước (Kịch bản · Ảnh 9:16 · Giọng + nhạc) | — |
+| **Hộp Video mới** | Tên, chip series (3 series + Khác), chip số cảnh 3–12 (mặc định 8), Huỷ / Tạo | `POST /projects` |
+| **Soạn video** | Dải cảnh kéo đổi thứ tự; **thả nhiều ảnh** (13.B2.1); cột 1 "Cảnh n · Thẻ chữ": ảnh + Đổi ảnh, chip vị trí Trên / Trên giữa / Giữa / Dưới / px, mỗi dòng: ô chữ có bộ đếm `n/giới hạn` (vàng khi vượt), chip S M L XL, 3 chấm màu Mực / Chính / Nhấn (`aria-label`), + Dòng; cột 2 "Lời đọc": ô lời, số ký tự cảnh, chip `\|` Ngắt cụm, `{ }` Cách đọc số, thanh "Cả video n/750"; thẻ Tuỳ chọn: công tắc Cú lật, Phụ đề Tự động / px, Nhãn cố định (n) ›; cột 3: nút chính, ước tính, xem trước (POST preview.png sau 600 ms), nút Vùng an toàn (lớp y 100–1500, mép phải 120 px); thanh đầu: "Đã lưu", nút Dán JSON | `GET/PUT /projects/{slug}`, `assets`, `scenes/reorder`, `POST preview.png`, `/lint` |
+| **Âm thanh** | Thẻ Giọng đọc (trình phát, "Đã cắt đuôi x s" + Nghe, vùng thả giọng mới); thẻ Điểm bắt đầu nhạc (chip Tự chọn / Đặt tay, "Lần trước: giây X" + Nghe + Dùng — chỉ khi `music_matches_current`); thẻ Nhạc nền (chip lọc tâm trạng, mỗi bài: ▶, tên, tác giả · nguồn, tâm trạng, Chọn / Đang dùng; ghi công; Tải nhạc, Không nhạc) | `assets`, `/music`, `/music/{id}/audio`, `from-library`, `/renders` |
+| **Xuất video** | Thẻ Kiểm tra (Sẵn sàng / có cảnh báo / bị chặn + 3 số; mỗi lỗi có "Đến cảnh N"); thẻ Kết quả (độ dài, LUFS, căn chữ + tỉ lệ khớp, cắt đuôi + Nghe); Nội dung đăng (3 khối + Sao chép); Ảnh bìa (3 dòng, chip cảnh nền, xem trước 3:4 và 3:2, Bỏ); Lịch sử dạng lưới (bìa / ảnh cảnh 1, nhãn Bản đẹp / Xem nhanh / 10 s đầu, ngày giờ, thẻ đang xem viền vàng); Dọn file tạm; cột phải: chip FPS 30/50/60 (mặc định theo Cài đặt), công tắc Outro, nút chính, "Xem nhanh cả video", ước tính, trình phát, tải video.mp4 / captions.srt / ảnh bìa | `/lint`, `/render`, SSE, `cancel`, `/renders`, `thumbnail/preview.jpg`, `build/clean`, `/files` |
+| **Cài đặt** | Thẻ FPS mặc định; Căn chữ (chip Tự động / small / medium / large-v3 + ghi chú, ô giới hạn giây); Màu chủ đề (2 ô màu); Từ nhạy cảm (mỗi nhóm: nút gạt Cảnh báo / Chặn, từ dạng chip có ×, nhóm ít dùng gộp thu gọn, ô Thêm từ); nút Lưu | `/settings/app`, `/settings/sensitive-words` |
+| **Hộp Dán JSON** | 13.B4.6 | 13.B4.7 |
+
+**13.B2.1 Thả nhiều ảnh:** xếp theo tên file kiểu tự nhiên (2 < 10); gán từ cảnh 1; nếu có cảnh đã có ảnh → hỏi xác nhận ghi đè một lần; ảnh dư → hỏi thêm cảnh (tối đa 12), phần vượt 12 bỏ và báo; tải **lần lượt từng file** (nhẹ máy), thanh tiến độ n/N.
+
+**Chữ UI:** ngắn, đúng nghĩa; toàn bộ trong `i18n/vi.ts`. Không viết câu giải thích dài trên màn; giải thích đưa vào `title` / chú thích khi cần.
+
+### 13.B3 Hiệu ứng tương tác và hiệu năng
+
+**13.B3.1 Trạng thái từng thành phần**
+
+| Thành phần | Hover | Nhấn | Focus (bàn phím) | Tắt / khác |
+|---|---|---|---|---|
+| Nút chính (đen / vàng / đỏ) | Nền đậm hoặc sáng 8%, nhấc `translateY(-1px)` | `scale(.97)` 90 ms | Vòng 2 px `--accent`, cách 2 px (trên nền vàng: vòng `--text`) | Mờ .4, `not-allowed`, chú thích lý do (vd "Thiếu ảnh cảnh 3"); đang chạy: vòng xoay nhỏ |
+| Nút phụ, chip | Nền `--soft` → đậm hơn 1 bậc | `scale(.97)` | Như trên | Chip đang chọn đổi nền 150 ms |
+| Nút icon tròn | Hiện nền `--soft` | `scale(.94)` | Như trên | |
+| Mục thanh trái | Nền `--soft` | `scale(.98)` | Như trên | Mục đang chọn đổi nền 150 ms |
+| Thẻ bấm được (dự án, lịch sử, bài nhạc, dòng khác biệt, Gần đây) | Nhấc `translateY(-2px)`, bóng đậm hơn (lớp `::after` đổi `opacity`) | `scale(.99)` | Như trên | Thẻ tĩnh: không hiệu ứng |
+| Dòng danh sách / menu | Nền `--soft-2` | Nền `--soft` | Như trên | |
+| Ô nhập, ô lời đọc | Viền `#D9D9DE` | — | Viền `--text` + quầng `--accent` 3 px mờ .35 | Lỗi: viền `--danger` + chữ lỗi dưới ô; vượt giới hạn: viền `--accent` |
+| Ảnh cảnh ở dải | `scale(1.04)` | — | Vòng focus | Đang chọn: vòng vàng 3 px; đang kéo: nhấc + mờ .9, chỗ thả có vạch vàng |
+| Vùng thả | — | — | — | Khi kéo file vào: nền `--tint-yel` + viền vàng nét đứt (tĩnh) |
+| Công tắc | Nền đậm hơn | — | Vòng focus | Núm trượt `translateX` 150 ms |
+| Hộp thoại | — | — | Focus vào ô đầu, Esc đóng | Hiện: nền mờ `opacity` 150 ms + `scale(.98→1)` 180 ms; đóng 120 ms |
+| Thông báo | — | — | — | Trượt lên 8 px + hiện 200 ms; tự ẩn 3 s, thông báo Hoàn tác 8 s |
+| Thanh tiến độ | — | — | — | `transform: scaleX()` 300 ms tuyến tính, không sọc chạy |
+| Đang tải | — | — | — | Khung xương tĩnh màu `--soft`, không hiệu ứng lấp lánh |
+
+**13.B3.2 Luật hiệu năng (bắt buộc)**
+
+1. Chỉ dùng CSS `transition`; chỉ đổi `transform`, `opacity`, `background-color`, `color`, `border-color`. Không đổi trực tiếp `width/height/top/left/box-shadow/filter`.
+2. Thời lượng 90–200 ms, `cubic-bezier(.2,0,0,1)`.
+3. Không `backdrop-filter`, `blur`, gradient động, hoạt ảnh lặp vô hạn (chỉ vòng xoay khi đang chạy việc).
+4. Không thêm thư viện hoạt ảnh hay dependency mới cho hiệu ứng.
+5. `prefers-reduced-motion: reduce` → bỏ mọi `transform`/chuyển động, giữ đổi màu.
+6. Không `will-change` toàn cục; không poll API định kỳ khi rảnh (tiến độ dùng SSE).
+7. Ảnh trong lưới / dải cảnh / lịch sử dùng bản thu nhỏ (`preview.png?w=`, `cover` thu nhỏ nếu có), `loading="lazy"`, `decoding="async"`.
+8. Xem trước cảnh: giữ debounce 600 ms, huỷ yêu cầu cũ (`AbortController`).
+9. Kiểm: DevTools Performance 10 s khi rảnh: không khung hình nào ngoài di chuột; CPU tab ≈ 0%.
+
+### 13.B4 Khối JSON kịch bản
+
+**13.B4.1 Dạng đầy đủ**
+
+```json
+{
+  "hbt_script": 1,
+  "scenes": [
+    {
+      "voice": "…",
+      "card": { "y": "top", "lines": [{ "text": "…", "size": "s", "color": "ink" }] },
+      "labels": [],
+      "punch": false,
+      "caption_y": null
+    }
+  ],
+  "publish": { "hook": "…", "hashtags": ["…"] },
+  "thumbnail": { "scene": 1, "lines": ["…", "…"], "series": "", "accent": "#FFD43B" }
+}
+```
+
+- `hbt_script` không bắt buộc; có thì phải bằng 1.
+- **Dạng ngắn:** gốc là mảng → coi là `scenes` (đúng mẫu chat kịch bản `[{punch, card}]`).
+
+**13.B4.2 Quy tắc gộp**
+
+| Quy tắc | Nội dung |
+|---|---|
+| Trường vắng | Giữ nguyên giá trị cũ |
+| Trường có mặt | Ghi đè **cả trường** (`card` thay toàn bộ; `labels: []` xoá hết nhãn; `publish`, `thumbnail` thay cả khối) |
+| `null` | Chỉ hợp lệ ở `caption_y` (= tự động); ở mọi nơi khác (`voice`, `card`, `labels`, `punch`, `publish`, `thumbnail`, `hbt_script`) là lỗi K3 |
+| Không đổi qua JSON | `image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
+| Chuẩn hoá | NFC mọi chuỗi; hashtag bỏ `#` đầu và khoảng trắng hai đầu |
+| Đếm ký tự | Số ký tự Unicode sau NFC (Python `len`, JS `[...s.normalize('NFC')].length`); dùng chung bộ ca test cho hai phía |
+| Mô hình đầu vào | **`ScriptIn` riêng trong `backend/hbt/script.py`, `extra="forbid"`** (cho K4), chặt cả các khối con (`card`, `lines`, `labels`, `publish`, `thumbnail` là lớp con `extra="forbid"` của lớp trong `models.py`, nên `colour` hay `pucnh` ở bất kỳ cấp nào đều là K4). **Không đổi `models.py`** (`Project` giữ `extra="ignore"`); K12 vẫn kiểm bản sau gộp bằng `Project.model_validate` |
+
+**13.B4.3 Quy tắc kiểm** (Lỗi = không cho áp · Cảnh báo = vẫn áp)
+
+| Mã | Kiểm | Mức |
+|---|---|---|
+| K1 | JSON không đọc được → báo dòng:cột | Lỗi |
+| K2 | Số phần tử ≠ số cảnh | 13.B4.5 |
+| K3 | `y` ∈ top/upper/middle/lower hoặc số px; `size` ∈ s/m/l/xl; `color` ∈ ink/primary/accent/#RRGGBB; `labels`, `caption_y`, `punch` đúng kiểu — theo Pydantic hiện có | Lỗi |
+| K4 | Trường lạ / sai tên / trường cấm (13.B4.2) — `ScriptIn` với `extra="forbid"` | Lỗi |
+| K5 | Dòng thẻ: xl ≤ 10, l ≤ 15, m ≤ 22, s ≤ 26 ký tự | Cảnh báo |
+| K6 | **Một từ đơn rộng > 888 px** (`TEXT_W = 960 − 2×36`) khi đo bằng đúng font và cỡ của bộ vẽ thẻ — tràn thật, như "TRÀN" trong `import_cards.py` (hàm đo dùng chung với `visual.py`, chỉ đọc) | Lỗi |
+| K6b | `_wrap` tách một dòng thành k dòng: "Dòng n tự xuống hàng thành k dòng" | Cảnh báo |
+| K7 | Thẻ 0 dòng; > 3 dòng; > 1 dòng màu `accent` | Cảnh báo |
+| K8 | Chữ thẻ chứa `\|`, `{`, `}` | Cảnh báo |
+| K9 | Tổng lời đọc > 750 ký tự; cảnh có lời trống | Cảnh báo |
+| K10 | Lint từ nhạy cảm trên bản sau gộp: `block` → cảnh báo đỏ "sẽ chặn xuất"; `warn` → vàng | Cảnh báo |
+| K11 | `thumbnail.lines` 2–3 dòng; `thumbnail.scene` ≤ số cảnh sau gộp | Lỗi |
+| K12 | Toàn bộ project sau gộp qua `Project.model_validate` | Lỗi (giữ bản cũ) |
+
+**Phạm vi áp (chốt ở Đợt 1):**
+
+- K5–K8 chỉ kiểm cảnh có `card` trong JSON (thẻ không đổi thì không kiểm lại).
+- K9 "cảnh có lời trống" chỉ áp cho cảnh có `voice` trong JSON hoặc cảnh mới thêm (`extra: "add"`), để JSON chỉ có thẻ chữ không báo lời trống hàng loạt. K9 "tổng > 750" và K10 chạy trên toàn bản sau gộp.
+- Mỗi cảnh báo K10 có thêm `level`: `block` (đỏ, "sẽ chặn xuất") hoặc `warn` (vàng).
+- K5 và K6 có thể cùng hiện trên một dòng; K6b hiện khi một dòng tự xuống hàng, kể cả khi dòng đó cũng bị K6.
+- K11 (`thumbnail.lines` 2–3, `thumbnail.scene` ≤ số cảnh) và K2 (ngoài 3–12) không báo trùng thêm một lỗi K12.
+
+**13.B4.4 Ghi chú hệ quả** (hiện ở bước Kiểm tra): cảnh đổi `voice` → "n cảnh sẽ căn chữ lại ở lần dựng tới".
+
+**13.B4.5 Lệch số cảnh**
+
+| Trường hợp | Xử lý |
+|---|---|
+| JSON ít phần tử hơn | Cảnh báo; áp cho cảnh 1…n, còn lại giữ nguyên |
+| JSON nhiều phần tử hơn | Lỗi, trừ khi gửi `extra: "add"` (thêm cảnh trống, chưa có ảnh) hoặc `extra: "trim"` (bỏ phần thừa) — giao diện hiện 2 nút **Thêm cảnh** / **Bỏ phần thừa** |
+| Số cảnh sau gộp ngoài 3–12 | Lỗi |
+
+**13.B4.6 Giao diện (hộp 3 bước)**
+
+1. **Dán:** ô dán (nền tối, chữ đơn cách) + thả file `.json`; trước khi kiểm, app lưu ngay bản đang soạn.
+2. **Kiểm tra:** 3 ô số (Số cảnh n = n, Lỗi, Cảnh báo); danh sách khác biệt theo cảnh, chỉ trường đổi (cũ → mới, nhãn cỡ / màu, cảnh báo ngay dưới dòng); "+k cảnh" thu gọn; dòng "Giữ nguyên:" liệt kê các trường không đụng; ghi chú 13.B4.4. Có lỗi → nút Áp dụng tắt.
+3. **Áp dụng:** nút "Áp dụng n cảnh" → thông báo "Đã áp dụng n cảnh · Hoàn tác" (8 s). Khoá khi đang dựng.
+
+Hoàn tác về sau: menu "Bản sao lưu" (danh sách 10 bản, ngày giờ, Khôi phục có xác nhận) — đặt trong menu ⋯ của thanh đầu Soạn video.
+
+**13.B4.7 API mới**
+
+| Method | Path | Thân / kết quả | Lỗi |
+|---|---|---|---|
+| POST | `/projects/{slug}/script/check` | `{script, extra?: "add"\|"trim"}` → `{ok, base_hash, counts{json, project, after}, errors[], warnings[], diff[], realign_scenes[]}`; mỗi lỗi/cảnh báo `{code, scene_index?, field, message}`; mỗi diff `{scene_index?, field, before, after}`. **Không ghi gì** | 404, 422 slug/body |
+| POST | `/projects/{slug}/script/apply` | `{script, extra?, base_hash}` → kiểm lại; sao lưu `project.json` hiện tại; ghi bản gộp → `{project, backup_id, base_hash}` (hash mới sau khi ghi) | 422 có lỗi (`{detail, errors[]}`, không ghi, không sao lưu); **409** đang dựng hoặc `base_hash` khác (project đã đổi sau khi kiểm); 409 được kiểm trước khi sao lưu |
+| GET | `/projects/{slug}/backups` | `[{id, created_at, reason}]` mới nhất trước, ≤ 10 | 404 |
+| POST | `/projects/{slug}/backups/{id}/restore` | Sao lưu bản hiện tại (`reason: "restore"`) rồi khôi phục → `{project, backup_id, base_hash}` (`backup_id` là bản vừa sao lưu; ghi lại đúng byte bản được chọn nên `base_hash` trở về giá trị cũ) | 404; 409 đang dựng; 422 id sai dạng hoặc bản sao lưu hỏng / thuộc project khác |
+
+- Lưu ở `workspace/projects/<slug>/backups/project-YYYYMMDD-HHMMSS[-n].json`; giữ 10 bản mới nhất (xoá bản cũ hơn); `duplicate` không chép `backups/`; "Dọn file tạm" không đụng `backups/`; `id` chỉ nhận `[0-9-]` (chặn đường dẫn).
+- **`id`** = phần giữa `project-` và `.json`, khớp `^\d{8}-\d{6}(-\d+)?$` (sai dạng → 422). Trùng giây thì thêm `-n` (n = 1, 2, …), sắp theo số (`-10` mới hơn `-9`). Giờ trong tên và `created_at` là UTC.
+- **File phụ** `project-….meta.json` cạnh mỗi bản: `{reason: "apply"|"restore", created_at}`. Thiếu hoặc hỏng thì `reason` = null và `created_at` lấy từ giờ sửa file. Dọn còn 10 bản thì xoá cả cặp.
+- `apply` và `restore` trả 409 khi đang dựng; `apply` còn 409 khi `base_hash` lệch. Cả hai kiểm trước khi sao lưu hay ghi gì. `restore` đọc bản được chọn trước khi sao lưu bản hiện tại, nên khôi phục bản cũ nhất trong 10 bản vẫn đúng.
+- `check` không ghi gì (kể cả sao lưu, kể cả dời ảnh cũ): đọc `project.json` thẳng từ đĩa. `base_hash` tính trên byte nguyên của file, không chuẩn hoá JSON.
+- `script` trong thân yêu cầu nhận chuỗi JSON (K1 báo dòng:cột) hoặc giá trị đã đọc.
+- Mã nguồn: `backend/hbt/script.py` (parse, gộp, kiểm), `backend/hbt/api/script.py`, `backend/hbt/backups.py`. `base_hash` = SHA-256 nội dung `project.json`.
+
+### 13.B5 Ước tính thời gian dựng (chốt B′ 27/10)
+
+| Cách | Mô tả |
+|---|---|
+| A | Giao diện tính từ `/renders`: `created_at` − giờ trong `job_id`; trung vị 3 lần gần nhất cùng loại |
+| B | Thêm `render_seconds` vào `meta.json` trong `render.py` (đổi `PIPELINE_VERSION` → cache cũ hết hiệu lực một lần) |
+| **B′ (chốt)** | Job runner (`jobs.py`, ngoài pipeline) ghi thêm `render_seconds` và `align_cached` vào `meta.json` sau khi job xong; `/renders` trả 2 trường. Không đổi `PIPELINE_VERSION`. Giao diện: trung vị 3 lần gần nhất cùng loại (10 s / cả video / bản đẹp theo fps), quy theo giây video; chưa có lịch sử → hệ số mặc định từ số đo (máy cũ: bản đẹp 50 fps ≈ 3 s/giây video, 60 fps ≈ 4,2 s/giây); bản cũ không có trường thì bỏ qua |
+
+### 13.B6 Điểm đã kiểm khi lập kế hoạch (đã kiểm 27/10/2026, chỉ đọc)
+
+**6a. `GET /projects` → `last_render`:** chưa có `cover`. `storage.last_render` (`backend/hbt/storage.py`) chỉ trả `job_id, preview, fps, duration, created_at, video`; `backend/hbt/api/projects.py` (`list_projects`) chỉ đổi `video` sang URL. `GET /projects/{slug}/renders` đã có `cover`. **Quyết định (chủ dự án 27/10), code ở Đợt 1:** `ProjectSummary` thêm
+
+- `cover` = URL `/api/files/projects/<slug>/renders/<job>/cover_9x16.jpg` của lần dựng **gần nhất có file `cover_9x16.jpg`** (duyệt từ mới đến cũ, gặp là dừng; không có thì `null`). Lần dựng mới nhất vẽ bìa lỗi (chỉ cảnh báo) thì lấy bìa của lần cũ hơn;
+- `last_final` = bản đẹp (không phải xem nhanh) mới nhất, **đủ các khoá như `last_render`** (`job_id, preview, fps, duration, render_seconds, align_cached, created_at, video`; `video` là URL) hoặc `null`.
+
+`last_render` và `GET /projects/{slug}/renders` cũng trả `render_seconds`, `align_cached` (bản dựng cũ thiếu thì `null`). Hai khoá mới nằm cuối `ProjectSummary`, thứ tự khoá cũ giữ nguyên.
+
+Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dòng **Dự án**).
+
+**6b. 888 px và hàm đo chữ:** `workspace/import_cards.py` khai `TEXT_W = 960 - 2*36`, khớp mặc định `maxw=960, pad=36` của `visual.draw_card`, và đo bằng `v.SIZES`, `v.font`, `v._wrap` + `ImageDraw.textlength`. Dùng chung được mà không sửa `visual.py`: **port logic đo chữ sang `backend/hbt/script.py`** (import `SIZES`, `font`, `_wrap` từ `hbt.pipeline.visual`, tự khai báo `TEXT_W`). `import_cards.py` nằm trong `workspace/` (bị ignore) nên `script.py` và CI không import được nó. **X3** kiểm bằng fixture kết quả mong đợi **sinh một lần** từ `import_cards.py` trên JSON thẻ chữ "muỗi", đặt ở `backend/tests/data/` (chỉ JSON, không media).
+
+**6c. Cờ cache căn chữ:** `aligner_info` chưa có (đọc lại từ `timing.json` y hệt lần đầu, `RenderResult` cũng không có cờ). `jobs.py` đủ thông tin mà không đụng pipeline: **`align_cached` = mtime của `build/timing.json` không đổi trước/sau `_render`** (thiếu file trước đó → `False`).
+
+**6d. Ghi `render_seconds`:** `meta.json` do pipeline ghi ở cuối `render.py`. Trong `jobs.py` (`_run`, nhánh `else:` sau khi có `result`, **trước `job._finish(DONE, …)`**) ghi thêm `render_seconds` (= `result.seconds`, làm tròn 1 chữ số) và `align_cached` vào `result.job_dir / "meta.json"`. Ghi an toàn (ghi file tạm rồi `os.replace`); lỗi chỉ ghi log, **không làm hỏng job**. Chỉ ghi khi job thành công (Xem nhanh hay bản đẹp) và `meta.json` đã có; job huỷ hoặc lỗi thì không ghi, không tạo `meta.json`, không đổi trường pipeline đã ghi. `render_seconds` lấy từ `result.seconds` (thời gian dựng thật, **không** tính xếp hàng). `align_cached` chỉ `True` khi `build/timing.json` có trước job và mtime không đổi sau job. `storage` (`/renders`) trả thêm hai trường. Không đụng `backend/hbt/pipeline/`.
+
+### 13.B7 Quyết định Đợt 2 (chủ dự án duyệt 27/10/2026)
+
+1. **Tên token và màu Tailwind cũ là bí danh tạm.** `tokens.css` có khối bí danh cuối file (`--surface` → `--card`, `--surface-2` → `--soft`, `--text-muted` → `--muted`, `--border` → `--line`, `--brand-red` → `--brand`, `--brand-cream`, `--brand-ink`); `tailwind.config.ts` giữ `surface`, `surface-2`, `text-muted`, `border`, `brand-red`, `brand-cream`, `brand-ink`, `rounded-frame`. Màn cũ vì thế còn chạy. **Xoá hết ở Đợt 5**, kèm test `grep` không còn tên cũ trong `frontend/src` và `tokens.css`.
+2. **Thay `Shell.tsx` bằng `AppShell` ngay Đợt 2.** "Trang chủ" tạm trỏ `/` (chưa đánh dấu đang chọn). Nút **Tạo video** tạm mở hộp tạo cũ qua `/?new=1` (`ProjectsPage` đọc rồi xoá tham số). Nối đúng ở Đợt 3a.
+3. **Thẻ tiến độ dựng ở thanh trái chỉ là khung nhận props** (`render: { percent, step } | null` truyền qua `AppShell` → `SideNav`; test ẩn/hiện theo props). Context job toàn cục và giữ SSE khi đổi màn làm ở Đợt 3d.
+4. **Bỏ `refetchInterval` của `/health`.** Chấm Môi trường chỉ lấy khi mở app và khi tab lấy lại focus (`refetchOnWindowFocus: true` riêng cho truy vấn này; mặc định toàn app vẫn `false`). Có test: 5 phút giả lập không có request thứ hai.
+5. **Trang mẫu thành phần `/dev/ui`** (`pages/Gallery.tsx`), route chỉ đăng ký khi `import.meta.env.DEV` và nạp bằng `lazy`. Kiểm: sau `npm run build`, `grep -ri gallery frontend/dist` rỗng. Chuỗi chữ của trang nằm ở `vi.ui.kit` trong `i18n/vi.ts` nên vẫn vào bundle (vài trăm byte, không có mã trang).
+6. **Không thêm gói npm.** Dialog, Drawer, Menu, Toast tự viết (`components/ui/overlay.ts`: focus vào ô đầu, bẫy Tab, Esc đóng, trả focus, giữ 120 ms để chạy hoạt ảnh đóng). `ConfirmDialog` và `Toast` giữ API cũ (thêm tuỳ chọn `undo`, 8 s).
+7. **Đo lại tương phản theo token** (`tokens.test.ts`, ≥ 4,5:1 sáng và tối, 25 cặp). Cặp "Sẵn sàng" `#1A7F45` trên `#E6F5EC` chỉ đạt 4,47:1 nên đổi chữ sang `#187A42` (DESIGN-HBT.md mục 2 và bảng 13.B1 đã sửa). Các giá trị khác giữ nguyên.
+8. **Test chạy nhanh:** `@pytest.mark.slow` cho test dựng/căn chữ thật từ 3 s (đo `--durations=0` trên máy cũ), `npm run test:fast` bỏ chúng; `npm run test` và CI vẫn chạy đủ. Vitest đọc `tokens.css` và `ui.css` bằng `?raw` nên `vite.config.ts` bật `css.include` cho hai file này.
+
+**X6 (đổi mốc so sánh):** `PIPELINE_VERSION` không đổi so với tag `v0.5.1`, và `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (v0.5.1 đã sửa `render.py`; `b240e97` không còn là mốc).
+
+### 13.B8 Quyết định Đợt 3a (chủ dự án duyệt 28/10/2026)
+
+1. **Route:** Trang chủ ở `/`, Dự án ở `/projects`, đường dẫn lạ (`*`) về `/`. Nút **Tạo video** ở thanh trái mở hộp Video mới (`NewProjectProvider` trong `AppShell`); bỏ luồng `/?new=1` và hộp tạo cũ. Tạo xong chuyển sang `/p/:slug`.
+2. **Tên series lưu khác PLAN §9** (không sửa PLAN): chip hiển thị đúng chữ lưu vào `series` (chữ này in lên nhãn bìa): "Vì Sao" · "Vì sao Trái Đất" · "Vì sao vậy ta?" · "Khác" (tự nhập, lưu nguyên văn). Lý do: khớp bìa các video đã đăng (project cũ lưu `Vì Sao` và `Vì sao vậy ta?`); bỏ dấu "…".
+3. **Thẻ dự án:** ảnh = `cover` → ảnh cảnh 1 (file gốc qua `/api/files/...`) → ô HBT; ảnh lỗi rơi về ô HBT đúng một lần. Không có ảnh thì hiện **"Chưa có ảnh"**, thay cho "0/8 ảnh" ở 13.B2 (`GET /projects` không trả số ảnh/cảnh, không sửa backend). Ngày trên thẻ = `updated_at`.
+4. **Thẻ "Lần xuất gần nhất" ở Trang chủ lấy bản mới nhất trong mọi dự án** (mỗi dự án: bản đẹp mới nhất, không có thì lần dựng gần nhất; chọn theo `created_at`), lệch 13.B2 ("dự án đầu") để tránh thẻ trống khi dự án vừa tạo chưa dựng. Số liệu chỉ từ `last_final` / `last_render`, không gọi `/renders`, nên **không có LUFS** trên thẻ (hiện fps, độ dài, thời gian dựng; thiếu thì "—").
+5. **"Tiếp tục làm":** dự án đầu danh sách (`updated_at` mới nhất); chấm Ảnh n/N · Giọng · Nhạc · Ảnh bìa lấy bằng một lần `GET /projects/{slug}`, không poll. "Gần đây" = 4 dự án kế sau dự án đó; chỉ có một dự án thì bỏ mục.
+6. **Nợ UI → Đợt 3d:** menu ⋯ của thẻ chưa khoá khi đang dựng (cần context job toàn cục); tạm bắt lỗi 409 và hiện Toast.
+7. **Backlog:** bản thu nhỏ `?w=` cho `cover` (luật 13.B3.2 mục 7); hiện dùng bản gốc với `loading="lazy"` `decoding="async"`.
+8. **Quy trình từ 28/10/2026:** trong đợt đã duyệt không dừng để hỏi hay cho xem từng màn; điểm chưa rõ tự chọn phương án an toàn nhất và ghi vào mục "Cần chốt" của báo cáo cuối đợt. Chỉ dừng giữa chừng khi test đỏ không tự sửa được hoặc phải sửa `pipeline/` / `models.py`.
+
+### 13.B9 Quyết định Đợt 3b (chủ dự án duyệt 28/10/2026)
+
+1. **Thẻ "Lần xuất gần nhất" (Trang chủ)** dùng token mới `--hero` / `--on-hero` (nền tối cố định, không phủ ở khối tối) thay cho `--primary`, vì `--primary` đảo sang sáng ở chế độ tối. Viền `--card-border` (trong suốt ở sáng, `--line` ở tối). `tokens.test.ts` kiểm tương phản ≥ 4,5:1 và token không bị phủ.
+2. **Bộ đếm ký tự dòng thẻ** (xl 10, l 15, m 22, s 26; chỉ cảnh báo) dùng chung bộ ca `shared/char_cases.json` với pytest (`test_script.py`, K5) và Vitest (`charCount.test.ts`). Đếm số ký tự Unicode sau NFC; `Input` có `limit` cũng đếm theo NFC.
+3. **Bố cục Soạn video:** dải cảnh ngang (`components/compose/SceneStrip.tsx`, kéo bằng tay nắm hoặc bàn phím) · 3 cột `1fr 1fr 300px` (thẻ chữ · lời đọc + Tuỳ chọn · xem trước 9:16 cố định) · dưới 1024 px xem trước thành ngăn kéo (không vẽ khi chưa mở). Màn dùng `components/ui/*`, không còn `.btn` / `.input` / `.chip` / `.spinner` (có test quét mã nguồn). **Bỏ hàng tab trong `ComposePage`** vì thanh trái đã có Soạn video / Âm thanh / Xuất video. Thanh đầu: nút quay lại, tên dự án, "Đã lưu", nút **Bìa & đăng**; **Dán JSON và menu ⋯ chưa hiện** (Đợt 4).
+4. **Xem nhanh / Xuất bản đẹp** ở cột 3 chỉ chuyển sang tab Xuất video; tắt kèm lý do khi thiếu nguyên liệu ("Thiếu ảnh cảnh 3 · Thiếu giọng đọc", `utils/blockers.ts`). **Dòng ước tính để Đợt 3d**: Đợt 3b không gọi `/renders`, chỉ chừa `data-slot="estimate"` trong `PreviewPane`.
+5. **Ngăn kéo "Bìa & đăng"** chứa `ThumbnailEditor` (không có nút tải file vì không đọc lịch sử dựng; tab Xuất vẫn có) và ô **Câu mở đầu** + **Hashtag** (`publish.hook`, `publish.hashtags`; app cũ chưa có chỗ sửa hai trường này). Hashtag gõ có hoặc không có `#`, lưu không `#`.
+6. **Thả nhiều ảnh (13.B2.1):** `utils/dropImages.ts` xếp tên tự nhiên; gán từ cảnh 1; hộp ghi đè (một lần) rồi hộp thêm cảnh cho ảnh dư (hai hộp nối tiếp, "Bỏ ảnh dư" thì chỉ gán vào cảnh đang có); phần vượt 12 bỏ và báo; tải lần lượt từng file, tiến độ `n/N`; thêm cảnh được lưu ngay trước khi tải ảnh.
+7. **Vùng an toàn** là lớp phủ CSS tĩnh trên khung xem trước (y 100–1500, mép phải 120 px, phần trăm của 1080×1920), không gọi API.
+8. **Đổi thứ tự khi đang dựng:** API trả 409 thì hiện Toast kèm gợi ý và nút Thử lại.
+9. **Thanh trái 72 px dưới 1280 px** đã làm ở Đợt 2 (`AppShell`), Đợt 3b không thêm commit riêng.
+10. **Backlog:** bản thu nhỏ `?w=` cho ảnh cảnh ở dải (luật 13.B3.2 mục 7), hiện dùng ảnh gốc với `loading="lazy"` `decoding="async"`; màn cũ không có "nhân bản cảnh" nên Đợt 3b không thêm; dọn khoá i18n cũ (`compose.tabs`, `compose.editor`…).
+
+### 13.B10 Quyết định Đợt 3c (chủ dự án duyệt 28/10/2026)
+
+1. **Nút Sáng/Tối** ở đáy thanh trái (trên chấm Môi trường). Chữ và biểu tượng là **chế độ hiện tại** (Sáng + mặt trời / Tối + trăng); `aria-pressed` = đang tối; `aria-label` "Đổi sang chế độ tối/sáng"; thu 72 px chỉ còn biểu tượng (có `title`). Lần đầu theo `prefers-color-scheme` và **không ghi gì**; bấm rồi thì ghi `localStorage['hbt-theme']` (`light` | `dark`, bọc `try/catch`) và đặt `data-theme` trên `<html>` (dùng lại khối `[data-theme]` của `tokens.css`). Script chặn nhỏ trong `<head>` của `index.html` đặt `data-theme` trước lần vẽ đầu, chịu được `localStorage` ném lỗi. Test: `themeBoot.test.ts` (thứ tự script, khoá, lỗi lưu trữ), `ThemeToggle.test.tsx`.
+2. **Khối trống cạnh "Tiếp tục làm"** (hiện khi chưa có lần xuất nào, chữ "Chưa có lần xuất nào") dùng `bg-hero text-on-hero` như thẻ "Lần xuất gần nhất"; test lớp và test tương phản `--on-hero`/`--hero` ≥ 4,5:1 cả hai chế độ.
+3. **Màn Âm thanh** (`pages/AudioTab.tsx` + `components/audio/*`), bố cục 3 cột `1fr 1fr 300px`: [Giọng đọc + Điểm bắt đầu nhạc] · [Nhạc nền] · `PreviewPane` dùng lại của Soạn video (‹ n/N ›); dưới 1024 px thành ngăn kéo. Xem nhanh / Xuất bản đẹp chỉ chuyển sang tab Xuất video. Không dùng `.btn`/`.input`/`.card` (test quét `AudioTab.legacy.test.ts`).
+4. **Giọng đọc:** trình phát; khi lần dựng gần nhất có `trimmed_tail` thì hiện nhãn "Đã cắt đuôi" + nút Nghe (phát file qua `/api/files`); chưa dựng lần nào hoặc không cắt thì ẩn. Ô "Cắt đuôi tại giây" (`voice.trim_end`) và vùng thả giọng mới giữ như cũ.
+5. **Điểm bắt đầu nhạc:** chip Tự chọn / Đặt tay (Tự chọn = `music.start = null`). "Lần trước: giây X" + Nghe + **Dùng** chỉ khi lần dựng gần nhất có `music_start_source = "auto"` và `music_matches_current`; **Dùng** chuyển sang Đặt tay và điền X. Thiếu dữ liệu thì ẩn dòng (bỏ các câu giải thích dài của bản cũ).
+6. **Nhạc nền:** danh sách bài từ `GET /music` (▶, tên, tác giả · nguồn, nhãn tâm trạng, Chọn / Đang dùng); chip lọc tâm trạng lấy từ `moods` **đã có** trong `index.json` và **ẩn khi không bài nào có `moods`**; "Đang dùng" suy từ `music.credit` = `Tên – Tác giả (Nguồn)` (dạng backend tự điền); chip **Không nhạc**; ô Ghi công; **Tải nhạc** = hộp tải file từ máy (không tải từ mạng) rồi dùng luôn.
+7. **Nghe thử:** một đoạn phát tại một thời điểm (bắt đầu đoạn mới thì dừng đoạn cũ); `<audio preload="none">`, không tải trước. Lịch sử dựng (`/renders`) lấy đúng một lần khi mở màn, không poll.
+8. **Không làm (thuộc 3d):** "Còn ≈ … · Huỷ", nối thẻ tiến độ, ước tính. Chip "Ý MỚI" của mockup là ghi chú, không vẽ.
+9. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) không thấy `workspace/mockup/audio.png`, màn làm theo 13.B2 + bổ sung của chủ dự án; (b) `/renders` không trả `trimmed_tail_seconds` (chỉ job trả) nên nhãn "Đã cắt đuôi" chưa có số giây, thêm cần sửa backend; (c) "Đang dùng" suy từ chuỗi ghi công nên mất khi người dùng sửa ô Ghi công; (d) chưa có trường "bài đang dùng" trong `project.json`; (e) khối cần sửa màu ở Trang chủ không có chữ "Có thể bạn muốn", đã áp cho khối trống cạnh "Tiếp tục làm" (nền `bg-primary` cũ); (f) trang `/dev/ui` gỡ `data-theme` khi đóng nên có thể làm mất chế độ đã chọn trong phiên dev.
+
+### 13.B11 Quyết định Đợt 3d (chủ dự án duyệt 28/10/2026)
+
+1. **Job toàn cục:** `RenderJobProvider` (trong `AppShell`) giữ job và luồng SSE qua `useJob`; `EventSource` chỉ mở khi có `jobId` và đóng khi job kết thúc, lúc rảnh không có kết nối hay request. Thẻ tiến độ ở thanh trái đọc từ context (`AppShell` vẫn nhận `render` để ghi đè khi test). `ProgressBar.tsx` cũ bỏ, dùng `ui/Progress` (`scaleX`). Mở lại trang khi job đang chạy thì app không biết job đó (chưa có API liệt kê job); backend vẫn trả 409.
+2. **Ước tính** (`utils/estimate.ts`): trung vị hệ số `render_seconds ÷ duration` của 3 lần gần nhất cùng loại (10 s đầu / cả video / bản đẹp theo fps), nhân độ dài video sắp dựng; chưa có lịch sử thì dùng hệ số mặc định (bản đẹp 50 fps 3, 60 fps 4,2; 30 fps 1,8 theo tỉ lệ; Xem nhanh 10 s đầu 4; Xem nhanh cả video 1,5). Độ dài video chưa biết = số cảnh × 6 s. "Còn ≈ …" = ước tính × (1 − tiến độ); tiến độ 0% hiện "Đang ước tính…". Lịch sử `/renders` lấy một lần khi mở Soạn video, Âm thanh, Xuất video, làm mới khi job kết thúc.
+3. **Xem nhanh tự dựng:** nút Xem nhanh ở Soạn video / Âm thanh chuyển sang tab Xuất kèm `location.state = { auto: 'preview' }`; tab Xuất chờ kiểm tra và môi trường xong, rồi dựng 10 s đầu đúng một lần (xoá `state` để tải lại không dựng lại). Thiếu nguyên liệu hoặc bị chặn thì không dựng, thẻ Kiểm tra hiện lý do. Xuất bản đẹp chỉ chuyển tab.
+4. **Màn Xuất video:** thẻ Kiểm tra (Sẵn sàng / Có cảnh báo / Bị chặn, 3 số, "Đến cảnh N" mở thẳng cảnh đó), Kết quả, Nội dung đăng, Ảnh bìa, Lịch sử dạng lưới (viền vàng tĩnh cho thẻ đang xem, bìa hoặc ảnh cảnh 1), Dọn file tạm; cột phải có chip fps 30/50/60 (mặc định `settings.fps` của dự án), công tắc Outro, Xem nhanh / Xuất bản đẹp / Xem nhanh cả video, ước tính, tiến độ + Huỷ, trình phát và nút tải video.mp4 / captions.srt / bìa. Nguyên liệu thiếu (ảnh, giọng) tính ngay ở giao diện (`renderBlockers`).
+5. **Khoá menu ⋯** theo slug của job đang chạy (Nhân bản, Xoá tắt, `title` "Đang dựng"); catch 409 → Toast giữ lại làm lưới an toàn.
+6. **Nút tải bìa** trong ngăn kéo "Bìa & đăng": lấy `/renders` chỉ khi ngăn kéo mở; tải `cover_9x16.jpg` và `youtube_3x2.jpg` từ lần dựng gần nhất có đủ hai file.
+7. **`trimmed_tail_seconds`** thêm vào tóm tắt lần dựng (`last_render`, `last_final`) và `/renders` (đọc từ `meta.json`, bản cũ `null`); chỉ sửa `storage.py`, không đụng `pipeline/` hay `models.py`. Nhãn "Đã cắt đuôi X s" ở Âm thanh. Đóng mục (b) của 13.B10.9.
+8. **Màn Cài đặt** viết lại bằng `components/ui/*`: thẻ FPS mặc định (chip), Căn chữ (chip Tự động / small / medium / large-v3, ghi chú theo máy, giới hạn giây), Màu chủ đề, Từ nhạy cảm (chip có ×, ô Thêm từ, chip mức Lưu ý / Cảnh báo / Chặn, nhóm mức Lưu ý gộp thu gọn). **Một nút Lưu** ghi cả cài đặt chung và danh sách từ (bỏ lưu tự động của bản cũ). Test quét mã nguồn: `ExportTab.legacy.test.ts`, `SettingsPage.legacy.test.ts`. CSS cũ và bí danh token giữ nguyên đến Đợt 5.
+9. **Không làm:** tải ảnh riêng làm bìa (sau `v1.0.0`), hộp JSON (Đợt 4), xoá bí danh token (Đợt 5).
+10. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) không có `workspace/mockup/export.png`, `settings.png`; hai màn làm theo 13.B2 + DESIGN-HBT v2; (b) hệ số mặc định của Xem nhanh (4 và 1,5), bản đẹp 30 fps (1,8) và "số cảnh × 6 s" là số tạm, chưa đo trên máy cũ; (c) "nhóm ít dùng" ở Cài đặt hiểu là nhóm mức Lưu ý; mức chọn bằng 3 chip (Lưu ý / Cảnh báo / Chặn) thay cho nút gạt hai trạng thái vì dữ liệu có ba mức; (d) CI của `4e0ded9` chưa kiểm được (`gh` chưa đăng nhập), nếu đỏ sửa ở đầu Đợt 4; (e) mở lại trang giữa lúc đang dựng: thẻ tiến độ không tự nối lại job (cần API liệt kê job); (f) `library/music/index.json` đang sửa dở trong cây làm việc (dữ liệu do app ghi), không commit.
+
+### 13.B12 Quyết định Đợt 4 (chủ dự án duyệt 28/10/2026)
+
+1. **Chỉ làm frontend** (không sửa backend, `pipeline/`, `models.py`; không thêm gói npm). Dùng đúng 4 API của 13.B4.7. `ApiError` giữ thêm `body` (thân JSON của lỗi) để đọc `errors[]` của 422 từ `script/apply`.
+2. **Vị trí:** thanh đầu Soạn video có nút **Dán JSON** (cạnh Bìa & đăng) và menu **⋯** (`Menu`, mục duy nhất **Bản sao lưu**). Hộp Dán JSON: `components/script/PasteJsonDialog.tsx` (bước 1 Dán, bước 2 Kiểm tra, nút Áp dụng ở chân hộp); `ScriptCheckView` + `DiffValue` + `utils/scriptDiff.ts` vẽ 3 ô số, khác biệt theo cảnh (cũ → mới, cảnh báo ngay dưới), "+k cảnh mới" thu gọn, dòng "Giữ nguyên:", ghi chú căn chữ lại. `BackupsDialog.tsx` liệt kê ≤ 10 bản (ngày giờ, Áp JSON / Khôi phục / Không rõ) và Khôi phục có xác nhận.
+3. **Lưu trước khi kiểm:** `flush()` của `useAutosave` (đã có) chạy trước mỗi lần `script/check`, nên không cần hàm mới. `script` gửi lên là chuỗi người dùng dán nguyên văn (K1 báo dòng:cột từ backend); thả hoặc chọn file `.json` thì đọc vào ô dán.
+4. **Lệch số cảnh:** JSON nhiều hơn dự án thì hiện hai chip **Thêm cảnh** / **Bỏ phần thừa**; bấm là kiểm lại với `extra` tương ứng (chip đang chọn đổi được). Nhãn nút "Áp dụng n cảnh" với n = min(JSON, số cảnh sau gộp).
+5. **Áp dụng:** gửi `base_hash` của lần kiểm. Thành công → thay project trong editor bằng `project` trả về, đóng hộp, Toast "Đã áp dụng n cảnh" kèm **Hoàn tác** (8 s, không hỏi xác nhận, gọi restore bằng `backup_id` vừa nhận). 422 → hiện `errors[]` ngay trong hộp, nút Áp dụng tắt. 409 hash lệch → Toast rồi tự kiểm lại để lấy hash mới. 409 đang dựng → Toast, giữ hộp.
+6. **Khoá khi đang dựng:** theo `RenderJobProvider` (job của chính dự án đang `running`/`starting`): Áp dụng và Khôi phục tắt kèm lý do; Toast áp dụng **không** có Hoàn tác nếu đang dựng lúc áp. Nếu máy chủ vẫn trả 409 (vd mở lại trang giữa lúc dựng) thì hiện Toast như thường.
+7. **Test:** Vitest cho endpoints, `scriptDiff`, hộp Dán + Kiểm tra, Áp dụng (409/422/khoá/Hoàn tác), Bản sao lưu, test quét `script.legacy.test.ts` (không lớp cũ, không chữ tiếng Việt cứng trong JSX). E2E `e2e/script-json.spec.ts` (dự án `e2e-dan-json-…`, xoá cuối bài bằng `DELETE`): dán fixture `dao-phuc-sinh.cards.json` → Áp dụng → tải lại còn dữ liệu → Khôi phục bản trước. Sau đợt này e2e có 6 kịch bản.
+8. **Việc của chủ dự án:** xoá tay `workspace/import_cards.py` (nằm ngoài git).
+9. **Cần chốt (chưa quyết, đã chọn phương án an toàn):** (a) không có mockup `workspace/mockup/` cho hộp này, làm theo 13.B2 + 13.B4.6; (b) dòng "Giữ nguyên:" do giao diện suy ra (ảnh, file giọng, nhạc, cài đặt, tên & series luôn; nội dung đăng / ảnh bìa nếu JSON không đổi chúng), không phải backend trả; (c) Hoàn tác và Khôi phục đều tạo thêm một bản sao lưu `restore`, nên chiếm chỗ trong 10 bản; (d) mở lại trang giữa lúc đang dựng thì giao diện không biết job (chưa có API liệt kê job), chỉ dựa vào 409; (e) menu ⋯ mới có một mục; (f) `script/check` chạy mỗi lần bấm Kiểm tra hoặc chọn Thêm cảnh / Bỏ phần thừa, không chạy khi gõ (không poll); (g) CI của `4a88794` và các commit Đợt 4 chưa kiểm được (`gh` chưa đăng nhập).
+
+
+### 13.B13 Quyết định Đợt 5 (chủ dự án duyệt 28/10/2026)
+
+1. **Xoá bí danh** (13.B7.1): khối bí danh cuối `tokens.css`, các khoá `surface`, `surface-2`, `text-muted`, `border`, `brand-red`, `brand-cream`, `brand-ink`, `frame` trong `tailwind.config.ts`, và mọi lớp `.btn*` / `.input` / `.label` / `.card` / `.chip*` / `.spinner` cũ trong `index.css` (chỉ giữ `.num`). Không màu nào đổi giá trị: các lớp cũ không còn nơi dùng. Test `legacyAliases.test.ts` quét `frontend/src` + `tailwind.config.ts`, chỉ bắt đúng tên cũ (`bg-surface`, `text-text-muted`, `border-border`, `rounded-frame`, `var(--surface)`…), không bắt `border`, `border-line`, `text-muted`, `rounded-card`. `manifest.webmanifest` giữ `#f7eeda` (không phải token).
+2. **Tab/focus:** `Menu` giữ Tab/Shift+Tab trong menu khi đang mở (như mũi tên, thêm Home/End; **đã chốt: giữ**, khác thói quen ARIA là Tab đóng menu); Esc trả focus về nút ⋯. Hai hộp chồng nhau (vd Bản sao lưu → xác nhận Khôi phục): chỉ hộp trên cùng nhận Esc / Tab (`useModal` giữ ngăn xếp), hộp dưới vẫn mở, focus về nút đã mở hộp trên. `Dialog`/`Drawer` đã giữ focus (`useModal`). Vòng focus toàn cục là `:focus-visible` trong `index.css`. E2E `e2e/focus.spec.ts` (kịch bản thứ 7): thứ tự Tab ở thanh trái, Dialog "Video mới", Menu ⋯ và hộp Bản sao lưu giữ focus bên trong, Esc trả focus về nút đã mở.
+3. **`GET /jobs`** (chỉ đọc, `JobManager.active()`): job đang chạy và đang chờ, cũ nhất trước: `{id, slug, kind: preview|final, status, progress, step}`. `RenderJobProvider` gọi **đúng một lần** khi mở app, nối lại SSE của job đang chạy (không có thì job đầu hàng), đặt `slug` để khoá ⋯ / Hoàn tác / Khôi phục / Dán JSON. Không đè job người dùng tự bắt đầu trước khi API trả lời; lỗi mạng thì bỏ qua (409 của máy chủ vẫn là lưới an toàn). Không đụng `pipeline/` hay `models.py`.
+4. **Cảnh báo rời Cài đặt** (`components/settings/LeaveGuard.tsx`): có thay đổi chưa Lưu thì đổi màn trong app → `ConfirmDialog` ("Ở lại" / "Rời đi"); đóng hoặc tải lại tab → `beforeunload`. Chỉ gắn khi có thay đổi, gỡ khi Lưu xong hoặc rời màn. "Chưa Lưu" = giá trị đang soạn khác giá trị đã lưu (so sâu, cả cài đặt chung lẫn danh sách từ nhạy cảm; "đã lưu" đổi sau mỗi lần Lưu thành công): sửa rồi trả về đúng giá trị cũ thì không còn cảnh báo. Cần data router nên `main.tsx` dùng `createBrowserRouter` (một route `*` bọc `ToastProvider` + `App`; `App` giữ `<Routes>`). Chữ ở `vi.settings.leave`.
+5. **CLAUDE.md** nêu hai máy theo mục 0.
+6. **Button** luôn render `<button>`; liên kết dùng `<a class="ui-btn">` / `<Link className="ui-btn">` (test quét không truyền `href`/`to`/`as` vào `<Button>`). **`/dev/ui`** nhớ `data-theme` của app lúc mở và trả lại khi đóng (và ở chip "Theo hệ thống"), không xoá lựa chọn Sáng/Tối. Đóng mục (f) của 13.B10.9.
+7. **Xoá lần xuất ở Lịch sử** (chủ dự án chốt thêm vào Đợt 5, **ngoại lệ** của danh sách Đợt 5; vào luôn `v0.6.0`). Chưa có API xoá lần xuất nên thêm `DELETE /projects/{slug}/renders/{job_id}` (xem mục 9; `Storage.delete_render`: đổi tên thư mục sang `.deleting-<id>` rồi xoá, thư mục tạm bị bỏ qua khi liệt kê; chỉ sửa `storage.py`, `api/projects.py`, không đụng `pipeline/` hay `models.py`). Giao diện: menu ⋯ ở mỗi thẻ Lịch sử có **Tải video** và **Xoá** (tắt kèm "Đang dựng" nếu là job đang chạy); hộp xác nhận "Xoá video, bìa và publish.txt của lần xuất này. Không hoàn tác được."; trước khi gọi API gỡ `src` của `<video>` (pause, `removeAttribute('src')`, `load()`) để Windows nhả file, 409 thì trả `src` lại; thành công → Toast "Đã xoá lần xuất", làm mới Lịch sử và `['projects']` (thẻ Dự án). Không thêm e2e (tránh dựng thêm video).
+8. **Bố cục cột phải màn Xuất video:** nút Tải **chỉ còn video.mp4** (chủ dự án bỏ captions.srt, bìa 9:16, bìa YouTube khỏi nhóm này; bìa vẫn tải ở thẻ Ảnh bìa / ngăn "Bìa & đăng") nằm **cùng khung** với Xem nhanh / Xuất bản đẹp, ngay dưới hai nút; dùng `<a download class="ui-btn ui-btn-soft">` (nút phụ, nút Xuất bản đẹp vẫn là nút vàng duy nhất); bỏ khối "Tải về" cũ dưới trình phát. Áp cho lần xuất đang chọn trong Lịch sử, mặc định lần mới nhất (nên tải lại trang vẫn có trình phát, kết quả và nút tải). **Chủ dự án bỏ nút Xem nhanh cả video trên UI (28/10), giữ API (`preview_seconds`) và CLI `--preview`** (golden test máy mới cần): xoá nút, chữ `fastFull` ở `vi.ts` và loại ước tính riêng `full` ở `utils/estimate.ts`; nhãn lịch sử cũ vẫn gọi đúng tên.
+9. **Vitest tăng từ 486 lên 757 (57 file; 743 ở báo cáo trước, thêm 14 từ các sửa sau):** 242 test đến từ hai test quét nguồn (`legacyAliases.test.ts`, `Button.links.test.ts`) dùng `it.each` trên từng file `.tsx` / `.css`; phần còn lại là test mới của Đợt 5.
+10. **Số test cuối đợt** (máy cũ, 28/10/2026, HEAD sau các sửa thêm): pytest 757 passed (700 không `slow`; backend không đổi từ lần chạy đầy đủ cuối); Vitest 58 file, 761 test; e2e 7/7. `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng; `PIPELINE_VERSION = 0112661f2845`.
+11. **Xoá dự án ở màn Soạn video** (chủ dự án yêu cầu thêm): menu ⋯ cạnh tên dự án có thêm **Xoá dự án** (hộp xác nhận như ở Dự án; `flush()` lưu nốt rồi `DELETE /projects/{slug}`; thành công → Toast, làm mới `['projects']`, về `/projects`; tắt kèm "Đang dựng" khi chính dự án này đang dựng; 409 → Toast).
+12. **Backlog sau v0.6.0 (không làm trong M5):** bộ đếm ký tự đặt **trong** ô nhập, sát phải: ô một dòng căn giữa dọc, textarea ở góc dưới phải; chừa padding để không che chữ, `pointer-events: none`, giữ `aria-describedby`. Cùng với: bìa từ ảnh tải lên, "bài đang dùng" (sau `v1.0.0`).
+13. **Cần chốt (đã chọn phương án an toàn / chủ dự án chấp nhận):** (a) nối lại job chỉ cho job đầu hàng, khoá của job xếp sau còn dựa vào 409 *(chấp nhận)*; (b) cảnh báo rời Cài đặt chỉ khi đổi đường dẫn, không hỏi khi chỉ đổi tham số tìm kiếm; (c) `npm run e2e` dựng Xem nhanh thật bằng FFmpeg ở kịch bản export-settings *(chấp nhận)*; (d) CI của các commit Đợt 4–5 chưa kiểm được (`gh` chưa đăng nhập); (e) `library/music/index.json` vẫn sửa dở, không commit, không stash; (f) xoá lần xuất: nếu đổi tên thư mục thành công nhưng xoá file dở (hiếm), phần còn lại nằm trong `renders/.deleting-<id>` và không hiện trong Lịch sử; (g) job_id của lần xuất hợp lệ gồm cả tên CLI (`20261026-103538-preview`), nên mẫu chấp nhận rộng hơn 12 ký tự hex của job app; (h) `GET /projects/{slug}/renders` đã dùng cho lưới nên không có API mới ngoài DELETE.

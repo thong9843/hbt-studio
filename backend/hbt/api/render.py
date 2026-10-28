@@ -71,6 +71,22 @@ def start_render(slug: str, state: State, body: RenderRequest | None = None):
     return {"job_id": job.id}
 
 
+@router.get("/jobs")
+def list_active_jobs(state: State):
+    """Chỉ đọc: job đang chạy và đang chờ (để giao diện nối lại sau khi tải lại trang)."""
+    return [
+        {
+            "id": j.id,
+            "slug": j.slug,
+            "kind": "preview" if j.preview else "final",
+            "status": j.status,
+            "progress": round(j.progress, 1),
+            "step": j.step,
+        }
+        for j in state.jobs.active()
+    ]
+
+
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str, state: State):
     return job_view(state.jobs.get(job_id))

@@ -40,6 +40,7 @@ def meta_of(res):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_whisper_cut_is_saved_in_the_job_dir_and_recorded(tmp_path, whisper):
     whisper(extra=AD)
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False, tail=TAIL_AUDIO)
@@ -55,6 +56,7 @@ def test_whisper_cut_is_saved_in_the_job_dir_and_recorded(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_nothing_cut_means_no_file(tmp_path, whisper):
     whisper()
     pdir, opts = make_project(tmp_path, aligner="auto", outro=False)
@@ -64,6 +66,7 @@ def test_nothing_cut_means_no_file(tmp_path, whisper):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_silence_aligner_cut_is_saved_too(tmp_path):
     pdir, opts = make_project(tmp_path, n=8, tail=[("gap", 0.8), ("tone", 3.0)], outro=False)
     res = render_project(pdir, opts)
@@ -73,6 +76,7 @@ def test_silence_aligner_cut_is_saved_too(tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.slow
 def test_manual_trim_end_cut_is_saved_too(tmp_path):
     pdir, opts = make_project(
         tmp_path,
