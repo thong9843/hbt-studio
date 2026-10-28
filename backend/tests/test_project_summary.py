@@ -68,6 +68,7 @@ def test_last_final_is_the_newest_non_preview_with_the_same_fields_as_last_rende
         "duration": None,
         "render_seconds": 60.5,
         "align_cached": True,
+        "trimmed_tail_seconds": None,
         "created_at": "2026-10-02T10:00:00Z",
         "video": f"/api/files/projects/{slug}/renders/f2/video.mp4",
     }
@@ -118,3 +119,15 @@ def test_broken_project_still_lists_with_null_new_fields(client):  # noqa: F811
     (folder / "project.json").write_text("{hỏng", encoding="utf-8")
     item = summary(client, slug)
     assert item["error"] and item["cover"] is None and item["last_final"] is None
+
+
+def test_trimmed_tail_seconds_comes_from_meta_in_summary_and_renders(client):  # noqa: F811
+    slug, folder = new_project(client)
+    make_render(folder, "old", "2026-10-01T10:00:00Z")  # bản cũ không ghi trường này
+    make_render(folder, "cut", "2026-10-02T10:00:00Z", trimmed_tail_seconds=3.78)
+    item = summary(client, slug)
+    assert item["last_render"]["trimmed_tail_seconds"] == 3.78
+    assert item["last_final"]["trimmed_tail_seconds"] == 3.78
+    renders = {r["job_id"]: r for r in client.get(f"/api/projects/{slug}/renders").json()}
+    assert renders["cut"]["trimmed_tail_seconds"] == 3.78
+    assert renders["old"]["trimmed_tail_seconds"] is None

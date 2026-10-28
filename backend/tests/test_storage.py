@@ -187,6 +187,7 @@ def test_list_projects_fields_and_order(store, tmp_path):
         "duration": 12.5,
         "render_seconds": None,  # bản dựng cũ chưa có hai trường của B′
         "align_cached": None,
+        "trimmed_tail_seconds": None,
         "created_at": "2026-10-21T01:00:00Z",
         "video": "projects/hai/renders/job1/video.mp4",
     }

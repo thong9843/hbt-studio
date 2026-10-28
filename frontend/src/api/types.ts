@@ -110,6 +110,8 @@ export interface RenderSummary {
   /** null = bản dựng cũ không ghi (IMPLEMENT 13.B6). */
   render_seconds?: number | null;
   align_cached?: boolean | null;
+  /** Số giây giọng bị cắt đuôi; null = không cắt hoặc bản dựng cũ không ghi. */
+  trimmed_tail_seconds?: number | null;
   created_at: string;
   video: string | null;
 }

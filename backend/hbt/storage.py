@@ -357,6 +357,7 @@ class Storage:
                 "music_start_source": meta.get("music_start_source"),
                 "render_seconds": meta.get("render_seconds"),  # bản dựng cũ không có → None
                 "align_cached": meta.get("align_cached"),
+                "trimmed_tail_seconds": meta.get("trimmed_tail_seconds"),
                 # nhạc hiện tại của project có đúng là nhạc đã dùng cho lần xuất này không
                 "music_matches_current": current_music is not None
                 and meta.get("music_sha256") == current_music,
@@ -421,6 +422,7 @@ class Storage:
             "duration": meta.get("duration"),
             "render_seconds": meta.get("render_seconds"),
             "align_cached": meta.get("align_cached"),
+            "trimmed_tail_seconds": meta.get("trimmed_tail_seconds"),  # bản cũ / không cắt → None
             "created_at": created,
             "video": self.rel(d / "video.mp4"),
         }
