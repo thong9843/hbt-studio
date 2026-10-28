@@ -1,6 +1,7 @@
 import { apiGet, apiPostBlob, apiRequest } from './client';
 import type {
   AppSettings,
+  BackupEntry,
   Job,
   LintResult,
   BuildClean,
@@ -13,6 +14,9 @@ import type {
   RenderOptions,
   RenderRecord,
   Scene,
+  ScriptApplied,
+  ScriptCheck,
+  ScriptExtra,
   SensitiveWords,
   Theme,
 } from './types';
@@ -76,6 +80,20 @@ export const api = {
       { form },
     );
   },
+
+  /** Kiểm khối JSON kịch bản (chuỗi người dùng dán). Không ghi gì. */
+  checkScript: (slug: string, script: string, extra?: ScriptExtra) =>
+    apiRequest<ScriptCheck>('POST', `/projects/${enc(slug)}/script/check`, {
+      json: { script, extra: extra ?? null },
+    }),
+  /** Áp khối JSON: sao lưu rồi ghi. 409 = đang dựng hoặc `baseHash` lệch; 422 = còn lỗi. */
+  applyScript: (slug: string, script: string, baseHash: string, extra?: ScriptExtra) =>
+    apiRequest<ScriptApplied>('POST', `/projects/${enc(slug)}/script/apply`, {
+      json: { script, extra: extra ?? null, base_hash: baseHash },
+    }),
+  listBackups: (slug: string) => apiGet<BackupEntry[]>(`/projects/${enc(slug)}/backups`),
+  restoreBackup: (slug: string, backupId: string) =>
+    apiRequest<ScriptApplied>('POST', `/projects/${enc(slug)}/backups/${enc(backupId)}/restore`),
 
   listMusic: () => apiGet<MusicEntry[]>('/music'),
   addMusic: (input: NewMusicInput) => {

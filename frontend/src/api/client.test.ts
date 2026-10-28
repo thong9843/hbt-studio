@@ -37,3 +37,18 @@ describe('fetchHealth', () => {
     expect(fetchFn.mock.calls[0][0]).toBe('/api/health');
   });
 });
+
+describe('ApiError.body', () => {
+  it('keeps the JSON body so callers can read errors[]', async () => {
+    const body = { detail: 'JSON có 1 lỗi, chưa áp', errors: [{ code: 'K3' }] };
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body, 422));
+    const err = (await apiGet('/x', fetchFn).catch((e: unknown) => e)) as ApiError;
+    expect(err.body).toEqual(body);
+  });
+
+  it('is null when the error body is not JSON', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response('boom', { status: 500 }));
+    const err = (await apiGet('/x', fetchFn).catch((e: unknown) => e)) as ApiError;
+    expect(err.body).toBeNull();
+  });
+});

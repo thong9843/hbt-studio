@@ -262,3 +262,46 @@ export interface NewMusicInput {
   moods?: string;
   bpm?: number | null;
 }
+
+/** Khối JSON kịch bản (IMPLEMENT 13.B4). */
+export type ScriptExtra = 'add' | 'trim';
+
+export interface ScriptIssue {
+  code: string;
+  /** Chỉ số cảnh từ 0; `null` = áp cho cả video. */
+  scene_index: number | null;
+  field: string;
+  message: string;
+  /** K10: `block` = sẽ chặn xuất, `warn` = lưu ý. */
+  level?: 'block' | 'warn';
+}
+
+export interface ScriptDiffItem {
+  scene_index: number | null;
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface ScriptCheck {
+  ok: boolean;
+  base_hash: string;
+  counts: { json: number; project: number; after: number };
+  errors: ScriptIssue[];
+  warnings: ScriptIssue[];
+  diff: ScriptDiffItem[];
+  /** Chỉ số (từ 0) các cảnh đổi lời đọc, sẽ căn chữ lại. */
+  realign_scenes: number[];
+}
+
+export interface ScriptApplied {
+  project: Project;
+  backup_id: string;
+  base_hash: string;
+}
+
+export interface BackupEntry {
+  id: string;
+  created_at: string;
+  reason: 'apply' | 'restore' | null;
+}
