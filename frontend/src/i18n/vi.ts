@@ -119,8 +119,10 @@ export const vi = {
       namePlaceholder: 'Ví dụ: Vì sao muỗi thích đốt bạn?',
       series: 'Series (tuỳ chọn)',
       scenes: 'Số cảnh',
+      seriesPresets: ['Vì sao…', 'Vì sao Trái Đất…', 'Vì sao vậy ta?'],
+      seriesOther: 'Khác',
+      seriesPlaceholder: 'Tên series',
       submit: 'Tạo',
-      creating: 'Đang tạo…',
     },
   },
   compose: {

@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { NewProjectProvider } from './NewProjectDialog';
 import { SideNav, type RenderProgress } from './SideNav';
 
 /** Điểm gãy: từ 1280 px thanh trái đầy đủ, dưới đó chỉ còn biểu tượng (DESIGN-HBT.md mục 5). */
@@ -14,11 +15,13 @@ interface Props {
 export function AppShell({ render }: Props) {
   const wide = useMediaQuery(WIDE_QUERY);
   return (
-    <div className="flex min-h-screen bg-bg">
-      <SideNav mini={!wide} render={render} />
-      <div className="min-w-0 flex-1">
-        <Outlet />
+    <NewProjectProvider>
+      <div className="flex min-h-screen bg-bg">
+        <SideNav mini={!wide} render={render} />
+        <div className="min-w-0 flex-1">
+          <Outlet />
+        </div>
       </div>
-    </div>
+    </NewProjectProvider>
   );
 }

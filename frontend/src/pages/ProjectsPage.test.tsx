@@ -1,9 +1,9 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NewProjectProvider } from '../components/NewProjectDialog';
 import { stubFetch } from '../test/fakes';
-import { project } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { ProjectsPage } from './ProjectsPage';
 
@@ -21,10 +21,12 @@ const summary = (slug: string, title: string, last_render: unknown = null) => ({
 
 function page() {
   return renderWithProviders(
-    <Routes>
-      <Route path="/" element={<ProjectsPage />} />
-      <Route path="/p/:slug" element={<p>trang soạn</p>} />
-    </Routes>,
+    <NewProjectProvider>
+      <Routes>
+        <Route path="/" element={<ProjectsPage />} />
+        <Route path="/p/:slug" element={<p>trang soạn</p>} />
+      </Routes>
+    </NewProjectProvider>,
   );
 }
 
@@ -58,47 +60,12 @@ describe('ProjectsPage', () => {
     expect(await screen.findByText(/Chưa có video nào/)).toBeInTheDocument();
   });
 
-  it('creates a video from the dialog and opens it', async () => {
+  it('opens the new-video dialog from the empty state', async () => {
     const user = userEvent.setup();
-    const create = vi.fn((_url: string, init?: RequestInit) => {
-      void init;
-      return new Response(JSON.stringify(project({ slug: 'video-moi', title: 'Video mới' })), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    stubFetch({ 'GET /api/health': health, 'GET /api/projects': [], 'POST /api/projects': create });
+    stubFetch({ 'GET /api/health': health, 'GET /api/projects': [] });
     page();
     await screen.findByText('Tạo video đầu tiên');
     await user.click(screen.getByRole('button', { name: 'Tạo video mới' }));
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Tiêu đề'), 'Video mới');
-    await user.click(screen.getByRole('button', { name: 'Tạo' }));
-    expect(await screen.findByText('trang soạn')).toBeInTheDocument();
-    expect(JSON.parse(String(create.mock.calls[0][1]?.body))).toEqual({
-      title: 'Video mới',
-      series: '',
-      scene_count: 8,
-    });
-  });
-
-  it('shows the API error inside the dialog', async () => {
-    const user = userEvent.setup();
-    stubFetch({
-      'GET /api/health': health,
-      'GET /api/projects': [],
-      'POST /api/projects': () =>
-        new Response(JSON.stringify({ detail: 'Tiêu đề trùng' }), {
-          status: 409,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    });
-    page();
-    await screen.findByText('Tạo video đầu tiên');
-    await user.click(screen.getByRole('button', { name: 'Tạo video mới' }));
-    await user.type(screen.getByLabelText('Tiêu đề'), 'A');
-    await user.click(screen.getByRole('button', { name: 'Tạo' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Tiêu đề trùng'));
+    expect(await screen.findByRole('dialog', { name: 'Tạo video mới' })).toBeInTheDocument();
   });
 });

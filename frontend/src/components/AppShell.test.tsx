@@ -128,17 +128,19 @@ describe('AppShell, wide (>= 1280 px)', () => {
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('href', '/');
   });
 
-  it('opens the old create dialog from the red button (via /?new=1)', async () => {
+  it('opens the new-video dialog from the red button, on any screen', async () => {
     stubFetch(routes());
     shell('/p/muoi');
     await userEvent.click(screen.getByRole('button', { name: 'Tạo video' }));
     expect(await screen.findByRole('dialog', { name: 'Tạo video mới' })).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent('/p/muoi');
   });
 
-  it('opens the create dialog and clears the query so a reload does not reopen it', async () => {
+  it('ignores the old /?new=1 query: no dialog opens', async () => {
     stubFetch(routes());
     shell('/?new=1');
-    expect(await screen.findByRole('dialog', { name: 'Tạo video mới' })).toBeInTheDocument();
+    await screen.findByRole('link', { name: 'Dự án' });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('is reachable by keyboard in reading order', async () => {

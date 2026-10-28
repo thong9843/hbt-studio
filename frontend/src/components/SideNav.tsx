@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { Link, NavLink, useMatch, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useMatch } from 'react-router-dom';
 import { fetchHealth, type Health } from '../api/client';
 import { api } from '../api/endpoints';
+import { useNewProject } from '../hooks/newProject';
 import { vi } from '../i18n/vi';
 import {
   FilmIcon,
@@ -164,7 +165,7 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
 
 /** Thanh trái cố định: rộng 232, hoặc 72 chỉ biểu tượng (DESIGN-HBT.md mục 5). */
 export function SideNav({ mini, render }: Props) {
-  const navigate = useNavigate();
+  const { open: openNew } = useNewProject();
   const open = useMatch('/p/:slug/*');
   const slug = open?.params.slug;
   return (
@@ -188,7 +189,7 @@ export function SideNav({ mini, render }: Props) {
         className={cx('ui-btn ui-btn-brand mt-3', mini && 'mx-auto !h-11 !w-11 !min-h-0 !p-0')}
         aria-label={vi.nav.newVideo}
         title={mini ? vi.nav.newVideo : undefined}
-        onClick={() => navigate('/?new=1')}
+        onClick={openNew}
       >
         <PlusIcon />
         {!mini && vi.nav.newVideo}

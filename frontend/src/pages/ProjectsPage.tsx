@@ -1,109 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { HealthStatus } from '../components/HealthStatus';
 import { PlusIcon } from '../components/icons';
+import { useNewProject } from '../hooks/newProject';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDateTime, formatDuration } from '../utils/format';
-
-function NewProjectDialog({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [title, setTitle] = useState('');
-  const [series, setSeries] = useState('');
-  const [sceneCount, setSceneCount] = useState(8);
-  const create = useMutation({
-    mutationFn: () =>
-      api.createProject({ title: title.trim(), series: series.trim(), scene_count: sceneCount }),
-    onSuccess: (project) => {
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      navigate(`/p/${project.slug}`);
-    },
-  });
-  const t = vi.projects.dialog;
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (title.trim()) create.mutate();
-  };
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-      <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-project-title"
-        onSubmit={submit}
-        className="w-full max-w-md space-y-4 rounded-frame bg-bg p-8 shadow-xl"
-      >
-        <h2 id="new-project-title">{t.title}</h2>
-        <div>
-          <label className="label" htmlFor="np-title">
-            {t.name}
-          </label>
-          <input
-            id="np-title"
-            className="input"
-            autoFocus
-            required
-            placeholder={t.namePlaceholder}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="np-series">
-            {t.series}
-          </label>
-          <input
-            id="np-series"
-            className="input"
-            value={series}
-            onChange={(e) => setSeries(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="np-scenes">
-            {t.scenes}
-          </label>
-          <input
-            id="np-scenes"
-            type="number"
-            min={3}
-            max={12}
-            className="input"
-            value={sceneCount}
-            onChange={(e) => setSceneCount(Math.min(12, Math.max(3, Number(e.target.value) || 8)))}
-          />
-        </div>
-        <ErrorNote error={create.error} />
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            {vi.common.cancel}
-          </button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={create.isPending || !title.trim()}
-          >
-            {create.isPending ? t.creating : t.submit}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 /** Thẻ dự án: ảnh cảnh 1 tràn sát mép (9:16), tiêu đề chữ hoa, ngày và huy hiệu ngay dưới ảnh. */
 export function ProjectCard({
@@ -178,19 +85,11 @@ export function ProjectCard({
 }
 
 export function ProjectsPage() {
-  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
-  // Nút "Tạo video" ở thanh trái mở hộp tạo cũ qua `/?new=1` (nối lại đúng ở Đợt 3a).
-  const [params, setParams] = useSearchParams();
-  useEffect(() => {
-    if (params.get('new')) {
-      setCreating(true);
-      setParams({}, { replace: true });
-    }
-  }, [params, setParams]);
+  const { open: openNew } = useNewProject();
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: api.listProjects,
@@ -224,7 +123,7 @@ export function ProjectsPage() {
         <h1>{vi.projects.title}</h1>
         {/* Một nút chính mỗi màn: khi danh sách trống, nút nằm trong khối trống bên dưới. */}
         {data?.length !== 0 && (
-          <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+          <button type="button" className="btn btn-primary" onClick={openNew}>
             <PlusIcon size={20} />
             {vi.projects.create}
           </button>
@@ -255,7 +154,7 @@ export function ProjectsPage() {
             <img src="/brand/hbt-logo-mark.png" alt="" className="h-20 w-auto" />
             <p className="text-hero font-extrabold uppercase">{vi.projects.emptyHero}</p>
             <p className="text-text-muted">{vi.projects.empty}</p>
-            <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+            <button type="button" className="btn btn-primary" onClick={openNew}>
               {vi.projects.create}
             </button>
           </div>
@@ -275,7 +174,6 @@ export function ProjectsPage() {
         )}
       </section>
 
-      {creating && <NewProjectDialog onClose={() => setCreating(false)} />}
       {deleting && (
         <ConfirmDialog
           title={vi.projects.deleteTitle}

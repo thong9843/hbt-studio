@@ -11,7 +11,10 @@ test('tạo project, thêm 3 cảnh, lưu, tải lại vẫn đủ dữ liệu',
     await page.goto('/');
     await page.getByRole('button', { name: vi.projects.create }).first().click();
     await page.getByLabel(vi.projects.dialog.name).fill(title);
-    await page.getByLabel(vi.projects.dialog.scenes).fill('3');
+    await page
+      .getByRole('group', { name: vi.projects.dialog.scenes })
+      .getByRole('button', { name: '3', exact: true })
+      .click();
     await page.getByRole('button', { name: vi.projects.dialog.submit, exact: true }).click();
     await page.waitForURL(/\/p\/[^/]+$/);
     slug = new URL(page.url()).pathname.split('/')[2]!;
