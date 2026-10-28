@@ -290,6 +290,11 @@
 .ui-card-link:active {
   transform: scale(0.99);
 }
+/* Hover/nhấn tạo ngăn xếp riêng (transform): thẻ có menu ⋯ đang mở phải nổi lên trên thẻ kế bên
+   và khối bên dưới, nếu không menu ở hàng cuối bị đè và không bấm được. */
+.ui-card-link:has(.ui-menu) {
+  z-index: 30;
+}
 .ui-inner {
   border-radius: var(--radius-inner);
   background: var(--soft-2);
