@@ -114,7 +114,8 @@ Mỗi project là 1 thư mục `workspace/projects/<slug>/`:
 
 ```
 project.json
-images/scene-01.png …        # ảnh gốc người dùng tải lên
+images/<hash16>.png …       # ảnh cảnh người dùng tải lên: tên = 16 ký tự đầu hash nội dung (`content_hash_16`)
+images/cover.<ext>           # (tuỳ chọn) ảnh bìa riêng, 13.B15
 voice.<ext>  music.<ext>
 build/                       # file trung gian (xoá được), có cache theo hash
 renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
@@ -134,7 +135,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
   "settings": { "fps": 50, "captions": true, "aligner": "auto", "sfx_on_punch": true, "outro": true },
   "scenes": [
     {
-      "image": "images/scene-01.png",
+      "image": "images/3f9a1c0e5b7d2a84.png",
       "card": { "y": "top", "lines": [
         { "text": "Bạn là người", "size": "s" },
         { "text": "“được muỗi yêu”?", "size": "l", "color": "accent" } ] },
@@ -144,7 +145,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
       "caption_y": null
     },
     {
-      "image": "images/scene-05.png",
+      "image": "images/a17c4e90d2b86f35.png",
       "card": { "y": "top", "lines": [
         { "text": "Mùi da thu hút muỗi", "size": "s" },
         { "text": "gấp 100 lần", "size": "xl", "color": "accent" } ] },
@@ -1051,3 +1052,8 @@ Nhánh `feat/cover-upload` (từ `main` `0e38efc`, tag `v1.0.0`), tag `v1.1.0`. 
 7. **Khối JSON:** `thumbnail.image` là trường cấm (K4, kể cả `null`); dán khối `thumbnail` thay cả khối nhưng **giữ** `image` hiện có (không hiện trong khác biệt).
 8. **Giao diện:** trong `ThumbnailEditor` (ngăn "Bìa & đăng" và tab Xuất video): vùng thả ảnh (`CoverDrop`), ảnh xem trước nhỏ (`?v=` tăng sau mỗi lần tải), nút **Bỏ ảnh**; có ảnh thì chip cảnh nền bị tắt kèm chú thích. Lưu bản nháp trước khi tải. Không thêm gói npm; thẻ Trang chủ không đổi.
 9. **Không làm:** chọn vị trí cắt (có thể thêm `thumbnail.focus` sau).
+10. **Tồn (ghi 28/10/2026):**
+    - (a) Thả ảnh bìa ngay sau một lần tải lỗi đôi khi không gửi đi; e2e đang chờ `networkidle` để né. Sửa ở đợt fix riêng, trước PostV.
+    - (b) e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`), chưa rõ gốc; chạy lại 3/3 và cả bộ 9/9 đều đạt.
+    - (c) Backlog: `make_covers` (`render.py`) tự chọn ảnh nền bằng 2 dòng, trong khi xem trước dùng `thumbnail.cover_background`; gộp về một hàm khi được phép sửa `render.py` lại.
+    - (d) Tên ảnh cảnh thật là `images/<hash16>.<ext>`. Mục 3 đã sửa; các dòng ở mục 9 (Quy ước đánh số cảnh, `POST /assets`, `scenes/reorder`) còn ghi `scene-NN`, cần đối chiếu với `storage.py` rồi sửa.
