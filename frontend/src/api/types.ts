@@ -107,6 +107,9 @@ export interface RenderSummary {
   preview: boolean;
   fps: number | null;
   duration: number | null;
+  /** null = bản dựng cũ không ghi (IMPLEMENT 13.B6). */
+  render_seconds?: number | null;
+  align_cached?: boolean | null;
   created_at: string;
   video: string | null;
 }
@@ -117,6 +120,10 @@ export interface ProjectSummary {
   updated_at: string;
   thumb: string | null;
   last_render: RenderSummary | null;
+  /** Bản đẹp mới nhất (không phải xem nhanh), cùng dạng `last_render`. */
+  last_final: RenderSummary | null;
+  /** Bìa 9:16 của lần dựng gần nhất có bìa. */
+  cover: string | null;
   error: string | null;
 }
 
