@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from hbt.api.deps import State, file_url
 from hbt.models import MAX_SCENES, MIN_SCENES, Project, Scene, Theme, Thumbnail
 from hbt.pipeline.preview import resize_png, scene_preview_for, scene_preview_png
-from hbt.pipeline.thumbnail import LOGO_FILE, render_cover
+from hbt.pipeline.thumbnail import LOGO_FILE, cover_background, render_cover
 from hbt.storage import BadRequest, Conflict, NotFound, Unprocessable
 
 router = APIRouter(tags=["projects"])
@@ -167,14 +167,20 @@ def draft_thumbnail_preview(
         raise Unprocessable("Project chưa có khối thumbnail (ảnh bìa)")
     if thumb.scene > len(project.scenes):
         raise Unprocessable(f"Cảnh nền {thumb.scene} vượt quá số cảnh ({len(project.scenes)})")
-    image = project.scenes[thumb.scene - 1].image
-    bg = state.storage.project_file(slug, image) if image else None
-    if bg is None or not bg.is_file():
-        raise Unprocessable(f"Cảnh {thumb.scene} chưa có ảnh để làm nền bìa")
+    if thumb.image:
+        try:
+            bg, fit = cover_background(thumb, project.scenes, state.storage.project_dir(slug))
+        except FileNotFoundError as e:
+            raise Unprocessable(str(e)) from e
+    else:
+        image = project.scenes[thumb.scene - 1].image
+        bg, fit = (state.storage.project_file(slug, image) if image else None), False
+        if bg is None or not bg.is_file():
+            raise Unprocessable(f"Cảnh {thumb.scene} chưa có ảnh để làm nền bìa")
     try:
         cover = render_cover(
             bg, thumb.lines, thumb.series or project.series, thumb.accent,
-            state.brand_dir / LOGO_FILE,
+            state.brand_dir / LOGO_FILE, fit_background=fit,
         )  # fmt: skip
     except OSError as e:
         raise Unprocessable(f"Không vẽ được ảnh bìa: {e}") from e
