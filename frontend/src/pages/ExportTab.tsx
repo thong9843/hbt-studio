@@ -302,19 +302,6 @@ export function ExportTab() {
               className="flex flex-wrap gap-2"
             >
               <DownloadLink href={media.video} file="video.mp4" label={X.result.video} />
-              {media.srt && (
-                <DownloadLink href={media.srt} file="captions.srt" label={X.result.srt} />
-              )}
-              {media.cover && (
-                <DownloadLink href={media.cover} file="cover_9x16.jpg" label={X.result.cover} />
-              )}
-              {media.youtube_cover && (
-                <DownloadLink
-                  href={media.youtube_cover}
-                  file="youtube_3x2.jpg"
-                  label={X.result.youtubeCover}
-                />
-              )}
             </div>
           )}
           {reason && (

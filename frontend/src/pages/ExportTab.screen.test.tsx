@@ -263,13 +263,14 @@ describe('Xuất video: lịch sử dạng lưới', () => {
       'download',
       'video.mp4',
     );
-    expect(screen.getByRole('link', { name: 'Tải captions.srt' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Tải cover_9x16.jpg' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Kết quả' })).toHaveTextContent('0:50');
 
     await user.click(items[1]);
     expect(items[0]).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.queryByRole('link', { name: 'Tải captions.srt' })).toBeNull();
+    expect(screen.getByLabelText('Trình phát video đã dựng')).toHaveAttribute(
+      'src',
+      '/api/files/projects/muoi/renders/j0/video.mp4',
+    );
   });
 });
 
@@ -282,8 +283,8 @@ describe('Xuất video: nút tải nằm trong khung Xuất', () => {
     const card = final.closest('section') as HTMLElement;
     const group = await within(card).findByRole('group', { name: 'Tải về' });
     expect(within(group).getByRole('link', { name: 'Tải video.mp4' })).toBeInTheDocument();
-    expect(within(group).getByRole('link', { name: 'Tải captions.srt' })).toBeInTheDocument();
-    expect(within(group).getByRole('link', { name: 'Tải cover_9x16.jpg' })).toBeInTheDocument();
+    // Chỉ giữ tải video: không có captions.srt, bìa 9:16, bìa YouTube.
+    expect(within(group).getAllByRole('link')).toHaveLength(1);
     // Sau nút Xuất bản đẹp trong cùng khung; nút tải là nút phụ (không vàng), nút chính vẫn là vàng.
     expect(final.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const a of within(group).getAllByRole('link')) {
@@ -303,7 +304,7 @@ describe('Xuất video: nút tải nằm trong khung Xuất', () => {
     expect(within(player).queryByRole('link')).toBeNull();
   });
 
-  it('survives a page reload: the newest render is shown with the right /files links', async () => {
+  it('survives a page reload: the newest render is shown with the right /files link', async () => {
     open({
       renders: [
         record({ job_id: 'j1' }),
@@ -316,25 +317,27 @@ describe('Xuất video: nút tải nằm trong khung Xuất', () => {
     });
     const link = await screen.findByRole('link', { name: 'Tải video.mp4' });
     expect(link).toHaveAttribute('href', `${j1}/video.mp4`);
-    expect(screen.getByRole('link', { name: 'Tải captions.srt' })).toHaveAttribute(
-      'href',
-      `${j1}/captions.srt`,
-    );
-    expect(screen.getByRole('link', { name: 'Tải cover_9x16.jpg' })).toHaveAttribute(
-      'href',
-      `${j1}/cover_9x16.jpg`,
-    );
     expect(screen.getByLabelText('Trình phát video đã dựng')).toHaveAttribute(
       'src',
       `${j1}/video.mp4`,
     );
   });
 
-  it('hides the buttons of files that do not exist (no cover, no srt)', async () => {
-    open({ renders: [record({ job_id: 'j1', cover: null, srt: null })] });
+  it('offers only the video download, even when srt and both covers exist', async () => {
+    open({
+      renders: [
+        record({
+          job_id: 'j1',
+          youtube_cover: '/api/files/projects/muoi/renders/j1/youtube_3x2.jpg',
+        }),
+      ],
+    });
     await screen.findByRole('link', { name: 'Tải video.mp4' });
-    expect(screen.queryByRole('link', { name: 'Tải cover_9x16.jpg' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Tải captions.srt' })).toBeNull();
+    const group = screen.getByRole('group', { name: 'Tải về' });
+    expect(within(group).getAllByRole('link')).toHaveLength(1);
+    for (const name of ['Tải captions.srt', 'Tải cover_9x16.jpg', 'Tải youtube_3x2.jpg']) {
+      expect(screen.queryByRole('link', { name })).toBeNull();
+    }
   });
 
   it('shows no download group before anything was rendered', async () => {
