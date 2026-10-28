@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
-import { API, createRenderableProject, deleteProject } from './helpers';
+import { API, createRenderableProject, deleteProject, solidPng } from './helpers';
 
 test('Xem nhanh từ Soạn video tự dựng ở tab Xuất; thẻ trái hiện tiến độ và Huỷ dừng job', async ({
   page,
@@ -104,5 +104,73 @@ test('Cài đặt: đổi FPS mặc định, Lưu, tải lại vẫn còn; khôi
     );
   } finally {
     await request.put(`${API}/settings/app`, { data: original });
+  }
+});
+
+test('Ảnh bìa riêng: bật bìa → tải ảnh → xem trước → Bỏ ảnh (file vẫn còn) và ảnh quá nhỏ bị từ chối', async ({
+  page,
+  request,
+}) => {
+  const T = vi.export.thumb;
+  let slug = '';
+  try {
+    slug = await createRenderableProject(request, `E2E ảnh bìa ${Date.now()}`);
+    await page.goto(`/p/${slug}/export`);
+    await page.getByRole('button', { name: T.add, exact: true }).click();
+    await page.getByLabel(T.line(1), { exact: true }).fill('bạn có phải');
+    await page.getByLabel(T.line(2), { exact: true }).fill('muỗi yêu?');
+
+    // Ảnh nhỏ hơn 540 px: máy chủ từ chối, giao diện báo lỗi, chưa có ảnh riêng.
+    const drop = page.getByLabel(T.imageDrop, { exact: true });
+    await drop.setInputFiles({
+      name: 'nho.png',
+      mimeType: 'image/png',
+      buffer: solidPng(300, 400, [20, 20, 20]),
+    });
+    await expect(page.getByText(/540 px/).first()).toBeVisible();
+    await expect(page.getByAltText(T.imageAlt)).toHaveCount(0);
+
+    await page.waitForLoadState('networkidle'); // chờ lưu + kiểm tra xong rồi mới thả ảnh kế
+    // Ảnh ngang 960×540 (cạnh ngắn đúng 540): nhận, cắt giữa.
+    await drop.setInputFiles({
+      name: 'bia.png',
+      mimeType: 'image/png',
+      buffer: solidPng(960, 540, [200, 30, 30]),
+    });
+    const img = page.getByAltText(T.imageAlt);
+    await expect(img).toBeVisible();
+    await expect(page.getByRole('button', { name: T.imageRemove, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cảnh 2', exact: true })).toBeDisabled();
+
+    const saved = await (await request.get(`${API}/projects/${slug}`)).json();
+    expect(saved.thumbnail.image).toBe('images/cover.png');
+    expect(saved.thumbnail.lines).toEqual(['bạn có phải', 'muỗi yêu?']);
+    const file = await request.get(`${API}/files/projects/${slug}/images/cover.png`);
+    expect(file.status()).toBe(200);
+
+    // Bản xem trước vẽ bằng ảnh tải lên (nền đỏ), không phải ảnh cảnh.
+    const preview = await request.post(`${API}/projects/${slug}/thumbnail/preview.jpg?w=108`, {
+      data: {},
+    });
+    expect(preview.status()).toBe(200);
+    expect((await preview.body()).length).toBeGreaterThan(500);
+
+    // Bỏ ảnh: quay về ảnh cảnh, file vẫn nằm trên đĩa.
+    await page.getByRole('button', { name: T.imageRemove, exact: true }).click();
+    await expect(img).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Cảnh 2', exact: true })).toBeEnabled();
+    await expect
+      .poll(
+        async () => (await (await request.get(`${API}/projects/${slug}`)).json()).thumbnail.image,
+        {
+          timeout: 10_000,
+        },
+      )
+      .toBeNull();
+    expect((await request.get(`${API}/files/projects/${slug}/images/cover.png`)).status()).toBe(
+      200,
+    );
+  } finally {
+    await deleteProject(request, slug);
   }
 });
