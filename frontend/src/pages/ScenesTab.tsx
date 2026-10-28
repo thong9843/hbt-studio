@@ -188,7 +188,7 @@ export function ScenesTab() {
           />
         </div>
 
-        {inline && <div className="self-start">{preview}</div>}
+        {inline && <div className="sticky top-5 self-start">{preview}</div>}
       </div>
 
       {!inline && (
