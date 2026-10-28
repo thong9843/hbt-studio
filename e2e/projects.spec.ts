@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
+import { deleteProject } from './helpers';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -45,6 +46,6 @@ test('tạo project, thêm 3 cảnh, lưu, tải lại vẫn đủ dữ liệu',
     expect(saved.scenes[0].voice).toBe('Muỗi đốt người');
     expect(saved.scenes[0].card.lines[0].text).toBe('MUỖI ĐỐT');
   } finally {
-    if (slug) await request.delete(`${API}/projects/${slug}`);
+    await deleteProject(request, slug);
   }
 });

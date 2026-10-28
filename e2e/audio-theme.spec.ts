@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
+import { deleteProject } from './helpers';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -46,6 +47,6 @@ test('màn Âm thanh: ba thẻ, xem trước 9:16, Không nhạc', async ({ page
     await page.getByRole('button', { name: vi.compose.preview.next }).click();
     await expect(page.getByText(vi.compose.preview.position(2, 3))).toBeVisible();
   } finally {
-    if (slug) await request.delete(`${API}/projects/${slug}`);
+    await deleteProject(request, slug);
   }
 });
