@@ -1,8 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { useRenderJob } from '../hooks/renderJob';
-import { vi } from '../i18n/vi';
-import { formatEstimate, remainingSeconds } from '../utils/estimate';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useRemainingText } from '../hooks/useRemaining';
 import { NewProjectProvider } from './NewProjectDialog';
 import { RenderJobProvider } from './RenderJobProvider';
 import { SideNav, type RenderProgress } from './SideNav';
@@ -18,14 +17,12 @@ interface Props {
 /** Thanh trái nhận tiến độ từ job toàn cục (`undefined` = lấy từ context). */
 function Nav({ mini, render }: { mini: boolean; render?: RenderProgress | null }) {
   const job = useRenderJob();
-  const left =
-    job.estimateSeconds === null ? null : remainingSeconds(job.estimateSeconds, job.percent);
+  const remaining = useRemainingText();
   const fromJob: RenderProgress | null = job.running
     ? {
         percent: job.percent,
         step: job.step,
-        remaining:
-          left === null ? vi.estimate.waiting : vi.estimate.remaining(formatEstimate(left)),
+        remaining: remaining ?? undefined,
         onCancel: () => void job.cancel(),
       }
     : null;

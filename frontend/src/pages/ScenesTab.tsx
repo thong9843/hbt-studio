@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { Scene } from '../api/types';
 import { CardEditor } from '../components/compose/CardEditor';
 import { OptionsPanel } from '../components/compose/OptionsPanel';
@@ -34,7 +34,12 @@ export function ScenesTab() {
   const navigate = useNavigate();
   const { project } = editor;
   const inline = useMediaQuery(PREVIEW_INLINE_QUERY);
-  const [selected, setSelected] = useState(0);
+  const location = useLocation();
+  // "Đến cảnh N" ở màn Xuất video mở thẳng cảnh đó (số cảnh tính từ 1).
+  const [selected, setSelected] = useState(() => {
+    const n = (location.state as { scene?: number } | null)?.scene;
+    return typeof n === 'number' && n >= 1 ? n - 1 : 0;
+  });
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [drawer, setDrawer] = useState(false);

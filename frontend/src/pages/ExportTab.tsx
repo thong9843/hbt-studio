@@ -1,542 +1,385 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { fetchHealth, fetchText } from '../api/client';
-import { api } from '../api/endpoints';
-import type { Fps, Job, LintIssue, LintResult, RenderOptions, RenderRecord } from '../api/types';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { fetchHealth } from '../api/client';
+import { api, projectFileUrl } from '../api/endpoints';
+import type { Fps, Job, RenderOptions, RenderRecord } from '../api/types';
+import { ChecksCard } from '../components/export/ChecksCard';
+import { CleanCard } from '../components/export/CleanCard';
+import { HistoryGrid } from '../components/export/HistoryGrid';
+import { PublishCard } from '../components/export/PublishCard';
+import { ResultCard, type ResultInfo } from '../components/export/ResultCard';
 import { ErrorNote } from '../components/ErrorNote';
+import { AlertIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
 import { ThumbnailEditor } from '../components/ThumbnailEditor';
-import { AlertIcon, CopyIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Chip } from '../components/ui/Chip';
 import { Progress } from '../components/ui/Progress';
+import { Switch } from '../components/ui/Switch';
 import { useProjectEditor } from '../hooks/projectEditor';
-import { useToast } from '../hooks/toast';
 import { useRenderJob } from '../hooks/renderJob';
+import { useToast } from '../hooks/toast';
+import { useLatestCovers } from '../hooks/useCovers';
+import { HEAD_PREVIEW_SECONDS, projectFps, useEstimates } from '../hooks/useEstimates';
+import { useRemainingText } from '../hooks/useRemaining';
 import { vi } from '../i18n/vi';
-import { alignerLabel, alignerNotes } from '../utils/aligner';
-import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
-import { splitPublishBlocks } from '../utils/publish';
-import { sceneNumber } from '../utils/scene';
+import { renderBlockers } from '../utils/blockers';
+import { formatEstimate, type RenderKind } from '../utils/estimate';
 
 const X = vi.export;
-const LEVEL_CHIP = { block: 'chip-danger', warn: 'chip-warn', info: 'chip-muted' } as const;
 const FPS: Fps[] = [30, 50, 60];
-export const HEAD_PREVIEW_SECONDS = 10;
+export { HEAD_PREVIEW_SECONDS };
 
-function issueScope(issue: LintIssue): string {
-  return issue.scene_index === null
-    ? X.checks.wholeVideo
-    : X.checks.scene(sceneNumber(issue.scene_index));
+/** Những gì cột phải cần để phát và tải một lần dựng (job vừa xong hoặc dòng lịch sử). */
+interface Media {
+  key: string;
+  video: string;
+  srt: string | null;
+  cover: string | null;
+  youtube_cover: string | null;
+  publish: string | null;
 }
 
-function Checks({ lint }: { lint: { data?: LintResult; isPending: boolean; error: unknown } }) {
-  const data = lint.data;
-  return (
-    <section className="space-y-3">
-      <h2>{X.checks.title}</h2>
-      {lint.isPending && (
-        <p className="flex items-center gap-3 text-text-muted">
-          <span className="spinner" aria-hidden="true" />
-          {X.checks.running}
-        </p>
-      )}
-      <ErrorNote error={lint.error} />
-      {data && data.problems.length === 0 && data.issues.length === 0 && (
-        <p className="chip chip-ok">{X.checks.ok}</p>
-      )}
-      {data && data.problems.length > 0 && (
-        <ul className="space-y-2">
-          {data.problems.map((p) => (
-            <li key={p} className="flex items-center gap-2 text-small">
-              <span className="chip chip-danger">
-                <AlertIcon size={14} />
-                {X.checks.missing}
-              </span>
-              {p}
-            </li>
-          ))}
-        </ul>
-      )}
-      {data && data.issues.length > 0 && (
-        <ul className="space-y-2">
-          {data.issues.map((issue, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-2 text-small">
-              <span className={`chip ${LEVEL_CHIP[issue.level]}`}>
-                {issue.level !== 'info' && <AlertIcon size={14} />}
-                {X.checks[issue.level]}
-              </span>
-              <b>{issueScope(issue)}</b>
-              <span>{issue.message}</span>
-              {issue.hint && <span className="text-text-muted">{issue.hint}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setState('copied');
-      setTimeout(() => setState('idle'), 2000);
-    } catch {
-      setState('failed');
-    }
+function jobInfo(job: Job): ResultInfo | null {
+  const o = job.output;
+  if (!o) return null;
+  return {
+    duration: o.duration,
+    fps: o.fps,
+    lufs: o.lufs,
+    aligner: o.aligner,
+    aligner_info: o.aligner_info,
+    trimmed_tail: o.trimmed_tail,
+    trimmed_tail_seconds: o.trimmed_tail_seconds,
+    seconds: o.seconds,
+    warnings: o.warnings,
   };
-  return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        aria-label={label}
-        onClick={() => void copy()}
-      >
-        <CopyIcon size={18} />
-        {state === 'copied' ? X.publish.copied : X.publish.copy}
-      </button>
-      {state === 'failed' && (
-        <span role="alert" className="text-small text-danger">
-          {X.publish.copyFailed}
-        </span>
-      )}
-    </span>
-  );
 }
 
-function PublishBox({ url }: { url: string }) {
-  const text = useQuery({
-    queryKey: ['publish', url],
-    queryFn: () => fetchText(url),
-    retry: false,
-  });
-  const blocks = splitPublishBlocks(text.data ?? '');
-  return (
-    <section className="space-y-3">
-      <h2>{X.publish.title}</h2>
-      <ErrorNote error={text.error} />
-      {blocks.length === 0 && text.data !== undefined && (
-        <textarea
-          readOnly
-          rows={8}
-          aria-label={X.publish.title}
-          className="input font-mono"
-          value={text.data}
-        />
-      )}
-      <ul className="space-y-4">
-        {blocks.map((b) => (
-          <li key={b.name} className="card space-y-3 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-tiny font-semibold uppercase text-text-muted">{b.name}</h3>
-              <CopyButton text={b.body} label={X.publish.copyBlock(b.name)} />
-            </div>
-            <pre className="whitespace-pre-wrap break-words font-mono text-small">{b.body}</pre>
-          </li>
-        ))}
-      </ul>
-      {text.data && blocks.length > 1 && <CopyButton text={text.data} label={X.publish.copyAll} />}
-    </section>
-  );
+function recordInfo(r: RenderRecord): ResultInfo {
+  return {
+    duration: r.duration,
+    fps: r.fps,
+    lufs: r.lufs,
+    aligner: r.aligner,
+    aligner_info: r.aligner_info,
+    trimmed_tail: r.trimmed_tail,
+    trimmed_tail_seconds: r.trimmed_tail_seconds,
+    seconds: r.render_seconds ?? null,
+    warnings: [],
+  };
 }
 
-function ResultView({ job }: { job: Job }) {
-  const out = job.output;
-  if (!out) return null;
-  const R = X.result;
+function DownloadLink({ href, file, label }: { href: string; file: string; label: string }) {
   return (
-    <section className="space-y-6">
-      <h2>{R.title}</h2>
-      <div className="mx-auto w-full max-w-[360px] overflow-hidden rounded-frame bg-surface">
-        <video
-          controls
-          aria-label={X.player}
-          className="aspect-[9/16] w-full bg-black"
-          src={out.video}
-        />
-      </div>
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {[
-          [R.duration, formatDuration(out.duration)],
-          [R.fps, String(out.fps)],
-          [R.lufs, out.lufs === null ? '—' : `${out.lufs.toFixed(1)} LUFS`],
-          [R.aligner, alignerLabel(out.aligner, out.aligner_info)],
-          [R.seconds, `${out.seconds} ${vi.common.seconds}`],
-        ].map(([k, v]) => (
-          <div key={k} className="card p-4">
-            <dt className="label mb-0">{k}</dt>
-            <dd className="num">{v}</dd>
-          </div>
-        ))}
-      </dl>
-      {out.trimmed_tail && (
-        <div className="space-y-2 text-small">
-          <p className="text-text-muted">
-            {R.trimmedTail((out.trimmed_tail_seconds ?? 0).toFixed(1).replace('.', ','))}
-          </p>
-          <audio controls aria-label={R.trimmedTailPlayer} src={out.trimmed_tail} />
-        </div>
-      )}
-      {alignerNotes(out.aligner, out.aligner_info).map((note) => (
-        <p key={note} className="text-small text-text-muted">
-          {note}
-        </p>
-      ))}
-      {out.warnings.length > 0 && (
-        <div className="rounded-card bg-accent p-4 text-small text-on-accent">
-          <b className="flex items-center gap-2">
-            <AlertIcon size={18} />
-            {R.warnings}
-          </b>
-          <ul className="mt-1 list-disc pl-5">
-            {out.warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="flex flex-wrap gap-3">
-        <a className="btn btn-primary" href={out.video} download="video.mp4">
-          <DownloadIcon size={20} />
-          {R.video}
-        </a>
-        {out.srt && (
-          <a className="btn btn-secondary" href={out.srt} download="captions.srt">
-            <DownloadIcon size={20} />
-            {R.srt}
-          </a>
-        )}
-        {out.cover && (
-          <a className="btn btn-secondary" href={out.cover} download="cover_9x16.jpg">
-            <DownloadIcon size={20} />
-            {R.cover}
-          </a>
-        )}
-        {out.youtube_cover && (
-          <a className="btn btn-secondary" href={out.youtube_cover} download="youtube_3x2.jpg">
-            <DownloadIcon size={20} />
-            {R.youtubeCover}
-          </a>
-        )}
-      </div>
-      <PublishBox url={out.publish} />
-    </section>
-  );
-}
-
-function CleanBuild({ slug, disabled }: { slug: string; disabled: boolean }) {
-  const C = X.clean;
-  const toast = useToast();
-  const [confirming, setConfirming] = useState(false);
-  const clean = useMutation({
-    mutationFn: () => api.cleanBuild(slug),
-    onSuccess: (r) => {
-      setConfirming(false);
-      toast.info(C.done(formatBytes(r.freed_bytes)));
-    },
-    onError: (e) => {
-      setConfirming(false);
-      toast.error(e);
-    },
-  });
-  return (
-    <section className="space-y-3">
-      <h2>{C.title}</h2>
-      <p className="text-small text-text-muted">{C.help}</p>
-      <button
-        type="button"
-        className="btn btn-outline"
-        disabled={disabled || clean.isPending}
-        onClick={() => setConfirming(true)}
-      >
-        {C.button}
-      </button>
-      {confirming && (
-        <ConfirmDialog
-          title={C.confirmTitle}
-          message={C.confirmMessage}
-          confirmLabel={clean.isPending ? C.busy : C.confirm}
-          busy={clean.isPending}
-          onConfirm={() => clean.mutate()}
-          onCancel={() => setConfirming(false)}
-        />
-      )}
-    </section>
-  );
-}
-
-function History({
-  renders,
-  onPlay,
-}: {
-  renders: RenderRecord[];
-  onPlay: (r: RenderRecord) => void;
-}) {
-  const H = X.history;
-  return (
-    <section className="space-y-3">
-      <h2>{H.title}</h2>
-      <p className="text-small text-text-muted">{H.note}</p>
-      {renders.length === 0 && <p className="text-text-muted">{H.empty}</p>}
-      <ul className="border-t border-border">
-        {renders.map((r) => (
-          <li
-            key={r.job_id}
-            className="flex flex-wrap items-center gap-3 border-b border-border py-3 text-small"
-          >
-            <span className={`chip ${r.preview ? 'chip-muted' : 'chip-warn'}`}>
-              {r.preview ? (r.preview_seconds ? H.fastHead(r.preview_seconds) : H.fast) : H.final}
-            </span>
-            <span className="num">{formatDateTime(r.created_at)}</span>
-            <span className="num text-text-muted">
-              {r.duration ? formatDuration(r.duration) : ''}
-              {r.fps ? ` · ${r.fps} fps` : ''}
-              {` · ${formatBytes(r.size)}`}
-              {r.aligner ? ` · ${alignerLabel(r.aligner, r.aligner_info)}` : ''}
-            </span>
-            <span className="ml-auto flex flex-wrap gap-2">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPlay(r)}>
-                <PlayIcon size={18} />
-                {H.play}
-              </button>
-              {r.video && (
-                <a className="btn btn-outline btn-sm" href={r.video} download="video.mp4">
-                  <DownloadIcon size={18} />
-                  {H.video}
-                </a>
-              )}
-              {r.srt && (
-                <a className="btn btn-outline btn-sm" href={r.srt} download="captions.srt">
-                  <DownloadIcon size={18} />
-                  {H.srt}
-                </a>
-              )}
-              {r.cover && (
-                <a className="btn btn-outline btn-sm" href={r.cover} download="cover_9x16.jpg">
-                  <DownloadIcon size={18} />
-                  {H.cover}
-                </a>
-              )}
-              {r.youtube_cover && (
-                <a
-                  className="btn btn-outline btn-sm"
-                  href={r.youtube_cover}
-                  download="youtube_3x2.jpg"
-                >
-                  <DownloadIcon size={18} />
-                  {H.youtubeCover}
-                </a>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <a className="ui-btn ui-btn-soft ui-btn-sm" href={href} download={file}>
+      <DownloadIcon size={18} />
+      {label}
+    </a>
   );
 }
 
 export function ExportTab() {
   const editor = useProjectEditor();
   const toast = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { project } = editor;
   const slug = project.slug;
   const outro = project.settings.outro;
-  const [finalFps, setFinalFps] = useState<Fps>(
-    (FPS as number[]).includes(project.settings.fps) ? (project.settings.fps as Fps) : 50,
-  );
   const rj = useRenderJob();
+  const remainingText = useRemainingText();
+  const estimates = useEstimates(project);
+  const covers = useLatestCovers(slug);
   const mine = rj.slug === slug;
-  const jobId = mine ? rj.jobId : null;
-  const lastOptions = rj.options;
   const finished = mine ? rj.finished : null;
   const connectionError = mine ? rj.connectionError : null;
+  const [finalFps, setFinalFps] = useState<Fps>(projectFps(project));
   const [played, setPlayed] = useState<RenderRecord | null>(null);
+
   const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth(), retry: false });
   const renders = useQuery({ queryKey: ['renders', slug], queryFn: () => api.listRenders(slug) });
-
   const lint = useQuery({
     queryKey: ['lint', slug, editor.savedCount],
     queryFn: () => api.lint(slug),
     retry: false,
   });
+
+  const missing = useMemo(() => renderBlockers(project), [project]);
   const blocked = !!lint.data && (lint.data.blocked || lint.data.problems.length > 0);
   const noFfmpeg = health.data?.ffmpeg === false;
+  const reason =
+    missing.length > 0
+      ? missing.join(' · ')
+      : blocked
+        ? X.blocked
+        : noFfmpeg
+          ? X.missingFfmpeg
+          : undefined;
 
   const start = useMutation({
-    mutationFn: async (options: RenderOptions) => {
+    mutationFn: async ({ options, kind }: { options: RenderOptions; kind: RenderKind }) => {
       await editor.flush();
-      await rj.start(slug, options);
+      await rj.start(slug, { ...options, outro }, estimates.estimate(kind));
     },
     onSuccess: () => setPlayed(null),
-    onError: (e, options) => toast.error(e, () => start.mutate(options)),
+    onError: (e, vars) => toast.error(e, () => start.mutate(vars)),
   });
 
+  const headKind: RenderKind = { kind: 'head', seconds: HEAD_PREVIEW_SECONDS };
+  const launchHead = () =>
+    start.mutate({
+      options: { preview: true, preview_seconds: HEAD_PREVIEW_SECONDS },
+      kind: headKind,
+    });
+
   const running = rj.running;
-  const cannotStart = running || start.isPending || blocked || noFfmpeg;
-  const reason = blocked ? X.blocked : noFfmpeg ? X.missingFfmpeg : undefined;
-  const launch = (options: RenderOptions) => start.mutate({ ...options, outro });
+  const cannotStart = running || start.isPending || !!reason;
+
+  // Xem nhanh tự dựng một lần khi mở tab từ nút Xem nhanh ở Soạn video / Âm thanh. Chờ kiểm tra
+  // và môi trường xong; thiếu nguyên liệu hoặc bị chặn thì không dựng (thẻ Kiểm tra đã hiện lý do).
+  const auto = (location.state as { auto?: string } | null)?.auto;
+  const autoHandled = useRef(false);
+  useEffect(() => {
+    if (auto !== 'preview' || autoHandled.current) return;
+    if (lint.isPending || health.isPending) return;
+    autoHandled.current = true;
+    navigate(location.pathname, { replace: true, state: null });
+    if (lint.isError || cannotStart) return;
+    launchHead();
+    // Chỉ chạy lại khi dữ liệu kiểm tra về; launchHead đổi mỗi lần vẽ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, lint.isPending, health.isPending]);
+
   const failure = finished?.status === 'failed' ? finished : null;
-  const withCovers = renders.data?.find((r) => r.cover && r.youtube_cover);
-  const latestCovers =
-    withCovers?.cover && withCovers.youtube_cover
-      ? { cover: withCovers.cover, youtube: withCovers.youtube_cover }
+  const history = renders.data ?? [];
+  const firstImage = project.scenes[0]?.image;
+  const fallbackImage = firstImage ? projectFileUrl(slug, firstImage) : null;
+
+  // Đang xem: dòng lịch sử được chọn, không thì job vừa xong của dự án này.
+  const out = finished?.status === 'done' ? finished.output : null;
+  const media: Media | null = played?.video
+    ? {
+        key: played.job_id,
+        video: played.video,
+        srt: played.srt,
+        cover: played.cover,
+        youtube_cover: played.youtube_cover,
+        publish: played.publish,
+      }
+    : out && finished
+      ? {
+          key: finished.id,
+          video: out.video,
+          srt: out.srt,
+          cover: out.cover,
+          youtube_cover: out.youtube_cover,
+          publish: out.publish,
+        }
       : null;
+  const info = played ? recordInfo(played) : finished ? jobInfo(finished) : null;
+  const currentId = played?.job_id ?? (finished?.status === 'done' ? finished.id : null);
+
   const pct = finished?.progress ?? (mine ? rj.percent : 0);
   const stepName = finished?.step ?? (mine ? rj.step : '');
+  const finalKind: RenderKind = { kind: 'final', fps: finalFps };
+  const idleEstimate = (kind: RenderKind) => formatEstimate(estimates.estimate(kind));
 
   return (
-    <div className="max-w-4xl space-y-12">
-      <Checks lint={lint} />
+    <div className="grid grid-cols-1 gap-[18px] p-6 min-[1024px]:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="min-w-0 space-y-[18px]">
+        <h1 className="text-h1 font-extrabold uppercase">{X.title}</h1>
+        <ChecksCard slug={slug} lint={lint} missing={missing} />
 
-      <section className="space-y-4">
-        <h2>{X.title}</h2>
-        <label className="flex min-h-[44px] w-fit cursor-pointer items-center gap-3 font-bold">
-          <input
-            type="checkbox"
-            className="h-5 w-5 accent-[var(--accent)]"
-            checked={outro}
-            onChange={(e) =>
-              editor.update((p) => ({
-                ...p,
-                settings: { ...p.settings, outro: e.target.checked },
-              }))
-            }
-          />
-          {X.options.outro}
-        </label>
-        <div className="flex flex-wrap items-end gap-4">
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={cannotStart}
-            title={reason}
-            onClick={() => launch({ preview: true, preview_seconds: HEAD_PREVIEW_SECONDS })}
-          >
-            {start.isPending ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : (
-              <PlayIcon size={20} />
-            )}
-            {X.fast}
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline"
-            disabled={cannotStart}
-            title={reason}
-            onClick={() => launch({ preview: true })}
-          >
-            {X.fastFull}
-          </button>
-          <div className="flex items-end gap-2">
-            <div>
-              <label className="label" htmlFor="final-fps">
-                {X.finalFps}
-              </label>
-              <select
-                id="final-fps"
-                className="input w-24"
-                value={finalFps}
-                onChange={(e) => setFinalFps(Number(e.target.value) as Fps)}
-              >
-                {FPS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              className="btn btn-accent"
-              disabled={cannotStart}
-              title={reason}
-              onClick={() => launch({ preview: false, fps: finalFps })}
-            >
-              {X.finalLabel(finalFps)}
-            </button>
+        {info && <ResultCard info={info} />}
+        {media?.publish && <PublishCard url={media.publish} />}
+
+        <Card as="section" aria-label={X.thumb.title}>
+          <ThumbnailEditor covers={covers} />
+        </Card>
+
+        <HistoryGrid
+          renders={history}
+          fallbackImage={fallbackImage}
+          current={currentId}
+          onSelect={setPlayed}
+        />
+
+        <CleanCard slug={slug} disabled={running} />
+      </div>
+
+      <aside
+        aria-label={X.title}
+        className="space-y-4 self-start min-[1024px]:sticky min-[1024px]:top-6"
+      >
+        <Card as="section" className="space-y-4">
+          <div role="group" aria-label={X.fpsGroup} className="flex items-center gap-2">
+            <span className="ui-label !mb-0 mr-1">{X.fpsGroup}</span>
+            {FPS.map((f) => (
+              <Chip key={f} small selected={finalFps === f} onClick={() => setFinalFps(f)}>
+                {f}
+              </Chip>
+            ))}
           </div>
-        </div>
-        <p className="text-small text-text-muted">
-          {X.fastHelp} · {X.finalHelp}
-        </p>
-        {reason && (
-          <p className="flex items-center gap-2 text-small font-bold text-danger">
-            <AlertIcon size={18} />
-            {reason}
-          </p>
-        )}
-      </section>
-
-      {jobId && (
-        <section className="space-y-4" aria-live="polite">
-          <h2>{X.progress}</h2>
-          <Progress value={pct} label={X.progress} />
-          <p className="text-small">
-            <span className="tabular-nums">{Math.round(pct)}%</span>
-            {stepName && <span> · {stepName}</span>}
-            {running && mine && rj.message && <span className="text-muted"> — {rj.message}</span>}
-          </p>
-          {running && mine && (
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => void rj.cancel()}
-            >
-              <StopIcon size={18} />
-              {X.cancel}
-            </button>
-          )}
-          <ErrorNote error={connectionError} />
-          {finished?.status === 'cancelled' && <p className="chip chip-muted">{X.cancelled}</p>}
-          {failure && (
-            <div className="space-y-3 rounded-card border-[1.5px] border-danger p-4">
-              <p role="alert" className="flex items-center gap-2 font-bold text-danger">
-                <AlertIcon size={18} />
-                {X.failed}: {failure.error}
-              </p>
-              {failure.needs_confirmation && (
-                <>
-                  <p className="text-small">{X.confirmTrim}</p>
-                  {failure.cut_audio && (
-                    <audio controls aria-label={X.cutAudio} src={failure.cut_audio} />
-                  )}
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => start.mutate({ ...lastOptions, allow_long_trim: true })}
-                  >
-                    {X.confirmTrimButton}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </section>
-      )}
-
-      {finished?.status === 'done' && !played && <ResultView job={finished} />}
-      {played && played.video && (
-        <section className="space-y-4">
-          <div className="mx-auto w-full max-w-[360px] overflow-hidden rounded-frame bg-surface">
-            <video
-              controls
-              aria-label={X.player}
-              className="aspect-[9/16] w-full bg-black"
-              src={played.video}
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-bold">{X.options.outro}</span>
+            <Switch
+              checked={outro}
+              label={X.outroLabel}
+              onChange={(checked) =>
+                editor.update((p) => ({ ...p, settings: { ...p.settings, outro: checked } }))
+              }
             />
           </div>
-          {played.publish && <PublishBox url={played.publish} />}
-        </section>
-      )}
+          <div className="space-y-2">
+            <Button
+              tone="ink"
+              size="lg"
+              className="w-full"
+              busy={start.isPending}
+              disabled={cannotStart}
+              reason={reason}
+              icon={<PlayIcon size={20} />}
+              onClick={launchHead}
+            >
+              {X.fast}
+            </Button>
+            <Button
+              tone="accent"
+              size="lg"
+              className="w-full"
+              disabled={cannotStart}
+              reason={reason}
+              onClick={() =>
+                start.mutate({ options: { preview: false, fps: finalFps }, kind: finalKind })
+              }
+            >
+              {X.finalLabel(finalFps)}
+            </Button>
+            <Button
+              tone="soft"
+              className="w-full"
+              disabled={cannotStart}
+              reason={reason}
+              onClick={() => start.mutate({ options: { preview: true }, kind: { kind: 'full' } })}
+            >
+              {X.fastFull}
+            </Button>
+          </div>
+          {reason && (
+            <p className="flex items-center gap-2 text-small font-bold text-danger">
+              <AlertIcon size={18} />
+              {reason}
+            </p>
+          )}
+          <p
+            data-slot="estimate"
+            className="min-h-5 text-center text-small tabular-nums text-muted"
+          >
+            {running && mine
+              ? remainingText
+              : estimates.loaded
+                ? vi.estimate.line(idleEstimate(headKind), idleEstimate(finalKind), finalFps)
+                : ''}
+          </p>
+        </Card>
 
-      <ThumbnailEditor covers={latestCovers} />
+        {(running || finished || connectionError) && mine && (
+          <Card as="section" aria-label={X.progress} aria-live="polite" className="space-y-3">
+            <Progress value={pct} label={X.progress} />
+            <p className="text-small">
+              <span className="tabular-nums">{Math.round(pct)}%</span>
+              {stepName && <span> · {stepName}</span>}
+              {running && rj.message && <span className="text-muted"> — {rj.message}</span>}
+            </p>
+            {running && (
+              <div className="flex items-center justify-between gap-2 text-small text-muted">
+                <span className="tabular-nums">{remainingText}</span>
+                <Button
+                  tone="soft"
+                  size="sm"
+                  icon={<StopIcon size={18} />}
+                  onClick={() => void rj.cancel()}
+                >
+                  {X.cancel}
+                </Button>
+              </div>
+            )}
+            <ErrorNote error={connectionError} />
+            {finished?.status === 'cancelled' && <p className="text-small">{X.cancelled}</p>}
+            {failure && (
+              <div className="space-y-3 rounded-inner border-[1.5px] border-danger p-4">
+                <p role="alert" className="flex items-center gap-2 font-bold text-danger">
+                  <AlertIcon size={18} />
+                  {X.failed}: {failure.error}
+                </p>
+                {failure.needs_confirmation && (
+                  <>
+                    <p className="text-small">{X.confirmTrim}</p>
+                    {failure.cut_audio && (
+                      <audio controls aria-label={X.cutAudio} src={failure.cut_audio} />
+                    )}
+                    <Button
+                      tone="ink"
+                      size="sm"
+                      onClick={() =>
+                        start.mutate({
+                          options: { ...rj.options, allow_long_trim: true },
+                          kind: rj.options.preview
+                            ? rj.options.preview_seconds
+                              ? headKind
+                              : { kind: 'full' }
+                            : { kind: 'final', fps: rj.options.fps ?? finalFps },
+                        })
+                      }
+                    >
+                      {X.confirmTrimButton}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </Card>
+        )}
 
-      <History renders={renders.data ?? []} onPlay={setPlayed} />
-
-      <CleanBuild slug={slug} disabled={running} />
+        <Card as="section" className="space-y-3">
+          {media ? (
+            <>
+              <div className="ui-frame mx-auto overflow-hidden bg-black">
+                <video
+                  key={media.key}
+                  controls
+                  aria-label={X.player}
+                  className="h-full w-full bg-black object-contain"
+                  src={media.video}
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="ui-label !mb-0">{X.downloads}</p>
+                <div className="flex flex-wrap gap-2">
+                  <DownloadLink href={media.video} file="video.mp4" label={X.result.video} />
+                  {media.srt && (
+                    <DownloadLink href={media.srt} file="captions.srt" label={X.result.srt} />
+                  )}
+                  {media.cover && (
+                    <DownloadLink href={media.cover} file="cover_9x16.jpg" label={X.result.cover} />
+                  )}
+                  {media.youtube_cover && (
+                    <DownloadLink
+                      href={media.youtube_cover}
+                      file="youtube_3x2.jpg"
+                      label={X.result.youtubeCover}
+                    />
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-small text-muted">{X.noPlayer}</p>
+          )}
+        </Card>
+      </aside>
     </div>
   );
 }

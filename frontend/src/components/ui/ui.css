@@ -880,3 +880,16 @@ textarea.ui-input {
   background: var(--tint-yel);
   border-color: var(--accent);
 }
+
+/* ---- Xuất video: thẻ lịch sử đang xem (viền vàng tĩnh, không hoạt ảnh) ---- */
+.ui-history-on {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* ---- Khối ghi chú vàng (cảnh báo khi dựng) ---- */
+.ui-note-yel {
+  border-radius: var(--radius-inner, 16px);
+  background: var(--tint-yel);
+  color: var(--on-tint-yel);
+}

@@ -4,7 +4,7 @@ import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderOptions, RenderRecord } from '../api/types';
 import { FakeEventSource, stubFetch } from '../test/fakes';
-import { project } from '../test/project';
+import { project, scene } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { ComposePage } from './ComposePage';
 import { ExportTab } from './ExportTab';
@@ -39,10 +39,24 @@ const record = (over: Partial<RenderRecord> = {}): RenderRecord => ({
   ...over,
 });
 
-function open(renders: RenderRecord[] = [], extra: Record<string, unknown> = {}) {
+const ready = () =>
+  project({
+    voice: 'voice.wav',
+    scenes: [
+      scene({ image: 'images/scene-01.png' }),
+      scene({ image: 'images/scene-02.png' }),
+      scene({ image: 'images/scene-03.png' }),
+    ],
+  });
+
+function open(
+  renders: RenderRecord[] = [],
+  extra: Record<string, unknown> = {},
+  route = '/p/muoi/export',
+) {
   const started: RenderOptions[] = [];
   stubFetch({
-    'GET /api/projects/muoi': project(),
+    'GET /api/projects/muoi': ready(),
     'GET /api/health': { ok: true, ffmpeg: true, whisper: false, gpu: false, missing: [] },
     'GET /api/projects/muoi/renders': renders,
     'POST /api/projects/muoi/lint': {
@@ -66,7 +80,7 @@ function open(renders: RenderRecord[] = [], extra: Record<string, unknown> = {})
         <Route path="export" element={<ExportTab />} />
       </Route>
     </Routes>,
-    '/p/muoi/export',
+    route,
   );
   return started;
 }
@@ -111,7 +125,7 @@ describe('Export tab: quick preview', () => {
       record({ job_id: 'c', preview: false, fps: 50 }),
     ]);
     expect(await screen.findByText('Xem nhanh 10 giây đầu')).toBeInTheDocument();
-    expect(screen.getByText('Xem nhanh', { selector: '.chip' })).toBeInTheDocument();
+    expect(screen.getByText('Xem nhanh', { selector: '.ui-badge' })).toBeInTheDocument();
     expect(screen.getByText('Bản đẹp')).toBeInTheDocument();
   });
 
