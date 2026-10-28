@@ -476,7 +476,6 @@ export const vi = {
     downloads: 'Tải về',
     noPlayer: 'Chưa có video để xem.',
     fast: 'Xem nhanh',
-    fastFull: 'Xem nhanh cả video',
     fastHelp: '540×960, 30 fps — dựng 10 giây đầu để kiểm tra nhanh',
     final: 'Xuất bản đẹp 50fps',
     finalHelp: '1080×1920',

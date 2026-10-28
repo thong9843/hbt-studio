@@ -1,8 +1,7 @@
 import type { Fps, RenderRecord } from '../api/types';
 
-/** Loại lần dựng để ước tính: 10 s đầu / cả video (Xem nhanh) / bản đẹp theo fps. */
-export type RenderKind =
-  { kind: 'head'; seconds: number } | { kind: 'full' } | { kind: 'final'; fps: Fps };
+/** Loại lần dựng để ước tính: Xem nhanh 10 s đầu / bản đẹp theo fps. */
+export type RenderKind = { kind: 'head'; seconds: number } | { kind: 'final'; fps: Fps };
 
 type Past = Pick<
   RenderRecord,
@@ -12,11 +11,10 @@ type Past = Pick<
 /**
  * Hệ số mặc định khi chưa có lịch sử: giây dựng trên mỗi giây video (máy cũ).
  * Bản đẹp 50 fps ≈ 3, 60 fps ≈ 4,2 (IMPLEMENT 13.B5); 30 fps suy theo tỉ lệ (0,06 × fps).
- * Xem nhanh 10 s đầu ≈ 4 (42 s nguội cho 10 s, M2); cả video ≈ 1,5 là số tạm, chưa đo.
+ * Xem nhanh 10 s đầu ≈ 4 (42 s nguội cho 10 s, M2).
  */
 export const DEFAULT_COEFFICIENT = {
   head: 4,
-  full: 1.5,
   final: { 30: 1.8, 50: 3, 60: 4.2 } satisfies Record<Fps, number>,
 } as const;
 
@@ -25,7 +23,6 @@ export const FALLBACK_SECONDS_PER_SCENE = 6;
 
 function sameKind(r: Past, k: RenderKind): boolean {
   if (k.kind === 'head') return r.preview && r.preview_seconds !== null;
-  if (k.kind === 'full') return r.preview && r.preview_seconds === null;
   return !r.preview && r.fps === k.fps;
 }
 

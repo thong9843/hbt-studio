@@ -257,15 +257,6 @@ export function ExportTab() {
             >
               {X.finalLabel(finalFps)}
             </Button>
-            <Button
-              tone="soft"
-              className="w-full"
-              disabled={cannotStart}
-              reason={reason}
-              onClick={() => start.mutate({ options: { preview: true }, kind: { kind: 'full' } })}
-            >
-              {X.fastFull}
-            </Button>
           </div>
           {reason && (
             <p className="flex items-center gap-2 text-small font-bold text-danger">
@@ -327,9 +318,7 @@ export function ExportTab() {
                         start.mutate({
                           options: { ...rj.options, allow_long_trim: true },
                           kind: rj.options.preview
-                            ? rj.options.preview_seconds
-                              ? headKind
-                              : { kind: 'full' }
+                            ? headKind
                             : { kind: 'final', fps: rj.options.fps ?? finalFps },
                         })
                       }

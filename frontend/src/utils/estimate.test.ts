@@ -36,7 +36,7 @@ describe('estimateSeconds', () => {
     expect(estimateSeconds({ kind: 'final', fps: 50 }, history, 40)).toBeCloseTo(120);
   });
 
-  it('only compares the same kind: head, full and each fps are separate', () => {
+  it('only compares the same kind: head and each fps are separate', () => {
     const history = [
       rec({ fps: 60, render_seconds: 500 }),
       rec({ preview: true, preview_seconds: 10, duration: 10, render_seconds: 20, fps: 30 }),
@@ -44,7 +44,6 @@ describe('estimateSeconds', () => {
     ];
     expect(estimateSeconds({ kind: 'final', fps: 50 }, history, 50)).toBe(150); // mặc định
     expect(estimateSeconds({ kind: 'head', seconds: 10 }, history, 50)).toBe(20);
-    expect(estimateSeconds({ kind: 'full' }, history, 60)).toBe(120);
   });
 
   it('skips old renders that lack render_seconds or duration', () => {

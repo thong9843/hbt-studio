@@ -96,15 +96,10 @@ describe('Export tab: quick preview', () => {
     expect(started[0]).toMatchObject({ preview: true, preview_seconds: 10 });
   });
 
-  it('keeps an option to preview the whole video (no preview_seconds)', async () => {
-    const started = open();
-    const user = userEvent.setup();
-    const button = await screen.findByRole('button', { name: 'Xem nhanh cả video' });
-    await waitFor(() => expect(button).toBeEnabled());
-    await user.click(button);
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0].preview).toBe(true);
-    expect(started[0]).not.toHaveProperty('preview_seconds');
+  it('has no "Xem nhanh cả video" button any more (API / CLI keep it)', async () => {
+    open();
+    await screen.findByRole('button', { name: 'Xem nhanh' });
+    expect(screen.queryByRole('button', { name: /cả video/ })).toBeNull();
   });
 
   it('never sends preview_seconds with the final render', async () => {
