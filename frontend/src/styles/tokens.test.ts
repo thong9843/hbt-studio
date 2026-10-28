@@ -28,8 +28,6 @@ const darkAttr = decls(block(stripped, ":root[data-theme='dark']"));
 /** Giải `var(--x)` về giá trị cuối; chế độ tối phủ lên chế độ sáng. */
 function resolver(theme: 'light' | 'dark') {
   const all = { ...light, ...(theme === 'dark' ? darkAttr : {}) };
-  // Khối :root thứ hai (bí danh) cũng nằm trong `light`? Không: block() chỉ lấy khối đầu.
-  Object.assign(all, decls(stripped.slice(stripped.lastIndexOf(':root {'))));
   const get = (name: string, depth = 0): string => {
     const v = all[name];
     if (v === undefined) throw new Error(`Thiếu token ${name}`);
@@ -124,12 +122,17 @@ describe('tokens.css v2', () => {
     for (const name of Object.keys(darkAttr)) expect(light[name], name).toBeDefined();
   });
 
-  it('keeps old token names as aliases pointing at v2', () => {
-    const alias = decls(stripped.slice(stripped.lastIndexOf(':root {')));
-    expect(alias['--surface']).toBe('var(--card)');
-    expect(alias['--text-muted']).toBe('var(--muted)');
-    expect(alias['--border']).toBe('var(--line)');
-    expect(alias['--brand-red']).toBe('var(--brand)');
+  it('has no old alias tokens left', () => {
+    for (const name of [
+      '--surface',
+      '--surface-2',
+      '--text-muted',
+      '--border',
+      '--brand-red',
+      '--brand-cream',
+      '--brand-ink',
+    ])
+      expect(light[name], name).toBeUndefined();
   });
 });
 

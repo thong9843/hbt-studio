@@ -35,14 +35,6 @@ export default {
         focus: 'var(--focus)',
         hero: 'var(--hero)',
         'on-hero': 'var(--on-hero)',
-        // Bí danh tên cũ (M3), xoá ở Đợt 5.
-        surface: 'var(--surface)',
-        'surface-2': 'var(--surface-2)',
-        'text-muted': 'var(--text-muted)',
-        border: 'var(--border)',
-        'brand-red': 'var(--brand-red)',
-        'brand-cream': 'var(--brand-cream)',
-        'brand-ink': 'var(--brand-ink)',
       },
       fontFamily: {
         sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'],
@@ -63,8 +55,6 @@ export default {
         preview: '28px',
         inner: '16px',
         input: '14px',
-        // Bí danh tên cũ: khung = hộp thoại.
-        frame: '28px',
       },
       boxShadow: {
         card: 'var(--shadow-card)',

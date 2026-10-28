@@ -141,14 +141,3 @@
 
   color-scheme: dark;
 }
-
-/* Bí danh tên cũ (M3) trỏ sang v2 để màn cũ còn chạy; xoá hết ở Đợt 5 (tokens.test.ts). */
-:root {
-  --surface: var(--card);
-  --surface-2: var(--soft);
-  --text-muted: var(--muted);
-  --border: var(--line);
-  --brand-red: var(--brand);
-  --brand-cream: #f7eeda;
-  --brand-ink: #1e1816;
-}
