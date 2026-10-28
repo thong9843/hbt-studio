@@ -4,7 +4,7 @@
 - Nếu chủ dự án chưa chạy `/kickoff`, tự làm theo `.claude/commands/kickoff.md` trước khi làm việc.
 
 ## Bối cảnh
-- App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, GPU RTX 2060 Super 8 GB.
+- App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, hai máy (máy cũ: i5-10400, không GPU rời, 16 GB; máy mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB). Không giả định có GPU: IMPLEMENT §0.
 - Đọc `PLAN.md` (mục tiêu, lộ trình) và `IMPLEMENT.md` (đặc tả) trước khi code. Làm **đúng mốc đang mở** trong `IMPLEMENT.md` mục 11, không làm trước mốc sau.
 - `reference/pipeline/` là code **đã chạy thật**. Khi port, giữ nguyên tham số FFmpeg, kích thước, màu, thời lượng. Muốn đổi → hỏi chủ dự án.
 
