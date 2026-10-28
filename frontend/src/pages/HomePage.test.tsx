@@ -138,6 +138,19 @@ describe('HomePage', () => {
     expect(card).not.toHaveClass('text-on-primary');
   });
 
+  it('the placeholder next to "Tiếp tục làm" (nothing exported yet) also uses the hero tokens', async () => {
+    stubFetch({
+      'GET /api/projects': [summary('muoi', 'Muỗi')],
+      'GET /api/projects/muoi': brief,
+    });
+    page();
+    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
+    expect(within(card).getByText('Chưa có lần xuất nào')).toBeVisible();
+    expect(card).toHaveClass('bg-hero', 'text-on-hero');
+    expect(card).not.toHaveClass('bg-primary');
+    expect(card).not.toHaveClass('text-on-primary');
+  });
+
   it('shows "—" for build time on an old render and a notice when nothing was ever rendered', async () => {
     stubFetch({
       'GET /api/projects': [

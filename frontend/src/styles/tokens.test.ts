@@ -185,6 +185,16 @@ describe('hero card tokens', () => {
   });
 });
 
+describe('hero card contrast', () => {
+  it.each(['light', 'dark'] as const)(
+    '--on-hero on --hero is at least 4.5:1 in %s mode',
+    (mode) => {
+      const get = resolver(mode);
+      expect(contrast(get('--on-hero'), get('--hero'))).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+});
+
 describe('contrast helper', () => {
   it('gives 21:1 for black on white and 1:1 for equal colours', () => {
     expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5);

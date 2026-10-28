@@ -208,7 +208,7 @@ export function HomePage() {
             ) : (
               <section
                 aria-label={t.lastExport}
-                className="flex items-center justify-center rounded-card bg-primary p-6 text-on-primary"
+                className="flex items-center justify-center rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
               >
                 <p className="text-body font-semibold">{t.last.none}</p>
               </section>
