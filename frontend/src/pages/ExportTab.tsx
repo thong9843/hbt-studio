@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
@@ -9,6 +9,7 @@ import { CleanCard } from '../components/export/CleanCard';
 import { HistoryGrid } from '../components/export/HistoryGrid';
 import { PublishCard } from '../components/export/PublishCard';
 import { ResultCard, type ResultInfo } from '../components/export/ResultCard';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { AlertIcon, DownloadIcon, PlayIcon, StopIcon } from '../components/icons';
 import { ThumbnailEditor } from '../components/ThumbnailEditor';
@@ -97,6 +98,10 @@ export function ExportTab() {
   const connectionError = mine ? rj.connectionError : null;
   const [finalFps, setFinalFps] = useState<Fps>(projectFps(project));
   const [played, setPlayed] = useState<RenderRecord | null>(null);
+  const [toDelete, setToDelete] = useState<RenderRecord | null>(null);
+  // Đang xoá lần xuất này: gỡ `src` của <video> để Windows nhả file.
+  const [releasing, setReleasing] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth(), retry: false });
   const renders = useQuery({ queryKey: ['renders', slug], queryFn: () => api.listRenders(slug) });
@@ -104,6 +109,33 @@ export function ExportTab() {
     queryKey: ['lint', slug, editor.savedCount],
     queryFn: () => api.lint(slug),
     retry: false,
+  });
+
+  const queryClient = useQueryClient();
+  const remove = useMutation({
+    mutationFn: async (r: RenderRecord) => {
+      const el = videoRef.current;
+      if (el) {
+        el.pause();
+        el.removeAttribute('src');
+        el.load(); // nhả file đang mở trước khi xoá
+      }
+      setReleasing(r.job_id);
+      await api.deleteRender(slug, r.job_id);
+    },
+    onSuccess: (_d, r) => {
+      toast.info(X.history.deleted);
+      setToDelete(null);
+      setReleasing(null);
+      if (played?.job_id === r.job_id) setPlayed(null);
+      void queryClient.invalidateQueries({ queryKey: ['renders', slug] });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+    onError: (e) => {
+      setToDelete(null);
+      setReleasing(null); // 409 (đang dựng / file đang mở): trả lại video cho trình phát
+      toast.error(e);
+    },
   });
 
   const missing = useMemo(() => renderBlockers(project), [project]);
@@ -206,6 +238,8 @@ export function ExportTab() {
           fallbackImage={fallbackImage}
           current={currentId}
           onSelect={setPlayed}
+          lockedId={running && mine ? rj.jobId : null}
+          onDelete={setToDelete}
         />
 
         <CleanCard slug={slug} disabled={running} />
@@ -361,11 +395,12 @@ export function ExportTab() {
           {media ? (
             <div className="ui-frame mx-auto overflow-hidden bg-black">
               <video
+                ref={videoRef}
                 key={media.key}
                 controls
                 aria-label={X.player}
                 className="h-full w-full bg-black object-contain"
-                src={media.video}
+                src={releasing === media.key ? undefined : media.video}
               />
             </div>
           ) : (
@@ -373,6 +408,17 @@ export function ExportTab() {
           )}
         </Card>
       </aside>
+      {toDelete && (
+        <ConfirmDialog
+          title={X.history.deleteTitle}
+          message={X.history.deleteBody}
+          confirmLabel={X.history.remove}
+          danger
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(toDelete)}
+          onCancel={() => !remove.isPending && setToDelete(null)}
+        />
+      )}
     </div>
   );
 }

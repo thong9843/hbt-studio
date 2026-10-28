@@ -116,6 +116,8 @@ export const api = {
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
+  deleteRender: (slug: string, jobId: string) =>
+    apiRequest<void>('DELETE', `/projects/${enc(slug)}/renders/${enc(jobId)}`),
   listRenders: (slug: string) => apiGet<RenderRecord[]>(`/projects/${enc(slug)}/renders`),
 
   getAppSettings: () => apiGet<AppSettings>('/settings/app'),

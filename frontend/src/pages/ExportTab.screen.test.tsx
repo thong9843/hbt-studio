@@ -343,3 +343,135 @@ describe('Xuất video: nút tải nằm trong khung Xuất', () => {
     expect(screen.queryByRole('group', { name: 'Tải về' })).toBeNull();
   });
 });
+
+describe('Xuất video: xoá lần xuất ở Lịch sử', () => {
+  const del = (id: string) => `DELETE /api/projects/muoi/renders/${id}`;
+  const r1 = () => record({ job_id: 'j1' });
+  const r0 = () =>
+    record({
+      job_id: 'j0',
+      created_at: '2026-10-22T10:00:00Z',
+      video: '/api/files/projects/muoi/renders/j0/video.mp4',
+      cover: null,
+    });
+
+  const cardCount = () =>
+    within(screen.getByRole('region', { name: 'Lịch sử các lần xuất' })).queryAllByRole('listitem')
+      .length;
+
+  async function openMenuOf(user: ReturnType<typeof userEvent.setup>, job: string) {
+    const grid = await screen.findByRole('region', { name: 'Lịch sử các lần xuất' });
+    const cards = await within(grid).findAllByRole('listitem');
+    const card = cards.find((li) =>
+      li.querySelector(`[aria-label*="${job === 'j1' ? '23' : '22'}"]`),
+    );
+    const menu = within(card ?? cards[0]).getByRole('button', { name: /^Thao tác:/ });
+    await user.click(menu);
+  }
+
+  it('asks first with the exact warning; Huỷ calls no API and keeps the card', async () => {
+    const user = userEvent.setup();
+    const { mock } = open({ renders: [r1(), r0()], extra: { [del('j1')]: () => ok({}, 204) } });
+    await openMenuOf(user, 'j1');
+    await user.click(screen.getByRole('menuitem', { name: 'Xoá' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Xoá lần xuất này?' });
+    expect(dialog).toHaveTextContent(
+      'Xoá video, bìa và publish.txt của lần xuất này. Không hoàn tác được.',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Huỷ' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(mock.mock.calls.some(([, init]) => (init as RequestInit)?.method === 'DELETE')).toBe(
+      false,
+    );
+    expect(cardCount()).toBe(2);
+  });
+
+  it('confirm: releases the <video> file first, calls DELETE, the card disappears, Toast + refresh', async () => {
+    const user = userEvent.setup();
+    let list = [r1(), r0()];
+    let videoSrcAtDelete: string | null | undefined;
+    const { mock } = open({
+      renders: list,
+      extra: {
+        'GET /api/projects/muoi/renders': () => ok(list),
+        [del('j1')]: () => {
+          videoSrcAtDelete = document.querySelector('video')?.getAttribute('src');
+          list = list.filter((r) => r.job_id !== 'j1');
+          return new Response(null, { status: 204 });
+        },
+      },
+    });
+    await screen.findByLabelText('Trình phát video đã dựng'); // j1 (mới nhất) đang phát
+    await openMenuOf(user, 'j1');
+    await user.click(screen.getByRole('menuitem', { name: 'Xoá' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
+
+    expect(await screen.findByText('Đã xoá lần xuất')).toBeInTheDocument();
+    expect(videoSrcAtDelete).toBeNull(); // src đã gỡ trước khi gọi API
+    await waitFor(() => expect(cardCount()).toBe(1));
+    const calls = mock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'DELETE');
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0][0])).toBe('/api/projects/muoi/renders/j1');
+    // Lịch sử và thẻ Dự án được làm mới; trình phát chuyển sang lần xuất còn lại.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Trình phát video đã dựng')).toHaveAttribute(
+        'src',
+        '/api/files/projects/muoi/renders/j0/video.mp4',
+      ),
+    );
+  });
+
+  it('409 shows a Toast with the reason, keeps the card and gives the video back', async () => {
+    const user = userEvent.setup();
+    open({
+      renders: [r1(), r0()],
+      extra: {
+        [del('j1')]: () => ok({ detail: 'Không xoá được vì file đang mở (đóng trình phát…)' }, 409),
+      },
+    });
+    await screen.findByLabelText('Trình phát video đã dựng');
+    await openMenuOf(user, 'j1');
+    await user.click(screen.getByRole('menuitem', { name: 'Xoá' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
+    expect(await screen.findByText(/file đang mở/)).toBeInTheDocument();
+    expect(cardCount()).toBe(2);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Trình phát video đã dựng')).toHaveAttribute(
+        'src',
+        '/api/files/projects/muoi/renders/j1/video.mp4',
+      ),
+    );
+  });
+
+  it('turns Xoá off on the card of the running job', async () => {
+    const user = userEvent.setup();
+    open({ renders: [r1(), r0()] });
+    const final = await screen.findByRole('button', { name: /Xuất bản đẹp 50fps/ });
+    await waitFor(() => expect(final).toBeEnabled());
+    await user.click(final); // job mới có id "j1" (khớp thẻ j1)
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+    await openMenuOf(user, 'j1');
+    const item = screen.getByRole('menuitem', { name: 'Xoá' });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute('title', 'Đang dựng');
+  });
+
+  it('menu also offers "Tải video" with the right file', async () => {
+    const user = userEvent.setup();
+    const clicked: { href: string; download: string }[] = [];
+    const spy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push({ href: this.getAttribute('href') ?? '', download: this.download });
+    });
+    open({ renders: [r1(), r0()] });
+    await openMenuOf(user, 'j0');
+    await user.click(screen.getByRole('menuitem', { name: 'Tải video' }));
+    expect(clicked).toEqual([
+      { href: '/api/files/projects/muoi/renders/j0/video.mp4', download: 'video.mp4' },
+    ]);
+    spy.mockRestore();
+  });
+});

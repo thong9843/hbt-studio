@@ -2,9 +2,11 @@ import type { RenderRecord } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { historyLabel } from '../../utils/exportView';
 import { formatDateTime, formatDuration } from '../../utils/format';
+import { MoreIcon } from '../icons';
 import { CardImage } from '../ProjectCard';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { Menu } from '../ui/Menu';
 
 const H = vi.export.history;
 
@@ -15,10 +17,31 @@ interface Props {
   /** `job_id` đang xem (viền vàng). */
   current: string | null;
   onSelect: (r: RenderRecord) => void;
+  /** `job_id` đang chạy hoặc đang chờ: tắt "Xoá" ở thẻ đó. */
+  lockedId?: string | null;
+  /** Bấm "Xoá" (nơi gọi hiện hộp xác nhận rồi gọi API). */
+  onDelete: (r: RenderRecord) => void;
+}
+
+/** Tải file bằng một thẻ <a download> tạm (mục menu không phải liên kết). */
+function download(href: string, file: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = file;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /** Lịch sử dạng lưới: bìa (hoặc ảnh cảnh 1), nhãn Bản đẹp / Xem nhanh / 10 s đầu, ngày giờ. */
-export function HistoryGrid({ renders, fallbackImage, current, onSelect }: Props) {
+export function HistoryGrid({
+  renders,
+  fallbackImage,
+  current,
+  onSelect,
+  lockedId = null,
+  onDelete,
+}: Props) {
   return (
     <section aria-label={H.title} className="space-y-3">
       <h2 className="text-h2 font-bold">{H.title}</h2>
@@ -34,7 +57,7 @@ export function HistoryGrid({ renders, fallbackImage, current, onSelect }: Props
               as="li"
               key={r.job_id}
               padded={false}
-              className={`ui-card-link overflow-hidden ${on ? 'ui-history-on' : ''}`}
+              className={`ui-card-link ${on ? 'ui-history-on' : ''}`}
             >
               <button
                 type="button"
@@ -43,7 +66,7 @@ export function HistoryGrid({ renders, fallbackImage, current, onSelect }: Props
                 className="block w-full text-left"
                 onClick={() => onSelect(r)}
               >
-                <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
+                <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
                   <CardImage src={r.cover ?? fallbackImage} />
                 </div>
                 <div className="space-y-2 p-3">
@@ -58,6 +81,31 @@ export function HistoryGrid({ renders, fallbackImage, current, onSelect }: Props
                   </p>
                 </div>
               </button>
+              <div className="absolute bottom-2 right-2">
+                <Menu
+                  label={H.menu(label, when)}
+                  icon={<MoreIcon />}
+                  items={[
+                    ...(r.video
+                      ? [
+                          {
+                            key: 'download',
+                            label: H.download,
+                            onSelect: () => download(r.video as string, 'video.mp4'),
+                          },
+                        ]
+                      : []),
+                    {
+                      key: 'delete',
+                      label: H.remove,
+                      danger: true,
+                      disabled: r.job_id === lockedId,
+                      reason: r.job_id === lockedId ? H.runningReason : undefined,
+                      onSelect: () => onDelete(r),
+                    },
+                  ]}
+                />
+              </div>
             </Card>
           );
         })}
