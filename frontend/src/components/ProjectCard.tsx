@@ -45,10 +45,12 @@ interface Props {
   onDuplicate: () => void;
   onDelete: () => void;
   busy?: boolean;
+  /** Dự án đang được dựng: khoá Nhân bản và Xoá (backend cũng trả 409). */
+  rendering?: boolean;
 }
 
 /** Thẻ dự án: ảnh 9:16 tràn mép, tên 2 dòng, nhãn trạng thái + ngày, menu ⋯. */
-export function ProjectCard({ project, onDuplicate, onDelete, busy }: Props) {
+export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }: Props) {
   const status = projectStatus(project);
   const image = projectImage(project);
   const href = `/p/${project.slug}`;
@@ -76,8 +78,21 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy }: Props) {
           label={t.menu(project.title)}
           icon={<MoreIcon />}
           items={[
-            { key: 'duplicate', label: t.duplicate, disabled: busy, onSelect: onDuplicate },
-            { key: 'delete', label: t.delete, danger: true, disabled: busy, onSelect: onDelete },
+            {
+              key: 'duplicate',
+              label: t.duplicate,
+              disabled: busy || rendering,
+              reason: rendering ? t.renderingReason : undefined,
+              onSelect: onDuplicate,
+            },
+            {
+              key: 'delete',
+              label: t.delete,
+              danger: true,
+              disabled: busy || rendering,
+              reason: rendering ? t.renderingReason : undefined,
+              onSelect: onDelete,
+            },
           ]}
         />
       </div>

@@ -158,6 +158,7 @@ export const vi = {
       none: 'Chưa dựng',
     },
     noImage: 'Chưa có ảnh',
+    renderingReason: 'Đang dựng',
     menu: (title: string) => `Thao tác: ${title}`,
     broken: 'Không đọc được project',
     open: 'Mở',

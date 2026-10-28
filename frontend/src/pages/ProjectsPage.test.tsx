@@ -1,10 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/Toast';
 import { NewProjectProvider } from '../components/NewProjectDialog';
-import { stubFetch } from '../test/fakes';
+import { useRenderJob } from '../hooks/renderJob';
+import { FakeEventSource, stubFetch } from '../test/fakes';
 import { project } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { ProjectsPage } from './ProjectsPage';
@@ -205,6 +206,52 @@ describe('ProjectsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Project đang được dựng');
     expect(screen.getByText('A')).toBeInTheDocument();
+  });
+
+  it('locks Nhân bản / Xoá of the project being rendered only, and unlocks when the job ends', async () => {
+    const user = userEvent.setup();
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetch({
+      'GET /api/projects': [summary('a', 'A'), summary('b', 'B')],
+      'POST /api/projects/a/render': { job_id: 'j1' },
+      'GET /api/jobs/j1': { id: 'j1', project: 'a', status: 'done', progress: 100, step: '' },
+    });
+    function Starter() {
+      const rj = useRenderJob();
+      return (
+        <button type="button" onClick={() => void rj.start('a', { preview: true })}>
+          go
+        </button>
+      );
+    }
+    renderWithProviders(
+      <ToastProvider>
+        <NewProjectProvider>
+          <Starter />
+          <ProjectsPage />
+        </NewProjectProvider>
+      </ToastProvider>,
+    );
+    await screen.findByText('A');
+    await user.click(screen.getByRole('button', { name: 'go' }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    await user.click(screen.getByRole('button', { name: 'Thao tác: A' }));
+    expect(screen.getByRole('menuitem', { name: /Nhân bản/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Xoá/ })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /Xoá/ })).toHaveAttribute('title', 'Đang dựng');
+    await user.keyboard('{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'Thao tác: B' }));
+    expect(screen.getByRole('menuitem', { name: 'Nhân bản' })).toBeEnabled();
+    await user.keyboard('{Escape}');
+
+    act(() => FakeEventSource.instances[0].emit('end', { status: 'done' }));
+    await waitFor(async () => {
+      await user.click(screen.getByRole('button', { name: 'Thao tác: A' }));
+      expect(screen.getByRole('menuitem', { name: 'Xoá' })).toBeEnabled();
+    });
   });
 
   it('flags an unreadable project and still lets it be deleted', async () => {

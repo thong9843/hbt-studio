@@ -10,6 +10,7 @@ import { PlusIcon } from '../components/icons';
 import { ProjectCard, ProjectCardSkeleton } from '../components/ProjectCard';
 import { Button } from '../components/ui/Button';
 import { useNewProject } from '../hooks/newProject';
+import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 
@@ -20,6 +21,7 @@ export function ProjectsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
+  const render = useRenderJob();
   const { open: openNew } = useNewProject();
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
@@ -27,7 +29,8 @@ export function ProjectsPage() {
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
 
-  // 409 (đang dựng) và mọi lỗi khác: Toast lỗi. Khoá thật theo job toàn cục làm ở Đợt 3d.
+  // Dự án đang dựng thì menu bị khoá theo job toàn cục; 409 từ backend (vd job mở từ trước khi tải
+  // lại trang) và mọi lỗi khác vẫn hiện Toast lỗi làm lưới an toàn.
   const duplicate = useMutation({
     mutationFn: (slug: string) => api.duplicateProject(slug),
     onSuccess: (copy) => {
@@ -88,6 +91,7 @@ export function ProjectsPage() {
                 key={p.slug}
                 project={p}
                 busy={duplicate.isPending || remove.isPending}
+                rendering={render.running && render.slug === p.slug}
                 onDuplicate={() => duplicate.mutate(p.slug)}
                 onDelete={() => setDeleting(p)}
               />
