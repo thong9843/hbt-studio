@@ -580,6 +580,12 @@ export const vi = {
     saving: 'Đang lưu…',
     saved: 'Đã lưu',
     dirty: 'Chưa lưu',
+    leave: {
+      title: 'Rời Cài đặt?',
+      message: 'Còn thay đổi chưa lưu. Rời đi sẽ mất các thay đổi này.',
+      stay: 'Ở lại',
+      leave: 'Rời đi',
+    },
     invalidColor: 'Màu cần dạng #RRGGBB.',
     fpsCard: { title: 'FPS mặc định', help: 'Áp cho video tạo mới.' },
     whisperCard: { title: 'Căn chữ' },

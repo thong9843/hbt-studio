@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { UNSAFE_DataRouterContext } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
 import type { AppSettings, SensitiveWords } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
+import { LeaveGuard } from '../components/settings/LeaveGuard';
 import { FpsCard, HEX, ThemeCard, WhisperCard } from '../components/settings/GeneralCards';
 import { WordsCard, type WordGroup } from '../components/settings/WordsCard';
 import { Badge } from '../components/ui/Badge';
@@ -33,6 +35,8 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
   const [value, setValue] = useState(app);
   const [groups, setGroups] = useState(() => toGroups(words));
   const [dirty, setDirty] = useState(false);
+  // `useBlocker` chỉ chạy trong data router (main.tsx); test dùng MemoryRouter thì bỏ qua.
+  const hasDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
   const health = useQuery({ queryKey: ['health'], queryFn: () => fetchHealth() });
 
   const validColors = HEX.test(value.theme.primary) && HEX.test(value.theme.accent);
@@ -95,6 +99,7 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         </span>
       </div>
       <ErrorNote error={save.error} />
+      {hasDataRouter && <LeaveGuard dirty={dirty} />}
     </form>
   );
 }
