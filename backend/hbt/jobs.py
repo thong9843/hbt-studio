@@ -191,6 +191,12 @@ class JobManager:
         with self._lock:
             return any(j.slug == slug and not j.finished for j in self._jobs.values())
 
+    def active(self) -> list[Job]:
+        """Job đang chạy hoặc đang chờ, cũ nhất trước (chỉ đọc)."""
+        with self._lock:
+            jobs = [j for j in self._jobs.values() if not j.finished]
+        return sorted(jobs, key=lambda j: j.created_at)
+
     # ---------------------------------------------------------------- tạo / huỷ
     def submit(
         self,
