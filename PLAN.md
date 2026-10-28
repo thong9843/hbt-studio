@@ -229,5 +229,5 @@ flowchart LR
 | M2 | ☑ | Chủ dự án duyệt 21/10/2026; CI xanh (FFmpeg 6.1.1, Ubuntu 24.04) · tag `v0.3.0`. Toàn bộ endpoint mục 9 (19 thao tác trên 14 đường dẫn), thử bằng curl: tạo project, tải 10 file, dựng Xem nhanh 42 s (nguội) / 18 s (có cache), SSE, huỷ job trong 0,05 s; không có FFmpeg thì 503 rõ ràng. Quyết định kỹ thuật: IMPLEMENT mục 9 |
 | M3 | ☑ | Chủ dự án duyệt 22/10/2026 · tag `v0.4.0`. Giao diện 4 màn hình, SSE, trình phát; Xem nhanh 3,7 MB/50 s; bản đẹp 143 s; kiểm thử trình duyệt `npm run e2e` |
 | M4 | ☑ | Xong 27/10/2026 theo phạm vi máy cũ, chờ chủ dự án duyệt (chưa merge, chưa tag). Kiểm chứng: 630 pytest + 95 Vitest, CI xanh, golden máy cũ ĐẠT (xem bằng mắt/tai). Lệch đặc tả đã duyệt: golden chỉ máy cũ; 1b CUDA thật, `bench-align` máy mới và golden máy mới tách thành việc riêng trên nhánh riêng từ `main`, không chặn M5 (Nhật ký 27/10) |
-| M5 | ◐ | Đang làm từ 27/10/2026, nhánh `feat/m5-ui-json`, tag dự kiến `v0.6.0`. Đợt 0, 1, 2, 3a, 3b, 3c xong; Đợt 3d, 4, 5 chưa làm (IMPLEMENT mục 11 "M5") |
+| M5 | ◐ | Đang làm từ 27/10/2026, nhánh `feat/m5-ui-json`, tag dự kiến `v0.6.0`. Đợt 0, 1, 2, 3a, 3b, 3c, 3d xong; Đợt 4, 5 chưa làm (IMPLEMENT mục 11 "M5") |
 
