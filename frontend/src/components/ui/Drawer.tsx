@@ -2,6 +2,7 @@ import { useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { vi } from '../../i18n/vi';
 import { XIcon } from '../icons';
+import { cx } from './cx';
 import { IconButton } from './IconButton';
 import { useModal, usePresence } from './overlay';
 import './ui.css';
@@ -11,10 +12,12 @@ interface Props {
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** Rộng 480 thay vì 360 (ngăn kéo có biểu mẫu dài). */
+  wide?: boolean;
 }
 
 /** Ngăn kéo bên phải (xem trước dưới 1024 px). Cùng luật focus/Esc như hộp thoại. */
-export function Drawer({ open, onClose, title, children }: Props) {
+export function Drawer({ open, onClose, title, children, wide }: Props) {
   const { mounted, closing } = usePresence(open);
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -32,7 +35,7 @@ export function Drawer({ open, onClose, title, children }: Props) {
         aria-modal="true"
         aria-labelledby={`${id}-t`}
         tabIndex={-1}
-        className="ui-drawer"
+        className={cx('ui-drawer', wide && 'ui-drawer-wide')}
       >
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 id={`${id}-t`} className="text-title font-extrabold">

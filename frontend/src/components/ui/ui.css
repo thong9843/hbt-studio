@@ -497,6 +497,9 @@ textarea.ui-input {
   box-shadow: var(--shadow-pop);
   animation: ui-slide var(--dur-slow) var(--ease) both;
 }
+.ui-drawer-wide {
+  width: min(480px, 100vw);
+}
 @keyframes ui-fade {
   from {
     opacity: 0;

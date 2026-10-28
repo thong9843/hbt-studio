@@ -7,6 +7,9 @@ import { vi } from '../i18n/vi';
 import { errorMessage } from '../utils/errors';
 import { sceneNumber } from '../utils/scene';
 import { DownloadIcon } from './icons';
+import { Button } from './ui/Button';
+import { Chip } from './ui/Chip';
+import { Input } from './ui/Field';
 
 const T = vi.export.thumb;
 export const THUMB_PREVIEW_DELAY_MS = 600;
@@ -79,7 +82,7 @@ function CoverPreview({ slug, thumbnail }: { slug: string; thumbnail: Thumbnail 
         {FRAMES.map((f) => (
           <figure key={f.key} className="space-y-1">
             <div
-              className="relative w-[180px] overflow-hidden rounded-frame bg-surface"
+              className="relative w-[180px] overflow-hidden rounded-inner bg-soft"
               style={{ aspectRatio: f.ratio, opacity: stale ? 0.6 : 1 }}
             >
               {url && (
@@ -91,11 +94,11 @@ function CoverPreview({ slug, thumbnail }: { slug: string; thumbnail: Thumbnail 
                 />
               )}
             </div>
-            <figcaption className="text-small text-text-muted">{f.label}</figcaption>
+            <figcaption className="text-small text-muted">{f.label}</figcaption>
           </figure>
         ))}
       </div>
-      {!usableLines(thumbnail) && <p className="text-small text-text-muted">{T.needLines}</p>}
+      {!usableLines(thumbnail) && <p className="text-small text-muted">{T.needLines}</p>}
       {error && (
         <p role="alert" className="text-small text-danger">
           {error}
@@ -105,7 +108,16 @@ function CoverPreview({ slug, thumbnail }: { slug: string; thumbnail: Thumbnail 
   );
 }
 
-export function ThumbnailEditor({ covers }: { covers: { cover: string; youtube: string } | null }) {
+/**
+ * Ảnh bìa: 2–3 dòng, cảnh nền, chữ series, màu dòng cuối, xem trước 3:4 và 3:2.
+ * `covers` có thì hiện nút tải file từ lần xuất gần nhất; bỏ qua (`undefined`) thì không hiện
+ * (ngăn kéo "Bìa & đăng" ở Soạn video không đọc lịch sử dựng).
+ */
+export function ThumbnailEditor({
+  covers,
+}: {
+  covers?: { cover: string; youtube: string } | null;
+}) {
   const editor = useProjectEditor();
   const { project } = editor;
   const thumb = project.thumbnail;
@@ -121,12 +133,11 @@ export function ThumbnailEditor({ covers }: { covers: { cover: string; youtube: 
 
   return (
     <section className="space-y-4">
-      <h2>{T.title}</h2>
-      <p className="text-small text-text-muted">{T.help}</p>
+      <h2 className="text-h2 font-bold">{T.title}</h2>
+      <p className="text-small text-muted">{T.help}</p>
       {!thumb ? (
-        <button
-          type="button"
-          className="btn btn-secondary"
+        <Button
+          tone="soft"
           onClick={() =>
             editor.update((p) => ({
               ...p,
@@ -135,90 +146,78 @@ export function ThumbnailEditor({ covers }: { covers: { cover: string; youtube: 
           }
         >
           {T.add}
-        </button>
+        </Button>
       ) : (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3">
             {[0, 1, 2].map((i) => (
-              <div key={i}>
-                <label className="label" htmlFor={`thumb-line-${i}`}>
-                  {i < 2 ? T.line(i + 1) : T.lineOptional(i + 1)}
-                </label>
-                <input
-                  id={`thumb-line-${i}`}
-                  className="input"
-                  value={thumb.lines[i] ?? ''}
-                  onChange={(e) => setLine(i, e.target.value)}
-                />
-              </div>
+              <Input
+                key={i}
+                id={`thumb-line-${i}`}
+                label={i < 2 ? T.line(i + 1) : T.lineOptional(i + 1)}
+                value={thumb.lines[i] ?? ''}
+                onChange={(e) => setLine(i, e.target.value)}
+              />
             ))}
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <label className="label" htmlFor="thumb-scene">
-                {T.scene}
-              </label>
-              <select
-                id="thumb-scene"
-                className="input"
-                value={thumb.scene}
-                onChange={(e) => patch({ scene: Number(e.target.value) })}
-              >
-                {project.scenes.map((_, i) => (
-                  <option key={i} value={sceneNumber(i)}>
-                    {T.sceneOption(sceneNumber(i))}
-                  </option>
-                ))}
-              </select>
+          <div className="space-y-2">
+            <p className="ui-label !mb-0" id="thumb-scene">
+              {T.scene}
+            </p>
+            <div role="group" aria-labelledby="thumb-scene" className="flex flex-wrap gap-2">
+              {project.scenes.map((_, i) => (
+                <Chip
+                  key={i}
+                  small
+                  selected={thumb.scene === sceneNumber(i)}
+                  onClick={() => patch({ scene: sceneNumber(i) })}
+                >
+                  {T.sceneOption(sceneNumber(i))}
+                </Chip>
+              ))}
             </div>
-            <div>
-              <label className="label" htmlFor="thumb-series">
-                {T.series}
-              </label>
-              <input
-                id="thumb-series"
-                className="input"
-                placeholder={project.series}
-                value={thumb.series}
-                onChange={(e) => patch({ series: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="thumb-accent">
-                {T.accent}
-              </label>
-              <input
-                id="thumb-accent"
-                type="color"
-                className="input h-11 w-24 p-1"
-                value={thumb.accent}
-                onChange={(e) => patch({ accent: e.target.value.toUpperCase() })}
-              />
-            </div>
+          </div>
+          <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+            <Input
+              id="thumb-series"
+              label={T.series}
+              placeholder={project.series}
+              value={thumb.series}
+              onChange={(e) => patch({ series: e.target.value })}
+            />
+            <Input
+              id="thumb-accent"
+              type="color"
+              label={T.accent}
+              className="!w-24 !p-1"
+              value={thumb.accent}
+              onChange={(e) => patch({ accent: e.target.value.toUpperCase() })}
+            />
           </div>
           <CoverPreview slug={project.slug} thumbnail={thumb} />
           <div className="flex flex-wrap items-center gap-3">
-            {covers ? (
+            {covers === undefined ? null : covers ? (
               <>
-                <a className="btn btn-secondary" href={covers.cover} download="cover_9x16.jpg">
+                <a className="ui-btn ui-btn-soft" href={covers.cover} download="cover_9x16.jpg">
                   <DownloadIcon size={20} />
                   {T.download916}
                 </a>
-                <a className="btn btn-secondary" href={covers.youtube} download="youtube_3x2.jpg">
+                <a className="ui-btn ui-btn-soft" href={covers.youtube} download="youtube_3x2.jpg">
                   <DownloadIcon size={20} />
                   {T.download32}
                 </a>
               </>
             ) : (
-              <p className="text-small text-text-muted">{T.noFilesYet}</p>
+              <p className="text-small text-muted">{T.noFilesYet}</p>
             )}
-            <button
-              type="button"
-              className="btn btn-outline btn-sm ml-auto"
+            <Button
+              tone="ghost"
+              size="sm"
+              className="ml-auto"
               onClick={() => editor.update((p) => ({ ...p, thumbnail: null }))}
             >
               {T.remove}
-            </button>
+            </Button>
           </div>
         </div>
       )}

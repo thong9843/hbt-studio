@@ -338,6 +338,16 @@ export const vi = {
       remove: (n: number) => `Bỏ nhãn ${n}`,
       item: (n: number) => `Nhãn ${n}`,
     },
+    publishPanel: {
+      open: 'Bìa & đăng',
+      title: 'Bìa & đăng',
+      postTitle: 'Nội dung đăng',
+      hook: 'Câu mở đầu',
+      hookPlaceholder: 'Câu thu hút ở đầu bài đăng',
+      hashtags: 'Hashtag',
+      hashtagsPlaceholder: '#muoi #khoahoc',
+      hashtagsHelp: 'Cách nhau bằng dấu cách; dấu # đầu tự bỏ khi lưu.',
+    },
     shortcuts: 'Ctrl+S lưu ngay · Alt+↑ / Alt+↓ chuyển cảnh',
     meta: {
       title: 'Tiêu đề',
