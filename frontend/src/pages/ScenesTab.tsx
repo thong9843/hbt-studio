@@ -1,28 +1,40 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Scene } from '../api/types';
+import { CardEditor } from '../components/compose/CardEditor';
+import { OptionsPanel } from '../components/compose/OptionsPanel';
+import { PreviewPane } from '../components/compose/PreviewPane';
+import { SceneStrip } from '../components/compose/SceneStrip';
+import { VoicePanel } from '../components/compose/VoicePanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { EyeIcon, XIcon } from '../components/icons';
-import { SceneEditor } from '../components/SceneEditor';
-import { SceneList } from '../components/SceneList';
-import { ScenePreview } from '../components/ScenePreview';
+import { EyeIcon, TrashIcon } from '../components/icons';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Drawer } from '../components/ui/Drawer';
+import { IconButton } from '../components/ui/IconButton';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
+import { useImageDrop } from '../hooks/useImageDrop';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { vi } from '../i18n/vi';
+import { primaryActionState } from '../utils/blockers';
 import { MAX_SCENES, MIN_SCENES } from '../utils/limits';
 import { emptyScene } from '../utils/newScene';
 import { sceneNumber } from '../utils/scene';
 import { countProjectVoiceChars } from '../utils/voice';
 
+/** Từ 1024 px cột xem trước nằm cạnh; dưới đó thành ngăn kéo (DESIGN-HBT.md mục 5). */
+const PREVIEW_INLINE_QUERY = '(min-width: 1024px)';
+
+/** Màn Soạn video: dải cảnh + 3 cột (thẻ chữ · lời đọc và tuỳ chọn · xem trước 9:16). */
 export function ScenesTab() {
   const editor = useProjectEditor();
   const toast = useToast();
+  const navigate = useNavigate();
   const { project } = editor;
-  const wide = useMediaQuery('(min-width: 1280px)');
-  const medium = useMediaQuery('(min-width: 1024px)');
+  const inline = useMediaQuery(PREVIEW_INLINE_QUERY);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
   const [removing, setRemoving] = useState(false);
   const [drawer, setDrawer] = useState(false);
 
@@ -46,8 +58,8 @@ export function ScenesTab() {
     try {
       await editor.reorder(order);
       setSelected(selectedAfter);
-      setMessage(vi.compose.scenes.moved);
     } catch (e) {
+      // 409 khi đang dựng: Toast kèm gợi ý, có nút Thử lại.
       toast.error(e, () => void reorder(order, selectedAfter));
     } finally {
       setBusy(false);
@@ -59,6 +71,23 @@ export function ScenesTab() {
     editor.update((p) => ({ ...p, scenes: [...p.scenes, emptyScene()] }));
     setSelected(count);
   };
+
+  const addScenes = useCallback(
+    async (n: number) => {
+      editor.update((p) => ({
+        ...p,
+        scenes: [...p.scenes, ...Array.from({ length: n }, () => emptyScene())],
+      }));
+      await editor.flush();
+    },
+    [editor],
+  );
+
+  const drop = useImageDrop({
+    scenes: project.scenes,
+    addScenes,
+    upload: editor.uploadImage,
+  });
 
   const removeScene = async () => {
     if (count <= MIN_SCENES) return;
@@ -80,96 +109,106 @@ export function ScenesTab() {
       scenes: p.scenes.map((s, i) => (i === index ? fn(s) : s)),
     }));
 
+  const action = primaryActionState(project);
   const preview = (
-    <ScenePreview
+    <PreviewPane
       slug={project.slug}
       sceneIndex={index}
+      sceneCount={count}
       scene={scene}
       theme={project.theme}
       imageVersion={editor.imageVersion}
-    />
-  );
-
-  const list = (
-    <SceneList
-      slug={project.slug}
-      scenes={project.scenes}
-      selected={index}
-      imageVersion={editor.imageVersion}
-      disabled={busy}
-      horizontal={!wide}
-      onSelect={setSelected}
-      onReorder={(order, after) => void reorder(order, after)}
-      onAdd={addScene}
-      onRemove={() => setRemoving(true)}
+      blockedReason={action.enabled ? undefined : action.reason}
+      onPrev={() => setSelected(Math.max(0, index - 1))}
+      onNext={() => setSelected(Math.min(count - 1, index + 1))}
+      onGoExport={() => navigate(`/p/${project.slug}/export`)}
     />
   );
 
   return (
-    <div
-      className={
-        wide
-          ? 'grid grid-cols-[280px_minmax(0,1fr)_360px] gap-8'
-          : medium
-            ? 'grid grid-cols-[minmax(0,1fr)_360px] gap-8'
-            : 'grid gap-8'
-      }
-    >
-      <div className={medium && !wide ? 'col-span-2' : ''}>
-        {list}
-        <p role="status" className="sr-only">
-          {message}
-        </p>
-        <p className="mt-3 text-small text-text-muted">{vi.compose.shortcuts}</p>
+    <div className="space-y-5">
+      <SceneStrip
+        slug={project.slug}
+        scenes={project.scenes}
+        selected={index}
+        imageVersion={editor.imageVersion}
+        disabled={busy || drop.progress !== null}
+        progress={drop.progress}
+        onSelect={setSelected}
+        onReorder={(order, after) => void reorder(order, after)}
+        onAdd={addScene}
+        onDropFiles={drop.onFiles}
+      />
+
+      <div
+        className={
+          inline
+            ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_300px] gap-[18px]'
+            : 'grid grid-cols-1 gap-[18px] min-[700px]:grid-cols-2'
+        }
+      >
+        <Card as="div" className="min-w-0 self-start">
+          <CardEditor
+            key={index}
+            slug={project.slug}
+            sceneIndex={index}
+            scene={scene}
+            theme={project.theme}
+            imageVersion={editor.imageVersion}
+            onChange={changeScene}
+            onUploadImage={(file) => editor.uploadImage(index, file)}
+            actions={
+              <IconButton
+                label={vi.compose.scenes.remove}
+                small
+                disabled={count <= MIN_SCENES || busy}
+                title={count <= MIN_SCENES ? vi.compose.scenes.min : vi.compose.scenes.remove}
+                onClick={() => setRemoving(true)}
+              >
+                <TrashIcon size={18} />
+              </IconButton>
+            }
+          />
+        </Card>
+
+        <div className="min-w-0 space-y-[18px] self-start">
+          <Card as="div">
+            <VoicePanel
+              sceneIndex={index}
+              voice={scene.voice}
+              totalChars={countProjectVoiceChars(project.scenes)}
+              onChange={(voice) => changeScene((s) => ({ ...s, voice }))}
+            />
+          </Card>
+          <OptionsPanel
+            sceneIndex={index}
+            scene={scene}
+            theme={project.theme}
+            onChange={changeScene}
+          />
+        </div>
+
+        {inline && <div className="self-start">{preview}</div>}
       </div>
 
-      <div className="min-w-0">
-        <h1 className="mb-6">{vi.compose.scenes.scene(sceneNumber(index))}</h1>
-        <SceneEditor
-          key={index}
-          slug={project.slug}
-          sceneIndex={index}
-          scene={scene}
-          imageVersion={editor.imageVersion}
-          totalVoiceChars={countProjectVoiceChars(project.scenes)}
-          onChange={changeScene}
-          onUploadImage={(file) => editor.uploadImage(index, file)}
-        />
-      </div>
-
-      {medium ? (
-        <div className="self-start lg:sticky lg:top-24">{preview}</div>
-      ) : (
+      {!inline && (
         <>
-          <button
-            type="button"
-            className="btn btn-primary fixed bottom-6 right-6 z-30 shadow-lg"
+          <Button
+            tone="ink"
+            className="fixed bottom-6 right-6 z-30 shadow-lg"
+            icon={<EyeIcon size={20} />}
             onClick={() => setDrawer(true)}
           >
-            <EyeIcon size={20} />
             {vi.compose.preview.open}
-          </button>
-          {drawer && (
-            <aside
-              role="dialog"
-              aria-modal="true"
-              aria-label={vi.compose.preview.title}
-              className="fixed inset-y-0 right-0 z-40 w-full max-w-[420px] overflow-y-auto bg-bg p-6 shadow-xl"
-            >
-              <button
-                type="button"
-                className="btn btn-icon mb-4 ml-auto"
-                aria-label={vi.compose.preview.closeDrawer}
-                onClick={() => setDrawer(false)}
-              >
-                <XIcon />
-              </button>
-              {preview}
-            </aside>
-          )}
+          </Button>
+          <Drawer open={drawer} onClose={() => setDrawer(false)} title={vi.compose.preview.title}>
+            {preview}
+          </Drawer>
         </>
       )}
 
+      <p className="text-small text-muted">{vi.compose.shortcuts}</p>
+      {drop.dialogs}
       {removing && (
         <ConfirmDialog
           title={vi.compose.scenes.removeTitle(sceneNumber(index))}

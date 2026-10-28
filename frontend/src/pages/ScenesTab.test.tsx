@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -56,8 +56,8 @@ function setup(initial: Project, extra: Record<string, unknown> = {}) {
 describe('ScenesTab', () => {
   it('adds a scene (selects it) and autosaves the new scene count', async () => {
     const { saved } = setup(project());
-    await userEvent.click(await screen.findByRole('button', { name: /Thêm cảnh/ }));
-    expect(await screen.findByRole('heading', { name: 'Cảnh 4' })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Thêm cảnh' }));
+    expect(await screen.findByRole('heading', { name: 'Cảnh 4 · Thẻ chữ' })).toBeInTheDocument();
     await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3000 });
     expect(saved[0].scenes).toHaveLength(4);
     expect(saved[0].scenes[3].image).toBe('');
@@ -70,12 +70,12 @@ describe('ScenesTab', () => {
     });
     const { saved } = setup(four);
     const user = userEvent.setup();
-    await screen.findByRole('heading', { name: 'Cảnh 1' });
-    await user.click(screen.getByText('Cảnh 4'));
-    await user.click(screen.getByRole('button', { name: /Xoá cảnh này/ }));
+    await screen.findByRole('heading', { name: 'Cảnh 1 · Thẻ chữ' });
+    await user.click(screen.getByRole('button', { name: /^Cảnh 4/ }));
+    await user.click(screen.getByRole('button', { name: 'Xoá cảnh này' }));
     const dialog = screen.getByRole('alertdialog');
     expect(dialog).toHaveTextContent('Xoá cảnh 4?');
-    await user.click(screen.getAllByRole('button', { name: 'Xoá cảnh này' }).at(-1)!);
+    await user.click(within(dialog).getByRole('button', { name: 'Xoá cảnh này' }));
     await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3000 });
     expect(saved[0].scenes).toHaveLength(3);
     expect((saved[0].thumbnail as { scene: number }).scene).toBe(3);
@@ -93,9 +93,11 @@ describe('ScenesTab', () => {
       },
     });
     const user = userEvent.setup();
-    await screen.findByRole('heading', { name: 'Cảnh 1' });
-    await user.click(screen.getByRole('button', { name: /Xoá cảnh này/ }));
-    await user.click(screen.getAllByRole('button', { name: 'Xoá cảnh này' }).at(-1)!);
+    await screen.findByRole('heading', { name: 'Cảnh 1 · Thẻ chữ' });
+    await user.click(screen.getByRole('button', { name: 'Xoá cảnh này' }));
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Xoá cảnh này' }),
+    );
     await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3000 });
     expect(deletedIndex).toBe(0);
     expect(saved[0].scenes).toHaveLength(3);
@@ -104,13 +106,13 @@ describe('ScenesTab', () => {
   it('Ctrl+S saves immediately and Alt+Down moves to the next scene', async () => {
     const { saved } = setup(project());
     const user = userEvent.setup();
-    const voice = await screen.findByLabelText('Lời đọc');
+    const voice = await screen.findByLabelText('Lời đọc cảnh');
     await user.type(voice, ' thêm');
     expect(saved).toHaveLength(0);
     await user.keyboard('{Control>}s{/Control}');
     await waitFor(() => expect(saved).toHaveLength(1));
     await user.keyboard('{Alt>}{ArrowDown}{/Alt}');
-    expect(await screen.findByRole('heading', { name: 'Cảnh 2' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cảnh 2 · Thẻ chữ' })).toBeInTheDocument();
   });
 
   it('warns in yellow when the whole script passes 750 characters', async () => {
@@ -118,6 +120,6 @@ describe('ScenesTab', () => {
       scenes: [scene({ voice: 'a'.repeat(400) }), scene({ voice: 'b'.repeat(400) }), scene()],
     });
     setup(long);
-    expect(await screen.findByText(/Vượt 750 ký tự/)).toBeInTheDocument();
+    expect(await screen.findByText('Vượt 750 ký tự')).toBeInTheDocument();
   });
 });

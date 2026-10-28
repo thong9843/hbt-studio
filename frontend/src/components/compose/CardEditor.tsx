@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { projectFileUrl } from '../../api/endpoints';
 import type { CardLine, LineSize, Scene, Theme } from '../../api/types';
@@ -35,6 +35,8 @@ interface Props {
   imageVersion: number;
   onChange: (fn: (scene: Scene) => Scene) => void;
   onUploadImage: (file: File) => Promise<void>;
+  /** Nút ở góc phải tiêu đề (vd xoá cảnh). */
+  actions?: ReactNode;
 }
 
 function SceneImage({
@@ -108,6 +110,7 @@ export function CardEditor({
   imageVersion,
   onChange,
   onUploadImage,
+  actions,
 }: Props) {
   const setCard = (patch: Partial<Scene['card']>) =>
     onChange((s) => ({ ...s, card: { ...s.card, ...patch } }));
@@ -122,7 +125,10 @@ export function CardEditor({
   const title = T.title(sceneNumber(sceneIndex));
   return (
     <section aria-label={title} className="space-y-5">
-      <h2 className="text-h2 font-bold">{title}</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-h2 font-bold">{title}</h2>
+        {actions}
+      </div>
       <SceneImage slug={slug} scene={scene} imageVersion={imageVersion} onUpload={onUploadImage} />
 
       <div className="space-y-2">

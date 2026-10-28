@@ -1,20 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, Outlet, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { Project } from '../api/types';
+import { PublishDrawer } from '../components/compose/PublishDrawer';
 import { ErrorNote } from '../components/ErrorNote';
 import { ArrowLeftIcon } from '../components/icons';
 import { SaveIndicator } from '../components/SaveIndicator';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Field';
 import { ProjectEditorContext, type ProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { useAutosave } from '../hooks/useAutosave';
 import { vi } from '../i18n/vi';
-
-const tab = ({ isActive }: { isActive: boolean }) =>
-  `flex h-11 items-center border-b-2 px-1 text-body font-bold transition-colors duration-[180ms] ease-hbt ${
-    isActive ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text'
-  }`;
 
 function EditorProvider({ initial }: { initial: Project }) {
   const slug = initial.slug;
@@ -149,37 +147,36 @@ function EditorProvider({ initial }: { initial: Project }) {
     ],
   );
 
-  const base = `/p/${slug}`;
+  const [publishOpen, setPublishOpen] = useState(false);
   return (
     <ProjectEditorContext.Provider value={editor}>
-      <main className="mx-auto max-w-[1280px] px-6 py-6">
-        <div className="flex flex-wrap items-center gap-4">
-          <Link to="/projects" className="btn btn-ghost btn-sm">
-            <ArrowLeftIcon size={18} />
-            {vi.compose.back}
+      <main className="mx-auto max-w-[1440px] px-6 py-5">
+        <header className="flex min-h-12 flex-wrap items-center gap-3">
+          <Link
+            to="/projects"
+            aria-label={vi.compose.back}
+            title={vi.compose.back}
+            className="ui-icon-btn ui-icon-btn-sm"
+          >
+            <ArrowLeftIcon size={20} />
           </Link>
-          <input
-            aria-label={vi.compose.meta.title}
-            className="h-12 min-w-[12rem] flex-1 rounded-input border border-transparent bg-transparent px-2 text-h1 font-extrabold uppercase hover:border-border"
-            value={project.title}
-            onChange={(e) => update((p) => ({ ...p, title: e.target.value }))}
-          />
+          <div className="min-w-[12rem] flex-1">
+            <Input
+              aria-label={vi.compose.meta.title}
+              className="!min-h-12 !bg-transparent !text-title !font-extrabold"
+              value={project.title}
+              onChange={(e) => update((p) => ({ ...p, title: e.target.value }))}
+            />
+          </div>
           <SaveIndicator status={status} error={error} />
-        </div>
-        <nav aria-label={vi.compose.tabs.label} className="mt-4 flex gap-6 border-b border-border">
-          <NavLink to={base} end className={tab}>
-            {vi.compose.tabs.scenes}
-          </NavLink>
-          <NavLink to={`${base}/audio`} className={tab}>
-            {vi.compose.tabs.audio}
-          </NavLink>
-          <NavLink to={`${base}/export`} className={tab}>
-            {vi.compose.tabs.export}
-          </NavLink>
-        </nav>
-        <div className="mt-8">
+          <Button tone="soft" size="sm" className="ml-auto" onClick={() => setPublishOpen(true)}>
+            {vi.compose.publishPanel.open}
+          </Button>
+        </header>
+        <div className="mt-5">
           <Outlet />
         </div>
+        <PublishDrawer open={publishOpen} onClose={() => setPublishOpen(false)} />
       </main>
     </ProjectEditorContext.Provider>
   );
@@ -198,8 +195,8 @@ export function ComposePage() {
 
   if (isPending)
     return (
-      <main className="mx-auto flex max-w-[1280px] items-center gap-3 px-6 py-12 text-text-muted">
-        <span className="spinner" aria-hidden="true" />
+      <main className="mx-auto flex max-w-[1440px] items-center gap-3 px-6 py-12 text-muted">
+        <span className="ui-spinner" aria-hidden="true" />
         {vi.compose.loading}
       </main>
     );
@@ -207,7 +204,7 @@ export function ComposePage() {
     return (
       <main className="mx-auto max-w-3xl px-6 py-10">
         <ErrorNote error={error} />
-        <Link to="/projects" className="btn btn-secondary mt-4">
+        <Link to="/projects" className="ui-btn ui-btn-soft mt-4">
           {vi.compose.back}
         </Link>
       </main>

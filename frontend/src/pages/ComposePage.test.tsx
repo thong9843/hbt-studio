@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -55,18 +55,20 @@ describe('Compose page', () => {
     routes();
     const user = userEvent.setup();
     page();
-    expect(await screen.findByRole('heading', { name: 'Cảnh 1' })).toBeInTheDocument();
-    expect(screen.getByText('Cảnh 3')).toBeInTheDocument();
-    expect(screen.getByText('chưa có ảnh')).toBeInTheDocument();
-    await user.click(screen.getByText('Cảnh 2'));
-    expect(screen.getByRole('heading', { name: 'Cảnh 2' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cảnh 1 · Thẻ chữ' })).toBeInTheDocument();
+    const strip = screen.getByRole('region', { name: 'Các cảnh' });
+    expect(
+      within(strip).getByRole('button', { name: /^Cảnh 3 — chưa có ảnh/ }),
+    ).toBeInTheDocument();
+    await user.click(within(strip).getByRole('button', { name: /^Cảnh 2/ }));
+    expect(screen.getByRole('heading', { name: 'Cảnh 2 · Thẻ chữ' })).toBeInTheDocument();
   });
 
   it('autosaves 1 s after typing and shows the saved indicator', async () => {
     const { saved } = routes();
     const user = userEvent.setup();
     page();
-    const voice = await screen.findByLabelText('Lời đọc');
+    const voice = await screen.findByLabelText('Lời đọc cảnh');
     await user.clear(voice);
     await user.type(voice, 'Muỗi thích bạn');
     expect(saved).toHaveLength(0);
@@ -80,8 +82,8 @@ describe('Compose page', () => {
   it('shows character counts and warns past the 750 limit', async () => {
     routes();
     page();
-    await screen.findByLabelText('Lời đọc');
-    expect(screen.getByText(/Cả video: 26\/750 ký tự/)).toBeInTheDocument();
+    await screen.findByLabelText('Lời đọc cảnh');
+    expect(screen.getByText('Cả video 26/750')).toBeInTheDocument();
   });
 
   it('draws the draft preview 600 ms after typing stops, not on every key', async () => {
@@ -104,9 +106,9 @@ describe('Compose page', () => {
     const user = userEvent.setup();
     page();
     await screen.findByLabelText('Dòng 1: Chữ');
-    await user.click(screen.getByRole('button', { name: 'Thêm dòng' }));
+    await user.click(screen.getByRole('button', { name: /^Dòng$/ }));
     expect(screen.getByLabelText('Dòng 2: Chữ')).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'Bỏ dòng' })[0]);
+    await user.click(screen.getByRole('button', { name: 'Bỏ dòng 1' }));
     expect(screen.queryByLabelText('Dòng 2: Chữ')).not.toBeInTheDocument();
   });
 
