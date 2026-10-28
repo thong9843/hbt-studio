@@ -676,9 +676,9 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0`. Đặc tả đầy đủ ở mục 13. Mỗi commit: `npm run lint && npm run test` xanh. Không sửa `backend/hbt/pipeline/` (giữ `PIPELINE_VERSION` của `v0.5.1`).
 
 - [ ] **Đợt 0 · Tài liệu:** PLAN/IMPLEMENT mục M5 và mục 13, DESIGN-HBT.md v2, CLAUDE.md (`docs(M5)`); sửa dòng nhật ký 26/10 bị vỡ (`docs(plan)`).
-- [ ] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
+- [x] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
 - [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
-- [ ] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới.
+- [x] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới. Xong 28/10/2026 (quyết định ở 13.B8).
 - [ ] **Đợt 3b:** Soạn video (dải cảnh, thả nhiều ảnh, thẻ chữ, bộ đếm, lời đọc, tuỳ chọn, xem trước, vùng an toàn).
 - [ ] **Đợt 3c:** Âm thanh.
 - [ ] **Đợt 3d:** Xuất video (lịch sử lưới, ước tính) + Cài đặt.
@@ -945,3 +945,14 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 8. **Test chạy nhanh:** `@pytest.mark.slow` cho test dựng/căn chữ thật từ 3 s (đo `--durations=0` trên máy cũ), `npm run test:fast` bỏ chúng; `npm run test` và CI vẫn chạy đủ. Vitest đọc `tokens.css` và `ui.css` bằng `?raw` nên `vite.config.ts` bật `css.include` cho hai file này.
 
 **X6 (đổi mốc so sánh):** `PIPELINE_VERSION` không đổi so với tag `v0.5.1`, và `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` rỗng (v0.5.1 đã sửa `render.py`; `b240e97` không còn là mốc).
+
+### 13.B8 Quyết định Đợt 3a (chủ dự án duyệt 28/10/2026)
+
+1. **Route:** Trang chủ ở `/`, Dự án ở `/projects`, đường dẫn lạ (`*`) về `/`. Nút **Tạo video** ở thanh trái mở hộp Video mới (`NewProjectProvider` trong `AppShell`); bỏ luồng `/?new=1` và hộp tạo cũ. Tạo xong chuyển sang `/p/:slug`.
+2. **Tên series lưu khác PLAN §9** (không sửa PLAN): chip hiển thị đúng chữ lưu vào `series` (chữ này in lên nhãn bìa): "Vì Sao" · "Vì sao Trái Đất" · "Vì sao vậy ta?" · "Khác" (tự nhập, lưu nguyên văn). Lý do: khớp bìa các video đã đăng (project cũ lưu `Vì Sao` và `Vì sao vậy ta?`); bỏ dấu "…".
+3. **Thẻ dự án:** ảnh = `cover` → ảnh cảnh 1 (file gốc qua `/api/files/...`) → ô HBT; ảnh lỗi rơi về ô HBT đúng một lần. Không có ảnh thì hiện **"Chưa có ảnh"**, thay cho "0/8 ảnh" ở 13.B2 (`GET /projects` không trả số ảnh/cảnh, không sửa backend). Ngày trên thẻ = `updated_at`.
+4. **Thẻ "Lần xuất gần nhất" ở Trang chủ lấy bản mới nhất trong mọi dự án** (mỗi dự án: bản đẹp mới nhất, không có thì lần dựng gần nhất; chọn theo `created_at`), lệch 13.B2 ("dự án đầu") để tránh thẻ trống khi dự án vừa tạo chưa dựng. Số liệu chỉ từ `last_final` / `last_render`, không gọi `/renders`, nên **không có LUFS** trên thẻ (hiện fps, độ dài, thời gian dựng; thiếu thì "—").
+5. **"Tiếp tục làm":** dự án đầu danh sách (`updated_at` mới nhất); chấm Ảnh n/N · Giọng · Nhạc · Ảnh bìa lấy bằng một lần `GET /projects/{slug}`, không poll. "Gần đây" = 4 dự án kế sau dự án đó; chỉ có một dự án thì bỏ mục.
+6. **Nợ UI → Đợt 3d:** menu ⋯ của thẻ chưa khoá khi đang dựng (cần context job toàn cục); tạm bắt lỗi 409 và hiện Toast.
+7. **Backlog:** bản thu nhỏ `?w=` cho `cover` (luật 13.B3.2 mục 7); hiện dùng bản gốc với `loading="lazy"` `decoding="async"`.
+8. **Quy trình từ 28/10/2026:** trong đợt đã duyệt không dừng để hỏi hay cho xem từng màn; điểm chưa rõ tự chọn phương án an toàn nhất và ghi vào mục "Cần chốt" của báo cáo cuối đợt. Chỉ dừng giữa chừng khi test đỏ không tự sửa được hoặc phải sửa `pipeline/` / `models.py`.
