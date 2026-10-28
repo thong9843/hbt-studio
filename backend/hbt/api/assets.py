@@ -1,4 +1,4 @@
-"""POST /api/projects/{slug}/assets: tải ảnh (theo cảnh), giọng đọc hoặc nhạc lên project."""
+"""POST /api/projects/{slug}/assets: tải ảnh (theo cảnh), ảnh bìa, giọng đọc hoặc nhạc."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from hbt.storage import BadRequest, Conflict
 
 router = APIRouter(tags=["assets"])
 
-MAX_BYTES = {"image": 30 << 20, "voice": 200 << 20, "music": 200 << 20}
+MAX_BYTES = {"image": 30 << 20, "cover": 30 << 20, "voice": 200 << 20, "music": 200 << 20}
 CHUNK = 1 << 20
 
 
@@ -46,12 +46,12 @@ def save_upload(upload: UploadFile, folder: Path, limit: int) -> Path:
 def upload_asset(
     slug: str,
     state: State,
-    kind: Annotated[str, Form(description="image | voice | music")],
+    kind: Annotated[str, Form(description="image | cover | voice | music")],
     file: Annotated[UploadFile, File()],
     scene_index: Annotated[int | None, Form(description="chỉ số cảnh từ 0 (chỉ với ảnh)")] = None,
 ):
     if kind not in MAX_BYTES:
-        raise BadRequest("`kind` phải là image, voice hoặc music")
+        raise BadRequest("`kind` phải là image, cover, voice hoặc music")
     state.storage.load(slug)  # 404 sớm, trước khi nhận file lớn
     if state.jobs.is_busy(slug):
         raise Conflict("Project đang được dựng, hãy chờ hoặc huỷ job trước khi thay file")
