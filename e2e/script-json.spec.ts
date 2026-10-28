@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
+import { deleteProject } from './helpers';
 
 const API = 'http://127.0.0.1:8000/api';
 const FIXTURE = join(process.cwd(), 'backend', 'tests', 'data', 'dao-phuc-sinh.cards.json');
@@ -65,6 +66,6 @@ test('Dán JSON dao-phuc-sinh → Áp dụng → tải lại còn dữ liệu �
     if (beforeText) await expect(line1).toHaveValue(beforeText);
     else await expect(line1).toHaveCount(0); // dự án mới chưa có dòng chữ nào
   } finally {
-    if (slug) await request.delete(`${API}/projects/${slug}`);
+    await deleteProject(request, slug);
   }
 });

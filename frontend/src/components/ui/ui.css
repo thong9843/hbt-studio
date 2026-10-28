@@ -290,6 +290,11 @@
 .ui-card-link:active {
   transform: scale(0.99);
 }
+/* Hover/nhấn tạo ngăn xếp riêng (transform): thẻ có menu ⋯ đang mở phải nổi lên trên thẻ kế bên
+   và khối bên dưới, nếu không menu ở hàng cuối bị đè và không bấm được. */
+.ui-card-link:has(.ui-menu) {
+  z-index: 30;
+}
 .ui-inner {
   border-radius: var(--radius-inner);
   background: var(--soft-2);
@@ -383,6 +388,30 @@ textarea.ui-input {
   font-size: 13px;
   font-weight: 600;
   color: var(--danger);
+}
+.ui-control {
+  position: relative;
+}
+/* Bộ đếm nằm trong ô: không che chữ nhờ padding, không chặn chuột. */
+.ui-input[data-counter] {
+  padding-right: 72px;
+}
+textarea.ui-input[data-counter] {
+  padding-right: 14px;
+  padding-bottom: 30px;
+}
+.ui-control > .ui-counter {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ui-control[data-kind='textarea'] > .ui-counter {
+  top: auto;
+  bottom: 8px;
+  right: 18px;
+  transform: none;
 }
 .ui-counter {
   font-size: 12px;

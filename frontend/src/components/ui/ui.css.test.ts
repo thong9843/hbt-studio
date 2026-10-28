@@ -20,6 +20,11 @@ const tokens = tokensCss.replace(/\/\*[\s\S]*?\*\//g, '');
 describe('ui.css performance rules (IMPLEMENT 13.B3.2)', () => {
   const css = uiCss.replace(/\/\*[\s\S]*?\*\//g, '');
 
+  it('lifts a card above its neighbours while its menu is open (hover makes a stacking context)', () => {
+    expect(block(css, '.ui-card-link:has(.ui-menu)')).toMatch(/z-index:\s*30/);
+    expect(block(css, '.ui-card {')).toMatch(/position:\s*relative/);
+  });
+
   it('has no blur, backdrop-filter, will-change or gradients', () => {
     expect(css).not.toMatch(/backdrop-filter|blur\(|will-change|gradient\(/);
   });

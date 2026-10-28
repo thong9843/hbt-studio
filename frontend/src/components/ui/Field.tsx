@@ -13,6 +13,10 @@ interface Common {
   error?: string;
   /** Giới hạn: hiện bộ đếm `n/giới hạn`; vượt thì viền `--accent`, bộ đếm nền vàng. */
   limit?: number;
+  /** Số đếm hiển thị thay cho độ dài của ô (vd tổng lời đọc cả video). Chỉ có nghĩa khi có `limit`. */
+  count?: number;
+  /** Chú thích (tooltip) của bộ đếm. */
+  countTitle?: string;
   hint?: ReactNode;
 }
 
@@ -24,34 +28,40 @@ function length(value: unknown): number {
   return typeof value === 'string' ? [...value.normalize('NFC')].length : 0;
 }
 
-function Meta({
+function Counter({
   id,
-  error,
   limit,
   value,
+  count,
+  title,
 }: {
   id: string;
-  error?: string;
   limit?: number;
   value: unknown;
+  count?: number;
+  title?: string;
 }) {
-  const n = length(value);
-  const over = limit !== undefined && n > limit;
+  if (limit === undefined) return null;
+  const n = count ?? length(value);
   return (
-    <>
-      {error && (
-        <p id={`${id}-err`} className="ui-field-error" role="alert">
-          {error}
-        </p>
-      )}
-      {limit !== undefined && (
-        <p id={`${id}-count`} className="mt-1 text-right">
-          <span data-over={over} className="ui-counter" aria-live="polite">
-            {n}/{limit}
-          </span>
-        </p>
-      )}
-    </>
+    <span
+      id={`${id}-count`}
+      data-over={n > limit}
+      className="ui-counter"
+      aria-live="polite"
+      title={title}
+    >
+      {n}/{limit}
+    </span>
+  );
+}
+
+function FieldError({ id, error }: { id: string; error?: string }) {
+  if (!error) return null;
+  return (
+    <p id={`${id}-err`} className="ui-field-error" role="alert">
+      {error}
+    </p>
   );
 }
 
@@ -64,10 +74,20 @@ function aria(id: string, error?: string, limit?: number) {
 }
 
 /** Ô nhập một dòng, cao 48, bo 14. */
-export function Input({ label, error, limit, hint, className, id: idProp, ...rest }: InputProps) {
+export function Input({
+  label,
+  error,
+  limit,
+  count,
+  countTitle,
+  hint,
+  className,
+  id: idProp,
+  ...rest
+}: InputProps) {
   const auto = useId();
   const id = idProp ?? auto;
-  const over = limit !== undefined && length(rest.value) > limit;
+  const over = limit !== undefined && (count ?? length(rest.value)) > limit;
   return (
     <div className="ui-field">
       {label && (
@@ -75,24 +95,38 @@ export function Input({ label, error, limit, hint, className, id: idProp, ...res
           {label}
         </label>
       )}
-      <input
-        {...rest}
-        id={id}
-        data-over={over || undefined}
-        {...aria(id, error, limit)}
-        className={cx('ui-input', className)}
-      />
+      <div className="ui-control" data-kind="input">
+        <input
+          {...rest}
+          id={id}
+          data-over={over || undefined}
+          data-counter={limit !== undefined || undefined}
+          {...aria(id, error, limit)}
+          className={cx('ui-input', className)}
+        />
+        <Counter id={id} limit={limit} value={rest.value} count={count} title={countTitle} />
+      </div>
       {hint}
-      <Meta id={id} error={error} limit={limit} value={rest.value} />
+      <FieldError id={id} error={error} />
     </div>
   );
 }
 
 /** Ô nhiều dòng (lời đọc). */
-export function Textarea({ label, error, limit, hint, className, id: idProp, ...rest }: AreaProps) {
+export function Textarea({
+  label,
+  error,
+  limit,
+  count,
+  countTitle,
+  hint,
+  className,
+  id: idProp,
+  ...rest
+}: AreaProps) {
   const auto = useId();
   const id = idProp ?? auto;
-  const over = limit !== undefined && length(rest.value) > limit;
+  const over = limit !== undefined && (count ?? length(rest.value)) > limit;
   return (
     <div className="ui-field">
       {label && (
@@ -100,15 +134,19 @@ export function Textarea({ label, error, limit, hint, className, id: idProp, ...
           {label}
         </label>
       )}
-      <textarea
-        {...rest}
-        id={id}
-        data-over={over || undefined}
-        {...aria(id, error, limit)}
-        className={cx('ui-input', className)}
-      />
+      <div className="ui-control" data-kind="textarea">
+        <textarea
+          {...rest}
+          id={id}
+          data-over={over || undefined}
+          data-counter={limit !== undefined || undefined}
+          {...aria(id, error, limit)}
+          className={cx('ui-input', className)}
+        />
+        <Counter id={id} limit={limit} value={rest.value} count={count} title={countTitle} />
+      </div>
       {hint}
-      <Meta id={id} error={error} limit={limit} value={rest.value} />
+      <FieldError id={id} error={error} />
     </div>
   );
 }

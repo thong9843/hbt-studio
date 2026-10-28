@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,8 @@ from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
+DELETE_ATTEMPTS = 5  # xoá project: số lần thử khi Windows còn giữ file
+DELETE_RETRY_SECONDS = 0.1
 KEEP_IN_BUILD = ("timing.json", "timing.json.key")  # dọn build/ vẫn giữ căn chữ
 RENDER_ID_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -176,23 +179,23 @@ class Storage:
 
     def clean_build(self, slug: str) -> dict:
         """Xoá file trung gian trong `build/`, luôn giữ `timing.json` và `timing.json.key`
-        (căn chữ là bước đắt nhất). Không động tới renders/, ảnh, giọng, nhạc, project.json."""
-        build = self.project_dir(slug) / "build"
+        (căn chữ là bước đắt nhất), và xoá nốt `renders/.deleting-*` (lần xuất xoá dở).
+        Không động tới lần xuất thật, ảnh, giọng, nhạc, project.json."""
+        folder = self.project_dir(slug)
+        build = folder / "build"
+        renders = folder / "renders"
         keep = set(KEEP_IN_BUILD)
-        before = _tree_size(build)
+        leftovers = _deleting_leftovers(renders)
+        before = _tree_size(build) + sum(_tree_size(d) for d in leftovers)
         failed = 0
         if build.is_dir() and not build.is_symlink():
             for entry in build.iterdir():
                 if entry.name in keep:
                     continue
-                try:
-                    if entry.is_dir() and not entry.is_symlink():
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                except OSError:
-                    failed += 1
-        after = _tree_size(build)
+                failed += _remove(entry)
+        for d in leftovers:
+            failed += _remove(d)
+        after = _tree_size(build) + sum(_tree_size(d) for d in _deleting_leftovers(renders))
         kept = sorted(n for n in keep if (build / n).is_file())
         return {
             "before_bytes": before,
@@ -287,7 +290,21 @@ class Storage:
         folder = self.project_dir(slug)
         if not (folder / "project.json").is_file():
             raise NotFound(f"Không có project '{slug}'")
-        shutil.rmtree(folder)
+        # Windows: file vừa ghi/đang đọc (vd ảnh xem trước) làm rmtree lỗi trong chốc lát.
+        for attempt in range(DELETE_ATTEMPTS):
+            try:
+                shutil.rmtree(folder)
+                return
+            except FileNotFoundError:
+                if not folder.exists():
+                    return
+            except OSError as e:
+                if attempt == DELETE_ATTEMPTS - 1:
+                    raise Conflict(
+                        "Không xoá được vì file đang mở (đóng chương trình đang dùng "
+                        "dự án này rồi thử lại)"
+                    ) from e
+            time.sleep(DELETE_RETRY_SECONDS)
 
     def delete_scene(self, slug: str, scene_index: int) -> Project:
         """Xoá một cảnh trong project (giữ ràng buộc MIN_SCENES..MAX_SCENES)."""
@@ -534,6 +551,29 @@ class Storage:
             raise BadRequest("`kind` phải là image, voice hoặc music")
         self.save(slug, project)
         return rel, project
+
+
+def _deleting_leftovers(renders: Path) -> list[Path]:
+    """Thư mục `renders/.deleting-*` còn sót (xoá lần xuất dở); không theo liên kết."""
+    if not renders.is_dir() or renders.is_symlink():
+        return []
+    return [
+        d
+        for d in renders.iterdir()
+        if d.name.startswith(TRASH_PREFIX) and d.is_dir() and not d.is_symlink()
+    ]
+
+
+def _remove(entry: Path) -> int:
+    """Xoá file hoặc thư mục; trả 1 nếu không xoá được (file đang bị khoá)."""
+    try:
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    except OSError:
+        return 1
+    return 0
 
 
 def _tree_size(folder: Path) -> int:

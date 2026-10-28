@@ -65,6 +65,34 @@ describe('Input and Textarea', () => {
     expect(screen.getByLabelText('Tên')).not.toHaveAttribute('data-over');
   });
 
+  it('puts the counter inside the control, above the text and click-through (Input and Textarea)', () => {
+    const { container } = render(
+      <>
+        <Input label="Dòng" value="ab" onChange={() => {}} limit={10} />
+        <Textarea label="Lời" value="abc" onChange={() => {}} limit={750} count={120} />
+      </>,
+    );
+    const controls = container.querySelectorAll('.ui-control');
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      const counter = control.querySelector('.ui-counter');
+      expect(counter).not.toBeNull();
+      expect(control.querySelector('.ui-input')).toHaveAttribute('data-counter', 'true');
+    }
+    expect(controls[0]).toHaveAttribute('data-kind', 'input');
+    expect(controls[1]).toHaveAttribute('data-kind', 'textarea');
+    // `count` thay cho độ dài của ô; aria-describedby vẫn trỏ tới bộ đếm.
+    const counter = screen.getByText('120/750');
+    expect(screen.getByLabelText('Lời').getAttribute('aria-describedby')).toBe(counter.id);
+    expect(counter).toHaveAttribute('data-over', 'false');
+  });
+
+  it('marks the textarea over limit by `count`, not by its own length', () => {
+    render(<Textarea label="Lời" value="abc" onChange={() => {}} limit={750} count={751} />);
+    expect(screen.getByLabelText('Lời')).toHaveAttribute('data-over', 'true');
+    expect(screen.getByText('751/750')).toHaveAttribute('data-over', 'true');
+  });
+
   it('has no error or counter without those props, and can be disabled', () => {
     render(<Input label="Tên" defaultValue="x" disabled />);
     expect(screen.getByLabelText('Tên')).toBeDisabled();

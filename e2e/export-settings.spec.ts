@@ -1,12 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { expect, test } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
-
-const API = 'http://127.0.0.1:8000/api';
-const SAMPLE = join(process.cwd(), 'workspace', 'samples', 'muoi');
+import { API, createRenderableProject, deleteProject } from './helpers';
 
 test('Xem nhanh từ Soạn video tự dựng ở tab Xuất; thẻ trái hiện tiến độ và Huỷ dừng job', async ({
   page,
@@ -15,44 +10,7 @@ test('Xem nhanh từ Soạn video tự dựng ở tab Xuất; thẻ trái hiện
   test.setTimeout(120_000);
   let slug = '';
   try {
-    const created = await request.post(`${API}/projects`, {
-      data: { title: `E2E xuất ${Date.now()}`, scene_count: 3 },
-    });
-    expect(created.ok()).toBeTruthy();
-    slug = (await created.json()).slug;
-    for (let i = 0; i < 3; i++) {
-      const res = await request.post(`${API}/projects/${slug}/assets`, {
-        multipart: {
-          kind: 'image',
-          scene_index: String(i),
-          file: {
-            name: `scene-0${i + 1}.png`,
-            mimeType: 'image/png',
-            buffer: readFileSync(join(SAMPLE, 'images', `scene-0${i + 1}.png`)),
-          },
-        },
-      });
-      expect(res.ok()).toBeTruthy();
-    }
-    const voice = await request.post(`${API}/projects/${slug}/assets`, {
-      multipart: {
-        kind: 'voice',
-        file: {
-          name: 'voice.mp3',
-          mimeType: 'audio/mpeg',
-          buffer: readFileSync(join(SAMPLE, 'voice.mp3')),
-        },
-      },
-    });
-    expect(voice.ok()).toBeTruthy();
-
-    // Kiểm tra chặn nếu cảnh nào chưa có lời đọc.
-    const project = await (await request.get(`${API}/projects/${slug}`)).json();
-    project.scenes = project.scenes.map((s: Record<string, unknown>) => ({
-      ...s,
-      voice: 'Muỗi đốt người.',
-    }));
-    expect((await request.put(`${API}/projects/${slug}`, { data: project })).ok()).toBeTruthy();
+    slug = await createRenderableProject(request, `E2E xuất ${Date.now()}`);
 
     await page.goto(`/p/${slug}`);
     const fast = page.getByRole('button', { name: vi.compose.preview.fast, exact: true });
@@ -78,7 +36,50 @@ test('Xem nhanh từ Soạn video tự dựng ở tab Xuất; thẻ trái hiện
       timeout: 30_000,
     });
   } finally {
-    if (slug) await request.delete(`${API}/projects/${slug}`);
+    await deleteProject(request, slug);
+  }
+});
+
+test('Lịch sử: dựng Xem nhanh xong → menu ⋯ của lần xuất → Xoá → xác nhận → thẻ biến mất', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(240_000);
+  let slug = '';
+  try {
+    slug = await createRenderableProject(request, `E2E xoá lần xuất ${Date.now()}`);
+    await page.goto(`/p/${slug}/export`);
+    const fast = page.getByRole('button', { name: vi.export.fast, exact: true });
+    await expect(fast).toBeEnabled();
+    await fast.click();
+
+    // File giọng mẫu có đuôi thừa dài: xác nhận cắt (bước nghe lại) rồi dựng tiếp.
+    await page
+      .getByRole('button', { name: vi.export.confirmTrimButton, exact: true })
+      .click({ timeout: 120_000 });
+
+    // Dựng xong thì thẻ lịch sử xuất hiện với menu ⋯ của nó.
+    const menu = page.getByRole('button', { name: /^Thao tác:/ });
+    await expect(menu).toHaveCount(1, { timeout: 200_000 });
+    const before = await (await request.get(`${API}/projects/${slug}/renders`)).json();
+    expect(before).toHaveLength(1);
+
+    // Chờ làm mới lịch sử/dự án sau khi dựng xong rồi mới thao tác (tránh bấm giữa lúc vẽ lại).
+    await expect(page.getByText(vi.export.done, { exact: true }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+
+    await menu.click();
+    await page.getByRole('menuitem', { name: vi.export.history.remove, exact: true }).click();
+    const dialog = page.getByRole('alertdialog', { name: vi.export.history.deleteTitle });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: vi.export.history.remove, exact: true }).click();
+
+    await expect(page.getByText(vi.export.history.deleted, { exact: true })).toBeVisible();
+    await expect(menu).toHaveCount(0);
+    const after = await (await request.get(`${API}/projects/${slug}/renders`)).json();
+    expect(after).toHaveLength(0);
+  } finally {
+    await deleteProject(request, slug);
   }
 });
 

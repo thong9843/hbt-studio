@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { vi } from '../frontend/src/i18n/vi';
+import { deleteProject } from './helpers';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -76,6 +77,6 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
     await expect(backups).toBeHidden();
     await expect(more).toBeFocused();
   } finally {
-    if (slug) await request.delete(`${API}/projects/${slug}`);
+    await deleteProject(request, slug);
   }
 });

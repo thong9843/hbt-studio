@@ -653,9 +653,9 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 **Mục theo dõi:** một test pytest từng rớt đúng một lần khi máy đang bận, chưa tái hiện được. CI đã in tên test rớt (`scripts/ci_annotate.py`); nếu rớt lại thì ghi tên test và điều kiện vào đây rồi điều tra.
 
 ### M4 · Hoàn thiện
-- [ ] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
-- [ ] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
-- [ ] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
+- [x] Whisper làm mặc định, fallback khoảng lặng; hiển thị phương pháp đã dùng
+- [x] Whisper chọn model/thiết bị theo phần cứng (`WHISPER_MODEL=auto`, mục 5.2), giới hạn thời gian trong Cài đặt, rơi về khoảng lặng kèm log; cập nhật `.env.example` và `config.py`
+- [x] `python -m cli bench-align <dự án> [--models small,medium,large-v3]`: thời gian, tỉ lệ âm tiết khớp kịch bản, độ lệch mốc cắt cảnh so với căn khoảng lặng
 - [x] Lint nội dung + trang chỉnh danh sách từ
 - [x] Thư viện nhạc + tự chọn đoạn nhạc + ghi công tự động (Đợt 2a/2b)
 - [x] `publish.txt` + nút sao chép (khối `[Thumbnail]` đủ 3 dòng)
@@ -677,7 +677,7 @@ Lưu tự động (debounce 1 s) khi sửa project; có chỉ báo "Đã lưu".
 
 Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0`. Đặc tả đầy đủ ở mục 13. Mỗi commit: `npm run lint && npm run test` xanh. Không sửa `backend/hbt/pipeline/` (giữ `PIPELINE_VERSION` của `v0.5.1`).
 
-- [ ] **Đợt 0 · Tài liệu:** PLAN/IMPLEMENT mục M5 và mục 13, DESIGN-HBT.md v2, CLAUDE.md (`docs(M5)`); sửa dòng nhật ký 26/10 bị vỡ (`docs(plan)`).
+- [x] **Đợt 0 · Tài liệu:** PLAN/IMPLEMENT mục M5 và mục 13, DESIGN-HBT.md v2, CLAUDE.md (`docs(M5)`); sửa dòng nhật ký 26/10 bị vỡ (`docs(plan)`).
 - [x] **Đợt 1 · Backend khối JSON:** `backend/hbt/script.py` (parse, gộp, K1–K12 và K6b, đo 888 px) · `backend/hbt/api/script.py` (`script/check`, `script/apply`) · `backend/hbt/backups.py` (`backups`, `restore`) · (B′) `render_seconds` + `align_cached` trong `jobs.py` và `/renders` · (B6) `cover`, `last_final` trong `GET /projects`.
 - [x] **Đợt 2 · Nền giao diện:** `tokens.css` v2 sáng/tối · thành phần dùng chung (Button, IconButton, Chip, Switch, Card, Badge, Input, Toast, Dialog, Progress, Skeleton) đủ trạng thái mục 13.B3 · AppShell + thanh trái · reduced-motion · logo. Xong 27/10/2026 (nhánh `feat/m5-ui-json`): token v2, 10 thành phần + Menu/Drawer, AppShell, trang mẫu `/dev/ui` (quyết định ở 13.B7).
 - [x] **Đợt 3a:** Trang chủ, Dự án, màn trống, hộp Video mới. Xong 28/10/2026 (quyết định ở 13.B8).
@@ -1025,3 +1025,15 @@ Nhãn lưới dự án suy từ hai trường này và `last_render` (13.B2, dò
 11. **Xoá dự án ở màn Soạn video** (chủ dự án yêu cầu thêm): menu ⋯ cạnh tên dự án có thêm **Xoá dự án** (hộp xác nhận như ở Dự án; `flush()` lưu nốt rồi `DELETE /projects/{slug}`; thành công → Toast, làm mới `['projects']`, về `/projects`; tắt kèm "Đang dựng" khi chính dự án này đang dựng; 409 → Toast).
 12. **Backlog sau v0.6.0 (không làm trong M5):** bộ đếm ký tự đặt **trong** ô nhập, sát phải: ô một dòng căn giữa dọc, textarea ở góc dưới phải; chừa padding để không che chữ, `pointer-events: none`, giữ `aria-describedby`. Cùng với: bìa từ ảnh tải lên, "bài đang dùng" (sau `v1.0.0`).
 13. **Cần chốt (đã chọn phương án an toàn / chủ dự án chấp nhận):** (a) nối lại job chỉ cho job đầu hàng, khoá của job xếp sau còn dựa vào 409 *(chấp nhận)*; (b) cảnh báo rời Cài đặt chỉ khi đổi đường dẫn, không hỏi khi chỉ đổi tham số tìm kiếm; (c) `npm run e2e` dựng Xem nhanh thật bằng FFmpeg ở kịch bản export-settings *(chấp nhận)*; (d) CI của các commit Đợt 4–5 chưa kiểm được (`gh` chưa đăng nhập); (e) `library/music/index.json` vẫn sửa dở, không commit, không stash; (f) xoá lần xuất: nếu đổi tên thư mục thành công nhưng xoá file dở (hiếm), phần còn lại nằm trong `renders/.deleting-<id>` và không hiện trong Lịch sử; (g) job_id của lần xuất hợp lệ gồm cả tên CLI (`20261026-103538-preview`), nên mẫu chấp nhận rộng hơn 12 ký tự hex của job app; (h) `GET /projects/{slug}/renders` đã dùng cho lưới nên không có API mới ngoài DELETE.
+
+### 13.B14 Quyết định đợt `v1.0.0` (chủ dự án duyệt 28/10/2026)
+
+Nhánh `feat/v1-polish` (từ `main` `015b385`, tag `v0.6.0`), tag `v1.0.0`. Không sửa `backend/hbt/pipeline/`, `reference/`, `models.py` (`git diff v0.6.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py` rỗng).
+
+1. **Bộ đếm ký tự nằm trong ô** (`ui/Field.tsx`, `ui.css`): `<span class="ui-counter">` đặt tuyệt đối trong khung `.ui-control` bọc ô, `pointer-events: none`, `aria-describedby` giữ nguyên (id `…-count`). Ô một dòng: căn giữa dọc, sát phải, `padding-right` 72 px; textarea: góc dưới phải, `padding-bottom` 30 px. Chỉ khi có `limit`. Thêm hai prop `count` (số hiển thị thay độ dài ô) và `countTitle`. Áp cho mọi chỗ dùng `ui-counter`: dòng thẻ chữ (`CardEditor`) và ô **Lời đọc** (`VoicePanel`: `limit` 750, `count` = tổng lời đọc cả video, tooltip "Số ký tự lời đọc cả video"). Vì số cả video đã nằm trong ô nên bỏ dòng chữ "Cả video n/750" (khoá `vi.compose.voice.total`); giữ thanh `Progress`, nhãn "Vượt 750 ký tự" và số ký tự của cảnh.
+2. **Dọn file tạm** (`Storage.clean_build`) xoá cả `renders/.deleting-*` còn sót, tính vào `before/after/freed/failed`; không đụng thư mục lần xuất thật. Chữ mô tả ở `vi.export.clean` cập nhật.
+3. **e2e:** hàm dùng chung `e2e/helpers.ts` (`deleteProject`: thử lại khi 409 tối đa 10 s rồi `expect` 204; `createRenderableProject`); mọi e2e có tạo dự án dùng nó. Thêm kịch bản thứ 8 (trong `export-settings.spec.ts`): dựng Xem nhanh xong (xác nhận cắt đuôi giọng mẫu) → menu ⋯ của lần xuất → Xoá → xác nhận → thẻ biến mất và `/renders` rỗng.
+4. **Hai lỗi thật do e2e bắt được, đã sửa:** (a) `DELETE /projects/{slug}` trả 500 khi Windows còn giữ file (vd ảnh xem trước vừa ghi): `Storage.delete` thử lại tới 5 lần cách 0,1 s, vẫn lỗi thì trả **409** (không còn 500); (b) menu ⋯ của thẻ Lịch sử ở hàng cuối bị khối "Dọn file tạm" đè khi rê chuột (hover tạo ngăn xếp riêng bằng `transform`), nên không bấm được Xoá: thẻ có menu đang mở được `z-index: 30` (`.ui-card-link:has(.ui-menu)`).
+5. **README** thêm mục "Hướng dẫn dùng (v1.0)": cài đặt, quy trình làm video thủ công, Dán JSON, lệnh, sự cố; chỉ chữ.
+6. **Không làm (sau `v1.0.0`):** bìa từ ảnh tải lên (cần `models.py` và `thumbnail.py`), "bài đang dùng", các việc máy mới (CUDA, `bench-align`, golden), PostV.
+
