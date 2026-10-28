@@ -599,7 +599,8 @@ textarea.ui-input {
   .ui-nav-item,
   .ui-scene,
   .ui-scene-img,
-  .ui-scene-add {
+  .ui-scene-add,
+  .ui-dot {
     transform: none !important;
   }
   .ui-switch::after {
@@ -757,4 +758,55 @@ textarea.ui-input {
 .ui-scene-add:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---- Chấm màu thẻ chữ (Mực / Chính / Nhấn / Tuỳ chọn) ---- */
+.ui-dot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--line-input);
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--text);
+  cursor: pointer;
+  outline: 3px solid transparent;
+  outline-offset: 1px;
+  transition:
+    transform var(--dur-press) var(--ease),
+    outline-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-dot:hover {
+    border-color: var(--text);
+  }
+}
+.ui-dot:active {
+  transform: scale(0.94);
+}
+.ui-dot[aria-pressed='true'],
+.ui-dot[data-on='true'] {
+  outline-color: var(--accent);
+  border-color: var(--text);
+}
+.ui-dot:focus-visible,
+.ui-dot:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ui-dot input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+  cursor: pointer;
 }
