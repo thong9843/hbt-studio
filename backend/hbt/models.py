@@ -57,6 +57,9 @@ def is_valid_slug(slug: str) -> bool:
     return True
 
 
+COVER_IMAGE_RE = re.compile(r"images/cover\.(png|jpg|jpeg|webp)")
+
+
 def _check_color(value: str, *, allow_names: bool) -> str:
     if HEX_COLOR.match(value) or (allow_names and value in ("ink", "primary", "accent")):
         return value
@@ -166,11 +169,20 @@ class Thumbnail(_Model):
     lines: list[str] = Field(min_length=2, max_length=3)
     series: str = ""
     accent: str = "#FFD43B"
+    # Ảnh bìa riêng tải lên (None = dùng ảnh của cảnh `scene`); chỉ nhận `images/cover.<ext>`.
+    image: str | None = None
 
     @field_validator("accent")
     @classmethod
     def _color(cls, v: str) -> str:
         return _check_color(v, allow_names=False)
+
+    @field_validator("image")
+    @classmethod
+    def _cover_image(cls, v: str | None) -> str | None:
+        if v is not None and not COVER_IMAGE_RE.fullmatch(v):
+            raise ValueError("thumbnail.image chỉ nhận images/cover.(png|jpg|jpeg|webp)")
+        return v
 
 
 class Project(_Model):
