@@ -4,14 +4,17 @@ import { Link, NavLink, useMatch } from 'react-router-dom';
 import { fetchHealth, type Health } from '../api/client';
 import { api } from '../api/endpoints';
 import { useNewProject } from '../hooks/newProject';
+import { useTheme } from '../hooks/useTheme';
 import { vi } from '../i18n/vi';
 import {
   FilmIcon,
   FolderIcon,
   HomeIcon,
+  MoonIcon,
   MusicIcon,
   PlusIcon,
   SettingsIcon,
+  SunIcon,
   UploadIcon,
 } from './icons';
 import { Progress } from './ui/Progress';
@@ -131,6 +134,28 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
   );
 }
 
+/** Nút Sáng ↔ Tối: chữ và biểu tượng là chế độ hiện tại; thu 72 px chỉ còn biểu tượng. */
+function ThemeToggle({ mini }: { mini: boolean }) {
+  const { theme, toggle } = useTheme();
+  const dark = theme === 'dark';
+  const T = vi.nav.theme;
+  const label = dark ? T.dark : T.light;
+  const action = dark ? T.toLight : T.toDark;
+  return (
+    <button
+      type="button"
+      className={cx('ui-nav-item w-full', mini && 'justify-center px-0')}
+      aria-pressed={dark}
+      aria-label={action}
+      title={mini ? action : undefined}
+      onClick={toggle}
+    >
+      <span className="shrink-0">{dark ? <MoonIcon /> : <SunIcon />}</span>
+      {!mini && <span className="truncate">{label}</span>}
+    </button>
+  );
+}
+
 /** Thẻ tiến độ dựng ở chân thanh trái; chỉ hiện khi có `render`. */
 export function RenderCard({ render, mini }: { render: RenderProgress; mini: boolean }) {
   const pct = Math.round(render.percent);
@@ -197,6 +222,9 @@ export function SideNav({ mini, render }: Props) {
       </nav>
 
       {render && <RenderCard render={render} mini={mini} />}
+      <div className="py-1">
+        <ThemeToggle mini={mini} />
+      </div>
       <Environment mini={mini} />
     </aside>
   );

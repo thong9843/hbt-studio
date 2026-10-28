@@ -43,6 +43,12 @@ export const vi = {
     env: 'Trạng thái môi trường',
     renderProgress: 'Đang dựng',
     renderProgressBar: 'Tiến độ dựng',
+    theme: {
+      light: 'Sáng',
+      dark: 'Tối',
+      toDark: 'Đổi sang chế độ tối',
+      toLight: 'Đổi sang chế độ sáng',
+    },
   },
   ui: {
     busy: 'Đang chạy',
