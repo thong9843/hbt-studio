@@ -7,6 +7,24 @@ import { IconButton } from './IconButton';
 import { Switch } from './Switch';
 
 describe('Button', () => {
+  it('only ever renders a <button>; links use <a class="ui-btn"> instead', () => {
+    const { container } = render(
+      <>
+        <Button>Một</Button>
+        <Button tone="accent" busy>
+          Hai
+        </Button>
+        <Button disabled reason="Thiếu ảnh">
+          Ba
+        </Button>
+      </>,
+    );
+    expect(container.querySelectorAll('a')).toHaveLength(0);
+    const nodes = Array.from(container.querySelectorAll('.ui-btn'));
+    expect(nodes).toHaveLength(3);
+    for (const n of nodes) expect(n.tagName).toBe('BUTTON');
+  });
+
   it('renders each tone as a class and fires onClick', async () => {
     const onClick = vi.fn();
     render(

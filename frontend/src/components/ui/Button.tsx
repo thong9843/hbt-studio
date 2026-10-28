@@ -15,7 +15,11 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
 }
 
-/** Nút viên thuốc cao 48 (54 ở cột xem trước). Ba màu chính: mực, vàng, đỏ. */
+/**
+ * Nút viên thuốc cao 48 (54 ở cột xem trước). Ba màu chính: mực, vàng, đỏ.
+ * Luôn render `<button>`. Liên kết (điều hướng, tải file) viết `<a className="ui-btn ui-btn-soft">`
+ * hoặc `<Link className="ui-btn ...">`, không truyền `href` / `to` / `as` vào đây.
+ */
 export function Button({
   tone = 'ink',
   size = 'md',
