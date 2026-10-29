@@ -43,5 +43,10 @@
     "accent_radius": 20,
     "max_lines": 4
   },
-  "censor": { "blur_radius": 11, "stars": "***" }
+  "censor": { "blur_radius": 11, "stars": "***" },
+  "anim": {
+    "smooth": { "in": 0.35, "slide": 24, "change": 0.3, "out": 0.25 },
+    "bounce": { "duration": 0.3, "from": 0.92, "peak": 1.04, "peak_at": 0.6, "steps": 12 },
+    "count": { "delay": 0.2, "seconds": 1.0, "steps": 24 }
+  }
 }

@@ -10,13 +10,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
-from hbt.postv.card import (
-    composite_preview,
-    hook_text_from_post,
-    load_template,
-    render_card,
-    render_hook,
-)
+from hbt.postv.card import composite_preview, load_template, render_project_card
 from hbt.postv.censor import compile_censor
 from hbt.postv.models import PostvProject
 from hbt.postv.parse import MAX_TEXT, ParseResult, parse_threads_text
@@ -93,27 +87,12 @@ def card_png(
         else None
     )
     tpl = load_template(project.template if project.template == "story_cards" else "story_cards")
-    if kind == "hook":
-        text = project.hook.text.strip() or hook_text_from_post(project.post.text)
-        image, _ = render_hook(text, project.hook.accent, tpl, censor, cfg.text)
-    elif kind == "post":
-        p = project.post
-        image, _ = render_card(
-            p.handle, p.age, p.card_text or p.text, likes=p.likes, replies=p.replies,
-            reposts=p.reposts, shares=p.shares, views=p.views, tpl=tpl, censor=censor,
-            censor_mode=cfg.text,
-        )  # fmt: skip
-    else:
-        comment = next((c for c in project.comments if c.id == ref), None)
+    if kind == "comment":
         if ref is None:
             raise Unprocessable("Cần `ref` (id bình luận) cho thẻ bình luận")
-        if comment is None:
+        if not any(c.id == ref for c in project.comments):
             raise NotFound(f"Không có bình luận '{ref}'")
-        image, _ = render_card(
-            comment.handle, comment.age, comment.text, likes=comment.likes, replies=comment.replies,
-            reposts=comment.reposts, shares=comment.shares, views=comment.views, tpl=tpl,
-            censor=censor, censor_mode=cfg.text,
-        )  # fmt: skip
+    image = render_project_card(project, kind, ref, tpl, censor, cfg.text)
     out = image if layer else composite_preview(image, _preview_background(project, state))
     if w and w < out.width:
         out = out.resize((w, round(out.height * w / out.width)), Image.LANCZOS)

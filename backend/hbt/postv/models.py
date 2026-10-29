@@ -130,6 +130,7 @@ class PostvSettings(_Model):
     aligner: Literal["auto", "whisper", "silence"] = "auto"
     outro: bool = True
     card_animation: Literal["smooth", "bounce"] = "smooth"
+    count_up: bool = True  # số like, bình luận, chia sẻ trên thẻ đếm từ 0 (D20)
     censor: Censor = Field(default_factory=Censor)
 
     @field_validator("fps")

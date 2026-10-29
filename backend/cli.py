@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -15,6 +16,9 @@ from hbt.pipeline.bench import bench_align, format_rows
 from hbt.pipeline.ffutil import FFmpegError
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
 from hbt.pipeline.whisper import DEFAULT_TIMEOUT, WhisperConfig
+from hbt.postv.censor import CensorStore
+from hbt.postv.models import project_kind
+from hbt.postv.render import render_postv
 from hbt.sensitive import SensitiveStore
 
 
@@ -85,6 +89,19 @@ def current_sensitive_words(project_dir: Path):
     return SensitiveStore(workspace).load()
 
 
+def project_workspace(project_dir: Path) -> Path:
+    parent = project_dir.resolve().parent
+    return parent.parent if parent.name == "projects" else parent
+
+
+def _is_postv(project_dir: Path) -> bool:
+    try:
+        data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False  # để đường dựng HBT báo lỗi đọc project như cũ
+    return project_kind(data) == "postv"
+
+
 def _describe(err: ValidationError) -> str:
     return "\n".join(
         f"  {'.'.join(str(p) for p in e['loc']) or '(gốc)'}: {e['msg']}" for e in err.errors()
@@ -133,7 +150,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         options.sensitive_words = current_sensitive_words(args.project_dir)
-        result = render_project(args.project_dir, options, progress=_progress_printer())
+        if _is_postv(args.project_dir):  # dự án PostV: bộ dựng riêng, cùng cách báo kết quả
+            words = CensorStore(project_workspace(args.project_dir)).load()
+            result = render_postv(
+                args.project_dir, options, progress=_progress_printer(), censor_words=words
+            )
+        else:
+            result = render_project(args.project_dir, options, progress=_progress_printer())
     except TailTrimNeedsConfirmation as e:
         print(
             f"\nDỪNG: {e}\nChạy lại với --allow-long-trim nếu đúng là phần cần cắt.",

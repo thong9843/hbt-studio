@@ -338,6 +338,41 @@ def render_card(
     return img, top + height
 
 
+def _scaled(value: int | None, k: float) -> int | None:
+    return None if value is None else int(round(value * k))
+
+
+def render_project_card(
+    project,
+    kind: CardKind,
+    ref: str | None,
+    tpl: dict,
+    censor: list[CensorMatcher] | None,
+    censor_mode: CensorMode,
+    count_scale: float = 1.0,
+) -> Image.Image:
+    """Lớp thẻ RGBA 1080×1920 của dự án PostV. `count_scale` ∈ [0, 1] thu nhỏ bốn số like,
+    bình luận, đăng lại, chia sẻ (hiệu ứng số chạy tăng); lượt xem giữ nguyên.
+    `ref` không có trong dự án thì ném `LookupError`."""
+    if kind == "hook":
+        text = project.hook.text.strip() or hook_text_from_post(project.post.text)
+        return render_hook(text, project.hook.accent, tpl, censor, censor_mode)[0]
+    if kind == "post":
+        src, text = project.post, project.post.card_text or project.post.text
+    else:
+        src = next((c for c in project.comments if c.id == ref), None)
+        if src is None:
+            raise LookupError(ref)
+        text = src.text
+    image, _ = render_card(
+        src.handle, src.age, text, likes=_scaled(src.likes, count_scale),
+        replies=_scaled(src.replies, count_scale), reposts=_scaled(src.reposts, count_scale),
+        shares=_scaled(src.shares, count_scale), views=src.views, tpl=tpl, censor=censor,
+        censor_mode=censor_mode,
+    )  # fmt: skip
+    return image
+
+
 def hook_text_from_post(text: str, limit: int = 60) -> str:
     """Chữ thẻ tiêu đề khi chưa nhập: câu đầu của bài, cắt ở từ nếu dài quá `limit`."""
     s = _normalise(text).replace(chr(10), " ")
