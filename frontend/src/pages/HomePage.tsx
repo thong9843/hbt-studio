@@ -13,6 +13,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
+import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus } from '../utils/projectStatus';
 import { latestExport, readiness } from '../utils/readiness';
 
@@ -46,6 +47,7 @@ function Continue({ project }: { project: ProjectSummary }) {
   const brief = useQuery({
     queryKey: ['project-brief', project.slug],
     queryFn: () => api.getProject(project.slug),
+    enabled: project.kind !== 'postv', // PostV chưa có chấm nguyên liệu (PV6)
   });
   const ready = brief.data ? readiness(brief.data) : null;
   const series = brief.data?.series;
@@ -73,10 +75,10 @@ function Continue({ project }: { project: ProjectSummary }) {
             <Dot on={ready.cover} label={t.dot.cover} />
           </ul>
         ) : (
-          !brief.isError && <Skeleton width={260} height={20} />
+          project.kind !== 'postv' && !brief.isError && <Skeleton width={260} height={20} />
         )}
         <div className="mt-auto flex flex-wrap gap-2 pt-2">
-          <Link to={`/p/${project.slug}`} className="ui-btn ui-btn-ink">
+          <Link to={projectHref(project)} className="ui-btn ui-btn-ink">
             {t.open}
           </Link>
           {video && (
@@ -146,7 +148,7 @@ function LastExport({ project, render }: { project: ProjectSummary; render: Rend
 
 function RecentCard({ project }: { project: ProjectSummary }) {
   const status = projectStatus(project);
-  const href = `/p/${project.slug}`;
+  const href = projectHref(project);
   return (
     <Card as="li" padded={false} className="ui-card-link overflow-hidden">
       <Link to={href} aria-label={`${vi.projects.open}: ${project.title}`} className="block">

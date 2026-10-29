@@ -2,8 +2,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
+import type { ProjectKind } from '../api/types';
 import { NewProjectContext } from '../hooks/newProject';
 import { vi } from '../i18n/vi';
+import { projectHref } from '../utils/projectHref';
 import { ErrorNote } from './ErrorNote';
 import { Button } from './ui/Button';
 import { Chip } from './ui/Chip';
@@ -23,15 +25,21 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
   const [preset, setPreset] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [sceneCount, setSceneCount] = useState(DEFAULT_SCENES);
+  const [kind, setKind] = useState<ProjectKind>('video');
 
   const series = preset === OTHER ? custom.trim() : preset;
   const create = useMutation({
-    mutationFn: () => api.createProject({ title: title.trim(), series, scene_count: sceneCount }),
+    mutationFn: () =>
+      api.createProject(
+        kind === 'postv'
+          ? { title: title.trim(), series, kind }
+          : { title: title.trim(), series, scene_count: sceneCount },
+      ),
     onSuccess: (project) => {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       reset();
       onClose();
-      navigate(`/p/${project.slug}`);
+      navigate(projectHref({ slug: project.slug, kind }));
     },
   });
 
@@ -40,6 +48,7 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
     setPreset('');
     setCustom('');
     setSceneCount(DEFAULT_SCENES);
+    setKind('video');
     create.reset();
   }
 
@@ -114,17 +123,32 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
           )}
         </div>
         <div className="ui-field">
-          <span className="ui-label" id="np-scenes-label">
-            {t.scenes}
+          <span className="ui-label" id="np-kind-label">
+            {t.kind}
           </span>
-          <div className="flex flex-wrap gap-2" role="group" aria-labelledby="np-scenes-label">
-            {SCENE_COUNTS.map((n) => (
-              <Chip key={n} small selected={sceneCount === n} onClick={() => setSceneCount(n)}>
-                {n}
-              </Chip>
-            ))}
+          <div className="flex flex-wrap gap-2" role="group" aria-labelledby="np-kind-label">
+            <Chip selected={kind === 'video'} onClick={() => setKind('video')}>
+              {t.kindVideo}
+            </Chip>
+            <Chip selected={kind === 'postv'} onClick={() => setKind('postv')}>
+              {t.kindPostv}
+            </Chip>
           </div>
         </div>
+        {kind === 'video' && (
+          <div className="ui-field">
+            <span className="ui-label" id="np-scenes-label">
+              {t.scenes}
+            </span>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="np-scenes-label">
+              {SCENE_COUNTS.map((n) => (
+                <Chip key={n} small selected={sceneCount === n} onClick={() => setSceneCount(n)}>
+                  {n}
+                </Chip>
+              ))}
+            </div>
+          </div>
+        )}
         <ErrorNote error={create.error} />
       </form>
     </Dialog>

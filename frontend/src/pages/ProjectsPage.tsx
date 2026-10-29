@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
-import type { ProjectSummary } from '../api/types';
+import { isPostv, type ProjectSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
@@ -13,6 +13,7 @@ import { useNewProject } from '../hooks/newProject';
 import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
+import { projectHref } from '../utils/projectHref';
 
 const SKELETONS = [0, 1, 2, 3];
 
@@ -35,7 +36,7 @@ export function ProjectsPage() {
     mutationFn: (slug: string) => api.duplicateProject(slug),
     onSuccess: (copy) => {
       void refresh();
-      navigate(`/p/${copy.slug}`);
+      navigate(projectHref({ slug: copy.slug, kind: isPostv(copy) ? 'postv' : 'video' }));
     },
     onError: (e, slug) => toast.error(e, () => duplicate.mutate(slug)),
   });

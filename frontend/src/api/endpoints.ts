@@ -9,6 +9,7 @@ import type {
   Thumbnail,
   MusicEntry,
   NewMusicInput,
+  AnyProject,
   Project,
   ProjectCreate,
   ProjectSummary,
@@ -33,13 +34,15 @@ export const projectFileUrl = (slug: string, rel: string) => fileUrl(`projects/$
 export const api = {
   listProjects: () => apiGet<ProjectSummary[]>('/projects'),
   createProject: (input: ProjectCreate) =>
-    apiRequest<Project>('POST', '/projects', { json: input }),
+    apiRequest<AnyProject>('POST', '/projects', { json: input }),
   getProject: (slug: string) => apiGet<Project>(`/projects/${enc(slug)}`),
+  /** Đọc dự án của cả hai loại; dùng khi chưa biết `kind` (trang mở theo đường dẫn). */
+  getAnyProject: (slug: string) => apiGet<AnyProject>(`/projects/${enc(slug)}`),
   saveProject: (slug: string, project: Project) =>
     apiRequest<Project>('PUT', `/projects/${enc(slug)}`, { json: project }),
   deleteProject: (slug: string) => apiRequest<void>('DELETE', `/projects/${enc(slug)}`),
   duplicateProject: (slug: string) =>
-    apiRequest<Project>('POST', `/projects/${enc(slug)}/duplicate`, { json: {} }),
+    apiRequest<AnyProject>('POST', `/projects/${enc(slug)}/duplicate`, { json: {} }),
   reorderScenes: (slug: string, order: number[]) =>
     apiRequest<Project>('POST', `/projects/${enc(slug)}/scenes/reorder`, { json: { order } }),
   deleteScene: (slug: string, sceneIndex: number) =>
