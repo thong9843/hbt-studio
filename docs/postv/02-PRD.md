@@ -40,7 +40,7 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | D20 | Số lượt xem/like trên thẻ **chạy tăng dần tới giá trị nhập**, bật mặc định khi có giá trị                                                                                                                                               | Chủ dự án 29/10                |
 | D21 | Hiệu ứng thẻ do tôi đề xuất (bộ "Mượt" mặc định, "Nảy" tuỳ chọn), duyệt bằng mắt ở PV5                                                                                                                                                  | Chủ dự án 29/10                |
 | D22 | Ghi dòng nguồn vào `publish.txt`; nút Xoá nguồn; giọng VieNeu có sẵn trước, nhân bản sau; giấy phép trọng số VieNeu **bỏ qua** (chủ dự án: miễn phí)                                                                                    | Chủ dự án 29/10                |
-| D23 | Bài gốc phải có **số like, bình luận, chia sẻ** (nhập tay, hoặc đọc từ ảnh chụp trang ở mức Should); lượt xem và đăng lại là tuỳ chọn. Số dạng `27.6K`, `1,5K` được đọc thành số                                                        | Chủ dự án 29/10 + ảnh mẫu      |
+| D23 | Bài gốc phải có **số like, bình luận, chia sẻ** (nhập tay; **chỉ để hiển thị trên thẻ**, không đọc thành lời, không tự trích từ chữ hay ảnh); lượt xem và đăng lại là tuỳ chọn. Số dạng `27.6K`, `1,5K` được đọc thành số               | Chủ dự án 29/10 + ảnh mẫu      |
 | D24 | Từ nhạy cảm **mức chặn** không chặn xuất mà bị che: tiếng bíp đè lên từ + chữ làm mờ hoặc `***` (phụ đề và thẻ); nhóm chửi thề mới đặt mức chặn. Mức cảnh báo chỉ nhắc                                                                  | Chủ dự án 29/10 (C-09, C-17)   |
 
 ## 3. User story và tiêu chí chấp nhận
@@ -65,7 +65,7 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | Mức        | Nội dung                                                                                                                                                                                                          |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Must**   | US1–US6, US8–US11 · mẫu "Thẻ theo đoạn" (thẻ hook, bài, bình luận, đoạn không thẻ) · schema `kind:"postv"` · thư viện nền có giấy phép · VieNeu local hoặc nhập file · lint nguồn · màn 5 bước theo DESIGN-HBT v2 |
-| **Should** | Xem nhanh (US7) · số like chạy tăng dần trên thẻ · nhập `.txt/.md` · OCR ảnh chụp trang Threads (đọc chữ và số liệu; ảnh mẫu `workspace/samples/threads-02.png`) · VieNeu qua CUDA                                |
+| **Should** | Xem nhanh (US7) · số like chạy tăng dần trên thẻ · nhập `.txt/.md` · OCR ảnh chụp trang Threads (chỉ đọc chữ; số liệu không cần đọc) · VieNeu qua CUDA                                                            |
 | **Could**  | Bình luận trả lời lồng nhau (đường kẻ dọc) · sticker từ nguồn miễn phí, không cần ghi công (K-25) · đổi nền theo đoạn (khác nền liền của D6) · `ScriptProvider` gợi ý chọn đoạn (GĐ2)                             |
 | **Won't**  | Xem mục 5                                                                                                                                                                                                         |
 
@@ -138,9 +138,9 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 
 ## 8. Chỉ số thành công
 
-| Chỉ số                                             | Ngưỡng                                                          |
-| -------------------------------------------------- | --------------------------------------------------------------- |
-| Thời gian làm 1 video PostV (từ dán đến file xuất) | ≤ 20 phút thao tác + thời gian dựng                             |
-| Thời gian dựng bản đẹp 50 fps, ~60 s, máy cũ       | **[?]** đo ở PV5; mục tiêu ≤ video "muỗi" (≈ 145–170 s) [SL]    |
-| Chữ phụ đề lệch lời đọc                            | Xem bằng mắt/tai, không cụm nào lệch (cùng tiêu chí golden HBT) |
-| Video HBT cũ                                       | Không đổi (US10)                                                |
+| Chỉ số                                             | Ngưỡng                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Thời gian làm 1 video PostV (từ dán đến file xuất) | ≤ 20 phút thao tác + thời gian dựng                                                                                                                                                                                                                                               |
+| Thời gian dựng bản đẹp, máy cũ                     | **Đo PV0** (phần ffmpeg, thân 60 s + outro, chưa tính giọng/Whisper): 50 fps 100 s, 60 fps 113 s, 30 fps 61 s (≈ 1,6–1,8 s mỗi giây video, so với ≈ 3,3–3,9 của video HBT). Cộng sinh giọng ≈ độ dài giọng và Whisper ≈ 0,65× độ dài giọng. Mục tiêu tổng ≤ 4 phút cho video 60 s |
+| Chữ phụ đề lệch lời đọc                            | Xem bằng mắt/tai, không cụm nào lệch (cùng tiêu chí golden HBT)                                                                                                                                                                                                                   |
+| Video HBT cũ                                       | Không đổi (US10)                                                                                                                                                                                                                                                                  |
