@@ -418,6 +418,8 @@ Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 bu
 | Chưa làm     | Hiệu ứng thẻ khi dựng, số chạy tăng, chọn/nối nền khi dựng (PV5); xoá/sửa clip trong thư viện (như `/music`, chưa có)                                                                                                                                                                                                                                                                   |
 | Test         | `test_postv_backgrounds` (16, cần FFmpeg, mỗi test dưới 3 s), `test_postv_card` (27); Vitest `PostvBackgrounds` (11) và cập nhật `PostvFlow`                                                                                                                                                                                                                                            |
 
+**Tồn (PV3):** thư viện nền nhận video dọc từ **720×1280** (đặc tả gốc ≥ 1080×1920); clip 720p phóng lên 1080×1920 có thể mềm. Clip dưới 1080×1920 hiện nhãn "Dưới 1080×1920" trong thư viện. Siết lại hay không: quyết ở PV5 khi đã xem video dựng thật.
+
 ## 9. Test chung
 
 | Loại          | Ca                                                                                                                                                                   |
