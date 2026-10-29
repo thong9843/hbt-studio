@@ -16,7 +16,7 @@ from hbt.jobs import Job
 router = APIRouter(tags=["render"])
 
 URL_KEYS = (
-    "video", "srt", "publish", "log", "cover", "youtube_cover", "trimmed_tail",
+    "video", "srt", "publish", "log", "cover", "youtube_cover", "trimmed_tail", "voice",
 )  # fmt: skip
 POLL_SECONDS = 0.2
 
@@ -78,7 +78,7 @@ def list_active_jobs(state: State):
         {
             "id": j.id,
             "slug": j.slug,
-            "kind": "preview" if j.preview else "final",
+            "kind": "voice" if j.kind == "voice" else ("preview" if j.preview else "final"),
             "status": j.status,
             "progress": round(j.progress, 1),
             "step": j.step,

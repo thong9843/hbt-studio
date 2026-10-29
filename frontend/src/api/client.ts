@@ -78,6 +78,9 @@ export interface Health {
   ffmpeg: boolean;
   whisper: boolean;
   gpu: boolean;
+  /** PostV: VieNeu đã cài và có trọng số. */
+  vieneu: boolean;
+  vieneu_note: string | null;
   /** Encoder/filter FFmpeg còn thiếu; ["ffmpeg"] nếu không chạy được FFmpeg. */
   missing: string[];
 }

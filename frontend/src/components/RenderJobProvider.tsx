@@ -61,9 +61,8 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
     api
       .listActiveJobs()
       .then((rows) => {
-        const head = Array.isArray(rows)
-          ? (rows.find((r) => r.status === 'running') ?? rows[0])
-          : null;
+        const renders = Array.isArray(rows) ? rows.filter((r) => r.kind !== 'voice') : [];
+        const head = renders.find((r) => r.status === 'running') ?? renders[0] ?? null;
         if (!head || jobIdRef.current !== null) return; // người dùng đã tự bắt đầu một job
         setSlug(head.slug);
         setOptions({ preview: head.kind === 'preview' });

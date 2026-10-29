@@ -34,7 +34,7 @@ from hbt.models import (
 )
 from hbt.pipeline.cache import sha256_file
 from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
-from hbt.postv.models import PostvProject, PostvVoice, project_kind
+from hbt.postv.models import PostvProject, project_kind
 
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
@@ -620,7 +620,12 @@ class Storage:
             shutil.move(src, folder / rel)
             if kind == "voice":
                 # điểm cắt cũ không còn đúng với file mới; PostV: giọng nhập vào là engine `file`
-                project.voice = PostvVoice(engine="file", file=rel) if postv else Voice(file=rel)
+                if postv:  # giữ giọng đã chọn từng người (cast, seed) khi đổi sang file nhập vào
+                    project.voice = project.voice.model_copy(
+                        update={"engine": "file", "file": rel, "trim_end": None}
+                    )
+                else:
+                    project.voice = Voice(file=rel)
             else:
                 project.music = Music(file=rel)
         else:

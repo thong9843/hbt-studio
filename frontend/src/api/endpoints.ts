@@ -1,6 +1,8 @@
 import { apiGet, apiPostBlob, apiRequest } from './client';
 import type {
   ActiveJob,
+  ProjectVoice,
+  VoiceList,
   AppSettings,
   BackupEntry,
   Job,
@@ -144,11 +146,15 @@ export const api = {
     return `/api/projects/${enc(slug)}/postv/card.png?${q}`;
   },
   attachLibraryMusic: (slug: string, id: string) =>
-    apiRequest<Project>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { id } }),
+    apiRequest<AnyProject>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { id } }),
 
   lint: (slug: string) => apiRequest<LintResult>('POST', `/projects/${enc(slug)}/lint`),
   startRender: (slug: string, options: RenderOptions) =>
     apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/render`, { json: options }),
+  listVoices: () => apiGet<VoiceList>('/voices'),
+  getProjectVoice: (slug: string) => apiGet<ProjectVoice>(`/projects/${enc(slug)}/voice`),
+  synthesizeVoice: (slug: string) =>
+    apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/voice/synthesize`),
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),

@@ -53,6 +53,18 @@ backend\.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 
 Cần driver NVIDIA hỗ trợ CUDA 12. Không có GPU thì app vẫn chạy, chỉ chậm hơn hoặc dùng chế độ căn theo khoảng lặng.
 
+#### Giọng VieNeu cho PostV (tuỳ chọn)
+
+PostV có thể tự sinh giọng đọc tiếng Việt bằng **VieNeu-TTS**, chạy trên CPU (không cần GPU), trong một môi trường Python riêng để không làm lệch phiên bản gói của app:
+
+```powershell
+py -3.11 -m venv backend\.venv-tts
+backend\.venv-tts\Scripts\pip install -r backend
+equirements-tts.txt
+```
+
+`requirements-tts.txt` ghim `vieneu==3.8.3`. Trọng số mô hình (khoảng 580 MB) nằm ở `models\hf_vieneu`. App **không tự tải** trọng số: lần đầu hãy chạy thử một lần có mạng (đặt `HF_HOME` về `models\hf_vieneu`) hoặc chép thư mục `models\hf_vieneu` từ máy đã có. Thiếu gói hoặc thiếu trọng số thì thanh trái ghi "VieNeu: thiếu", bước 3 của PostV nói rõ thiếu gì, và bạn vẫn nhập file giọng như bình thường. Đọc khoảng 1 giây cho mỗi giây giọng trên CPU. Test VieNeu thật (`pytest -m slow`) tự bỏ qua nếu chưa cài.
+
 ### 3. Chạy
 
 ```powershell
@@ -161,7 +173,7 @@ backend\.venv\Scripts\python -m cli bench-align workspace/projects/<tên-dự-á
 
 ## Kiểm thử trình duyệt (e2e)
 
-Chỉ chạy trên máy cá nhân, không nằm trong CI. Dùng trình duyệt **Microsoft Edge** có sẵn của Windows (không phải tải trình duyệt). Tám kịch bản: tạo project và lưu, nút Sáng/Tối, màn Âm thanh, Xem nhanh và Huỷ, xoá lần xuất ở Lịch sử, đổi cài đặt, dán JSON kịch bản, Tab/focus. Mỗi kịch bản tự xoá project thử bằng `DELETE` khi xong (và báo lỗi nếu không xoá được). Kịch bản Xem nhanh và xoá lần xuất dựng video thật bằng FFmpeg nên mất vài chục giây.
+Chỉ chạy trên máy cá nhân, không nằm trong CI. Dùng trình duyệt **Microsoft Edge** có sẵn của Windows (không phải tải trình duyệt). Chín kịch bản: tạo project và lưu, nút Sáng/Tối, màn Âm thanh, Xem nhanh và Huỷ, xoá lần xuất ở Lịch sử, đổi cài đặt, dán JSON kịch bản, Tab/focus, sinh giọng VieNeu ở bước 3 của PostV (tự bỏ qua nếu máy chưa cài VieNeu). Mỗi kịch bản tự xoá project thử bằng `DELETE` khi xong (và báo lỗi nếu không xoá được). Kịch bản Xem nhanh và xoá lần xuất dựng video thật bằng FFmpeg nên mất vài chục giây.
 
 ```powershell
 npm run e2e

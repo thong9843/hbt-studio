@@ -1,0 +1,2 @@
+# VieNeu voice subprocess (separate venv backend/.venv-tts, see README)
+vieneu==3.8.3
