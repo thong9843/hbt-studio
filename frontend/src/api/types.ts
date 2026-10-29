@@ -307,6 +307,15 @@ export interface PostvProject {
   comments: PostvComment[];
   segments: PostvSegment[];
   template: 'story_cards' | 'fixed_card';
+  /** Thẻ tiêu đề ở giây đầu; trống = lấy câu đầu của bài. */
+  hook: { text: string; accent: string };
+  background: {
+    mode: 'auto' | 'manual';
+    clip_ids: string[];
+    seed: number;
+    start_offset: number | null;
+  };
+  style: { caption: { preset: 'hbt' | 'sample'; highlight_color: string | null } };
   voice: {
     engine: 'vieneu' | 'file';
     voice_id: string | null;
@@ -327,6 +336,30 @@ export interface PostvProject {
 }
 
 export type AnyProject = Project | PostvProject;
+
+/** Clip nền gameplay trong thư viện (`GET /backgrounds`). */
+export interface BackgroundEntry {
+  id: string;
+  file: string;
+  title: string;
+  source: string;
+  license: string;
+  url: string;
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  tags: string[];
+}
+
+export interface NewBackgroundInput {
+  file: File;
+  title: string;
+  source: string;
+  license: string;
+  url?: string;
+  tags?: string;
+}
 
 /** Kết quả `POST /postv/parse` (hàm thuần, không ghi gì). */
 export interface PostvParseResult {

@@ -10,6 +10,8 @@ import type {
   MusicEntry,
   NewMusicInput,
   AnyProject,
+  BackgroundEntry,
+  NewBackgroundInput,
   PostvCheck,
   PostvParseResult,
   PostvProject,
@@ -119,6 +121,28 @@ export const api = {
     return apiRequest<MusicEntry>('POST', '/music', { form });
   },
   libraryMusicUrl: (id: string) => `/api/music/${enc(id)}/audio`,
+  listBackgrounds: () => apiGet<BackgroundEntry[]>('/backgrounds'),
+  addBackground: (input: NewBackgroundInput) => {
+    const form = new FormData();
+    form.set('file', input.file);
+    for (const key of ['title', 'source', 'license', 'url', 'tags'] as const) {
+      form.set(key, input[key] ?? '');
+    }
+    return apiRequest<BackgroundEntry>('POST', '/backgrounds', { form });
+  },
+  backgroundThumbUrl: (id: string) => `/api/backgrounds/${enc(id)}/thumb`,
+  backgroundVideoUrl: (id: string) => `/api/backgrounds/${enc(id)}/video`,
+  /** Ảnh thẻ PostV vẽ ở máy chủ từ dữ liệu đã lưu; `version` đổi sau mỗi lần lưu để tải lại ảnh. */
+  postvCardUrl: (
+    slug: string,
+    opts: { kind: 'hook' | 'post' | 'comment'; ref?: string; w?: number; version?: number },
+  ) => {
+    const q = new URLSearchParams({ kind: opts.kind });
+    if (opts.ref) q.set('ref', opts.ref);
+    if (opts.w) q.set('w', String(opts.w));
+    if (opts.version !== undefined) q.set('v', String(opts.version));
+    return `/api/projects/${enc(slug)}/postv/card.png?${q}`;
+  },
   attachLibraryMusic: (slug: string, id: string) =>
     apiRequest<Project>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { id } }),
 

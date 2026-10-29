@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
 import { PlusIcon } from '../components/icons';
+import { BackgroundLibraryCard } from '../components/postv/BackgroundLibrary';
 import { ProjectCard, ProjectCardSkeleton } from '../components/ProjectCard';
 import { Button } from '../components/ui/Button';
 import { useNewProject } from '../hooks/newProject';
@@ -123,6 +124,8 @@ export function ProjectsPage({ kind }: { kind?: ProjectKind } = {}) {
           </ul>
         )}
       </section>
+
+      {postvPage && <BackgroundLibraryCard />}
 
       {deleting && (
         <ConfirmDialog

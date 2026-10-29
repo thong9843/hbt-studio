@@ -413,7 +413,7 @@ export function PostvSourcePage() {
                 .join(' · ')
             : ' '}
         </p>
-        <PostvCardPreview post={project.post} />
+        <PostvCardPreview slug={project.slug} kind="post" version={savedCount} />
       </aside>
 
       {pending && (

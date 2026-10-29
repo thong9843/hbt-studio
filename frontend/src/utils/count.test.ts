@@ -3,26 +3,19 @@ import cases from '../../../shared/count_cases.json';
 import { formatCount, parseCount } from './count';
 
 describe('parseCount (shared with backend counts.py)', () => {
-  it.each(cases)('$in', ({ in: input, out }) => {
+  it.each(cases.parse)('$in', ({ in: input, out }) => {
     expect(parseCount(input)).toBe(out);
   });
 });
 
 describe('formatCount', () => {
-  it.each([
-    [null, ''],
-    [undefined, ''],
-    [0, '0'],
-    [351, '351'],
-    [1000, '1K'],
-    [1800, '1,8K'],
-    [27600, '27,6K'],
-    [619000, '619K'],
-    [999950, '1M'],
-    [1500000, '1,5M'],
-    [2000000, '2M'],
-  ])('%s → %s', (n, text) => {
-    expect(formatCount(n)).toBe(text);
+  it.each(cases.format)('$n', ({ n, out }) => {
+    expect(formatCount(n)).toBe(out);
+  });
+
+  it('prints nothing for null / undefined', () => {
+    expect(formatCount(null)).toBe('');
+    expect(formatCount(undefined)).toBe('');
   });
 
   it('round-trips what it prints', () => {

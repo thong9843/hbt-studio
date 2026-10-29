@@ -7,6 +7,7 @@ import { ExportTab } from '../pages/ExportTab';
 import { HomePage } from '../pages/HomePage';
 import { PostvLayout } from '../pages/PostvLayout';
 import { PostvPickPage } from '../pages/PostvPickPage';
+import { PostvPreviewPage } from '../pages/PostvPreviewPage';
 import { PostvSoonPage } from '../pages/PostvSoonPage';
 import { PostvSourcePage } from '../pages/PostvSourcePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
@@ -33,7 +34,7 @@ export function App() {
           <Route index element={<PostvSourcePage />} />
           <Route path="pick" element={<PostvPickPage />} />
           <Route path="script" element={<PostvSoonPage step={2} />} />
-          <Route path="preview" element={<PostvSoonPage step={3} />} />
+          <Route path="preview" element={<PostvPreviewPage />} />
           <Route path="export" element={<PostvSoonPage step={4} />} />
         </Route>
         <Route path="settings" element={<SettingsPage />} />
