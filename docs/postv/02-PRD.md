@@ -6,13 +6,13 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 
 ## 1. Mục tiêu
 
-| #   | Mục tiêu                                                                                                              | Số đo                                              |
-| --- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| G1  | Dựng video 9:16 kiểu "đọc bài mạng xã hội trên nền gameplay" từ chữ **người dùng tự dán**, có góc nhìn riêng của kênh | 1 video 35–75 s làm trọn trong app, không terminal |
-| G2  | Dùng lại tối đa phần đã chạy thật của HBT Studio (căn chữ, nhạc, outro, bìa, lint, `publish.txt`, job)                | Không sửa `backend/hbt/pipeline/` ở mốc nào        |
-| G3  | Không làm hỏng video kiểu cũ                                                                                          | Dựng lại "muỗi": framemd5 giống `v1.1.0`           |
-| G4  | An toàn pháp lý: không cào, không gửi yêu cầu tới Threads/Meta, ẩn danh mặc định, dẫn nguồn, có bước duyệt của người  | Test chặn mạng; thẻ không có tên/avatar thật       |
-| G5  | Chạy local, một người dùng, hai máy, **không giả định GPU**                                                           | Đủ chạy trên máy cũ (CPU)                          |
+| #   | Mục tiêu                                                                                                              | Số đo                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| G1  | Dựng video 9:16 kiểu "đọc bài mạng xã hội trên nền gameplay" từ chữ **người dùng tự dán**, có góc nhìn riêng của kênh | 1 video (độ dài tự do, **dưới 2 phút**) làm trọn trong app, không terminal |
+| G2  | Dùng lại tối đa phần đã chạy thật của HBT Studio (căn chữ, nhạc, outro, bìa, lint, `publish.txt`, job)                | Không sửa `backend/hbt/pipeline/` ở mốc nào                                |
+| G3  | Không làm hỏng video kiểu cũ                                                                                          | Dựng lại "muỗi": framemd5 giống `v1.1.0`                                   |
+| G4  | An toàn: không cào, không gửi yêu cầu tới Threads/Meta, dẫn nguồn, có bước duyệt của người                            | Test chặn mạng; thẻ không có logo/biểu tượng/avatar thật của nền tảng      |
+| G5  | Chạy local, một người dùng, hai máy, **không giả định GPU**                                                           | Đủ chạy trên máy cũ (CPU)                                                  |
 
 ## 2. Quyết định đã chốt
 
@@ -21,22 +21,22 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | D1  | Gộp vào HBT Studio, tên **PostV**; dùng chung job, thư viện nhạc, outro, bìa, lint, `publish.txt`                                                                                                                                       | Brief #1                       |
 | D2  | Dán tay là đường chính; link chỉ lưu làm dòng dẫn nguồn + nút mở bài                                                                                                                                                                    | Brief #2, #3                   |
 | D3  | Cấm cào, headless, dịch vụ cào, Threads API, oEmbed                                                                                                                                                                                     | Brief mục 3                    |
-| D4  | Thẻ bài vẽ bằng Pillow, tên ẩn danh, không logo/tên/giao diện Threads, Meta, Reddit                                                                                                                                                     | Brief #4                       |
-| D5  | Commentary (góc nhìn kênh) **bắt buộc**; thời lượng đích 35–75 s                                                                                                                                                                        | Brief #6                       |
+| D4  | Thẻ bài vẽ bằng Pillow, **giữ nguyên tên tài khoản như bài đã dán** (chủ dự án chốt 29/10, bỏ ẩn danh; avatar là hình người xám trơn); không logo/tên/giao diện Threads, Meta, Reddit                                                   | Brief #4, đổi 29/10            |
+| D5  | Commentary (góc nhìn kênh) khuyến khích, thiếu thì **chỉ nhắc** (C-09). Thời lượng **tự do, dưới 120 s**                                                                                                                                | Brief #6, đổi 29/10            |
 | D6  | Nền gameplay chạy liền; chỉ thẻ có hiệu ứng vào/ra                                                                                                                                                                                      | Brief #11                      |
 | D7  | Phong cách Hooked. **Mẫu làm trước = "Thẻ theo đoạn"** (đo từ video mẫu 29/10: thẻ hook → bài → từng bình luận, đoạn commentary không có thẻ). "Thẻ cố định" (mẫu A) chỉ còn là biến thể đơn giản. _Đổi so với brief #12 (mẫu A trước)_ | Video mẫu 29/10                |
 | D8  | Ba điểm duyệt của người: nguồn → đoạn/kịch bản → video cuối; không tự đăng                                                                                                                                                              | Brief #9                       |
 | D9  | Không đổi tham số bản đẹp HBT (`PIPELINE_VERSION` giữ nguyên)                                                                                                                                                                           | CLAUDE.md                      |
 | D10 | **Giọng: VieNeu-TTS chạy local thay Vbee** cho PostV. Nhập file giọng vẫn là đường dự phòng (rẻ, đã có)                                                                                                                                 | Chủ dự án 29/10 (đổi Brief #7) |
-| D11 | PostV **bỏ giới hạn 750 ký tự** (đó là giới hạn gói Vbee). Cảnh báo theo **giây** 35–75 s                                                                                                                                               | Chủ dự án 29/10 + đề xuất đợt  |
+| D11 | PostV **bỏ giới hạn 750 ký tự** (giới hạn gói Vbee). Chỉ nhắc theo **giây**: từ 120 s trở lên; không có giới hạn dưới                                                                                                                   | Chủ dự án 29/10                |
 | D12 | fps xuất hỗ trợ **30, 50, 60**; **mặc định 60** (khớp nguồn nền; outro 60 fps có sẵn)                                                                                                                                                   | Chủ dự án 29/10                |
 | D13 | Nền: nhiều video gameplay **dọc 1080×1920, 60 fps**, đủ giấy phép; clip đổi bằng **cắt thẳng**; ngắn hơn lời thì nối thêm clip khác                                                                                                     | Chủ dự án 29/10 + video mẫu    |
 | D14 | Bìa: ưu tiên `thumbnail.image`; không có thì lấy **khung gameplay**                                                                                                                                                                     | Chủ dự án 29/10                |
 | D15 | Bước chép 2–4 của `_render_project` vào `backend/hbt/postv/` ở PV đầu (không sửa `render.py`)                                                                                                                                           | Đề xuất đợt, chủ dự án duyệt   |
 | D16 | Đợt fix/cover-drop hoãn đến khi xong hết PostV                                                                                                                                                                                          | Chủ dự án 29/10                |
 | D17 | CUDA (VieNeu, Whisper lớn) chỉ cần máy mới khi kiểm đường CUDA; còn lại làm trên máy cũ                                                                                                                                                 | Chủ dự án 29/10                |
-| D18 | Tên tài khoản hiển thị trên thẻ: **chưa chốt** (C-10)                                                                                                                                                                                   | Chủ dự án 29/10                |
-| D19 | Phụ đề: cơ chế karaoke của HBT (từ đang đọc đổi màu), 1–3 từ mỗi lần; màu và hoa/thường chờ xác nhận (C-08)                                                                                                                             | Chủ dự án 29/10                |
+| D18 | Tên tài khoản và thời gian trên thẻ lấy đúng như bài dán, sửa tay được (K-22)                                                                                                                                                           | Chủ dự án 29/10                |
+| D19 | Phụ đề: cơ chế karaoke của HBT, 1–3 từ mỗi lần, mặc định kiểu HBT (vàng); chọn màu từ preset (vàng, xanh lá, xanh dương, đỏ) hoặc màu tuỳ chỉnh (K-23)                                                                                  | Chủ dự án 29/10                |
 | D20 | Số lượt xem/like trên thẻ **chạy tăng dần tới giá trị nhập**, bật mặc định khi có giá trị                                                                                                                                               | Chủ dự án 29/10                |
 | D21 | Hiệu ứng thẻ do tôi đề xuất (bộ "Mượt" mặc định, "Nảy" tuỳ chọn), duyệt bằng mắt ở PV5                                                                                                                                                  | Chủ dự án 29/10                |
 | D22 | Ghi dòng nguồn vào `publish.txt`; nút Xoá nguồn; giọng VieNeu có sẵn trước, nhân bản sau; giấy phép trọng số VieNeu **bỏ qua** (chủ dự án: miễn phí)                                                                                    | Chủ dự án 29/10                |
@@ -47,9 +47,9 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | ---- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | US1  | Dán cả trang Threads vào một ô, app tách bài + bình luận (+ like nếu có) | Với 3–5 mẫu thật (PV0) tách đúng bài gốc và từng bình luận; sửa tay được từng khối; nhập link chỉ lưu `source.url`; **không có request ra ngoài** (test chặn mạng)                                                                            |
 | US2  | Chọn bài gốc và 1–5 bình luận làm nội dung                               | Chọn/bỏ/đổi thứ tự được; hiện ước lượng thời lượng theo giây; số like nhập tay được                                                                                                                                                           |
-| US3  | Viết kịch bản gồm lời dẫn + trích bình luận + **góc nhìn riêng**         | Thiếu commentary → chặn xuất; trích nguyên văn quá ngưỡng → cảnh báo; ngoài 35–75 s → cảnh báo (không chặn)                                                                                                                                   |
+| US3  | Viết kịch bản gồm lời dẫn + trích bình luận + **góc nhìn riêng**         | Thiếu hoặc ít commentary, trích nguyên văn quá ngưỡng, hoặc ≥ 120 s → chỉ nhắc (dòng vàng, vẫn xuất được)                                                                                                                                     |
 | US4  | Có giọng đọc cho kịch bản                                                | Sinh bằng VieNeu local (CPU được) hoặc nhập file; nghe thử trong app; lời đọc dùng cú pháp `\|` và `{}` như video HBT                                                                                                                         |
-| US5  | Thẻ bài đăng đẹp, ẩn danh                                                | Pillow, tên ẩn danh sửa được, không logo/giao diện nền tảng nào, dấu tiếng Việt đúng (font trong `backend/hbt/fonts/`); xem trước PNG                                                                                                         |
+| US5  | Thẻ bài đăng đẹp                                                         | Pillow, tên tài khoản + thời gian đúng như bài dán (sửa được), avatar hình người xám trơn, không logo/giao diện nền tảng nào, dấu tiếng Việt đúng (font trong `backend/hbt/fonts/`); thân dài tự co/cắt `…`; xem trước PNG                    |
 | US6  | Chọn nền từ thư viện gameplay của mình                                   | Mỗi clip có nguồn + giấy phép, thiếu thì chặn xuất; nền ngắn hơn lời thì tự nối clip khác; nền chạy liền suốt video                                                                                                                           |
 | US7  | Xem nhanh trước khi xuất                                                 | Xem nhanh 540×960, 30 fps, ≤ 10 s đầu, dùng lại cache                                                                                                                                                                                         |
 | US8  | Xuất video hoàn chỉnh                                                    | 1080×1920 ở 30/50/60 fps (mặc định 60); thẻ hook đầu video, thẻ bài, thẻ từng bình luận, đoạn commentary không thẻ; hiệu ứng thẻ bộ "Mượt"; phụ đề 1–3 từ; nhạc ducking −14 LUFS (±1); outro 4 s (công tắc); bìa; `publish.txt` có dòng nguồn |
@@ -62,35 +62,35 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | Mức        | Nội dung                                                                                                                                                                                                          |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Must**   | US1–US6, US8–US11 · mẫu "Thẻ theo đoạn" (thẻ hook, bài, bình luận, đoạn không thẻ) · schema `kind:"postv"` · thư viện nền có giấy phép · VieNeu local hoặc nhập file · lint nguồn · màn 5 bước theo DESIGN-HBT v2 |
-| **Should** | Xem nhanh (US7) · số like chạy tăng dần trên thẻ · nhập `.txt/.md` · OCR ảnh chụp (vẽ lại, che tên/avatar) · VieNeu qua CUDA · chọn tên ẩn danh tự động                                                           |
-| **Could**  | Bình luận trả lời lồng nhau (đường kẻ dọc) · sticker từ thư viện có giấy phép · đổi nền theo đoạn (khác nền liền của D6) · `ScriptProvider` gợi ý chọn đoạn (GĐ2)                                                 |
+| **Should** | Xem nhanh (US7) · số like chạy tăng dần trên thẻ · nhập `.txt/.md` · OCR ảnh chụp (vẽ lại) · VieNeu qua CUDA                                                                                                      |
+| **Could**  | Bình luận trả lời lồng nhau (đường kẻ dọc) · sticker từ nguồn miễn phí, không cần ghi công (K-25) · đổi nền theo đoạn (khác nền liền của D6) · `ScriptProvider` gợi ý chọn đoạn (GĐ2)                             |
 | **Won't**  | Xem mục 5                                                                                                                                                                                                         |
 
 ## 5. Ngoài phạm vi
 
-| Hạng mục                                                  | Lý do                                                              |
-| --------------------------------------------------------- | ------------------------------------------------------------------ |
-| Cào, headless, dịch vụ cào bên thứ ba, tải trang từ link  | Meta cấm truy cập dữ liệu ngoài API [KC]                           |
-| Threads API, oEmbed lấy chữ                               | Không có căn cứ rõ cho việc dựng video; oEmbed cấm trích xuất [KC] |
-| Tự đăng lên nền tảng                                      | Giữ 3 điểm duyệt của người                                         |
-| AI tự bịa bài/bình luận                                   | Rủi ro "nội dung giả" (bài học từ Hooked)                          |
-| Tên/avatar thật, logo hay giao diện Threads, Meta, Reddit | Thương hiệu duy nhất trong app là HBT                              |
-| Meme/sticker của người khác                               | Chỉ nhận từ thư viện có giấy phép                                  |
-| Vbee API, chia lượt Vbee, cắt quảng cáo từng file Vbee    | Chủ dự án bỏ Vbee cho PostV (D10)                                  |
-| Đăng nhập, nhiều người dùng, gửi dữ liệu ra ngoài         | CLAUDE.md                                                          |
-| Sửa `backend/hbt/pipeline/`, `reference/`                 | D9; ngoại lệ chỉ khi chủ dự án duyệt riêng                         |
+| Hạng mục                                                                         | Lý do                                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Cào, headless, dịch vụ cào bên thứ ba, tải trang từ link                         | Meta cấm truy cập dữ liệu ngoài API [KC]                           |
+| Threads API, oEmbed lấy chữ                                                      | Không có căn cứ rõ cho việc dựng video; oEmbed cấm trích xuất [KC] |
+| Tự đăng lên nền tảng                                                             | Giữ 3 điểm duyệt của người                                         |
+| AI tự bịa bài/bình luận                                                          | Rủi ro "nội dung giả" (bài học từ Hooked)                          |
+| Logo, biểu tượng hay giao diện Threads, Meta, Reddit; avatar thật của người đăng | Thương hiệu duy nhất trong app là HBT                              |
+| Meme/sticker của người khác                                                      | Chỉ nhận từ thư viện có giấy phép                                  |
+| Vbee API, chia lượt Vbee, cắt quảng cáo từng file Vbee                           | Chủ dự án bỏ Vbee cho PostV (D10)                                  |
+| Đăng nhập, nhiều người dùng, gửi dữ liệu ra ngoài                                | CLAUDE.md                                                          |
+| Sửa `backend/hbt/pipeline/`, `reference/`                                        | D9; ngoại lệ chỉ khi chủ dự án duyệt riêng                         |
 
 ## 6. Ràng buộc pháp lý và an toàn (Must)
 
-| Ràng buộc                                       | Cách đáp ứng                                                                             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Không gửi yêu cầu tới Threads/Meta              | Link chỉ lưu chuỗi; nút "Mở bài" mở tab trình duyệt của người dùng                       |
-| Che danh tính người đăng và người bình luận     | Thẻ vẽ lại, tên ẩn danh; không lưu avatar                                                |
-| Phần biến đổi chiếm tỉ lệ đáng kể               | Commentary bắt buộc + thanh tỉ lệ biến đổi + cảnh báo đọc nguyên văn                     |
-| Nội dung nhạy cảm                               | Mở rộng `sensitive.py`/`lint` quét nguồn và kịch bản                                     |
-| Nền: nguồn + giấy phép từng clip                | `BackgroundEntry` bắt buộc `source`, `license`                                           |
-| Giấy phép trọng số VieNeu-TTS                   | Chủ dự án: miễn phí, bỏ qua (29/10); PV0 vẫn chép nguyên văn giấy phép vào docs (1 dòng) |
-| Điều khoản Threads gốc chưa đọc được nguyên văn | **[?]** chủ dự án tự mở `help.instagram.com/769983657850414`                             |
+| Ràng buộc                                       | Cách đáp ứng                                                                                                           |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Không gửi yêu cầu tới Threads/Meta              | Link chỉ lưu chuỗi; nút "Mở bài" mở tab trình duyệt của người dùng                                                     |
+| Hiển thị người đăng/bình luận                   | Giữ tên tài khoản như bài dán (K-22, chủ dự án chốt); avatar hình người trơn; nút Xoá nguồn gỡ chữ khi chủ bài yêu cầu |
+| Phần biến đổi chiếm tỉ lệ đáng kể               | Nhắc commentary + thanh tỉ lệ biến đổi + cảnh báo đọc nguyên văn                                                       |
+| Nội dung nhạy cảm                               | Mở rộng `sensitive.py`/`lint` quét nguồn và kịch bản                                                                   |
+| Nền: nguồn + giấy phép từng clip                | `BackgroundEntry` bắt buộc `source`, `license`                                                                         |
+| Giấy phép trọng số VieNeu-TTS                   | Chủ dự án: miễn phí, bỏ qua (29/10); PV0 vẫn chép nguyên văn giấy phép vào docs (1 dòng)                               |
+| Điều khoản Threads gốc chưa đọc được nguyên văn | **[?]** chủ dự án tự mở `help.instagram.com/769983657850414`                                                           |
 
 ## 7. Brief ↔ mã
 
@@ -111,13 +111,13 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 
 ### 7b. Thay đổi do chốt 29/10 (VieNeu thay Vbee)
 
-| Brief ghi                                                                        | Nay                                                                                           |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| #7 "Vbee trước, VieNeu sau (Should)"                                             | VieNeu local là đường chính của PostV; nhập file giọng là dự phòng                            |
-| 4.2 "Chia lượt giọng > 750 ký tự rồi nối"; phát hiện 2 (cắt đuôi từng file Vbee) | Bỏ. VieNeu không chèn quảng cáo; một lần sinh cho cả kịch bản                                 |
-| 4.1 giới hạn 750 ký tự (gói Vbee 3.000 ký tự/ngày)                               | Bỏ cho PostV; cảnh báo theo giây 35–75 s. `lint.VOICE_CHAR_LIMIT` giữ nguyên cho video HBT    |
-| 4.4 VieNeu "Should"                                                              | **Must** (D10); thêm rủi ro giấy phép trọng số, tốc độ CPU, độ lệch Whisper trên giọng VieNeu |
-| 2b/4.3b nền "gameplay cắt/scale/crop"                                            | Nền dọc 1080×1920 60 fps: **không cần cắt hay lấp khung**; chỉ nhận video dọc (K-10)          |
+| Brief ghi                                                                        | Nay                                                                                                            |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| #7 "Vbee trước, VieNeu sau (Should)"                                             | VieNeu local là đường chính của PostV; nhập file giọng là dự phòng                                             |
+| 4.2 "Chia lượt giọng > 750 ký tự rồi nối"; phát hiện 2 (cắt đuôi từng file Vbee) | Bỏ. VieNeu không chèn quảng cáo; một lần sinh cho cả kịch bản                                                  |
+| 4.1 giới hạn 750 ký tự (gói Vbee 3.000 ký tự/ngày)                               | Bỏ cho PostV; chỉ nhắc từ 120 s trở lên, không giới hạn dưới. `lint.VOICE_CHAR_LIMIT` giữ nguyên cho video HBT |
+| 4.4 VieNeu "Should"                                                              | **Must** (D10); thêm rủi ro giấy phép trọng số, tốc độ CPU, độ lệch Whisper trên giọng VieNeu                  |
+| 2b/4.3b nền "gameplay cắt/scale/crop"                                            | Nền dọc 1080×1920 60 fps: **không cần cắt hay lấp khung**; chỉ nhận video dọc (K-10)                           |
 
 ## 7c. Video mẫu `postv-thu-01_v2_1080p60.mp4` (đo 29/10/2026)
 
@@ -131,7 +131,7 @@ Tài liệu đi kèm: `IMPLEMENT-POSTV.md` (đặc tả), `06-cau-hoi-mo.md` (c�
 | Phụ đề               | CHỮ HOA, trắng viền đen, 1–3 từ mỗi lần, từ đang đọc đổi **xanh lá** (cùng màu ô nhấn của thẻ hook), y ≈ 76 %                                                                                                                                                                                                                            |
 | Meme/sticker         | Không có trong mẫu này                                                                                                                                                                                                                                                                                                                   |
 
-**Khác brief:** (1) thẻ đổi theo đoạn trên **nền gameplay liền**, nên "mẫu A" trong brief không phải mẫu đầu tiên cần làm; (2) có thẻ hook ở giây đầu; (3) đoạn commentary không thẻ. **Rủi ro:** tên tài khoản trên thẻ mẫu trông như tên thật (xem C-10).
+**Khác brief:** (1) thẻ đổi theo đoạn trên **nền gameplay liền**, nên "mẫu A" trong brief không phải mẫu đầu tiên cần làm; (2) có thẻ hook ở giây đầu; (3) đoạn commentary không thẻ. **Rủi ro đã biết:** tên tài khoản trên thẻ là tên thật như bài gốc; chủ dự án chốt giữ nguyên (K-22), còn nút Xoá nguồn để gỡ khi chủ bài yêu cầu.
 
 ## 8. Chỉ số thành công
 
