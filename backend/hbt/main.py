@@ -11,13 +11,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from hbt.api import assets, files, health, lint, music, postv, projects, script
+from hbt.api import assets, backgrounds, files, health, lint, music, postv, projects, script
 from hbt.api import render as render_api
 from hbt.api import settings as settings_api
 from hbt.app_settings import AppSettingsStore
 from hbt.config import BRAND_DIR, Settings, load_settings
 from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
+from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.censor import CensorStore
 from hbt.sensitive import SensitiveStore
 from hbt.state import AppState
@@ -57,6 +58,7 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
         app_settings=app_settings,
         brand_dir=brand_dir,
         postv_words=CensorStore(settings.workspace_dir),
+        backgrounds=BackgroundLibrary(settings.library_dir),
     )
 
     @asynccontextmanager
@@ -98,6 +100,7 @@ def create_app(settings: Settings | None = None, brand_dir: Path | None = None) 
         files,
         script,
         postv,
+        backgrounds,
     ):
         app.include_router(module.router, prefix="/api")
     return app

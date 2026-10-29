@@ -287,14 +287,16 @@ describe('Bước 1 · Nhập nguồn', () => {
     expect([post.likes, post.replies, post.shares]).toEqual([27600, 351, 1800]);
   });
 
-  it('shows the stats on the card preview (formatted) and flags an unreadable number', async () => {
+  it('previews the real server-drawn card and flags an unreadable number', async () => {
     const user = userEvent.setup();
     backend(postv({ post: { ...postv().post, likes: 27600, replies: 351, views: 619000 } }));
     app();
     const preview = await screen.findByRole('complementary', { name: 'Xem trước thẻ bài gốc' });
-    expect(within(preview).getByText('27,6K')).toBeVisible();
-    expect(within(preview).getByText('351')).toBeVisible();
-    expect(within(preview).getByText('619K')).toBeVisible();
+    const img = within(preview).getByRole('img', { name: 'Xem trước thẻ bài gốc' });
+    const url = new URL(img.getAttribute('src') ?? '', 'http://x');
+    expect(url.pathname).toBe('/api/projects/bai/postv/card.png');
+    expect([url.searchParams.get('kind'), url.searchParams.get('w')]).toEqual(['post', '288']);
+    expect(url.searchParams.has('v')).toBe(true); // đổi sau mỗi lần lưu để tải lại ảnh
     const shares = screen.getByRole('textbox', { name: /^Chia sẻ/ });
     await user.type(shares, 'abc');
     expect(shares).toHaveAttribute('aria-invalid', 'true');

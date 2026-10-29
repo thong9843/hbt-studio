@@ -28,3 +28,18 @@ def parse_count(raw: str | None) -> int | None:
         number = float(m.group(1).replace(",", "."))
         return round(number * _SUFFIX[m.group(2)])
     return None
+
+
+def format_count(n: int | None) -> str:
+    """27600 → `27,6K`, 1500000 → `1,5M`, 351 → `351`; rỗng cho None (khớp `utils/count.ts`)."""
+    if n is None:
+        return ""
+
+    def one(v: float) -> str:
+        return f"{round(v * 10) / 10:g}".replace(".", ",")
+
+    if n >= 1_000_000 or round(n / 100) / 10 >= 1000:
+        return f"{one(n / 1_000_000)}M"
+    if n >= 1_000:
+        return f"{one(n / 1_000)}K"
+    return str(n)

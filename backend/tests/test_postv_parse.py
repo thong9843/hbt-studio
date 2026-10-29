@@ -7,14 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from hbt.postv.counts import parse_count
+from hbt.postv.counts import format_count, parse_count
 from hbt.postv.parse import MAX_TEXT, age_label, parse_threads_text
 
-CASES = json.loads(
+SHARED = json.loads(
     (Path(__file__).resolve().parents[2] / "shared" / "count_cases.json").read_text(
         encoding="utf-8"
     )
 )
+CASES = SHARED["parse"]
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +35,17 @@ def test_parse_count_shared_cases(case):
 
 def test_parse_count_accepts_none():
     assert parse_count(None) is None
+
+
+@pytest.mark.parametrize("case", SHARED["format"], ids=[str(c["n"]) for c in SHARED["format"]])
+def test_format_count_shared_cases(case):
+    assert format_count(case["n"]) == case["out"]
+
+
+def test_format_count_none_and_round_trip():
+    assert format_count(None) == ""
+    for n in (351, 1800, 27600, 619000, 1500000):
+        assert parse_count(format_count(n)) == n
 
 
 # Mẫu 1: tuổi dạng `17h`; thân có 2 dấu cách cuối dòng và emoji (tên tài khoản là giả).
