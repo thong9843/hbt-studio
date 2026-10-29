@@ -73,6 +73,13 @@ class PostvSegment(_Model):
     ref: str | None = None  # id bình luận khi role == "comment"
 
 
+class PostvHook(_Model):
+    """Thẻ tiêu đề ở giây đầu: chữ và cụm nhấn (ô màu bo góc). Trống = lấy câu đầu của bài."""
+
+    text: str = ""
+    accent: str = ""
+
+
 class PostvBackground(_Model):
     mode: Literal["auto", "manual"] = "auto"
     clip_ids: list[str] = Field(default_factory=list)
@@ -140,6 +147,7 @@ class PostvProject(_Model):
     comments: list[PostvComment] = Field(default_factory=list, max_length=MAX_COMMENTS)
     segments: list[PostvSegment] = Field(default_factory=list, max_length=MAX_SEGMENTS)
     template: Literal["story_cards", "fixed_card"] = "story_cards"
+    hook: PostvHook = Field(default_factory=PostvHook)
     style: PostvStyle = Field(default_factory=PostvStyle)
     background: PostvBackground = Field(default_factory=PostvBackground)
     voice: PostvVoice = Field(default_factory=PostvVoice)

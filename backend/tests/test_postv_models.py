@@ -45,6 +45,7 @@ def test_postv_defaults():
     assert p.settings.card_animation == "smooth" and p.template == "story_cards"
     assert p.voice.engine == "vieneu" and p.background.mode == "auto"
     assert p.segments == [] and p.comments == []
+    assert p.hook.text == "" and p.hook.accent == ""  # trống = lấy câu đầu của bài
     assert p.style.caption.preset == "hbt" and p.style.caption.highlight_color is None
 
 

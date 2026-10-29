@@ -1,0 +1,47 @@
+{
+  "canvas": { "w": 1080, "h": 1920 },
+  "card": { "x": 72, "w": 936, "radius": 32, "pad": 36, "bg": "#FDFDFD", "top": 282 },
+  "header": {
+    "avatar": 70,
+    "gap": 20,
+    "handle_font": "BeVietnamPro-Bold.ttf",
+    "handle_size": 40,
+    "handle_color": "#16120F",
+    "age_font": "BeVietnamPro-Medium.ttf",
+    "age_size": 30,
+    "age_color": "#8A8A90",
+    "avatar_bg": "#D3D3D9",
+    "avatar_fg": "#9C9CA4"
+  },
+  "body": {
+    "font": "BeVietnamPro-Bold.ttf",
+    "size": 44,
+    "line_height": 1.3,
+    "color": "#16120F",
+    "gap": 22,
+    "max_lines": 6
+  },
+  "stats": {
+    "font": "BeVietnamPro-Bold.ttf",
+    "size": 30,
+    "color": "#3A3540",
+    "views_color": "#8A8A90",
+    "icon": 34,
+    "gap": 34,
+    "top_gap": 26
+  },
+  "hook": {
+    "top": 232,
+    "pad": 44,
+    "font": "BeVietnamPro-ExtraBold.ttf",
+    "size": 86,
+    "line_height": 1.2,
+    "color": "#16120F",
+    "accent_bg": "#38E178",
+    "accent_fg": "#16120F",
+    "accent_pad": 16,
+    "accent_radius": 20,
+    "max_lines": 4
+  },
+  "censor": { "blur_radius": 11, "stars": "***" }
+}
