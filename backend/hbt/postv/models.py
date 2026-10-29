@@ -71,6 +71,8 @@ class PostvSegment(_Model):
     card: CardKind | None = None  # None = theo `role` (`commentary` → none)
     voice: str = ""  # chữ thường cho VieNeu: không dùng `{cách đọc}` hay `|` (K-33)
     ref: str | None = None  # id bình luận khi role == "comment"
+    # ai đọc đoạn: "narrator", "post" hoặc id bình luận; None = theo `role` (6d)
+    speaker: str | None = Field(default=None, max_length=40)
 
 
 class PostvHook(_Model):
@@ -94,6 +96,9 @@ class PostvVoice(_Model):
     voice_id: str | None = None
     file: str | None = None
     trim_end: float | None = Field(default=None, gt=0)
+    # chỉ giọng người dùng chọn tay: {speaker: voice_id}; người chưa gán bốc theo `seed` (6d)
+    cast: dict[str, str] = Field(default_factory=dict)
+    seed: int = 1
 
 
 class CaptionStyle(_Model):
@@ -173,6 +178,13 @@ class PostvProject(_Model):
         for i, seg in enumerate(self.segments, 1):
             if seg.ref is not None and seg.ref not in known:
                 raise ValueError(f"Đoạn {i} dẫn tới bình luận không có: '{seg.ref}'")
+        people = {"narrator", "post", *known}
+        for i, seg in enumerate(self.segments, 1):
+            if seg.speaker is not None and seg.speaker not in people:
+                raise ValueError(f"Đoạn {i} có người đọc không có: '{seg.speaker}'")
+        for who in self.voice.cast:
+            if who not in people:
+                raise ValueError(f"Giọng chọn cho người không có: '{who}'")
         return self
 
     def render_problems(self) -> list[str]:

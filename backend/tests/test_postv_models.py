@@ -154,3 +154,35 @@ def test_missing_commentary_is_not_a_problem():
         )
     )
     assert all("commentary" not in x for x in p.render_problems())
+
+
+def test_voice_cast_seed_and_segment_speaker_roundtrip():
+    raw = postv(
+        comments=[{"id": "c1", "handle": "an"}],
+        segments=[
+            {"role": "post", "voice": "a"},
+            {"role": "comment", "ref": "c1", "voice": "b", "speaker": "narrator"},
+        ],
+        voice={"cast": {"narrator": "Adam bựa", "c1": "Trúc Ly"}, "seed": 7},
+    )
+    p = PostvProject.model_validate(raw)
+    assert p.segments[0].speaker is None and p.segments[1].speaker == "narrator"
+    assert p.voice.cast["c1"] == "Trúc Ly" and p.voice.seed == 7
+    assert PostvProject.model_validate(p.model_dump(mode="json")) == p
+
+
+def test_voice_defaults_for_old_postv_project():
+    p = PostvProject.model_validate(postv(voice={"engine": "file", "file": "voice.wav"}))
+    assert p.voice.cast == {} and p.voice.seed == 1
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"segments": [{"role": "post", "voice": "a", "speaker": "ai-do"}]},
+        {"voice": {"cast": {"ai-do": "Adam bựa"}}},
+    ],
+)
+def test_unknown_speaker_rejected(extra):
+    with pytest.raises(ValidationError):
+        PostvProject.model_validate(postv(**extra))
