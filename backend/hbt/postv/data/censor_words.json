@@ -3,7 +3,20 @@
     {
       "id": "tuc",
       "level": "block",
-      "words": ["vcl", "vkl", "vl", "đéo", "đm", "đmm", "dmm", "địt", "lồn", "cặc", "đụ má", "đụ mẹ"],
+      "words": [
+        "vcl",
+        "vkl",
+        "vl",
+        "đéo",
+        "đm",
+        "đmm",
+        "dmm",
+        "địt",
+        "lồn",
+        "cặc",
+        "đụ má",
+        "đụ mẹ"
+      ],
       "hint": "Chửi thề: PostV che bằng tiếng bíp và làm mờ chữ"
     }
   ]

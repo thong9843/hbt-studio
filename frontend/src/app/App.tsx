@@ -5,7 +5,10 @@ import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
 import { HomePage } from '../pages/HomePage';
-import { PostvPage } from '../pages/PostvPage';
+import { PostvLayout } from '../pages/PostvLayout';
+import { PostvPickPage } from '../pages/PostvPickPage';
+import { PostvSoonPage } from '../pages/PostvSoonPage';
+import { PostvSourcePage } from '../pages/PostvSourcePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
 import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
@@ -25,7 +28,14 @@ export function App() {
           <Route path="audio" element={<AudioTab />} />
           <Route path="export" element={<ExportTab />} />
         </Route>
-        <Route path="postv/:slug" element={<PostvPage />} />
+        <Route path="postv" element={<ProjectsPage kind="postv" />} />
+        <Route path="postv/:slug" element={<PostvLayout />}>
+          <Route index element={<PostvSourcePage />} />
+          <Route path="pick" element={<PostvPickPage />} />
+          <Route path="script" element={<PostvSoonPage step={2} />} />
+          <Route path="preview" element={<PostvSoonPage step={3} />} />
+          <Route path="export" element={<PostvSoonPage step={4} />} />
+        </Route>
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (
           <Route

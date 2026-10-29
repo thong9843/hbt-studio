@@ -72,6 +72,7 @@ export const EyeIcon = make(
 );
 
 // Biểu tượng thanh trái (Đợt 2)
+export const ChatIcon = make(<path d="M4 5h16v11H10l-6 4V5Zm4 4h8m-8 3h5" />);
 export const HomeIcon = make(<path d="M4 11 12 4l8 7v9h-5v-6H9v6H4v-9Z" />);
 export const FolderIcon = make(
   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,

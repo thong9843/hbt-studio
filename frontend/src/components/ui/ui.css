@@ -10,6 +10,7 @@
 .ui-chip:focus-visible,
 .ui-icon-btn:focus-visible,
 .ui-nav-item:focus-visible,
+.ui-step:focus-visible,
 .ui-card-link:focus-visible,
 .ui-row:focus-visible,
 .ui-switch:focus-visible {
@@ -622,8 +623,62 @@ textarea.ui-input[data-counter] {
   color: var(--on-primary);
 }
 
+/* ---- PostV: thanh 5 bước ngang ở đầu màn (K-36) ---- */
+.ui-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px 0 10px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    transform var(--dur-press) var(--ease),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+@media (hover: hover) {
+  .ui-step:hover {
+    background: var(--soft);
+  }
+}
+.ui-step:active {
+  transform: scale(0.98);
+}
+.ui-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 800;
+}
+.ui-step-on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.ui-step-on .ui-step-num {
+  background: var(--accent);
+  color: #16120f;
+}
+@media (hover: hover) {
+  .ui-step-on:hover {
+    background: var(--primary);
+  }
+}
+
 /* Giảm chuyển động: bỏ transform và hoạt ảnh trượt, giữ đổi màu (luật 5) */
 @media (prefers-reduced-motion: reduce) {
+  .ui-step,
   .ui-btn,
   .ui-chip,
   .ui-icon-btn,
