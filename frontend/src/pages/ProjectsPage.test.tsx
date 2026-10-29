@@ -42,6 +42,7 @@ function page() {
         <Routes>
           <Route path="/" element={<ProjectsPage />} />
           <Route path="/p/:slug" element={<p>trang soạn</p>} />
+          <Route path="/postv/:slug" element={<p>trang PostV</p>} />
         </Routes>
       </NewProjectProvider>
     </ToastProvider>,
@@ -69,6 +70,44 @@ describe('ProjectsPage', () => {
     expect(within(card('Bản đẹp')).getByText('Đã xuất · 60 fps')).toBeInTheDocument();
     expect(within(card('Chỉ xem nhanh')).getByText('Đã xem nhanh')).toBeInTheDocument();
     expect(within(card('Mới tạo')).getByText('Chưa dựng')).toBeInTheDocument();
+  });
+
+  it('marks PostV projects with a badge and opens them on /postv', async () => {
+    stubFetch({
+      'GET /api/projects': [
+        summary('bai', 'Bài PostV', { kind: 'postv' }),
+        summary('muoi', 'Muỗi', { kind: 'video' }),
+      ],
+    });
+    page();
+    await screen.findByText('Bài PostV');
+    expect(within(card('Bài PostV')).getByText('PostV')).toBeInTheDocument();
+    expect(within(card('Muỗi')).queryByText('PostV')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Mở: Bài PostV' })).toHaveAttribute(
+      'href',
+      '/postv/bai',
+    );
+    expect(screen.getByRole('link', { name: 'Mở: Muỗi' })).toHaveAttribute('href', '/p/muoi');
+  });
+
+  it('duplicating a PostV project opens the copy on /postv', async () => {
+    const user = userEvent.setup();
+    stubFetch({
+      'GET /api/projects': [summary('bai', 'Bài PostV', { kind: 'postv' })],
+      'POST /api/projects/bai/duplicate': {
+        version: 1,
+        kind: 'postv',
+        slug: 'bai-ban-sao',
+        title: 'Bài PostV (bản sao)',
+      },
+    });
+    page();
+    await screen.findByText('Bài PostV');
+    await user.click(
+      within(card('Bài PostV')).getByRole('button', { name: 'Thao tác: Bài PostV' }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: 'Nhân bản' }));
+    expect(await screen.findByText('trang PostV')).toBeInTheDocument();
   });
 
   it('uses the cover, then scene 1, then the HBT tile; images are lazy', async () => {
