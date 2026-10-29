@@ -33,6 +33,7 @@ const postv = (over: Record<string, unknown> = {}) => ({
   title: 'Bài đêm khuya',
   series: '',
   source: { url: '', note: '', pasted_at: null },
+  voice: { engine: 'vieneu', voice_id: null, file: null, trim_end: null, cast: {}, seed: 1 },
   post: {
     handle: 'tac_gia',
     age: '17 giờ',

@@ -11,7 +11,15 @@ import { RenderCard } from './SideNav';
 
 afterEach(() => vi.unstubAllGlobals());
 
-const health = { ok: true, ffmpeg: true, whisper: false, gpu: false, missing: [] };
+const health = {
+  ok: true,
+  ffmpeg: true,
+  whisper: false,
+  gpu: false,
+  vieneu: true,
+  vieneu_note: null,
+  missing: [],
+};
 const summary = (slug: string, title: string) => ({
   slug,
   title,
@@ -329,5 +337,16 @@ describe('environment dots', () => {
     await waitFor(() => expect(list).toHaveTextContent('FFmpeg: có'));
     expect(list).toHaveTextContent('Whisper: thiếu');
     expect(list).toHaveTextContent('GPU: thiếu');
+    expect(list).toHaveTextContent('VieNeu: có'); // K-40
+  });
+
+  it('shows VieNeu as missing when the backend says so', async () => {
+    stubFetch({
+      ...routes(),
+      'GET /api/health': { ...health, vieneu: false, vieneu_note: 'Chưa cài VieNeu' },
+    });
+    shell('/settings');
+    const list = await screen.findByRole('list', { name: 'Trạng thái môi trường' });
+    await waitFor(() => expect(list).toHaveTextContent('VieNeu: thiếu'));
   });
 });
