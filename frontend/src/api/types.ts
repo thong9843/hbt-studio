@@ -328,6 +328,34 @@ export interface PostvProject {
 
 export type AnyProject = Project | PostvProject;
 
+/** Kết quả `POST /postv/parse` (hàm thuần, không ghi gì). */
+export interface PostvParseResult {
+  guess: 'threads_text' | 'embed' | 'unknown';
+  source_url: string | null;
+  post: { handle: string; age: string; text: string } | null;
+  comments: {
+    id: string;
+    handle: string;
+    age: string;
+    text: string;
+    same_author: boolean;
+    picked: boolean;
+  }[];
+  /** Dòng chỉ gồm số có thể là số liệu; `block` 0 = bài gốc, i ≥ 1 = bình luận thứ i. */
+  hints: { block: number; raw: string; value: number | null }[];
+  warnings: string[];
+}
+
+/** Kết quả `POST /projects/{slug}/postv/script/check`: chỉ nhắc, không chặn. */
+export interface PostvCheck {
+  seconds: number;
+  chars: number;
+  long: boolean;
+  censored: number;
+  segments: { index: number; role: string; chars: number; seconds: number }[];
+  issues: { where: string; level: 'info' | 'warn'; message: string; word: string | null }[];
+}
+
 export function isPostv(p: AnyProject): p is PostvProject {
   return 'kind' in p && p.kind === 'postv';
 }

@@ -7,6 +7,7 @@ import { useNewProject } from '../hooks/newProject';
 import { useTheme } from '../hooks/useTheme';
 import { vi } from '../i18n/vi';
 import {
+  ChatIcon,
   FilmIcon,
   FolderIcon,
   HomeIcon,
@@ -219,7 +220,7 @@ export function SideNav({ mini, render }: Props) {
         className={cx('ui-btn ui-btn-brand mt-3', mini && 'mx-auto !h-11 !w-11 !min-h-0 !p-0')}
         aria-label={vi.nav.newVideo}
         title={mini ? vi.nav.newVideo : undefined}
-        onClick={openNew}
+        onClick={() => openNew()}
       >
         <PlusIcon />
         {!mini && vi.nav.newVideo}
@@ -229,6 +230,7 @@ export function SideNav({ mini, render }: Props) {
         <div className="space-y-1">
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
           <NavItem to="/projects" icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
+          <NavItem to="/postv" icon={<ChatIcon />} label={vi.nav.postv} mini={mini} />
         </div>
         {slug && <OpenProject slug={slug} mini={mini} />}
         <div className="mt-2">

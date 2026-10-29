@@ -10,6 +10,9 @@ import type {
   MusicEntry,
   NewMusicInput,
   AnyProject,
+  PostvCheck,
+  PostvParseResult,
+  PostvProject,
   Project,
   ProjectCreate,
   ProjectSummary,
@@ -38,6 +41,12 @@ export const api = {
   getProject: (slug: string) => apiGet<Project>(`/projects/${enc(slug)}`),
   /** Đọc dự án của cả hai loại; dùng khi chưa biết `kind` (trang mở theo đường dẫn). */
   getAnyProject: (slug: string) => apiGet<AnyProject>(`/projects/${enc(slug)}`),
+  savePostv: (slug: string, project: PostvProject) =>
+    apiRequest<AnyProject>('PUT', `/projects/${enc(slug)}`, { json: project }),
+  parsePostv: (text: string) =>
+    apiRequest<PostvParseResult>('POST', '/postv/parse', { json: { text } }),
+  postvCheck: (slug: string) =>
+    apiRequest<PostvCheck>('POST', `/projects/${enc(slug)}/postv/script/check`, { json: {} }),
   saveProject: (slug: string, project: Project) =>
     apiRequest<Project>('PUT', `/projects/${enc(slug)}`, { json: project }),
   deleteProject: (slug: string) => apiRequest<void>('DELETE', `/projects/${enc(slug)}`),

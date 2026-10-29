@@ -39,6 +39,7 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
         <Route path="/" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
+        <Route path="/postv/*" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
     </Routes>,
@@ -74,7 +75,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'Dự án', 'Cài đặt']);
+    expect(labels).toEqual(['Trang chủ', 'Dự án', 'PostV', 'Cài đặt']);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
@@ -135,6 +136,15 @@ describe('AppShell, wide (>= 1280 px)', () => {
     expect(screen.getByRole('link', { name: 'Trang chủ' })).not.toHaveAttribute('aria-current');
   });
 
+  it('has its own PostV item: /postv is current on the PostV screens, not on Projects', async () => {
+    stubFetch(routes());
+    shell('/postv/bai/pick');
+    expect(await screen.findByRole('link', { name: 'PostV' })).toHaveAttribute('href', '/postv');
+    expect(screen.getByRole('link', { name: 'PostV' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('group', { name: 'Dự án đang mở' })).toBeNull(); // bước nằm ở thanh ngang
+  });
+
   it('opens the new-video dialog from the red button, on any screen', async () => {
     stubFetch(routes());
     shell('/p/muoi');
@@ -153,7 +163,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
   it('is reachable by keyboard in reading order', async () => {
     stubFetch(routes());
     shell();
-    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'Cài đặt'];
+    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'PostV', 'Cài đặt'];
     for (const name of order) {
       await userEvent.tab();
       expect(document.activeElement).toHaveAccessibleName(name);

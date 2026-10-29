@@ -13,7 +13,7 @@ afterEach(() => vi.unstubAllGlobals());
 function Opener() {
   const { open } = useNewProject();
   return (
-    <button type="button" onClick={open}>
+    <button type="button" onClick={() => open()}>
       mở hộp
     </button>
   );

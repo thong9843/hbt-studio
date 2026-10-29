@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectKind } from '../api/types';
@@ -17,7 +17,15 @@ const DEFAULT_SCENES = 8;
 const SCENE_COUNTS = Array.from({ length: 10 }, (_, i) => i + 3);
 
 /** Hộp "Video mới": tên, series (3 + Khác), số cảnh 3–12. Tạo xong mở thẳng trang soạn. */
-export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function NewProjectDialog({
+  open,
+  onClose,
+  initialKind = 'video',
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialKind?: ProjectKind;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const t = vi.projects.dialog;
@@ -25,7 +33,12 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
   const [preset, setPreset] = useState<string>('');
   const [custom, setCustom] = useState('');
   const [sceneCount, setSceneCount] = useState(DEFAULT_SCENES);
-  const [kind, setKind] = useState<ProjectKind>('video');
+  const [kind, setKind] = useState<ProjectKind>(initialKind);
+
+  // Mở từ trang PostV thì chọn sẵn PostV.
+  useEffect(() => {
+    if (open) setKind(initialKind);
+  }, [open, initialKind]);
 
   const series = preset === OTHER ? custom.trim() : preset;
   const create = useMutation({
@@ -48,7 +61,7 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
     setPreset('');
     setCustom('');
     setSceneCount(DEFAULT_SCENES);
-    setKind('video');
+    setKind(initialKind);
     create.reset();
   }
 
@@ -158,12 +171,16 @@ export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: ()
 /** Giữ trạng thái mở của hộp; đặt trong AppShell để mọi màn gọi được `useNewProject().open`. */
 export function NewProjectProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const openDialog = useCallback(() => setOpen(true), []);
+  const [kind, setKind] = useState<ProjectKind>('video');
+  const openDialog = useCallback((k?: ProjectKind) => {
+    setKind(k === 'postv' ? 'postv' : 'video'); // nút truyền cả sự kiện bấm: chỉ nhận đúng 'postv'
+    setOpen(true);
+  }, []);
   const value = useMemo(() => ({ open: openDialog }), [openDialog]);
   return (
     <NewProjectContext.Provider value={value}>
       {children}
-      <NewProjectDialog open={open} onClose={() => setOpen(false)} />
+      <NewProjectDialog open={open} onClose={() => setOpen(false)} initialKind={kind} />
     </NewProjectContext.Provider>
   );
 }
