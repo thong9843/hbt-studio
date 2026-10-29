@@ -263,6 +263,94 @@ Mẫu thật do chủ dự án đưa: chữ copy từ trang một bài Threads (
 | Số/viết tắt                           | Thử câu "ngày 29 tháng 10 năm 2026, giá 150.000 đồng, tăng 25%": sinh bình thường (7,4 s); Whisper chép lại thành chữ số nên **chưa kiểm được bằng máy** VieNeu đọc đúng chữ nào: chủ dự án nghe `workspace/spike/tts_numbers.wav`                                                                                                                                                                                                |
 | **Xung đột gói**                      | `vieneu` kéo `gradio`, `fastapi 0.162`, `pydantic 2.14`, `starlette 1.10`, `numpy 2.4.6`, `pillow 12.3`, `onnxruntime 1.31.1` (`backend/.venv` đang có pillow 13.0, onnxruntime 1.31.0). Cài chung dễ lệch phiên bản → **chạy VieNeu trong venv riêng, gọi bằng tiến trình con** (đã có mẫu `whisper_worker`): thư mục `backend/.venv-tts` (ignore), worker nhận JSON (lời, giọng) và ghi WAV. Không cần phần mềm hệ thống (K-14) |
 
+## 6d. Tự động (mốc PVA): dán là ra bản Xem nhanh
+
+Quyết định 29/10 (K-42 đến K-47): **không AI** viết lời; chuỗi dừng ở **Xem nhanh 10 s**; **mỗi người một giọng**; phong cách bằng **chip**; kịch bản có thể **dán JSON** (Claude Code sinh ngoài app).
+
+### Chuỗi một nút "Tạo tự động" (bước 1)
+
+| #   | Pha          | Việc                                                                                                                                                                       | Dùng lại / mới                      |
+| --- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| 1   | Tách bài     | Đã có từ PV2 (người dùng đã dán và tách)                                                                                                                                   | `parse.py`                          |
+| 2   | Chọn đoạn    | Bài gốc + N bình luận (mặc định 3, chip 2–5): ưu tiên nhiều like; bỏ bình luận trống, dưới 8 ký tự, có liên kết hoặc quảng cáo, trùng chữ; chưa có số like thì theo thứ tự | `suggestByLikes` + bộ lọc mới       |
+| 3   | Viết lời đọc | Theo **mẫu của phong cách** (bảng dưới), không AI                                                                                                                          | `postv/auto_script.py` mới          |
+| 4   | Gán giọng    | `voice.cast`: mỗi người một giọng, người dẫn một giọng                                                                                                                     | mới                                 |
+| 5   | Nền, nhạc    | Nền chọn theo `seed` trong thư viện nền; nhạc ngẫu nhiên trong thư viện nhạc (không nhạc nếu thư viện trống)                                                               | `BackgroundLibrary`, `MusicLibrary` |
+| 6   | Sinh giọng   | VieNeu từng đoạn, nối bằng khoảng nghỉ 0,25 s                                                                                                                              | PV4                                 |
+| 7   | Xem nhanh    | Căn chữ rồi dựng 10 s đầu; **dừng ở đây**, mở bước Xem trước                                                                                                               | PV5 (`preview_seconds`)             |
+
+Một job nhiều pha trong `JobManager` (SSE báo tiến độ từng pha, huỷ được). Pha nào lỗi thì dừng, **giữ kết quả các pha trước** (kịch bản đã tạo vẫn nằm trong project). Không gọi mạng.
+
+### Mẫu lời đọc theo phong cách (không AI)
+
+| Mục               | Quy định                                                                                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Phong cách        | 5 chip: **Kể chuyện**, **Hài hước**, **Drama**, **Hóng** (tin nóng), **Cảm động**. Dữ liệu ở `postv/data/script_styles.json`, bản người dùng sửa ở `workspace/settings/postv_script_styles.json`                                                                                     |
+| Mỗi phong cách có | `hook` (khuôn + câu đầu bài), `intro_post` (vd "Một bạn kể:"), `intro_comment` (≥ 4 câu xoay vòng: "Có người hỏi ngay:", "Một bạn khác nói:"…), `commentary` (câu hỏi/góc nhìn mẫu), `outro` (lời kêu gọi). Xoay vòng, không lặp liền nhau; chọn theo `seed` nên dựng lại giống nhau |
+| Chữ trích         | Giữ chữ người dùng dán, **làm sạch cho giọng đọc**: bỏ emoji, emoticon (`=))`, `:))`, `:D`), liên kết; gộp khoảng trắng; mở rộng viết tắt theo bảng người dùng sửa được (`ko`→`không`, `dc`→`được`, `vs`→`với`, `trc`→`trước`…). Không dùng `{cách đọc}` hay `\|` (K-33)             |
+| Rút gọn           | Bình luận dài hơn 220 ký tự: lời đọc cắt ở dấu câu gần nhất; thẻ vẫn hiện phần đầu. Ước > 100 s thì giảm bớt số bình luận                                                                                                                                                            |
+| Thẻ hook          | Chữ tiêu đề lấy câu đầu của bài, ≤ 60 ký tự; ô nhấn do người dùng chọn (mặc định không có)                                                                                                                                                                                           |
+
+### Giọng: mỗi người một giọng
+
+| Mục                    | Quy định                                                                                                                                                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dữ liệu                | `voice.cast: {speaker: voice_id}`; `speaker` ∈ `narrator`, `post`, id bình luận. `segments[].speaker` cho biết ai đọc đoạn đó; `voice.seed` làm giọng ngẫu nhiên lặp lại được                                              |
+| Đoạn dẫn và đoạn trích | "Có người hỏi ngay:" do **narrator** đọc, câu trích do **người đó** đọc. Hai đoạn cùng `ref` nên thẻ bình luận hiện ngay từ đoạn dẫn                                                                                       |
+| Ngẫu nhiên             | Bốc từ 25 giọng VieNeu, **không trùng** giữa những người trong cùng video, xen nam/nữ theo nhãn giọng; narrator ưu tiên giọng "tin tức/kể chuyện". Chip **Đổi giọng** bốc lại; chọn tay từng người ở bước 3                |
+| Dựng                   | Sinh từng đoạn bằng VieNeu (một tiến trình con, nạp mô hình một lần), nối bằng khoảng nghỉ 0,25 s. Mốc đoạn lấy từ độ dài từng file nên không cần `scene_offsets`; Whisper vẫn cho mốc từng từ của phụ đề trên file đã nối |
+
+### Dán JSON kịch bản (để Claude Code viết rồi dán)
+
+```json
+{
+  "postv_script": 1,
+  "style": "ke-chuyen",
+  "hook": { "text": "Quên ví ở quán cà phê", "accent": "quên ví" },
+  "segments": [
+    { "role": "hook", "speaker": "narrator", "voice": "Quên ví ở quán cà phê.", "card": "hook" },
+    { "role": "post", "speaker": "post", "voice": "Hôm qua mình để quên ví…", "card": "post" },
+    {
+      "role": "comment",
+      "ref": "c1",
+      "speaker": "narrator",
+      "voice": "Có người hỏi ngay:",
+      "card": "comment"
+    },
+    {
+      "role": "comment",
+      "ref": "c1",
+      "speaker": "c1",
+      "voice": "Quán ở đâu vậy bạn?",
+      "card": "comment"
+    },
+    { "role": "commentary", "speaker": "narrator", "voice": "Bạn thấy sao?", "card": "none" }
+  ],
+  "cast": { "narrator": "hai-dang" },
+  "publish": { "hook": "…", "hashtags": ["chuyentute"] }
+}
+```
+
+| Mục  | Quy định                                                                                                                                                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hộp  | "Dán JSON" ở bước 3, cùng kiểu hộp HBT (IMPLEMENT 13.B4): **kiểm** (không ghi) → **áp** (tự sao lưu, giữ 10 bản, Hoàn tác)                                                                                                                                         |
+| API  | `POST /projects/{slug}/postv/script-json/check` và `/apply` (409 khi đang dựng hoặc `base_hash` cũ; 422 khi có lỗi, không ghi). Dùng lại `backups.py` nếu tổng quát được **[?]** (đang viết cho `Project`)                                                         |
+| Luật | Trường lạ là lỗi; `ref` phải là bình luận đang có; `speaker` phải là `narrator`, `post`, id bình luận có trong `comments`; `voice_id` trong `cast` phải có trong danh sách giọng; lời đọc chứa `{` `}` `\|` thì cảnh báo; **không** đổi nguồn (`post`, `comments`) |
+
+### Thay đổi schema và API (làm ở PV4 và PVA)
+
+| Thay đổi                                                                                               | Mốc |
+| ------------------------------------------------------------------------------------------------------ | --- |
+| `segments[].speaker: str \| None`, `voice.cast: dict[str, str]`, `voice.seed: int`                     | PV4 |
+| `hook: {text, accent}` (thẻ tiêu đề)                                                                   | PV3 |
+| `auto: {style, comments, voices: "random" \| "manual"}` (nhớ lựa chọn lần trước)                       | PVA |
+| `POST /projects/{slug}/postv/auto` `{style, comments?, voices?}` → 202 `{job_id}` (chuỗi 7 pha ở trên) | PVA |
+| `GET /postv/styles` (danh sách phong cách cho chip)                                                    | PVA |
+
+### Giao diện
+
+Khối **"Tạo tự động"** ở bước 1 (dưới nút Tiếp): chip phong cách, chip số bình luận (2–5), chip Giọng (Ngẫu nhiên / Chọn tay), nút lớn "Tạo tự động", thanh tiến độ từng pha, nút Huỷ. Xong thì mở bước 4 (Xem trước) có video 10 s. Bố cục bám mockup nhưng **được tự do cải thiện** (K-46).
+
 ## 7. Giao diện 5 bước
 
 Theo `DESIGN-HBT.md` v2 và `IMPLEMENT.md` 13.B2/13.B3: thanh trái cố định (không còn khối bước; **5 bước nằm ở thanh ngang ngay dưới thanh đầu**, K-36; mục **PostV** ở thanh trái dẫn tới trang danh sách `/postv`, K-38), thanh đầu cao 48 ("Đã lưu"), cột xem trước 9:16 288×512 bên phải, nút chính lớn cố định, mọi thành phần đủ thường/hover/nhấn/focus/tắt, sáng/tối, Be Vietnam Pro, chữ ở `vi.postv`, không logo hay tên nền tảng khác; 1024–1279 thu thanh trái, < 1024 xem trước thành ngăn kéo.
@@ -287,13 +375,14 @@ Nhánh `feat/pvN-…`; mỗi mốc theo 6 bước đóng mốc của `CLAUDE.md`
 | **PV1** | `postv/models.py` (`PostvProject`, union); `storage.load_any/save_any/create(kind)`; `list_projects` có `kind`; `api/projects.py`; hộp Video mới chọn loại; route `/postv/:slug` trống; nhãn "PostV" trong lưới Dự án                                                                                                                                                                                                                                                                                                               | Round-trip PostV; project cũ nạp/ghi không đổi; dispatch union; mọi router với slug PostV trả 4xx không 500; slug; `PIPELINE_VERSION` giữ; `git diff v1.1.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py` rỗng | Tạo dự án PostV rỗng trên UI, thấy ở lưới, mở được; "muỗi" vẫn mở; lint + test xanh                         | 1,5           | Máy cũ                                       | —                   |
 | **PV2** | `postv/parse.py`; `POST /postv/parse`; `postv/script.py` (ước giây, kiểm tra từ nhạy cảm); UI bước 1–2 với **thanh bước ngang ở đầu** (K-36) và trang danh sách `/postv` (K-38); `…/script/check`; danh sách từ che riêng của PostV (`postv/data/censor_words.json`, có nhóm chửi thề; `GET/PUT /settings/postv-words`, K-41); ô số liệu bài gốc (like, bình luận, chia sẻ; lượt xem, đăng lại tuỳ chọn)                                                                                                                            | Parser theo từng mẫu thật (golden JSON); lệch/rỗng/quá lớn; **test chặn socket** (không request ra ngoài); lint nguồn; Vitest bước 1–2                                                                                      | Dán mẫu thật → bài + bình luận đúng, sửa tay được, chọn đoạn, thấy ước giây; không có request ra ngoài      | 2,5           | Máy cũ                                       | PV0 (mẫu)           |
 | **PV3** | `postv/backgrounds.py` + `api/backgrounds.py`; `postv/card.py` + `templates/story_cards.json` (thẻ hook, bài, bình luận); `card.png`; `.gitignore`; UI chọn nền và thẻ (bước 4 một phần)                                                                                                                                                                                                                                                                                                                                            | Entry thiếu nguồn/giấy phép bị chặn; ffprobe sai → 400; dấu tiếng Việt vẽ đúng (không ô vuông); tràn dòng; thẻ không chứa tên/avatar; API thư viện                                                                          | Thêm clip có giấy phép, xem thẻ ẩn danh đúng dấu trên khung nền; clip thiếu giấy phép bị chặn               | 2             | Máy cũ                                       | K-10                |
-| **PV4** | `postv/voice.py` (`VieNeuProvider` qua `VoiceProvider`, chạy **tiến trình con trong `backend/.venv-tts`**, mục 6c; `FileVoice`); `GET /voices`; `…/voice/synthesize`; cache giọng; UI bước 3 (giọng, nhạc)                                                                                                                                                                                                                                                                                                                          | Provider giả cho CI; hash cache; 503 khi chưa cài; test thật VieNeu đánh dấu `slow`, không chạy trong CI; nhập file vẫn dùng được                                                                                           | Sinh giọng cho 1 kịch bản mẫu trên máy cũ bằng CPU, nghe được trong app; không có VieNeu thì nhập file      | 2             | Máy cũ. Nhánh CUDA/VRAM: máy mới (phụ)       | PV0 (C-03, C-04)    |
+| **PV4** | `postv/voice.py` (`VieNeuProvider` qua `VoiceProvider`, chạy **tiến trình con trong `backend/.venv-tts`**, mục 6c; `FileVoice`); `GET /voices`; `…/voice/synthesize`; cache giọng; **mỗi người một giọng** (`voice.cast`, `segments[].speaker`, sinh từng đoạn rồi nối; mục 6d), UI bước 3 (chọn giọng từng người, giọng ngẫu nhiên, nhạc)                                                                                                                                                                                          | Provider giả cho CI; hash cache; 503 khi chưa cài; test thật VieNeu đánh dấu `slow`, không chạy trong CI; nhập file vẫn dùng được                                                                                           | Sinh giọng cho 1 kịch bản mẫu trên máy cũ bằng CPU, nghe được trong app; không có VieNeu thì nhập file      | 2             | Máy cũ. Nhánh CUDA/VRAM: máy mới (phụ)       | PV0 (C-03, C-04)    |
 | **PV5** | `postv/render.py`, `captions.py`, `publish.py`; `jobs.py` rẽ `kind`; nền nối clip; thẻ theo đoạn (hook, bài, bình luận, không thẻ) với hiệu ứng "Mượt"/"Nảy" và số chạy tăng; phụ đề Hooked; outro; bìa; `meta.json`; **che từ nhạy cảm** (bíp đè + làm mờ, mục 6b)                                                                                                                                                                                                                                                                 | Chọn/nối nền theo `seed`; tách cụm 1–3 từ; chuỗi filter; Xem nhanh 10 s; bản đẹp ngắn (`slow`); **framemd5 "muỗi" giống `v1.1.0`**; huỷ job; `render_problems` PostV                                                        | Dựng được video PostV mẫu 50 fps (và 30/60) có nhạc, outro, bìa, `publish.txt` có nguồn; ghi thời gian dựng | 3             | Máy cũ (đo thời gian trên cả hai máy nếu có) | PV2, PV3, PV4, C-08 |
 | **PV6** | UI bước 4–5 hoàn chỉnh: Xem nhanh, preview tĩnh, Xuất, Lịch sử, Ảnh bìa (khung gameplay), nội dung đăng; thanh trái theo loại; e2e                                                                                                                                                                                                                                                                                                                                                                                                  | Vitest từng bước; e2e Playwright: dán → chọn → kịch bản (giọng nhập file) → Xem nhanh → Xuất; sáng/tối; Tab/focus                                                                                                           | Làm trọn 1 video PostV bằng giao diện, không terminal; chủ dự án duyệt từng màn                             | 2             | Máy cũ                                       | PV5                 |
+| **PVA** | **Tự động (không AI):** `postv/auto_script.py` (mẫu theo phong cách, làm sạch chữ trích, rút gọn, gán giọng ngẫu nhiên), `data/script_styles.json`, `POST /postv/auto` (chuỗi 7 pha, dừng ở Xem nhanh), hộp Dán JSON kịch bản (check/apply/hoàn tác), khối "Tạo tự động" ở bước 1                                                                                                                                                                                                                                                   | Mẫu ổn định theo `seed`; làm sạch emoji/liên kết/viết tắt; lọc bình luận; giọng không trùng; chuỗi dừng ở Xem nhanh (job giả) và giữ kết quả pha trước khi lỗi; JSON check/apply; không gọi mạng                            | Dán mẫu thật → "Tạo tự động" → ra Xem nhanh 10 s, mỗi người một giọng; dán JSON thay được lời đọc           | 3             | Máy cũ                                       | PV4, PV5, PV6       |
 | **PV7** | _(Could)_ Bình luận trả lời lồng nhau (đường kẻ dọc), sticker từ nguồn miễn phí không cần ghi công (K-25), biến thể "Thẻ cố định" (`fixed_card.json`)                                                                                                                                                                                                                                                                                                                                                                               | Layout thẻ lồng; sticker thiếu giấy phép bị chặn; mốc đổi thẻ theo `scene_offsets`                                                                                                                                          | Dựng được video mẫu B                                                                                       | 2,5           | Máy cũ                                       | PV6, C-14           |
 | **PV8** | Hoàn thiện: `Xoá nguồn`, README + `IMPLEMENT.md`/`PLAN.md` ghi PostV, dọn nợ                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Test `Xoá nguồn` giữ kịch bản; e2e đầy đủ                                                                                                                                                                                   | 6 bước đóng mốc; `git diff` không đụng `pipeline/`, `models.py`, `reference/`                               | 1,5           | Máy cũ                                       | PV6                 |
 
-Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **15,5 buổi** cho PV0–PV6 + PV8 (Must/Should), **18 buổi** nếu làm cả PV7. Brief ước 10–12 buổi cho PV0–PV5 với Vbee; phần tăng là VieNeu (PV4), giao diện 5 bước (PV6), mẫu hiệu chỉnh (PV8) [SL].
+Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 buổi** cho PV0–PV6 + PVA + PV8 (Must/Should), **21 buổi** nếu làm cả PV7. Brief ước 10–12 buổi cho PV0–PV5 với Vbee; phần tăng là VieNeu (PV4), giao diện 5 bước (PV6), mẫu hiệu chỉnh (PV8) [SL].
 
 ## 8b. PV1 đã làm (29/10/2026)
 
