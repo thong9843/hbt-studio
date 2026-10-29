@@ -3,6 +3,8 @@ workspace/
 models/
 library/music/**
 !library/music/index.json
+library/backgrounds/**
+!library/backgrounds/index.json
 *.mp3
 *.m4a
 *.ogg
