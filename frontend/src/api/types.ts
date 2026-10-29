@@ -229,7 +229,7 @@ export interface Job {
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final';
+  kind: 'preview' | 'final' | 'voice';
   status: 'queued' | 'running';
   progress: number;
   step: string;
@@ -292,6 +292,8 @@ export interface PostvSegment {
   card: 'hook' | 'post' | 'comment' | 'none' | null;
   voice: string;
   ref: string | null;
+  /** Ai đọc đoạn: "narrator", "post" hoặc id bình luận; null/thiếu = theo vai trò. */
+  speaker?: string | null;
 }
 
 /** Dự án PostV (docs/postv/IMPLEMENT-POSTV.md mục 3). Có `kind: "postv"`, không có `scenes`. */
@@ -321,6 +323,9 @@ export interface PostvProject {
     voice_id: string | null;
     file: string | null;
     trim_end: number | null;
+    /** Giọng chọn tay từng người ({speaker: voice_id}); người chưa gán bốc theo `seed`. */
+    cast: Record<string, string>;
+    seed: number;
   };
   music: Music | null;
   settings: {
@@ -445,4 +450,54 @@ export interface BackupEntry {
   id: string;
   created_at: string;
   reason: 'apply' | 'restore' | null;
+}
+
+/** Một giọng VieNeu (`GET /voices`). */
+export interface VoiceEntry {
+  id: string;
+  label: string;
+  gender: string;
+  region: string;
+  style: string;
+}
+
+export interface VoiceList {
+  /** Giọng mặc định của người dẫn (Adam bựa). */
+  default: string;
+  voices: VoiceEntry[];
+}
+
+export interface VoiceSpeaker {
+  speaker: string;
+  voice_id: string;
+  /** true = người dùng đã chọn tay; false = mặc định hoặc bốc theo seed. */
+  manual: boolean;
+}
+
+/** Hiện trạng giọng của một dự án PostV (`GET /projects/{slug}/voice`). */
+export interface ProjectVoice {
+  engine: 'vieneu' | 'file';
+  file: string | null;
+  url: string | null;
+  /** VieNeu đã cài và có trọng số. */
+  available: boolean;
+  note: string | null;
+  seed: number;
+  manual: Record<string, string>;
+  speakers: VoiceSpeaker[];
+  segments:
+    { index: number; speaker: string; voice_id: string; start: number; end: number }[] | null;
+  seconds: number | null;
+  /** Lời hoặc giọng đã đổi sau lần sinh gần nhất; null = chưa biết. */
+  stale: boolean | null;
+  estimated_seconds: number;
+}
+
+/** `output` của job sinh giọng (`Job.output` khi `kind` là voice). */
+export interface VoiceJobOutput {
+  voice: string;
+  seconds: number;
+  generated: number;
+  cached: number;
+  cast: Record<string, string>;
 }

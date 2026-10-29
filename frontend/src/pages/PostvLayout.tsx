@@ -44,7 +44,13 @@ function PostvEditorProvider({ initial }: { initial: PostvProject }) {
   );
 
   const t = vi.postv;
-  const done = [project.post.text.trim() !== '', project.segments.length > 0, false, false, false];
+  const done = [
+    project.post.text.trim() !== '',
+    project.segments.length > 0,
+    Boolean(project.voice.file),
+    false,
+    false,
+  ];
   return (
     <PostvEditorContext.Provider value={editor}>
       <main className="mx-auto max-w-[1440px] space-y-4 px-6 py-5">

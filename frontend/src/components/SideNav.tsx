@@ -23,7 +23,12 @@ import { Progress } from './ui/Progress';
 import { cx } from './ui/cx';
 import './ui/ui.css';
 
-const ENV_ITEMS = ['ffmpeg', 'whisper', 'gpu'] as const satisfies readonly (keyof Health)[];
+const ENV_ITEMS = [
+  'ffmpeg',
+  'whisper',
+  'gpu',
+  'vieneu',
+] as const satisfies readonly (keyof Health)[];
 
 /** Tiến độ dựng đang chạy, do AppShell truyền vào (Đợt 3d nối job thật). */
 export interface RenderProgress {

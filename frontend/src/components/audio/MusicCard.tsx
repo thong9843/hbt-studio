@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { api } from '../../api/endpoints';
+import type { Music } from '../../api/types';
 import { useProjectEditor } from '../../hooks/projectEditor';
 import { vi } from '../../i18n/vi';
 import { ErrorNote } from '../ErrorNote';
@@ -17,11 +18,36 @@ import { UploadTrackDialog } from './UploadTrackDialog';
 
 const T = vi.audio.music;
 
-/** Thẻ Nhạc nền: lọc tâm trạng, danh sách bài, ghi công, Tải nhạc, Không nhạc. */
+/** Thứ thẻ Nhạc cần từ trình soạn: video HBT và PostV có hai trình soạn khác nhau. */
+export interface MusicHost {
+  slug: string;
+  music: Music | null | undefined;
+  /** Đổi nhạc trên máy (tự lưu sau 1 s). */
+  setMusic: (music: Music | null) => void;
+  /** Nhận nhạc máy chủ vừa đặt. */
+  applyMusic: (music: Music | null) => void;
+  flush: () => Promise<void>;
+}
+
+/** Thẻ Nhạc nền của video HBT. */
 export function MusicCard() {
   const editor = useProjectEditor();
-  const { project } = editor;
-  const music = project.music;
+  return (
+    <MusicCardView
+      host={{
+        slug: editor.project.slug,
+        music: editor.project.music,
+        setMusic: (music) => editor.update((p) => ({ ...p, music })),
+        applyMusic: (music) => editor.applyServer((p) => ({ ...p, music })),
+        flush: editor.flush,
+      }}
+    />
+  );
+}
+
+/** Thẻ Nhạc nền: lọc tâm trạng, danh sách bài, ghi công, Tải nhạc, Không nhạc. */
+export function MusicCardView({ host }: { host: MusicHost }) {
+  const music = host.music;
   const queryClient = useQueryClient();
   const library = useQuery({ queryKey: ['music'], queryFn: api.listMusic });
   const [mood, setMood] = useState<string | null>(null);
@@ -29,10 +55,10 @@ export function MusicCard() {
 
   const attach = useMutation({
     mutationFn: async (id: string) => {
-      await editor.flush();
-      return api.attachLibraryMusic(project.slug, id);
+      await host.flush();
+      return api.attachLibraryMusic(host.slug, id);
     },
-    onSuccess: (res) => editor.applyServer((p) => ({ ...p, music: res.music })),
+    onSuccess: (res) => host.applyMusic(res.music),
   });
 
   const entries = useMemo(() => library.data ?? [], [library.data]);
@@ -53,10 +79,7 @@ export function MusicCard() {
           >
             {T.upload}
           </Button>
-          <Chip
-            selected={!music?.file}
-            onClick={() => editor.update((p) => ({ ...p, music: null }))}
-          >
+          <Chip selected={!music?.file} onClick={() => host.setMusic(null)}>
             {T.noMusic}
           </Chip>
         </div>
@@ -135,11 +158,7 @@ export function MusicCard() {
           label={T.credit}
           hint={<p className="mt-1 text-small text-muted">{T.creditHelp}</p>}
           value={music.credit}
-          onChange={(e) =>
-            editor.update((p) =>
-              p.music ? { ...p, music: { ...p.music, credit: e.target.value } } : p,
-            )
-          }
+          onChange={(e) => host.setMusic({ ...music, credit: e.target.value })}
         />
       ) : (
         <p className="text-small text-muted">{T.noMusicNote}</p>
