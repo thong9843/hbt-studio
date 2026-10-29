@@ -286,3 +286,14 @@ def test_worker_never_imports_hbt_and_forces_offline():
     src = V.WORKER.read_text(encoding="utf-8")
     assert "import hbt" not in src and "from hbt" not in src
     assert 'HF_HUB_OFFLINE"] = "1"' in src
+
+
+def test_worker_turns_off_watermark():
+    src = V.WORKER.read_text(encoding="utf-8")
+    assert "apply_watermark=False" in src
+
+
+def test_cache_key_changes_with_worker_rev(monkeypatch):
+    before = cache_key("a", "x")
+    monkeypatch.setattr(V, "WORKER_REV", V.WORKER_REV + 1)
+    assert cache_key("a", "x") != before

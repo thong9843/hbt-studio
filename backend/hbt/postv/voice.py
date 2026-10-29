@@ -28,7 +28,7 @@ from hbt.postv.models import PostvProject
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 WORKER = Path(__file__).with_name("voice_worker.py")
 VIENEU_VERSION = "3.8.3"  # khớp backend/requirements-tts.txt
-WORKER_REV = 1  # đổi khi cách sinh giọng đổi (vô hiệu cache)
+WORKER_REV = 2  # đổi khi cách sinh giọng đổi (vô hiệu cache)
 WEIGHTS_REPO = "models--pnnbao-ump--VieNeu-TTS-v3-Turbo"
 DEFAULT_NARRATOR = "Adam bựa"  # K-35: giọng mặc định của người dẫn
 GAP_SECONDS = 0.25  # khoảng nghỉ giữa hai đoạn (6d)

@@ -75,7 +75,7 @@ def main(request_path: str) -> int:
         files = []
         for i, item in enumerate(req["items"]):
             _note(req.get("progress"), f"begin {i}")
-            audio = tts.infer(item["text"], voice=item["voice"])
+            audio = tts.infer(item["text"], voice=item["voice"], apply_watermark=False)
             seconds = _write_wav(item["out"], audio, int(tts.sample_rate))
             files.append({"out": item["out"], "seconds": seconds})
             _note(req.get("progress"), f"done {i}")
