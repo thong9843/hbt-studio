@@ -20,6 +20,7 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
+from hbt.models import Project
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
@@ -208,7 +209,9 @@ class JobManager:
         allow_long_trim: bool = False,
         preview_seconds: float | None = None,
     ) -> Job:
-        project = self.storage.load(slug)  # NotFound / BadRequest nếu project hỏng
+        project = self.storage.load_any(slug)  # NotFound / BadRequest nếu project hỏng
+        if not isinstance(project, Project):  # PostV: bộ dựng làm ở mốc PV5
+            raise Unprocessable("Dự án PostV chưa dựng được (bộ dựng PostV làm ở mốc PV5)")
         if fps is not None and fps not in ALLOWED_FPS:
             raise Unprocessable(f"fps phải là một trong {ALLOWED_FPS}")
         if preview_seconds is not None:

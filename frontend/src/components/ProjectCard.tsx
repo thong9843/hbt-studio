@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ProjectSummary } from '../api/types';
 import { vi } from '../i18n/vi';
 import { formatDate } from '../utils/format';
+import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus, type ProjectStatusKind } from '../utils/projectStatus';
 import { MoreIcon } from './icons';
 import { Badge, type BadgeTone } from './ui/Badge';
@@ -53,7 +54,7 @@ interface Props {
 export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }: Props) {
   const status = projectStatus(project);
   const image = projectImage(project);
-  const href = `/p/${project.slug}`;
+  const href = projectHref(project);
   const t = vi.projects;
   return (
     <Card as="li" padded={false} className="ui-card-link overflow-hidden">
@@ -70,6 +71,7 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }:
             </Link>
           </h3>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
             <Badge tone={TONE[status.kind]}>{status.label}</Badge>
             <span className="num text-tiny text-muted">{formatDate(project.updated_at)}</span>
           </div>

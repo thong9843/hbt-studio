@@ -52,7 +52,7 @@ def upload_asset(
 ):
     if kind not in MAX_BYTES:
         raise BadRequest("`kind` phải là image, cover, voice hoặc music")
-    state.storage.load(slug)  # 404 sớm, trước khi nhận file lớn
+    state.storage.load_any(slug)  # 404 sớm, trước khi nhận file lớn
     if state.jobs.is_busy(slug):
         raise Conflict("Project đang được dựng, hãy chờ hoặc huỷ job trước khi thay file")
     tmp = save_upload(file, state.settings.workspace_dir / ".uploads", MAX_BYTES[kind])

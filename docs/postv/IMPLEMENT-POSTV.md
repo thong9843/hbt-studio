@@ -295,6 +295,17 @@ Nhánh `feat/pvN-…`; mỗi mốc theo 6 bước đóng mốc của `CLAUDE.md`
 
 Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **15,5 buổi** cho PV0–PV6 + PV8 (Must/Should), **18 buổi** nếu làm cả PV7. Brief ước 10–12 buổi cho PV0–PV5 với Vbee; phần tăng là VieNeu (PV4), giao diện 5 bước (PV6), mẫu hiệu chỉnh (PV8) [SL].
 
+## 8b. PV1 đã làm (29/10/2026)
+
+| Mục       | Quyết định / kết quả                                                                                                                                                                                                                                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Schema    | `backend/hbt/postv/models.py`: `PostvProject` + `AnyProject` (union theo `kind`, callable `project_kind`; thiếu `kind` = video). **`hbt/models.py` không đổi**; `project.json` HBT không có `kind` và không bị ghi lại khác                                                                                      |
+| Lưu trữ   | `Storage.kind_of`, `load_any`, `save_any`, `create_postv`; `list_projects` thêm `kind`; `duplicate`, `attach_music`, `_music_sha256`, `save_asset` (voice → `engine: file`, music, cover; `image` bị từ chối) chạy cho cả hai loại. `Storage.load` với dự án PostV trả **400** có lời nhắn rõ, không bao giờ 500 |
+| API       | `POST /projects` nhận `kind` (mặc định `video`; PostV bỏ qua `scene_count`); `GET/PUT /projects/{slug}`, nhân bản và `music/from-library` dùng `AnyProject`; `PUT` **không đổi loại** (422); `ProjectSummary.kind` đặt cuối (test giữ thứ tự khoá cũ)                                                            |
+| Dựng      | `jobs.submit` với dự án PostV trả **422** "chưa dựng được (PV5)"; `render.py`, `pipeline/` không đổi (`PIPELINE_VERSION` giữ nguyên)                                                                                                                                                                             |
+| Giao diện | Hộp Video mới có chip Video HBT / PostV (PostV ẩn số cảnh); `projectHref` mở PostV ở `/postv/:slug`; `/p/:slug` chuyển PostV sang màn riêng; Trang chủ không đọc dự án PostV như video; màn `PostvPage` hiện 5 bước "Sắp có". Chưa làm khối thanh trái cho PostV (PV6)                                           |
+| Test      | `test_postv_models.py` (27), `test_api_postv.py` (28, gồm quét router không 500), Vitest 11 ca mới (60 file, 789 test sau mốc)                                                                                                                                                                                   |
+
 ## 9. Test chung
 
 | Loại          | Ca                                                                                                                                                                   |

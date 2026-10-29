@@ -5,6 +5,7 @@ import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
 import { HomePage } from '../pages/HomePage';
+import { PostvPage } from '../pages/PostvPage';
 import { ProjectsPage } from '../pages/ProjectsPage';
 import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
@@ -24,6 +25,7 @@ export function App() {
           <Route path="audio" element={<AudioTab />} />
           <Route path="export" element={<ExportTab />} />
         </Route>
+        <Route path="postv/:slug" element={<PostvPage />} />
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (
           <Route

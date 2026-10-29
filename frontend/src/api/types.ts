@@ -90,6 +90,9 @@ export interface BuildClean {
   failed: number;
 }
 
+/** Loại dự án: video HBT (ảnh + giọng) hoặc PostV (bài mạng xã hội trên nền gameplay). */
+export type ProjectKind = 'video' | 'postv';
+
 export interface Project {
   version: 1;
   slug: string;
@@ -129,6 +132,7 @@ export interface ProjectSummary {
   /** Bìa 9:16 của lần dựng gần nhất có bìa. */
   cover: string | null;
   error: string | null;
+  kind: ProjectKind;
 }
 
 export interface RenderRecord extends RenderSummary {
@@ -261,7 +265,71 @@ export interface SensitiveWords {
 export interface ProjectCreate {
   title: string;
   series: string;
-  scene_count: number;
+  scene_count?: number;
+  /** Bỏ trống = video HBT. */
+  kind?: ProjectKind;
+}
+
+export interface PostvStats {
+  views: number | null;
+  likes: number | null;
+  replies: number | null;
+  reposts: number | null;
+  shares: number | null;
+}
+
+export interface PostvComment extends PostvStats {
+  id: string;
+  handle: string;
+  age: string;
+  text: string;
+  parent: string | null;
+  picked: boolean;
+}
+
+export interface PostvSegment {
+  role: 'hook' | 'post' | 'comment' | 'commentary';
+  card: 'hook' | 'post' | 'comment' | 'none' | null;
+  voice: string;
+  ref: string | null;
+}
+
+/** Dự án PostV (docs/postv/IMPLEMENT-POSTV.md mục 3). Có `kind: "postv"`, không có `scenes`. */
+export interface PostvProject {
+  version: 1;
+  kind: 'postv';
+  slug: string;
+  title: string;
+  series: string;
+  theme: Theme;
+  source: { url: string; note: string; pasted_at: string | null };
+  post: PostvStats & { handle: string; age: string; text: string; card_text: string | null };
+  comments: PostvComment[];
+  segments: PostvSegment[];
+  template: 'story_cards' | 'fixed_card';
+  voice: {
+    engine: 'vieneu' | 'file';
+    voice_id: string | null;
+    file: string | null;
+    trim_end: number | null;
+  };
+  music: Music | null;
+  settings: {
+    fps: number;
+    captions: boolean;
+    aligner: 'auto' | 'whisper' | 'silence';
+    outro: boolean;
+    card_animation: 'smooth' | 'bounce';
+    censor: { enabled: boolean; sfx: 'bleep'; blur_card: boolean; text: 'blur' | 'stars' };
+  };
+  publish: { hook: string; hashtags: string[] };
+  thumbnail: Thumbnail | null;
+}
+
+export type AnyProject = Project | PostvProject;
+
+export function isPostv(p: AnyProject): p is PostvProject {
+  return 'kind' in p && p.kind === 'postv';
 }
 
 export interface NewMusicInput {

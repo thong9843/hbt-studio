@@ -25,6 +25,7 @@ function app() {
       <Routes>
         <Route path="/" element={<Opener />} />
         <Route path="/p/:slug" element={<p>trang soạn</p>} />
+        <Route path="/postv/:slug" element={<p>trang PostV</p>} />
       </Routes>
     </NewProjectProvider>,
   );
@@ -61,6 +62,40 @@ describe('NewProjectDialog', () => {
       scene_count: 8,
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('offers the kind (Video HBT is selected by default)', async () => {
+    const user = userEvent.setup();
+    stubFetch({});
+    await openDialog(user);
+    expect(screen.getByRole('button', { name: 'Video HBT' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'PostV' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('PostV: hides the scene count, sends kind postv and opens the PostV screen', async () => {
+    const user = userEvent.setup();
+    const create = vi.fn((_url: string, init?: RequestInit) => {
+      void init;
+      return new Response(
+        JSON.stringify({ version: 1, kind: 'postv', slug: 'bai-moi', title: 'Bài mới' }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    stubFetch({ 'POST /api/projects': create });
+    await openDialog(user);
+    await user.click(screen.getByRole('button', { name: 'PostV' }));
+    expect(screen.queryByRole('button', { name: '8' })).toBeNull();
+    await user.type(screen.getByLabelText('Tiêu đề'), 'Bài mới');
+    await user.click(screen.getByRole('button', { name: 'Tạo' }));
+    expect(await screen.findByText('trang PostV')).toBeInTheDocument();
+    expect(JSON.parse(String(create.mock.calls[0][1]?.body))).toEqual({
+      title: 'Bài mới',
+      series: '',
+      kind: 'postv',
+    });
   });
 
   it('puts focus on the title field', async () => {

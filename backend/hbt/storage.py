@@ -34,6 +34,7 @@ from hbt.models import (
 )
 from hbt.pipeline.cache import sha256_file
 from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
+from hbt.postv.models import PostvProject, PostvVoice, project_kind
 
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
@@ -248,8 +249,14 @@ class Storage:
         if not path.is_file():
             raise NotFound(f"Không có project '{slug}'")
         try:
-            project = Project.model_validate(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, ValidationError) as e:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+        if project_kind(raw) == "postv":
+            raise BadRequest(f"'{slug}' là dự án PostV, không dùng được ở chức năng video HBT")
+        try:
+            project = Project.model_validate(raw)
+        except ValidationError as e:
             raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
 
         # Tự chuyển project cũ dạng scene-01.png hoặc ảnh chưa chuẩn hash sang
@@ -277,6 +284,54 @@ class Storage:
         if changed:
             self.save(slug, project)
         return project
+
+    def kind_of(self, slug: str) -> str:
+        """`video` hoặc `postv`; NotFound nếu chưa có project, BadRequest nếu JSON hỏng."""
+        path = self.project_dir(slug) / "project.json"
+        if not path.is_file():
+            raise NotFound(f"Không có project '{slug}'")
+        try:
+            return project_kind(json.loads(path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+
+    def load_any(self, slug: str) -> Project | PostvProject:
+        """Đọc project của cả hai loại (video HBT qua `load`, PostV qua `PostvProject`)."""
+        if self.kind_of(slug) == "video":
+            return self.load(slug)
+        path = self.project_dir(slug) / "project.json"
+        try:
+            return PostvProject.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, ValidationError) as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+
+    def save_any(self, slug: str, project: Project | PostvProject) -> Project | PostvProject:
+        if isinstance(project, PostvProject):
+            return self._save_postv(slug, project)
+        return self.save(slug, project)
+
+    def _save_postv(self, slug: str, project: PostvProject) -> PostvProject:
+        if project.slug != slug:
+            raise BadRequest(f"slug trong nội dung ('{project.slug}') khác đường dẫn ('{slug}')")
+        folder = self.project_dir(slug)
+        folder.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(folder / "project.json", project.model_dump(mode="json"))
+        return project
+
+    def create_postv(self, title: str, series: str = "") -> PostvProject:
+        """Dự án PostV rỗng: chưa có nguồn, đoạn, giọng, nền (bản nháp)."""
+        if not title.strip():
+            raise BadRequest("Tiêu đề không được để trống")
+        slug = self.unique_slug(slugify(title))
+        defaults = self.app_settings.load() if self.app_settings else None
+        project = PostvProject(
+            slug=slug,
+            title=title.strip(),
+            series=series.strip(),
+            theme=Theme(**defaults.theme.model_dump()) if defaults else Theme(),
+        )
+        (self.projects_dir / slug / "images").mkdir(parents=True)
+        return self._save_postv(slug, project)
 
     def save(self, slug: str, project: Project) -> Project:
         if project.slug != slug:
@@ -325,7 +380,7 @@ class Storage:
         return self.save(slug, project)
 
     def duplicate(self, slug: str, title: str | None = None) -> Project:
-        source = self.load(slug)
+        source = self.load_any(slug)
         new_title = (title or f"{source.title} (bản sao)").strip()
         new_slug = self.unique_slug(slugify(new_title))
         shutil.copytree(
@@ -334,7 +389,7 @@ class Storage:
             ignore=shutil.ignore_patterns(*COPY_EXCLUDE),
         )
         copy = source.model_copy(update={"slug": new_slug, "title": new_title})
-        return self.save(new_slug, copy)
+        return self.save_any(new_slug, copy)
 
     # ---------------------------------------------------------------- thứ tự cảnh
     def reorder_scenes(self, slug: str, order: list[int]) -> Project:
@@ -401,19 +456,19 @@ class Storage:
 
     def attach_music(self, slug: str, src: Path, credit: str) -> tuple[str, Project]:
         """Chép một file nhạc có sẵn (từ thư viện) vào project và đặt ghi công."""
-        project = self.load(slug)
+        project = self.load_any(slug)
         folder = self.project_dir(slug)
         rel = f"music{src.suffix.lower()}"
         _remove_siblings(folder, "music")
         shutil.copyfile(src, folder / rel)
         project.music = Music(file=rel, credit=credit)
-        self.save(slug, project)
+        self.save_any(slug, project)
         return rel, project
 
     # ---------------------------------------------------------------- danh sách
     def _music_sha256(self, slug: str) -> str | None:
         """SHA-256 của file nhạc hiện tại trong project; None nếu không có nhạc."""
-        music = self.load(slug).music
+        music = self.load_any(slug).music
         path = self.project_dir(slug) / music.file if music and music.file else None
         return sha256_file(path) if path is not None and path.is_file() else None
 
@@ -503,16 +558,20 @@ class Storage:
             item = {
                 "slug": d.name,
                 "title": d.name,
+                "kind": "video",
                 "updated_at": _now_iso(pj.stat().st_mtime),
                 "thumb": None,
                 **self.render_summary(d.name),
             }
             try:
-                project = self.load(d.name)
+                project = self.load_any(d.name)
                 item["title"] = project.title
-                first = project.scenes[0].image
-                if first and (d / first).is_file():
-                    item["thumb"] = self.rel(d / first)
+                if isinstance(project, PostvProject):
+                    item["kind"] = "postv"
+                else:
+                    first = project.scenes[0].image
+                    if first and (d / first).is_file():
+                        item["thumb"] = self.rel(d / first)
             except StorageError as e:
                 item["error"] = e.message
             out.append(item)
@@ -523,9 +582,12 @@ class Storage:
         self, slug: str, kind: str, src: Path, filename: str, scene_index: int | None = None
     ) -> tuple[str, Project]:
         """Nhận file tải lên (`src` là file tạm), kiểm tra, đặt vào project và lưu project.json."""
-        project = self.load(slug)
+        project = self.load_any(slug)
+        postv = isinstance(project, PostvProject)
         folder = self.project_dir(slug)
         if kind == "image":
+            if postv:
+                raise BadRequest("Dự án PostV không có ảnh cảnh (chỉ nhận cover, voice, music)")
             if scene_index is None or not 0 <= scene_index < len(project.scenes):
                 raise BadRequest(f"Cần `scene_index` từ 0 đến {len(project.scenes) - 1} cho ảnh")
             ext = _image_extension(src)
@@ -557,12 +619,13 @@ class Storage:
             _remove_siblings(folder, kind)
             shutil.move(src, folder / rel)
             if kind == "voice":
-                project.voice = Voice(file=rel)  # điểm cắt cũ không còn đúng với file mới
+                # điểm cắt cũ không còn đúng với file mới; PostV: giọng nhập vào là engine `file`
+                project.voice = PostvVoice(engine="file", file=rel) if postv else Voice(file=rel)
             else:
                 project.music = Music(file=rel)
         else:
             raise BadRequest("`kind` phải là image, cover, voice hoặc music")
-        self.save(slug, project)
+        self.save_any(slug, project)
         return rel, project
 
 

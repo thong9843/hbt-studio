@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
-import type { Project } from '../api/types';
+import { isPostv, type Project } from '../api/types';
 import { PublishDrawer } from '../components/compose/PublishDrawer';
 import { BackupsDialog } from '../components/script/BackupsDialog';
 import { PasteJsonDialog } from '../components/script/PasteJsonDialog';
@@ -249,7 +249,7 @@ export function ComposePage() {
   const { slug = '' } = useParams();
   const { data, isPending, error } = useQuery({
     queryKey: ['project', slug],
-    queryFn: () => api.getProject(slug),
+    queryFn: () => api.getAnyProject(slug),
     staleTime: Infinity,
     gcTime: 0,
     refetchOnWindowFocus: false,
@@ -273,5 +273,6 @@ export function ComposePage() {
       </main>
     );
   }
+  if (isPostv(data)) return <Navigate to={`/postv/${slug}`} replace />; // dự án PostV có màn riêng
   return <EditorProvider key={slug} initial={data} />;
 }
