@@ -1,2 +1,2 @@
-# Gói cho tiến trình con giọng VieNeu (venv riêng: backend/.venv-tts, xem README)
+# VieNeu voice subprocess (separate venv backend/.venv-tts, see README)
 vieneu==3.8.3
