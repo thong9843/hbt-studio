@@ -9,7 +9,7 @@ import { PostvLayout } from '../pages/PostvLayout';
 import { PostvPickPage } from '../pages/PostvPickPage';
 import { PostvPreviewPage } from '../pages/PostvPreviewPage';
 import { PostvScriptPage } from '../pages/PostvScriptPage';
-import { PostvSoonPage } from '../pages/PostvSoonPage';
+import { PostvExportPage } from '../pages/PostvExportPage';
 import { PostvSourcePage } from '../pages/PostvSourcePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
 import { ScenesTab } from '../pages/ScenesTab';
@@ -36,7 +36,7 @@ export function App() {
           <Route path="pick" element={<PostvPickPage />} />
           <Route path="script" element={<PostvScriptPage />} />
           <Route path="preview" element={<PostvPreviewPage />} />
-          <Route path="export" element={<PostvSoonPage step={4} />} />
+          <Route path="export" element={<PostvExportPage />} />
         </Route>
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (

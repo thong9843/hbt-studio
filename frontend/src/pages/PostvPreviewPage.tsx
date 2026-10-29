@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ClipTile } from '../components/postv/BackgroundLibrary';
 import { PostvCardPreview } from '../components/postv/PostvCardPreview';
-import { Button } from '../components/ui/Button';
+import { PostvRenderPanel } from '../components/postv/PostvRenderPanel';
 import { Card } from '../components/ui/Card';
 import { Chip } from '../components/ui/Chip';
 import { Input } from '../components/ui/Field';
@@ -10,6 +10,8 @@ import { usePostvEditor } from '../hooks/postvEditor';
 import { useBackgrounds } from '../hooks/useBackgrounds';
 import { vi } from '../i18n/vi';
 import { totalSeconds } from '../utils/postvSegments';
+
+const HEAD_SECONDS = 10;
 
 /** Bước 4 · Xem trước: chọn nền gameplay, chữ thẻ tiêu đề, hiệu ứng thẻ, xem thẻ thật. */
 export function PostvPreviewPage() {
@@ -25,6 +27,11 @@ export function PostvPreviewPage() {
     : library;
   const total = chosen.reduce((sum, c) => sum + c.duration, 0);
   const need = Math.ceil(totalSeconds(project.segments));
+  const ready =
+    project.post.text.trim() !== '' &&
+    project.segments.some((s) => s.voice.trim() !== '') &&
+    Boolean(project.voice.file) &&
+    chosen.length > 0;
 
   const setMode = (mode: 'auto' | 'manual') =>
     update((p) => ({ ...p, background: { ...p.background, mode } }));
@@ -123,9 +130,11 @@ export function PostvPreviewPage() {
       </Card>
 
       <aside aria-label={t.previewOf} className="flex flex-col gap-3">
-        <Button tone="ink" size="lg" disabled title={t.quickSoon}>
-          {t.quick}
-        </Button>
+        <PostvRenderPanel
+          label={t.quick}
+          options={{ preview: true, preview_seconds: HEAD_SECONDS }}
+          blocked={ready ? null : t.notReady}
+        />
         <div className="flex flex-wrap justify-center gap-2" role="group" aria-label={t.previewOf}>
           {tabs.map((x) => (
             <Chip key={x.key} small selected={active === x.key} onClick={() => setTab(x.key)}>

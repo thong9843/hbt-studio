@@ -273,7 +273,8 @@ describe('Bước 4 · Xem trước: nền, thẻ, hiệu ứng', () => {
     const chips = within(aside)
       .getAllByRole('button')
       .map((b) => b.textContent);
-    expect(chips).toEqual(['Xem nhanh', 'Tiêu đề', 'Bài gốc', 'user_b']); // chỉ bình luận đã chọn
+    expect(chips[0]).toMatch(/^Xem nhanh/);
+    expect(chips.slice(1)).toEqual(['Tiêu đề', 'Bài gốc', 'user_b']); // chỉ bình luận đã chọn
     await user.click(within(aside).getByRole('button', { name: 'Bài gốc' }));
     expect(src().searchParams.get('kind')).toBe('post');
     await user.click(within(aside).getByRole('button', { name: 'user_b' }));
@@ -302,7 +303,7 @@ describe('Bước 4 · Xem trước: nền, thẻ, hiệu ứng', () => {
     expect(screen.getByPlaceholderText('Để trống: lấy câu đầu của bài')).toBeVisible();
   });
 
-  it('chooses the card animation, and "Xem nhanh" waits for the renderer milestone', async () => {
+  it('chooses the card animation, and "Xem nhanh" waits for a voice file', async () => {
     const user = userEvent.setup();
     const saves = backend(postv(), []);
     app('/postv/bai/preview');
@@ -313,9 +314,7 @@ describe('Bước 4 · Xem trước: nền, thẻ, hiệu ứng', () => {
     await user.click(screen.getByRole('button', { name: 'Nảy' }));
     expect(screen.getByRole('button', { name: 'Nảy' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Mượt' })).toHaveAttribute('aria-pressed', 'false');
-    const quick = screen.getByRole('button', { name: 'Xem nhanh' });
-    expect(quick).toBeDisabled();
-    expect(quick).toHaveAttribute('title', 'Xem nhanh làm ở mốc PV5');
+    expect(screen.getByRole('button', { name: /^Xem nhanh/ })).toBeDisabled();
     await waitFor(() => expect(saves.length).toBeGreaterThan(0));
     expect((saves[saves.length - 1].settings as { card_animation: string }).card_animation).toBe(
       'bounce',
