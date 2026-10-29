@@ -21,6 +21,7 @@ library/backgrounds/**
 # Môi trường
 node_modules/
 .venv/
+.venv-tts/
 __pycache__/
 *.pyc
 *.egg-info/

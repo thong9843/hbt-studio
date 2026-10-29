@@ -1,0 +1,2 @@
+# Gói cho tiến trình con giọng VieNeu (venv riêng: backend/.venv-tts, xem README)
+vieneu==3.8.3
