@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from hbt.api.assets import MAX_BYTES, save_upload
 from hbt.api.deps import State
 from hbt.library import MusicEntry
-from hbt.models import Project
+from hbt.postv.models import AnyProject
 from hbt.storage import BadRequest
 
 router = APIRouter(tags=["music"])
@@ -64,10 +64,10 @@ class FromLibrary(BaseModel):
     id: str
 
 
-@router.post("/projects/{slug}/music/from-library", response_model=Project)
+@router.post("/projects/{slug}/music/from-library", response_model=AnyProject)
 def attach_library_music(slug: str, body: FromLibrary, state: State):
     """Dùng một bài trong thư viện cho project: chép file và đặt ghi công theo thư viện."""
-    state.storage.load(slug)  # 404 trước nếu project không có
+    state.storage.load_any(slug)  # 404 trước nếu project không có
     entry, path = state.library.find(body.id)
     _, project = state.storage.attach_music(slug, path, entry.credit)
     return project
