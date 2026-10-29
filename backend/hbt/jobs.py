@@ -21,11 +21,14 @@ from typing import Any
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
 from hbt.models import Project
+from hbt.pipeline import cancel
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
+from hbt.postv.models import PostvProject
+from hbt.postv.voice import VoiceError, VoiceProvider, build_plan, synthesize_plan
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
@@ -63,6 +66,7 @@ class Job:
     _events: list = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _done: threading.Event = field(default_factory=threading.Event)
+    kind: str = "render"  # "render" (dựng video) | "voice" (sinh giọng PostV)
 
     @property
     def finished(self) -> bool:
@@ -168,6 +172,7 @@ class JobManager:
         tool_check=check_render_tools,
         sensitive: SensitiveStore | None = None,
         app_settings: AppSettingsStore | None = None,
+        voice: VoiceProvider | None = None,
     ):
         self.storage = storage
         self.library_dir = library_dir
@@ -176,6 +181,7 @@ class JobManager:
         self._tool_check = tool_check
         self.sensitive = sensitive
         self.app_settings = app_settings
+        self.voice = voice
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
@@ -241,6 +247,27 @@ class JobManager:
         self._pool.submit(self._run, job)
         return job
 
+    def submit_voice(self, slug: str) -> Job:
+        """Job sinh giọng VieNeu cho dự án PostV (chung hàng đợi một luồng với job dựng)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới sinh giọng bằng VieNeu")
+        if self.voice is None:
+            raise ServiceUnavailable("Chưa cấu hình bộ sinh giọng")
+        status = self.voice.status()
+        if not status.ok:
+            raise ServiceUnavailable(status.note)
+        if not any(s.voice.strip() for s in project.segments):
+            raise Unprocessable("Chưa có đoạn nào có lời đọc để sinh giọng")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
     def cancel(self, job_id: str) -> Job:
         job = self.get(job_id)
         if job.finished:
@@ -271,6 +298,9 @@ class JobManager:
                 return
             job.status = RUNNING
             job.started_at = time.time()
+        if job.kind == "voice":
+            self._run_voice(job)
+            return
         folder = self.storage.project_dir(job.slug)
         cfg = self.app_settings.load() if self.app_settings is not None else None
         opts = RenderOptions(
@@ -324,3 +354,39 @@ class JobManager:
             align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
             write_run_stats(result.job_dir, result.seconds, align_cached)
             job._finish(DONE, output=output)
+
+    def _run_voice(self, job: Job) -> None:
+        """Sinh giọng từng đoạn (tiến trình con VieNeu), nối thành `voice.wav`, ghi vào project."""
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load_any(job.slug)
+                job._progress(1, "voice", "Đang nạp danh sách giọng")
+                plan, cast = build_plan(project, self.voice.list_voices())
+                result = synthesize_plan(
+                    plan, self.storage.project_dir(job.slug), self.voice, cast, job._progress
+                )
+            latest = self.storage.load_any(
+                job.slug
+            )  # người dùng có thể đã sửa project trong lúc đọc
+            latest.voice = latest.voice.model_copy(
+                update={"engine": "vieneu", "file": "voice.wav", "trim_end": None}
+            )
+            self.storage.save_any(job.slug, latest)
+            job._progress(100, "voice", "Đã sinh xong giọng")
+            job._finish(
+                DONE,
+                output={
+                    "voice": self.storage.rel(result.file),
+                    "seconds": round(result.seconds, 2),
+                    "segments": result.segments,
+                    "cast": result.cast,
+                    "generated": result.generated,
+                    "cached": result.cached,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except VoiceError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)

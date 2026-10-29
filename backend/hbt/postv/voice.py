@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Protocol
 
 from hbt.pipeline import cancel
+from hbt.postv.models import PostvProject
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 WORKER = Path(__file__).with_name("voice_worker.py")
@@ -534,6 +535,37 @@ def synthesize_plan(
     return VoiceResult(out, spans[-1][1], segments, cast, len(todo), cached, sig)
 
 
+def speakers_of(project: PostvProject) -> list[str]:
+    """Những người có lời đọc, theo thứ tự xuất hiện (người dẫn trước nếu có đoạn của họ)."""
+    seen: list[str] = []
+    for seg in project.segments:
+        if not seg.voice.strip():
+            continue
+        who = segment_speaker(seg.role, seg.ref, seg.speaker)
+        if who not in seen:
+            seen.append(who)
+    return seen
+
+
+def build_plan(
+    project: PostvProject, voices: Sequence[VoiceInfo]
+) -> tuple[list[VoicePlanItem], dict[str, str]]:
+    """Kế hoạch sinh giọng: mỗi đoạn có lời → (người đọc, giọng, chữ). Chữ gửi nguyên cho VieNeu
+    (không `{cách đọc}`, K-33). Trả kèm `cast` đã chia cho từng người."""
+    speakers = speakers_of(project)
+    if not speakers:
+        raise VoiceError("Chưa có đoạn nào có lời đọc")
+    cast = resolve_cast(speakers, project.voice.cast, project.voice.seed, voices)
+    plan = []
+    for i, seg in enumerate(project.segments):
+        text = seg.voice.strip()
+        if not text:
+            continue
+        who = segment_speaker(seg.role, seg.ref, seg.speaker)
+        plan.append(VoicePlanItem(i, who, cast[who], text))
+    return plan, cast
+
+
 def voice_cache_size(folder: Path) -> int:
     d = folder / "build" / "voice"
     return sum(f.stat().st_size for f in d.glob("*.wav")) if d.is_dir() else 0
@@ -549,6 +581,7 @@ __all__ = [
     "VoiceInfo",
     "VoiceProvider",
     "VoiceUnavailable",
+    "build_plan",
     "resolve_cast",
     "segment_speaker",
 ]
