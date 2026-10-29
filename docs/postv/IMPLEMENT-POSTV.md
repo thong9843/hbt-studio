@@ -459,6 +459,17 @@ Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 bu
 | Test                              | pytest: `test_postv_bgbuild`, `test_postv_captions`, `test_postv_cardfx` (có chạy ffmpeg thật: hiện dần, trượt, nảy), `test_postv_censorfx` (RMS trong khoảng che = 0, bíp 1 kHz), `test_postv_render` (dựng thật Xem nhanh, bản đẹp có outro + bìa + cache, che từ, huỷ; `slow`), `test_jobs_postv`, `test_cli`; Vitest `PostvRender`; e2e `postv-render` (tự bỏ qua khi thư viện nền trống)                                                                                                                                                                |
 | Chưa làm / để PV6                 | Lịch sử, ảnh bìa, nội dung đăng, preview tĩnh `preview.png`, nghe thử bíp để chỉnh mức, nhận video nền dưới 1080×1920 vẫn như PV3. Dựng không tự sinh giọng: phải có `voice.file` (sinh ở bước 3)                                                                                                                                                                                                                                                                                                                                                            |
 
+## 8g. Máy mới (i5-14400F, RTX 2060 Super 8 GB, 32 GB) (29/10/2026)
+
+| Bài đo | Máy cũ (i5-10400, CPU) | Máy mới (i5-14400F, RTX 2060 Super) | Ghi chú |
+| --- | --- | --- | --- |
+| **Whisper large-v3** ("muỗi") | ~900 s (timeout) / rơi về silence | **12,8 s** (CUDA int8_float16) | Khớp 91,4%, lệch TB 331 ms, lệch max 455 ms. Chạy CUDA hoàn toàn ổn định không lỗi DLL. |
+| **Whisper small** ("muỗi") | 47 s (CPU) | **4,7 s** (CUDA) / **12,6 s** (CPU) | Khớp 89,4%, lệch TB 130 ms (CUDA) / 137 ms (CPU). |
+| **VieNeu RTF** (v3 Turbo fp32) | RTF ≈ 1,0 (22,5 s / 22 s) | **RTF ≈ 0,43 – 0,87** | ONNX Runtime CPU. Lần nạp đầu 30,8 s; infer câu 4,0 s mất 1,72 s (RTF 0,43); warm infer 4,32 s mất 3,75 s (RTF 0,87). GPU chưa hỗ trợ ở bản tối thiểu vì `vieneu==3.8.3` đòi hỏi `torch` khi dùng CUDA. |
+| **Dựng HBT "muỗi" 50 fps** (nguội) | 142 – 149 s | **136 s** | 45,78 s video, 50 fps, bản đẹp có outro. Whisper large-v3 chạy CUDA mất 17,2 s. |
+| **Dựng PostV 60 fps mẫu** (nguội) | 136 s (39,4 s video) | **31,2 s** (41,3 s video) | Nhanh gấp ~4,3 lần máy cũ. |
+| **Dựng PostV 60 fps mẫu** (cache) | 59 s | **13,0 s** | Tái sử dụng cache nền và mốc căn chữ, nhanh gấp ~4,5 lần. |
+
 ## 9. Test chung
 
 | Loại          | Ca                                                                                                                                                                   |
