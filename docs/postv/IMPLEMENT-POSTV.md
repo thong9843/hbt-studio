@@ -470,6 +470,9 @@ Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 bu
 | **Dựng PostV 60 fps mẫu** (nguội)  | 136 s (39,4 s video)              | **31,2 s** (41,3 s video)           | Nhanh gấp ~4,3 lần máy cũ.                                                                                                                                                                              |
 | **Dựng PostV 60 fps mẫu** (cache)  | 59 s                              | **13,0 s**                          | Tái sử dụng cache nền và mốc căn chữ, nhanh gấp ~4,5 lần.                                                                                                                                               |
 
+- **Kiểm thử máy mới:** pytest passed 1117 (1 skipped), Vitest passed 924 (65 files), e2e passed 9 (2 skipped).
+- **Cần chốt:** large-v3 lệch TB 331 ms > small 130 ms; KHÔNG đổi mặc định Whisper.
+
 ## 9. Test chung
 
 | Loại          | Ca                                                                                                                                                                   |
