@@ -9,10 +9,13 @@ gian, cỡ nằm ở khối `anim` của `templates/story_cards.json` (N7).
 from __future__ import annotations
 
 import json
+import math
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from PIL import Image
 
 from hbt.pipeline import cache
 from hbt.postv import card as _card
@@ -100,6 +103,22 @@ def _source(project: PostvProject, span: CardSpan) -> dict:
     return {"hook": project.hook.model_dump(), "post": project.post.text}
 
 
+def bounce_scale(t: float, cfg: dict) -> float:
+    """Hệ số phóng của thẻ "nảy" sau `t` giây: from → peak (tại `peak_at`) → 1 trong `duration`."""
+    d, f, p = cfg["duration"], cfg["from"], cfg["peak"]
+    up = d * cfg["peak_at"]
+    if t >= d:
+        return 1.0
+    if t < up:
+        return f + (p - f) * t / up
+    return p + (1 - p) * (t - up) / (d - up)
+
+
+def _even(n: float) -> int:
+    n = math.ceil(n)
+    return n + (n % 2)
+
+
 def build_asset(
     project: PostvProject,
     span: CardSpan,
@@ -108,16 +127,27 @@ def build_asset(
     censor_mode: str,
     count_up: bool,
     out_dir: Path,
+    bounce: bool = False,
 ) -> CardAsset:
-    """Vẽ (hoặc dùng lại) các trạng thái PNG của thẻ; cache theo nội dung, không theo thời gian."""
+    """Vẽ (hoặc dùng lại) các trạng thái PNG của thẻ; cache theo nội dung, không theo thời gian.
+
+    `bounce`: thẻ "nảy": các trạng thái ở `duration` đầu được phóng sẵn (from → peak → 1) và đặt
+    giữa một khung trong suốt cỡ cố định, vì ffmpeg không đổi cỡ khung giữa dòng được qua `fade`
+    và `overlay`; mọi trạng thái cùng cỡ nên ghép bằng vị trí cố định."""
     out_dir.mkdir(parents=True, exist_ok=True)
     source = _source(project, span)
     stats = [source.get(k) for k in ("likes", "replies", "reposts", "shares")]
     counting = count_up and span.kind != "hook" and any(stats)
-    schedule = count_schedule(tpl["anim"]["count"]) if counting else [(0.0, 1.0)]
+    counts = count_schedule(tpl["anim"]["count"]) if counting else [(0.0, 1.0)]
+    bcfg = tpl["anim"]["bounce"]
+    times = {t for t, _ in counts}
+    if bounce:
+        steps = int(bcfg["steps"])
+        times |= {bcfg["duration"] * i / steps for i in range(steps + 1)}
+    schedule = sorted(times)
     key = cache.digest(
         "pv-card", span.kind, source, tpl, [m.word for m in censor or []], censor_mode, schedule,
-        CARD_CODE,
+        counting, bounce, CARD_CODE,
     )  # fmt: skip
     meta_path = out_dir / f"{key}.json"
     if meta_path.is_file():
@@ -128,15 +158,31 @@ def build_asset(
     box = final.getchannel("A").getbbox()
     if box is None:
         raise ValueError("Thẻ trống")
+    x, y, right, bottom = box
+    w, h = right - x, bottom - y
+    canvas = (_even(w * bcfg["peak"] + 2), _even(h * bcfg["peak"] + 2)) if bounce else (w, h)
+    by_scale: dict[float, Image.Image] = {}
     states: list[tuple[str, float]] = []
     previous = None
-    for k, (at, scale) in enumerate(schedule):
-        image = final
-        if scale < 1.0:
-            image = render_project_card(
-                project, span.kind, span.ref, tpl, censor, censor_mode, scale
+    for k, at in enumerate(schedule):
+        k_count = next(sc for tt, sc in reversed(counts) if tt <= at + 1e-9)
+        if k_count not in by_scale:
+            image = final
+            if k_count < 1.0:
+                image = render_project_card(
+                    project, span.kind, span.ref, tpl, censor, censor_mode, k_count
+                )
+            by_scale[k_count] = image.crop(box)
+        crop = by_scale[k_count]
+        if bounce:
+            factor = bounce_scale(at, bcfg)
+            if factor != 1.0:
+                crop = crop.resize((round(w * factor), round(h * factor)), Image.LANCZOS)
+            frame = Image.new("RGBA", canvas, (0, 0, 0, 0))
+            frame.alpha_composite(
+                crop, ((canvas[0] - crop.width) // 2, (canvas[1] - crop.height) // 2)
             )
-        crop = image.crop(box)
+            crop = frame
         raw = crop.tobytes()
         if raw == previous:  # giống trạng thái trước: gộp vào, không thêm
             continue
@@ -144,8 +190,9 @@ def build_asset(
         name = f"{key[:10]}-{k:02d}.png"
         crop.save(out_dir / name)
         states.append((name, at))
-    x, y, right, bottom = box
-    box_xywh = [x, y, right - x, bottom - y]
+    if bounce:  # đặt khung cố định sao cho tâm trùng tâm thẻ gốc
+        x, y = x + w // 2 - canvas[0] // 2, y + h // 2 - canvas[1] // 2
+    box_xywh = [x, y, *canvas]
     meta_path.write_text(json.dumps({"states": states, "box": box_xywh}), encoding="utf-8")
     return CardAsset([(out_dir / n, t) for n, t in states], *box_xywh)
 
@@ -163,16 +210,6 @@ def write_card_concat(asset: CardAsset, seconds: float, path: Path) -> None:
 
 def _num(v: float) -> str:
     return f"{v:.4f}".rstrip("0").rstrip(".") or "0"
-
-
-def bounce_scale_expr(cfg: dict) -> str:
-    """Hệ số phóng theo `t` (giây từ lúc thẻ hiện): from → peak → 1 trong `duration`."""
-    d, f, p = cfg["duration"], cfg["from"], cfg["peak"]
-    up = d * cfg["peak_at"]
-    return (
-        f"if(lt(t,{_num(up)}),{_num(f)}+({_num(p - f)})*t/{_num(up)},"
-        f"if(lt(t,{_num(d)}),{_num(p)}+({_num(1 - p)})*(t-{_num(up)})/{_num(d - up)},1))"
-    )
 
 
 def card_timing(span: CardSpan, tpl: dict, mode: str, total: float) -> dict:
@@ -215,12 +252,7 @@ def card_chain(
     if scale != 1.0:
         chain.append(f"scale=w='round(iw*{_num(scale)})':h='round(ih*{_num(scale)})':flags=lanczos")
     x0, y0 = asset.x * scale, asset.y * scale
-    if timing["bounce"]:
-        f = bounce_scale_expr(tpl["anim"]["bounce"])
-        chain.append(f"scale=w='round(iw*({f}))':h='round(ih*({f}))':eval=frame,format=rgba")
-        cx, cy = x0 + asset.w * scale / 2, y0 + asset.h * scale / 2
-        pos = f"x='{_num(cx)}-w/2':y='{_num(cy)}-h/2'"
-    elif timing["slide"]:
+    if timing["slide"]:
         slide = timing["slide"] * scale
         pos = (
             f"x={_num(x0)}:y='{_num(y0)}-{_num(slide)}*pow(max(1-(t-{_num(s)})/{_num(t_in)},0),3)'"

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from hbt.pipeline import cache
 from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.pipeline.render import PIPELINE_VERSION
 from hbt.postv.backgrounds import BackgroundEntry
 
 PIECE_SECONDS = (7.5, 15.0)  # mỗi clip được dùng 7,5 s hoặc 15 s
@@ -77,7 +78,9 @@ def bg_key(
     for p in pieces:
         st = p.file.stat()
         sources.append([p.clip_id, p.start, p.seconds, st.st_size, st.st_mtime_ns])
-    return cache.digest("pv-bg", sources, width, height, fps, preset, crf, BG_VERSION)
+    return cache.digest(
+        "pv-bg", sources, width, height, fps, preset, crf, BG_VERSION, PIPELINE_VERSION
+    )
 
 
 def build_background(

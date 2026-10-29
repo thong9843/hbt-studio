@@ -59,6 +59,7 @@ def create_app(
     app_settings = AppSettingsStore(settings.workspace_dir, settings.default_fps)
     storage = Storage(settings.workspace_dir, settings.default_fps, app_settings)
     sensitive = SensitiveStore(settings.workspace_dir)
+    postv_words = CensorStore(settings.workspace_dir)
     state = AppState(
         settings=settings,
         storage=storage,
@@ -69,12 +70,13 @@ def create_app(
             sensitive=sensitive,
             app_settings=app_settings,
             voice=voice,
+            postv_words=postv_words,
         ),
         library=MusicLibrary(settings.library_dir),
         sensitive=sensitive,
         app_settings=app_settings,
         brand_dir=brand_dir,
-        postv_words=CensorStore(settings.workspace_dir),
+        postv_words=postv_words,
         backgrounds=BackgroundLibrary(settings.library_dir),
         voice=voice,
     )

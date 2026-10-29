@@ -27,7 +27,10 @@ from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
+from hbt.postv.backgrounds import BackgroundLibrary, background_problems
+from hbt.postv.censor import CensorStore
 from hbt.postv.models import PostvProject
+from hbt.postv.render import render_postv
 from hbt.postv.voice import VoiceError, VoiceProvider, build_plan, synthesize_plan
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
@@ -173,11 +176,15 @@ class JobManager:
         sensitive: SensitiveStore | None = None,
         app_settings: AppSettingsStore | None = None,
         voice: VoiceProvider | None = None,
+        postv_render_fn=render_postv,
+        postv_words: CensorStore | None = None,
     ):
         self.storage = storage
         self.library_dir = library_dir
         self.brand_dir = brand_dir
         self._render = render_fn
+        self._render_postv = postv_render_fn
+        self.postv_words = postv_words
         self._tool_check = tool_check
         self.sensitive = sensitive
         self.app_settings = app_settings
@@ -216,8 +223,6 @@ class JobManager:
         preview_seconds: float | None = None,
     ) -> Job:
         project = self.storage.load_any(slug)  # NotFound / BadRequest nếu project hỏng
-        if not isinstance(project, Project):  # PostV: bộ dựng làm ở mốc PV5
-            raise Unprocessable("Dự án PostV chưa dựng được (bộ dựng PostV làm ở mốc PV5)")
         if fps is not None and fps not in ALLOWED_FPS:
             raise Unprocessable(f"fps phải là một trong {ALLOWED_FPS}")
         if preview_seconds is not None:
@@ -226,9 +231,13 @@ class JobManager:
             if not 0 < preview_seconds <= MAX_PREVIEW_SECONDS:
                 raise Unprocessable(f"preview_seconds phải trong (0, {MAX_PREVIEW_SECONDS}] giây")
         problems = project.render_problems()
+        if isinstance(project, PostvProject):  # PostV: thêm kiểm tra nền; từ nhạy cảm không chặn
+            problems += background_problems(
+                project.background.clip_ids, BackgroundLibrary(self.library_dir)
+            )
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
-        if self.sensitive is not None:  # từ mức `block` chặn xuất, không tạo job (mục 7)
+        if self.sensitive is not None and isinstance(project, Project):  # `block` chặn xuất (mục 7)
             blocked = [
                 describe_issue(i)
                 for i in lint_project(project, self.sensitive.load())
@@ -318,7 +327,14 @@ class JobManager:
         )
         timing_before = _timing_mtime(folder)
         try:
-            result = self._render(folder, opts, progress=job._progress, cancel_token=job.token)
+            if self.storage.kind_of(job.slug) == "postv":
+                words = self.postv_words.load() if self.postv_words is not None else None
+                result = self._render_postv(
+                    folder, opts, progress=job._progress, cancel_token=job.token,
+                    censor_words=words,
+                )  # fmt: skip
+            else:
+                result = self._render(folder, opts, progress=job._progress, cancel_token=job.token)
         except RenderCancelled:
             job._finish(CANCELLED)
         except TailTrimNeedsConfirmation as e:

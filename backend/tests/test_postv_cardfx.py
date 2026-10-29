@@ -10,7 +10,7 @@ from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.postv.card import load_template
 from hbt.postv.cardfx import (
     CardSpan,
-    bounce_scale_expr,
+    bounce_scale,
     build_asset,
     card_chain,
     card_of,
@@ -115,10 +115,12 @@ def test_handoff_fades_over_the_change_time_and_last_card_ends_before_total():
     assert last["seconds"] == pytest.approx(10)
 
 
-def test_bounce_expression_has_the_keyframes():
-    expr = bounce_scale_expr(TPL["anim"]["bounce"])
-    assert "0.92" in expr and "1.04" in expr and "0.18" in expr and "0.3" in expr
-    assert expr.count("(") == expr.count(")")
+def test_bounce_scale_follows_the_keyframes():
+    cfg = TPL["anim"]["bounce"]
+    assert bounce_scale(0, cfg) == pytest.approx(0.92)
+    assert bounce_scale(0.18, cfg) == pytest.approx(1.04)  # đỉnh tại 60 % của 0,3 s
+    assert bounce_scale(0.3, cfg) == 1.0 and bounce_scale(5, cfg) == 1.0
+    assert 0.92 < bounce_scale(0.09, cfg) < 1.04 and 1.0 < bounce_scale(0.24, cfg) < 1.04
 
 
 def test_count_schedule_goes_from_zero_to_full_in_about_a_second():
@@ -162,6 +164,23 @@ def test_asset_is_cached_by_content_not_by_time(tmp_path):
     assert c.states[0][0] != a.states[0][0]
 
 
+def test_bounce_asset_has_one_fixed_canvas_and_a_growing_then_settling_card(tmp_path):
+    p = project(likes=500, replies=3, shares=2)
+    asset = build_asset(p, post_span(), FEW, None, "blur", False, tmp_path, bounce=True)
+    plain = build_asset(p, post_span(), FEW, None, "blur", False, tmp_path)
+    sizes = {Image.open(path).size for path, _ in asset.states}
+    assert sizes == {(asset.w, asset.h)} and asset.w >= plain.w * 1.04 and asset.h >= plain.h * 1.04
+    assert asset.w % 2 == 0 and asset.h % 2 == 0 and len(asset.states) >= 8
+    widths = []
+    for path, _ in asset.states:
+        cols = np.nonzero(np.asarray(Image.open(path))[..., 3].sum(axis=0))[0]
+        widths.append(int(cols.max() - cols.min()) + 1)
+    assert widths[0] < max(widths) and widths[-1] == plain.w  # nhỏ hơn → to nhất → về cỡ gốc
+    # tâm khung trùng tâm thẻ gốc
+    assert asset.x + asset.w / 2 == pytest.approx(plain.x + plain.w / 2, abs=1)
+    assert asset.y + asset.h / 2 == pytest.approx(plain.y + plain.h / 2, abs=1)
+
+
 def test_comment_asset_uses_the_comment_numbers(tmp_path):
     span = CardSpan("comment", "c1", 0, 6, True, False)
     assert len(build_asset(project(), span, FEW, None, "blur", True, tmp_path).states) > 1
@@ -185,8 +204,10 @@ def test_concat_file_lasts_exactly_the_requested_time(tmp_path):
 
 # ------------------------------------------------------------------ chạy thật bằng ffmpeg
 def run_chain(tmp_path, span, mode, total=5.0, scale=0.25):
-    asset = build_asset(project(), span, TPL, None, "blur", False, tmp_path / "cards")
     timing = card_timing(span, TPL, mode, total)
+    asset = build_asset(
+        project(), span, TPL, None, "blur", False, tmp_path / "cards", timing["bounce"]
+    )
     concat = tmp_path / "c.ffconcat"
     write_card_concat(asset, timing["seconds"], concat)
     w, h = int(1080 * scale), int(1920 * scale)

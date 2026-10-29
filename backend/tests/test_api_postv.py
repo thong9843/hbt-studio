@@ -154,7 +154,7 @@ def test_upload_cover_after_enabling_thumbnail(client, pv):  # noqa: F811
 
 def test_render_postv_is_422_not_500(client, pv):  # noqa: F811
     r = client.post(f"/api/projects/{pv['slug']}/render", json={})
-    assert r.status_code == 422 and "PostV" in r.json()["detail"]
+    assert r.status_code == 422 and "Chưa có chữ bài gốc" in r.json()["detail"]
 
 
 def test_renders_and_clean_work_for_postv(client, pv):  # noqa: F811
