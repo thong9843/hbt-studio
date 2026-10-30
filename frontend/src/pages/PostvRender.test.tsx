@@ -252,4 +252,36 @@ describe('Bước 5 · Xuất bản đẹp', () => {
     app('/postv/bai/export');
     expect(await screen.findByRole('button', { name: /Xuất bản đẹp 60fps/ })).toBeDisabled();
   });
+
+  it('displays history, cover editor and publish content', async () => {
+    const user = userEvent.setup();
+    const historyItem = {
+      job_id: 'j-old',
+      project: 'bai',
+      created_at: '2026-10-30T09:00:00Z',
+      video: '/files/bai/renders/j-old/video.mp4',
+      publish: null,
+      srt: null,
+      cover: null,
+      preview: false,
+      preview_seconds: null,
+      fps: 60,
+      duration: 40,
+    };
+    backend(postv(), {
+      'GET /api/projects/bai/renders': [historyItem],
+      'POST /api/projects/bai/postv/thumbnail/preview.jpg': () =>
+        new Response(new Blob(['jpg']), { status: 200 }),
+    });
+    app('/postv/bai/export');
+
+    expect(await screen.findByRole('heading', { name: 'Lịch sử các lần xuất' })).toBeVisible();
+    expect(await screen.findByText(/0:40/)).toBeVisible();
+
+    expect(screen.getByRole('heading', { name: 'Ảnh bìa' })).toBeVisible();
+    const addCover = screen.getByRole('button', { name: 'Thêm ảnh bìa' });
+    await user.click(addCover);
+    expect(screen.getByRole('button', { name: 'Khung gameplay' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Ảnh tải lên' })).toBeVisible();
+  });
 });
