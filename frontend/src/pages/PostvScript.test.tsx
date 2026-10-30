@@ -390,3 +390,48 @@ describe('Gỡ file giọng đã nạp', () => {
     expect(deleteVoice).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Hộp Dán JSON kịch bản', () => {
+  it('opens dialog, checks JSON and applies it', async () => {
+    const user = userEvent.setup();
+    const checkFn = vi.fn(() =>
+      json({
+        ok: true,
+        errors: [],
+        warnings: [],
+        summary: {
+          hook: 'Tiêu đề test',
+          segments_count: 3,
+          total_chars: 100,
+          estimated_seconds: 15,
+        },
+      }),
+    );
+    const applyFn = vi.fn(() => json({ ok: true, backup_id: 'b1' }));
+    backend(postv(), info(), {
+      'GET /api/music': [],
+      'GET /api/projects/bai/postv/backups': [
+        { id: 'b0', created_at: '2026-10-30T10:00:00', bytes: 1024 },
+      ],
+      'POST /api/projects/bai/postv/script-json/check': checkFn,
+      'POST /api/projects/bai/postv/script-json/apply': applyFn,
+    });
+    app();
+    const openBtn = await screen.findByRole('button', { name: 'Dán JSON' });
+    await user.click(openBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Dán JSON kịch bản' });
+    const textarea = within(dialog).getByLabelText('Dán JSON kịch bản');
+    await user.type(textarea, '{{"postv_script": 1}');
+
+    const checkBtn = within(dialog).getByRole('button', { name: 'Kiểm tra' });
+    await user.click(checkBtn);
+    expect(checkFn).toHaveBeenCalledTimes(1);
+
+    expect(await within(dialog).findByText(/Kịch bản hợp lệ/)).toBeVisible();
+    expect(within(dialog).getByText(/Tiêu đề: "Tiêu đề test"/)).toBeVisible();
+
+    const applyBtn = within(dialog).getByRole('button', { name: 'Áp dụng' });
+    expect(applyBtn).toBeEnabled();
+  });
+});

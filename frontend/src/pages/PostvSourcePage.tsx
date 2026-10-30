@@ -6,6 +6,7 @@ import type { PostvComment, PostvParseResult, PostvProject } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorNote } from '../components/ErrorNote';
 import { AlertIcon, MoreIcon, PlusIcon, UploadIcon } from '../components/icons';
+import { PostvAutoPanel } from '../components/postv/PostvAutoPanel';
 import { PostvCardPreview } from '../components/postv/PostvCardPreview';
 import { StatInput } from '../components/postv/StatInput';
 import { Button } from '../components/ui/Button';
@@ -403,6 +404,7 @@ export function PostvSourcePage() {
         >
           {vi.postv.next.pick}
         </Button>
+        <PostvAutoPanel project={project} disabled={needPost} />
         <p className="text-center text-small font-semibold text-muted">
           {check.data
             ? [

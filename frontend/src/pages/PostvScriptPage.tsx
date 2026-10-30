@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PostvMusicCard } from '../components/postv/PostvMusicCard';
+import { PostvScriptJsonDialog } from '../components/postv/PostvScriptJsonDialog';
 import { PostvVoiceCard } from '../components/postv/PostvVoiceCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -21,6 +23,7 @@ function readerOf(role: string, ref: string | null, speaker: string | null | und
 export function PostvScriptPage() {
   const { project, update, flush } = usePostvEditor();
   const navigate = useNavigate();
+  const [jsonDialogOpen, setJsonDialogOpen] = useState(false);
   const t = vi.postv.script;
   const roles = vi.postv.pick.roles;
   const V = vi.postv.voice;
@@ -42,9 +45,14 @@ export function PostvScriptPage() {
   return (
     <div className="grid gap-4 min-[1024px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_300px]">
       <Card as="section" aria-label={t.listTitle} className="flex min-w-0 flex-col gap-3">
-        <div>
-          <h2 className="text-h2 font-bold">{t.listTitle}</h2>
-          <p className="text-small text-muted">{t.lead}</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-h2 font-bold">{t.listTitle}</h2>
+            <p className="text-small text-muted">{t.lead}</p>
+          </div>
+          <Button tone="soft" size="sm" onClick={() => setJsonDialogOpen(true)}>
+            {vi.postv.scriptJson.button}
+          </Button>
         </div>
         {project.segments.length === 0 && (
           <div className="ui-inner flex flex-wrap items-center gap-3 p-3">
@@ -109,6 +117,8 @@ export function PostvScriptPage() {
           {empty > 0 && <Badge tone="yel">{t.missingText}</Badge>}
         </Card>
       </aside>
+
+      <PostvScriptJsonDialog open={jsonDialogOpen} onClose={() => setJsonDialogOpen(false)} />
     </div>
   );
 }
