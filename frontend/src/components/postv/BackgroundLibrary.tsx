@@ -5,8 +5,9 @@ import type { BackgroundEntry } from '../../api/types';
 import { useBackgrounds } from '../../hooks/useBackgrounds';
 import { vi } from '../../i18n/vi';
 import { isLowRes } from '../../utils/background';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { ErrorNote } from '../ErrorNote';
-import { PlusIcon, UploadIcon } from '../icons';
+import { PlusIcon, TrashIcon, UploadIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -18,15 +19,17 @@ type Key = keyof typeof T.fields;
 const KEYS = Object.keys(T.fields) as Key[];
 const REQUIRED: readonly Key[] = ['title', 'source', 'license'];
 const EMPTY: Record<Key, string> = { title: '', source: '', license: '', url: '', tags: '' };
-/** Ô một clip: ảnh xem nhanh 9:16, tên, thời lượng, giấy phép; tuỳ chọn có ô chọn. */
+/** Ô một clip: ảnh xem nhanh 9:16, tên, thời lượng, giấy phép; tuỳ chọn có ô chọn hoặc nút xoá. */
 export function ClipTile({
   clip,
   selected,
   onToggle,
+  onDelete,
 }: {
   clip: BackgroundEntry;
   selected?: boolean;
   onToggle?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <li className="ui-inner flex w-[132px] flex-none flex-col gap-2 p-2">
@@ -44,6 +47,19 @@ export function ClipTile({
             onChange={onToggle}
             aria-label={vi.postv.preview.pickClip(clip.title)}
             className="absolute left-2 top-2 h-5 w-5"
+          />
+        )}
+        {onDelete && (
+          <Button
+            tone="soft"
+            size="sm"
+            icon={<TrashIcon size={14} />}
+            aria-label={`${T.delete} ${clip.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="absolute right-2 top-2 !h-7 !w-7 !p-0 bg-base/80 text-danger hover:bg-base"
           />
         )}
       </div>
@@ -152,7 +168,18 @@ export function AddBackgroundDialog({ open, onClose }: { open: boolean; onClose:
 /** Khối "Thư viện nền" của trang /postv. */
 export function BackgroundLibraryCard() {
   const [adding, setAdding] = useState(false);
+  const [deletingClip, setDeletingClip] = useState<BackgroundEntry | null>(null);
   const { data, isPending, error } = useBackgrounds();
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteBackground(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backgrounds'] });
+      setDeletingClip(null);
+    },
+  });
+
   return (
     <Card as="section" aria-label={T.title} className="mt-8 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -167,18 +194,29 @@ export function BackgroundLibraryCard() {
           {T.add}
         </Button>
       </div>
-      <ErrorNote error={error} />
+      <ErrorNote error={error ?? deleteMutation.error} />
       {!isPending && data && data.length === 0 && (
         <p className="text-small text-muted">{T.empty}</p>
       )}
       {data && data.length > 0 && (
         <ul className="flex gap-3 overflow-x-auto pb-1" aria-label={T.title}>
           {data.map((c) => (
-            <ClipTile key={c.id} clip={c} />
+            <ClipTile key={c.id} clip={c} onDelete={() => setDeletingClip(c)} />
           ))}
         </ul>
       )}
       <AddBackgroundDialog open={adding} onClose={() => setAdding(false)} />
+      {deletingClip && (
+        <ConfirmDialog
+          title={T.deleteConfirmTitle}
+          message={T.deleteConfirmMessage(deletingClip.title)}
+          confirmLabel={T.delete}
+          danger
+          busy={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(deletingClip.id)}
+          onCancel={() => !deleteMutation.isPending && setDeletingClip(null)}
+        />
+      )}
     </Card>
   );
 }

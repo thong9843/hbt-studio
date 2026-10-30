@@ -1,10 +1,10 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewProjectProvider } from '../components/NewProjectDialog';
 import { ToastProvider } from '../components/Toast';
-import { stubFetch } from '../test/fakes';
+import { FakeEventSource, stubFetch } from '../test/fakes';
 import { project } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { PostvLayout } from './PostvLayout';
@@ -13,6 +13,10 @@ import { PostvSoonPage } from './PostvSoonPage';
 import { PostvSourcePage } from './PostvSourcePage';
 import { ProjectsPage } from './ProjectsPage';
 
+beforeEach(() => {
+  FakeEventSource.instances = [];
+  vi.stubGlobal('EventSource', FakeEventSource);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 const stats = { views: null, likes: null, replies: null, reposts: null, shares: null };
@@ -533,5 +537,36 @@ describe('Trang /postv', () => {
       'aria-pressed',
       'true',
     );
+  });
+
+  it('runs auto generation with style and comment count chips', async () => {
+    const user = userEvent.setup();
+    const autoFn = vi.fn(() => json({ job_id: 'auto-123' }));
+    stubFetch({
+      'GET /api/projects/bai': postv({ comments: [comment('1')] }),
+      'GET /api/postv/styles': [
+        { id: 'ke-chuyen', label: 'Kể chuyện', description: '', tone: '', voice_style: '' },
+        { id: 'hai-huoc', label: 'Hài hước', description: '', tone: '', voice_style: '' },
+      ],
+      'POST /api/projects/bai/postv/script/check': CHECK,
+      'POST /api/projects/bai/postv/auto': autoFn,
+      'GET /api/jobs/auto-123': {
+        id: 'auto-123',
+        slug: 'bai',
+        kind: 'postv_auto',
+        status: 'running',
+        progress: 40,
+        message: '3/7: Viết kịch bản mẫu',
+      },
+    });
+    app('/postv/bai');
+    const panel = await screen.findByRole('region', { name: 'Tạo tự động' });
+    await user.click(within(panel).getByRole('button', { name: 'Hài hước' }));
+    await user.click(within(panel).getByRole('button', { name: '4' }));
+
+    const submitBtn = within(panel).getByRole('button', { name: 'Tạo tự động' });
+    await user.click(submitBtn);
+
+    await waitFor(() => expect(autoFn).toHaveBeenCalledTimes(1));
   });
 });

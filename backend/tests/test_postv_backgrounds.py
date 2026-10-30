@@ -46,6 +46,44 @@ def test_add_reads_the_video_and_stores_file_thumb_and_index(lib, clip):
     assert [e.id for e in lib.list()] == ["parkour-01"]
     assert json.loads(lib.index_path.read_text(encoding="utf-8"))[0]["license"] == "Tự quay"
 
+    # Test remove
+    lib.remove("parkour-01")
+    assert not (lib.root / "parkour-01.mp4").is_file()
+    assert not (lib.thumbs_dir / "parkour-01.jpg").is_file()
+    assert len(lib.list()) == 0
+
+
+def test_delete_background_endpoint(client, tmp_path):  # noqa: F811
+    in_clip = make_clip(tmp_path / "temp_in.mp4")
+    with open(in_clip, "rb") as f:
+        r = client.post(
+            "/api/backgrounds",
+            data={"title": "Test Delete", "source": "src", "license": "lic"},
+            files={"file": ("test.mp4", f, "video/mp4")},
+        )
+    assert r.status_code == 201
+    clip_id = r.json()["id"]
+
+    # Tạo dự án PostV dùng clip_id này
+    p_res = client.post("/api/projects", json={"title": "Dùng Clip", "kind": "postv"})
+    slug = p_res.json()["slug"]
+    p_data = client.get(f"/api/projects/{slug}").json()
+    p_data["background"]["clip_ids"] = [clip_id]
+    client.put(f"/api/projects/{slug}", json=p_data)
+
+    # Xóa bị 409 do dự án đang dùng
+    del_r = client.delete(f"/api/backgrounds/{clip_id}")
+    assert del_r.status_code == 409
+    assert "Dùng Clip" in del_r.text
+
+    # Bỏ dùng clip
+    p_data["background"]["clip_ids"] = []
+    client.put(f"/api/projects/{slug}", json=p_data)
+
+    # Giờ xóa thành công 204
+    del_ok = client.delete(f"/api/backgrounds/{clip_id}")
+    assert del_ok.status_code == 204
+
 
 def test_same_title_gets_a_new_id(lib, tmp_path):
     a = lib.add(make_clip(tmp_path / "a.mp4"), "a.mp4", META)

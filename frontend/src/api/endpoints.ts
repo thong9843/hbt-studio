@@ -14,9 +14,12 @@ import type {
   AnyProject,
   BackgroundEntry,
   NewBackgroundInput,
+  PostvAutoOptions,
+  PostvBackupRecord,
   PostvCheck,
   PostvParseResult,
   PostvProject,
+  PostvScriptStyle,
   Project,
   ProjectCreate,
   ProjectSummary,
@@ -26,6 +29,7 @@ import type {
   ScriptApplied,
   ScriptCheck,
   ScriptExtra,
+  ScriptJsonCheckResult,
   SensitiveWords,
   Theme,
 } from './types';
@@ -132,6 +136,31 @@ export const api = {
     }
     return apiRequest<BackgroundEntry>('POST', '/backgrounds', { form });
   },
+  deleteBackground: (id: string) => apiRequest<void>('DELETE', `/backgrounds/${enc(id)}`),
+  deletePostvVoice: (slug: string) =>
+    apiRequest<void>('DELETE', `/projects/${enc(slug)}/postv/assets/voice`),
+  deletePostvMusic: (slug: string) =>
+    apiRequest<void>('DELETE', `/projects/${enc(slug)}/postv/assets/music`),
+  getPostvStyles: () => apiGet<PostvScriptStyle[]>('/postv/styles'),
+  startPostvAuto: (slug: string, options: PostvAutoOptions) =>
+    apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/postv/auto`, { json: options }),
+  checkPostvScriptJson: (slug: string, body: unknown) =>
+    apiRequest<ScriptJsonCheckResult>('POST', `/projects/${enc(slug)}/postv/script-json/check`, {
+      json: body,
+    }),
+  applyPostvScriptJson: (slug: string, body: unknown) =>
+    apiRequest<{ ok: boolean; backup_id: string }>(
+      'POST',
+      `/projects/${enc(slug)}/postv/script-json/apply`,
+      { json: body },
+    ),
+  listPostvBackups: (slug: string) =>
+    apiGet<PostvBackupRecord[]>(`/projects/${enc(slug)}/postv/backups`),
+  restorePostvBackup: (slug: string, backupId: string) =>
+    apiRequest<{ ok: boolean }>(
+      'POST',
+      `/projects/${enc(slug)}/postv/backups/${enc(backupId)}/restore`,
+    ),
   backgroundThumbUrl: (id: string) => `/api/backgrounds/${enc(id)}/thumb`,
   backgroundVideoUrl: (id: string) => `/api/backgrounds/${enc(id)}/video`,
   /** Ảnh thẻ PostV vẽ ở máy chủ từ dữ liệu đã lưu; `version` đổi sau mỗi lần lưu để tải lại ảnh. */

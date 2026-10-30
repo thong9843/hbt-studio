@@ -141,6 +141,15 @@ class PostvSettings(_Model):
         return v
 
 
+class PostvAutoOptions(_Model):
+    """Tùy chọn ghi nhớ lần tạo tự động gần nhất (PVA)."""
+
+    style: str = "ke-chuyen"
+    comments: int = Field(default=3, ge=2, le=5)
+    voices: Literal["random", "manual"] = "random"
+    seed: int = 1
+
+
 class PostvProject(_Model):
     version: Literal[1] = 1
     kind: Literal["postv"] = "postv"
@@ -161,6 +170,7 @@ class PostvProject(_Model):
     settings: PostvSettings = Field(default_factory=PostvSettings)
     publish: Publish = Field(default_factory=Publish)
     thumbnail: Thumbnail | None = None
+    auto: PostvAutoOptions = Field(default_factory=PostvAutoOptions)
 
     @field_validator("slug")
     @classmethod
@@ -211,4 +221,4 @@ AnyProject = Annotated[
     Discriminator(project_kind),
 ]
 
-__all__ = ["AnyProject", "PostvProject", "POSTV_FPS", "project_kind"]
+__all__ = ["AnyProject", "PostvAutoOptions", "PostvProject", "POSTV_FPS", "project_kind"]

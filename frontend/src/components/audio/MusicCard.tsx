@@ -6,7 +6,7 @@ import { useProjectEditor } from '../../hooks/projectEditor';
 import { vi } from '../../i18n/vi';
 import { ErrorNote } from '../ErrorNote';
 import { creditOf, libraryMoods } from '../../utils/audio';
-import { UploadIcon } from '../icons';
+import { TrashIcon, UploadIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -27,6 +27,9 @@ export interface MusicHost {
   /** Nhận nhạc máy chủ vừa đặt. */
   applyMusic: (music: Music | null) => void;
   flush: () => Promise<void>;
+  /** Gỡ file nhạc đã nạp khỏi thư mục dự án (nếu hỗ trợ). */
+  onRemoveAsset?: () => void;
+  isRemovingAsset?: boolean;
 }
 
 /** Thẻ Nhạc nền của video HBT. */
@@ -154,12 +157,27 @@ export function MusicCardView({ host }: { host: MusicHost }) {
       <ErrorNote error={library.error ?? attach.error} />
 
       {music?.file ? (
-        <Input
-          label={T.credit}
-          hint={<p className="mt-1 text-small text-muted">{T.creditHelp}</p>}
-          value={music.credit}
-          onChange={(e) => host.setMusic({ ...music, credit: e.target.value })}
-        />
+        <div className="space-y-2">
+          <Input
+            label={T.credit}
+            hint={<p className="mt-1 text-small text-muted">{T.creditHelp}</p>}
+            value={music.credit}
+            onChange={(e) => host.setMusic({ ...music, credit: e.target.value })}
+          />
+          {host.onRemoveAsset && (
+            <div>
+              <Button
+                tone="danger"
+                size="sm"
+                icon={<TrashIcon size={14} />}
+                disabled={host.isRemovingAsset}
+                onClick={host.onRemoveAsset}
+              >
+                {T.remove}
+              </Button>
+            </div>
+          )}
+        </div>
       ) : (
         <p className="text-small text-muted">{T.noMusicNote}</p>
       )}

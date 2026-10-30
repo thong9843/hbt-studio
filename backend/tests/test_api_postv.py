@@ -235,6 +235,12 @@ def test_postv_preview_png_endpoint(client, pv):  # noqa: F811
     assert r.headers["content-type"] == "image/png"
     assert len(r.content) > 100
 
+    # Có tham số t nhưng chưa có clip nền -> rơi về thumb hoặc nền mặc định
+    r_t = client.get(f"/api/projects/{slug}/postv/preview.png?t=1.5&w=270")
+    assert r_t.status_code == 200
+    assert r_t.headers["content-type"] == "image/png"
+    assert len(r_t.content) > 100
+
 
 def test_postv_thumbnail_preview_endpoint(client, pv):  # noqa: F811
     slug = pv["slug"]
@@ -250,3 +256,23 @@ def test_postv_thumbnail_preview_endpoint(client, pv):  # noqa: F811
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == "image/jpeg"
     assert len(r.content) > 100
+
+
+def test_delete_postv_assets_voice_and_music(client, pv):  # noqa: F811
+    slug = pv["slug"]
+    p = client.get(f"/api/projects/{slug}").json()
+    p["voice"]["file"] = "voice.wav"
+    p["voice"]["engine"] = "file"
+    p["music"] = {"id": "m1", "file": "music.mp3", "title": "Nhạc"}
+    client.put(f"/api/projects/{slug}", json=p)
+
+    rv = client.delete(f"/api/projects/{slug}/postv/assets/voice")
+    assert rv.status_code == 204
+    p_after_v = client.get(f"/api/projects/{slug}").json()
+    assert p_after_v["voice"]["file"] is None
+    assert p_after_v["voice"]["engine"] == "vieneu"
+
+    rm = client.delete(f"/api/projects/{slug}/postv/assets/music")
+    assert rm.status_code == 204
+    p_after_m = client.get(f"/api/projects/{slug}").json()
+    assert p_after_m["music"] is None

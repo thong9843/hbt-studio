@@ -346,4 +346,92 @@ describe('Thẻ Nhạc', () => {
     const music = await screen.findByRole('region', { name: 'Nhạc nền' });
     expect(within(music).getByRole('button', { name: 'Không nhạc' })).toBeVisible();
   });
+
+  it('allows removing an attached music file with confirmation', async () => {
+    const user = userEvent.setup();
+    const deleteMusic = vi.fn(() => new Response(null, { status: 204 }));
+    backend(postv({ music: { file: 'music.mp3', credit: 'Sample Artist' } }), info(), {
+      'GET /api/music': [],
+      'DELETE /api/projects/bai/postv/assets/music': deleteMusic,
+    });
+    app();
+    const musicCard = await screen.findByRole('region', { name: 'Nhạc nền' });
+    const removeBtn = within(musicCard).getByRole('button', { name: 'Gỡ file nhạc' });
+    await user.click(removeBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Gỡ file nhạc' });
+    expect(within(dialog).getByText(/Bạn có chắc muốn gỡ file nhạc này\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Gỡ file nhạc' }));
+    expect(deleteMusic).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Gỡ file giọng đã nạp', () => {
+  it('allows removing an uploaded voice file with confirmation', async () => {
+    const user = userEvent.setup();
+    const deleteVoice = vi.fn(() => new Response(null, { status: 204 }));
+    backend(
+      postv({ voice: { ...VOICE, engine: 'file', file: 'voice_input.wav' } }),
+      info({ engine: 'file', file: 'voice_input.wav' }),
+      {
+        'DELETE /api/projects/bai/postv/assets/voice': deleteVoice,
+      },
+    );
+    app();
+    const voiceCard = await screen.findByRole('region', { name: 'Giọng đọc' });
+    const removeBtn = within(voiceCard).getByRole('button', { name: 'Gỡ file giọng' });
+    await user.click(removeBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Gỡ file giọng' });
+    expect(within(dialog).getByText(/Bạn có chắc muốn gỡ file giọng này\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Gỡ file giọng' }));
+    expect(deleteVoice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Hộp Dán JSON kịch bản', () => {
+  it('opens dialog, checks JSON and applies it', async () => {
+    const user = userEvent.setup();
+    const checkFn = vi.fn(() =>
+      json({
+        ok: true,
+        errors: [],
+        warnings: [],
+        summary: {
+          hook: 'Tiêu đề test',
+          segments_count: 3,
+          total_chars: 100,
+          estimated_seconds: 15,
+        },
+      }),
+    );
+    const applyFn = vi.fn(() => json({ ok: true, backup_id: 'b1' }));
+    backend(postv(), info(), {
+      'GET /api/music': [],
+      'GET /api/projects/bai/postv/backups': [
+        { id: 'b0', created_at: '2026-10-30T10:00:00', bytes: 1024 },
+      ],
+      'POST /api/projects/bai/postv/script-json/check': checkFn,
+      'POST /api/projects/bai/postv/script-json/apply': applyFn,
+    });
+    app();
+    const openBtn = await screen.findByRole('button', { name: 'Dán JSON' });
+    await user.click(openBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Dán JSON kịch bản' });
+    const textarea = within(dialog).getByLabelText('Dán JSON kịch bản');
+    await user.type(textarea, '{{"postv_script": 1}');
+
+    const checkBtn = within(dialog).getByRole('button', { name: 'Kiểm tra' });
+    await user.click(checkBtn);
+    expect(checkFn).toHaveBeenCalledTimes(1);
+
+    expect(await within(dialog).findByText(/Kịch bản hợp lệ/)).toBeVisible();
+    expect(within(dialog).getByText(/Tiêu đề: "Tiêu đề test"/)).toBeVisible();
+
+    const applyBtn = within(dialog).getByRole('button', { name: 'Áp dụng' });
+    expect(applyBtn).toBeEnabled();
+  });
 });
