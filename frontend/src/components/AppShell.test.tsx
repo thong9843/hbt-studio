@@ -47,6 +47,7 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
         <Route path="/" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
+        <Route path="/postv/:slug/*" element={<Where />} />
         <Route path="/postv/*" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
@@ -123,6 +124,35 @@ describe('AppShell, wide (>= 1280 px)', () => {
     );
   });
 
+  it('shows the open postv project with its name and five steps inside /postv/:slug', async () => {
+    stubFetch({
+      'GET /api/health': health,
+      'GET /api/projects': [summary('bai', 'Bài đêm khuya')],
+    });
+    shell('/postv/bai/preview');
+    const group = screen.getByRole('group', { name: 'Dự án đang mở' });
+    expect(await within(group).findByText('Bài đêm khuya')).toBeInTheDocument();
+    const links = within(group).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual([
+      'Nguồn',
+      'Chọn đoạn',
+      'Kịch bản',
+      'Xem trước',
+      'Xuất',
+    ]);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '/postv/bai',
+      '/postv/bai/pick',
+      '/postv/bai/script',
+      '/postv/bai/preview',
+      '/postv/bai/export',
+    ]);
+    expect(within(group).getByRole('link', { name: 'Xem trước' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
   it('falls back to the slug until the project list arrives', () => {
     stubFetch(routes());
     shell('/p/muoi');
@@ -146,11 +176,11 @@ describe('AppShell, wide (>= 1280 px)', () => {
 
   it('has its own PostV item: /postv is current on the PostV screens, not on Projects', async () => {
     stubFetch(routes());
-    shell('/postv/bai/pick');
+    shell('/postv');
     expect(await screen.findByRole('link', { name: 'PostV' })).toHaveAttribute('href', '/postv');
     expect(screen.getByRole('link', { name: 'PostV' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
-    expect(screen.queryByRole('group', { name: 'Dự án đang mở' })).toBeNull(); // bước nằm ở thanh ngang
+    expect(screen.queryByRole('group', { name: 'Dự án đang mở' })).toBeNull();
   });
 
   it('opens the new-video dialog from the red button, on any screen', async () => {

@@ -171,6 +171,37 @@ describe('Bước 4 · Xem nhanh', () => {
     await user.click(await screen.findByRole('button', { name: 'Xem nhanh' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Chưa có clip nền nào');
   });
+
+  it('toggles captions, changes caption preset and plays bleep sound', async () => {
+    const user = userEvent.setup();
+    const playMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      'Audio',
+      vi.fn().mockImplementation(() => ({
+        play: playMock,
+        onended: null,
+        onerror: null,
+      })),
+    );
+    backend(postv(), {
+      'GET /api/projects/bai/postv/preview.png': () =>
+        new Response(new Blob(['x']), { status: 200 }),
+    });
+    app('/postv/bai/preview');
+
+    expect(await screen.findByRole('button', { name: 'HBT (Vàng)' })).toBeVisible();
+    const sampleChip = screen.getByRole('button', { name: 'Mẫu (Xanh lá)' });
+    await user.click(sampleChip);
+
+    const bleepBtn = screen.getByRole('button', { name: 'Nghe thử bíp' });
+    await user.click(bleepBtn);
+    expect(playMock).toHaveBeenCalled();
+
+    const cardChip = screen.getByRole('button', { name: 'Chỉ thẻ bài' });
+    await user.click(cardChip);
+    const fullChip = screen.getByRole('button', { name: 'Toàn khung 9:16' });
+    await user.click(fullChip);
+  });
 });
 
 describe('Bước 5 · Xuất bản đẹp', () => {
@@ -220,5 +251,37 @@ describe('Bước 5 · Xuất bản đẹp', () => {
     backend(postv({ segments: [] }));
     app('/postv/bai/export');
     expect(await screen.findByRole('button', { name: /Xuất bản đẹp 60fps/ })).toBeDisabled();
+  });
+
+  it('displays history, cover editor and publish content', async () => {
+    const user = userEvent.setup();
+    const historyItem = {
+      job_id: 'j-old',
+      project: 'bai',
+      created_at: '2026-10-30T09:00:00Z',
+      video: '/files/bai/renders/j-old/video.mp4',
+      publish: null,
+      srt: null,
+      cover: null,
+      preview: false,
+      preview_seconds: null,
+      fps: 60,
+      duration: 40,
+    };
+    backend(postv(), {
+      'GET /api/projects/bai/renders': [historyItem],
+      'POST /api/projects/bai/postv/thumbnail/preview.jpg': () =>
+        new Response(new Blob(['jpg']), { status: 200 }),
+    });
+    app('/postv/bai/export');
+
+    expect(await screen.findByRole('heading', { name: 'Lịch sử các lần xuất' })).toBeVisible();
+    expect(await screen.findByText(/0:40/)).toBeVisible();
+
+    expect(screen.getByRole('heading', { name: 'Ảnh bìa' })).toBeVisible();
+    const addCover = screen.getByRole('button', { name: 'Thêm ảnh bìa' });
+    await user.click(addCover);
+    expect(screen.getByRole('button', { name: 'Khung gameplay' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Ảnh tải lên' })).toBeVisible();
   });
 });

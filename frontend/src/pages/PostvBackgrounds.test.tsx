@@ -274,7 +274,7 @@ describe('Bước 4 · Xem trước: nền, thẻ, hiệu ứng', () => {
       .getAllByRole('button')
       .map((b) => b.textContent);
     expect(chips[0]).toMatch(/^Xem nhanh/);
-    expect(chips.slice(1)).toEqual(['Tiêu đề', 'Bài gốc', 'user_b']); // chỉ bình luận đã chọn
+    expect(chips.slice(3)).toEqual(['Tiêu đề', 'Bài gốc', 'user_b']); // chỉ bình luận đã chọn
     await user.click(within(aside).getByRole('button', { name: 'Bài gốc' }));
     expect(src().searchParams.get('kind')).toBe('post');
     await user.click(within(aside).getByRole('button', { name: 'user_b' }));

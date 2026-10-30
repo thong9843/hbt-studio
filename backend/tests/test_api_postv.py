@@ -212,3 +212,41 @@ def test_music_from_library_for_postv(client, pv):  # noqa: F811
     r = client.post(f"/api/projects/{pv['slug']}/music/from-library", json={"id": "bai"})
     assert r.status_code == 200, r.text
     assert r.json()["kind"] == "postv" and r.json()["music"]["credit"].startswith("Bài")
+
+
+def test_bleep_wav_endpoint(client):  # noqa: F811
+    r = client.get("/api/postv/bleep.wav?seconds=0.2")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/wav"
+    assert len(r.content) > 1000
+
+
+def test_postv_preview_png_endpoint(client, pv):  # noqa: F811
+    slug = pv["slug"]
+    # Điền một ít nội dung để xem trước
+    got = client.get(f"/api/projects/{slug}").json()
+    got["post"]["text"] = "Một buổi tối thật kỳ lạ."
+    got["hook"]["text"] = "Tối kỳ lạ"
+    got["segments"] = [{"role": "post", "voice": "Một buổi tối thật kỳ lạ."}]
+    client.put(f"/api/projects/{slug}", json=got)
+
+    r = client.get(f"/api/projects/{slug}/postv/preview.png?w=270")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert len(r.content) > 100
+
+
+def test_postv_thumbnail_preview_endpoint(client, pv):  # noqa: F811
+    slug = pv["slug"]
+    body = {
+        "thumbnail": {
+            "scene": 1,
+            "lines": ["TIÊU ĐỀ BÌA", "DÒNG THỨ HAI"],
+            "series": "CHUYỆN ĐÊM",
+            "accent": "#FFD43B",
+        }
+    }
+    r = client.post(f"/api/projects/{slug}/postv/thumbnail/preview.jpg?w=270", json=body)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/jpeg"
+    assert len(r.content) > 100

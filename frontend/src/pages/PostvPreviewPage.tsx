@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../api/endpoints';
 import { ClipTile } from '../components/postv/BackgroundLibrary';
 import { PostvCardPreview } from '../components/postv/PostvCardPreview';
 import { PostvRenderPanel } from '../components/postv/PostvRenderPanel';
+import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Chip } from '../components/ui/Chip';
 import { Input } from '../components/ui/Field';
+import { Switch } from '../components/ui/Switch';
+import { PlayIcon } from '../components/icons';
 import { usePostvEditor } from '../hooks/postvEditor';
 import { useBackgrounds } from '../hooks/useBackgrounds';
 import { vi } from '../i18n/vi';
@@ -13,12 +17,15 @@ import { totalSeconds } from '../utils/postvSegments';
 
 const HEAD_SECONDS = 10;
 
-/** Bước 4 · Xem trước: chọn nền gameplay, chữ thẻ tiêu đề, hiệu ứng thẻ, xem thẻ thật. */
+/** Bước 4 · Xem trước: chọn nền gameplay, chữ thẻ tiêu đề, hiệu ứng thẻ, phụ đề, che từ, xem trước tĩnh 9:16. */
 export function PostvPreviewPage() {
   const { project, update, savedCount } = usePostvEditor();
   const t = vi.postv.preview;
   const clips = useBackgrounds();
   const [tab, setTab] = useState<string>('hook'); // 'hook' | 'post' | id bình luận
+  const [viewMode, setViewMode] = useState<'full' | 'card'>('full');
+  const [playingBleep, setPlayingBleep] = useState(false);
+
   const picked = project.comments.filter((c) => c.picked);
   const manual = project.background.mode === 'manual';
   const library = clips.data ?? [];
@@ -42,6 +49,14 @@ export function PostvPreviewPage() {
       return { ...p, background: { ...p.background, clip_ids: next } };
     });
 
+  const playBleep = () => {
+    setPlayingBleep(true);
+    const audio = new Audio(api.postvBleepUrl());
+    audio.onended = () => setPlayingBleep(false);
+    audio.onerror = () => setPlayingBleep(false);
+    audio.play().catch(() => setPlayingBleep(false));
+  };
+
   const tabs = [
     { key: 'hook', label: t.tabs.hook },
     { key: 'post', label: t.tabs.post },
@@ -49,6 +64,14 @@ export function PostvPreviewPage() {
   ];
   const active = tabs.some((x) => x.key === tab) ? tab : 'hook';
   const kind = active === 'hook' || active === 'post' ? active : 'comment';
+
+  const captionPreset = project.style?.caption?.preset ?? 'hbt';
+  const highlightColor =
+    project.style?.caption?.highlight_color ?? (captionPreset === 'sample' ? '#38E178' : '#FFD43B');
+  const captionsEnabled = project.settings?.captions ?? true;
+  const censorEnabled = project.settings?.censor?.enabled ?? true;
+  const censorText = project.settings?.censor?.text ?? 'blur';
+  const cardAnimation = project.settings?.card_animation ?? 'smooth';
 
   return (
     <div className="grid gap-4 min-[1024px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_300px]">
@@ -96,7 +119,7 @@ export function PostvPreviewPage() {
         )}
       </Card>
 
-      <Card as="section" aria-label={t.cards} className="flex min-w-0 flex-col gap-3">
+      <Card as="section" aria-label={t.cards} className="flex min-w-0 flex-col gap-4">
         <h2 className="text-h2 font-bold">{t.cards}</h2>
         <Input
           label={t.hookText}
@@ -117,7 +140,7 @@ export function PostvPreviewPage() {
             {(['smooth', 'bounce'] as const).map((value) => (
               <Chip
                 key={value}
-                selected={project.settings.card_animation === value}
+                selected={cardAnimation === value}
                 onClick={() =>
                   update((p) => ({ ...p, settings: { ...p.settings, card_animation: value } }))
                 }
@@ -127,6 +150,161 @@ export function PostvPreviewPage() {
             ))}
           </div>
         </div>
+
+        <div className="space-y-3 border-t border-line pt-3">
+          <div className="flex items-center justify-between">
+            <span className="font-bold">{t.captions}</span>
+            <Switch
+              label={t.captions}
+              checked={captionsEnabled}
+              onChange={(checked) =>
+                update((p) => ({ ...p, settings: { ...p.settings, captions: checked } }))
+              }
+            />
+          </div>
+          {captionsEnabled && (
+            <div className="space-y-3 pl-1">
+              <div className="ui-field">
+                <span className="ui-label" id="pv-cap-preset">
+                  {t.captionPreset}
+                </span>
+                <div className="flex flex-wrap gap-2" role="group" aria-labelledby="pv-cap-preset">
+                  <Chip
+                    small
+                    selected={captionPreset === 'hbt'}
+                    onClick={() =>
+                      update((p) => ({
+                        ...p,
+                        style: {
+                          ...(p.style ?? {}),
+                          caption: { ...(p.style?.caption ?? {}), preset: 'hbt' },
+                        },
+                      }))
+                    }
+                  >
+                    {t.presetHbt}
+                  </Chip>
+                  <Chip
+                    small
+                    selected={captionPreset === 'sample'}
+                    onClick={() =>
+                      update((p) => ({
+                        ...p,
+                        style: {
+                          ...(p.style ?? {}),
+                          caption: { ...(p.style?.caption ?? {}), preset: 'sample' },
+                        },
+                      }))
+                    }
+                  >
+                    {t.presetSample}
+                  </Chip>
+                </div>
+              </div>
+              <Input
+                label={t.captionColor}
+                value={highlightColor}
+                onChange={(e) =>
+                  update((p) => ({
+                    ...p,
+                    style: {
+                      ...(p.style ?? {}),
+                      caption: { ...(p.style?.caption ?? {}), highlight_color: e.target.value },
+                    },
+                  }))
+                }
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 border-t border-line pt-3">
+          <div className="flex items-center justify-between">
+            <span className="font-bold">{t.censor}</span>
+            <Switch
+              label={t.censor}
+              checked={censorEnabled}
+              onChange={(checked) =>
+                update((p) => ({
+                  ...p,
+                  settings: {
+                    ...p.settings,
+                    censor: {
+                      ...(p.settings?.censor ?? { sfx: 'bleep', blur_card: true, text: 'blur' }),
+                      enabled: checked,
+                    },
+                  },
+                }))
+              }
+            />
+          </div>
+          {censorEnabled && (
+            <div className="space-y-3 pl-1">
+              <div className="ui-field">
+                <span className="ui-label" id="pv-censor-text">
+                  {t.censorText}
+                </span>
+                <div className="flex flex-wrap gap-2" role="group" aria-labelledby="pv-censor-text">
+                  <Chip
+                    small
+                    selected={censorText === 'blur'}
+                    onClick={() =>
+                      update((p) => ({
+                        ...p,
+                        settings: {
+                          ...p.settings,
+                          censor: {
+                            ...(p.settings?.censor ?? {
+                              enabled: true,
+                              sfx: 'bleep',
+                              blur_card: true,
+                            }),
+                            text: 'blur',
+                          },
+                        },
+                      }))
+                    }
+                  >
+                    {t.censorBlur}
+                  </Chip>
+                  <Chip
+                    small
+                    selected={censorText === 'stars'}
+                    onClick={() =>
+                      update((p) => ({
+                        ...p,
+                        settings: {
+                          ...p.settings,
+                          censor: {
+                            ...(p.settings?.censor ?? {
+                              enabled: true,
+                              sfx: 'bleep',
+                              blur_card: true,
+                            }),
+                            text: 'stars',
+                          },
+                        },
+                      }))
+                    }
+                  >
+                    {t.censorStars}
+                  </Chip>
+                </div>
+              </div>
+              <div>
+                <Button
+                  tone="soft"
+                  size="sm"
+                  icon={<PlayIcon size={16} />}
+                  onClick={playBleep}
+                  busy={playingBleep}
+                >
+                  {t.testBleep}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </Card>
 
       <aside aria-label={t.previewOf} className="flex flex-col gap-3">
@@ -135,6 +313,14 @@ export function PostvPreviewPage() {
           options={{ preview: true, preview_seconds: HEAD_SECONDS }}
           blocked={ready ? null : t.notReady}
         />
+        <div className="flex flex-wrap justify-center gap-2" role="group" aria-label={t.viewMode}>
+          <Chip small selected={viewMode === 'full'} onClick={() => setViewMode('full')}>
+            {t.viewStatic}
+          </Chip>
+          <Chip small selected={viewMode === 'card'} onClick={() => setViewMode('card')}>
+            {t.viewCard}
+          </Chip>
+        </div>
         <div className="flex flex-wrap justify-center gap-2" role="group" aria-label={t.previewOf}>
           {tabs.map((x) => (
             <Chip key={x.key} small selected={active === x.key} onClick={() => setTab(x.key)}>
@@ -147,7 +333,8 @@ export function PostvPreviewPage() {
           kind={kind}
           refId={kind === 'comment' ? active : undefined}
           version={savedCount}
-          caption={t.previewOf}
+          caption={viewMode === 'full' ? t.viewStatic : t.viewCard}
+          fullPreview={viewMode === 'full'}
         />
       </aside>
     </div>
