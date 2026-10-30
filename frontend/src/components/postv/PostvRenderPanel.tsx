@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
+import { api } from '../../api/endpoints';
 import type { RenderOptions } from '../../api/types';
 import { usePostvEditor } from '../../hooks/postvEditor';
 import { useRenderJob } from '../../hooks/renderJob';
@@ -34,6 +36,12 @@ export function PostvRenderPanel({ label, options, tone = 'ink', blocked = null,
   const finished = mine ? job.finished : null;
   const sameKind = finished?.preview === Boolean(options.preview);
 
+  const renders = useQuery({
+    queryKey: ['renders', project.slug],
+    queryFn: () => api.listRenders(project.slug),
+    retry: false,
+  });
+
   const launch = async () => {
     setError(null);
     setSaving(true);
@@ -47,7 +55,24 @@ export function PostvRenderPanel({ label, options, tone = 'ink', blocked = null,
     }
   };
 
-  const output = sameKind && finished?.status === 'done' ? finished.output : null;
+  const history = renders.data ?? [];
+  const latestRender = history.find(
+    (r) => Boolean(r.preview) === Boolean(options.preview) && Boolean(r.video),
+  );
+
+  const fallbackOutput = latestRender?.video
+    ? {
+        video: latestRender.video,
+        publish: latestRender.publish ?? '',
+        duration: latestRender.duration ?? 0,
+        fps: latestRender.fps ?? 30,
+        seconds: latestRender.duration ?? 0,
+        warnings: [] as string[],
+      }
+    : null;
+
+  const output =
+    (sameKind && finished?.status === 'done' ? finished.output : null) ?? fallbackOutput;
   const percent = Math.round(job.percent);
   return (
     <div className="space-y-3" aria-live="polite">
@@ -111,9 +136,9 @@ export function PostvRenderPanel({ label, options, tone = 'ink', blocked = null,
               {T.publish}
             </a>
           </div>
-          {output.warnings.length > 0 && (
+          {(output.warnings ?? []).length > 0 && (
             <ul aria-label={T.warnings} className="list-disc pl-5 text-small">
-              {output.warnings.map((w) => (
+              {(output.warnings ?? []).map((w) => (
                 <li key={w}>{w}</li>
               ))}
             </ul>

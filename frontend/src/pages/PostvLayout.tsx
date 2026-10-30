@@ -26,21 +26,34 @@ function PostvEditorProvider({ initial }: { initial: PostvProject }) {
     },
     [queryClient],
   );
-  const { status, error, schedule, flush } = useAutosave(save);
+  const { status, error, schedule, flush, hasPending } = useAutosave(save);
+
+  const commit = useCallback((next: PostvProject) => {
+    latest.current = next;
+    setProject(next);
+  }, []);
 
   const update = useCallback(
     (fn: (p: PostvProject) => PostvProject) => {
       const next = fn(latest.current);
-      latest.current = next;
-      setProject(next);
+      commit(next);
       schedule(next);
     },
-    [schedule],
+    [commit, schedule],
+  );
+
+  const applyServer = useCallback(
+    (fn: (p: PostvProject) => PostvProject) => {
+      const next = fn(latest.current);
+      commit(next);
+      if (hasPending()) schedule(next);
+    },
+    [commit, hasPending, schedule],
   );
 
   const editor = useMemo<PostvEditor>(
-    () => ({ project, update, flush, status, saveError: error, savedCount }),
-    [project, update, flush, status, error, savedCount],
+    () => ({ project, update, applyServer, flush, status, saveError: error, savedCount }),
+    [project, update, applyServer, flush, status, error, savedCount],
   );
 
   const t = vi.postv;

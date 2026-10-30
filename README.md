@@ -149,6 +149,35 @@ backend\.venv\Scripts\python -m cli bench-align workspace/projects/<tên-dự-á
 - Không xoá được dự án hoặc lần xuất vì "file đang mở": đóng trình phát hoặc chương trình đang dùng file rồi thử lại.
 - Không bao giờ commit `workspace/`, `models/`, file media và `.env`.
 
+## Hướng dẫn dùng PostV (Video câu chuyện dọc)
+
+PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Threads + phụ đề Hooked), tài liệu đặc tả tại `docs/postv/IMPLEMENT-POSTV.md`.
+
+### Quy trình 5 bước
+
+1. **Nhập nguồn:** Dán nội dung bài viết từ Threads (bài gốc và các bình luận), ứng dụng tự động nhận diện bài, bình luận, tác giả và số liệu (like, bình luận, chia sẻ).
+2. **Chọn đoạn:** Chọn lọc các bình luận muốn đưa vào video, kéo thả hoặc dùng nút đổi thứ tự, xem ước tính thời lượng.
+3. **Kịch bản và giọng:**
+   - Chỉnh sửa lời đọc từng đoạn (mỗi người một giọng đọc).
+   - Chọn giọng đọc VieNeu (nam/nữ) hoặc tải file giọng ngoài.
+   - Hỗ trợ **Dán JSON kịch bản** (có kiểm tra lỗi và tối đa 10 bản sao lưu để hoàn tác).
+   - Chọn nhạc nền và tinh chỉnh điểm bắt đầu.
+4. **Xem trước:**
+   - Chọn clip nền từ Thư viện nền (ngẫu nhiên hoặc tự chọn).
+   - Tinh chỉnh thẻ bài: câu mở đầu hook, từ nhấn, hiệu ứng thẻ (Mượt / Nảy).
+   - Chọn kiểu phụ đề (HBT vàng hoặc Mẫu xanh lá) và màu từ đang đọc.
+   - Nút **Xem nhanh** dựng 10 giây đầu ở độ phân giải thấp để duyệt nhịp.
+5. **Xuất video:**
+   - Chọn fps (30, 50, 60), tuỳ chọn outro 4 giây.
+   - Biên tập ảnh bìa (trích từ khung gameplay hoặc tải ảnh riêng, cắt 3:4 và 3:2).
+   - Bấm **Xuất bản đẹp** để dựng video hoàn chỉnh 1080×1920.
+   - Sao chép nội dung đăng (TikTok / YouTube Shorts kèm hashtag và dòng nguồn).
+   - Tải video, quản lý lịch sử xuất, dọn file tạm hoặc bấm **Xoá nguồn** khi cần gỡ dữ liệu gốc nhưng vẫn giữ kịch bản.
+
+### Chế độ Tạo tự động (PVA)
+
+Ở Bước 1, khối **Tạo tự động** cho phép chọn 1 trong 5 phong cách (`Kể chuyện`, `Hài hước`, `Drama`, `Hóng biến`, `Cảm động`) và số bình luận (2–5). Ứng dụng sẽ tự động chạy chuỗi 7 pha không dùng AI: làm sạch nội dung, sinh lời thoại, phân giọng ngẫu nhiên xen kẽ, chọn nền nhạc và dừng ở bản Xem nhanh 10 giây.
+
 ## Lệnh hay dùng
 
 | Lệnh             | Việc                                       |

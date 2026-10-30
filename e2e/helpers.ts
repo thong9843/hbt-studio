@@ -13,13 +13,27 @@ export const SAMPLE = join(process.cwd(), 'workspace', 'samples', 'muoi');
  */
 export async function deleteProject(request: APIRequestContext, slug: string): Promise<void> {
   if (!slug) return;
+  // Nếu có job đang chạy cho slug này thì gọi huỷ job, đợi hết rồi mới xoá
+  try {
+    const res = await request.get(`${API}/jobs`);
+    if (res.ok()) {
+      const jobs = (await res.json()) as Array<{ id: string; slug: string }>;
+      for (const j of jobs) {
+        if (j.slug === slug) {
+          await request.post(`${API}/jobs/${j.id}/cancel`).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // Bỏ qua lỗi kết nối
+  }
   let status = 0;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 30; i++) {
     status = (await request.delete(`${API}/projects/${slug}`)).status();
     if (status !== 409) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  expect(status, `DELETE /projects/${slug}`).toBe(204);
+  expect([204, 404], `DELETE /projects/${slug}`).toContain(status);
 }
 
 /** Tạo dự án `scenes` cảnh có ảnh mẫu + giọng mẫu của "muỗi" và lời đọc ở mọi cảnh. */

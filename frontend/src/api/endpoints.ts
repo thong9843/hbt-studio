@@ -141,6 +141,8 @@ export const api = {
     apiRequest<void>('DELETE', `/projects/${enc(slug)}/postv/assets/voice`),
   deletePostvMusic: (slug: string) =>
     apiRequest<void>('DELETE', `/projects/${enc(slug)}/postv/assets/music`),
+  deletePostvSource: (slug: string) =>
+    apiRequest<void>('DELETE', `/projects/${enc(slug)}/postv/source`),
   getPostvStyles: () => apiGet<PostvScriptStyle[]>('/postv/styles'),
   startPostvAuto: (slug: string, options: PostvAutoOptions) =>
     apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/postv/auto`, { json: options }),

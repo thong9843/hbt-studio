@@ -260,9 +260,6 @@ export const vi = {
       submitting: 'Đang tải…',
       fields: {
         title: 'Tên clip',
-        source: 'Nguồn (ví dụ Tự quay)',
-        license: 'Giấy phép',
-        url: 'Liên kết nguồn (tuỳ chọn)',
         tags: 'Nhãn, cách nhau dấu phẩy (tuỳ chọn)',
       },
       lowRes: 'Dưới 1080×1920',
@@ -404,6 +401,11 @@ export const vi = {
       remove: 'Xoá',
       cleanBuild: 'Dọn file tạm',
       cleanDone: 'Đã dọn file tạm',
+      deleteSource: 'Xoá nguồn',
+      deleteSourceTitle: 'Xoá nguồn bài viết?',
+      deleteSourceBody:
+        'Chữ bài gốc, các bình luận và liên kết nguồn sẽ bị xoá khỏi dự án. Toàn bộ kịch bản và lần xuất video vẫn được giữ nguyên.',
+      deleteSourceDone: 'Đã xoá nội dung nguồn',
     },
     needPost: 'Cần có chữ bài gốc trước',
     source: {

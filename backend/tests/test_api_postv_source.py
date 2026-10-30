@@ -98,3 +98,42 @@ def test_hbt_sensitive_words_list_is_untouched_by_postv_words(client):  # noqa: 
     client.put("/api/settings/postv-words", json=client.get("/api/settings/postv-words").json())
     assert client.get("/api/settings/sensitive-words").json() == before
     assert "tuc" not in [c["id"] for c in before["categories"]]  # video HBT không đổi hành vi
+
+
+def test_delete_postv_source_keeps_segments_and_clears_texts(client, pv):  # noqa: F811
+    slug = pv["slug"]
+    # Setup postv project with source, post.text, comments, and segments
+    data = client.get(f"/api/projects/{slug}").json()
+    data["source"]["url"] = "https://example.com/post/1"
+    data["post"]["text"] = "Chữ bài gốc bí mật"
+    data["comments"] = [
+        {"id": "c1", "text": "Bình luận 1", "handle": "u1", "age": "1h", "picked": True},
+        {"id": "c2", "text": "Bình luận 2", "handle": "u2", "age": "2h", "picked": True},
+    ]
+    data["segments"] = [
+        {"role": "post", "voice": "Lời đọc bài đã biến đổi", "ref": None},
+        {"role": "comment", "voice": "Lời đọc bình luận 1", "ref": "c1"},
+    ]
+    client.put(f"/api/projects/{slug}", json=data)
+
+    # Thử gọi DELETE /postv/source
+    res = client.delete(f"/api/projects/{slug}/postv/source")
+    assert res.status_code == 204
+
+    # Kiểm tra lại: post.text, comments[].text, source.url đã xoá; segments giữ nguyên
+    after = client.get(f"/api/projects/{slug}").json()
+    assert after["post"]["text"] == ""
+    assert after["comments"][0]["text"] == ""
+    assert after["comments"][1]["text"] == ""
+    assert after["source"]["url"] == ""
+    assert len(after["segments"]) == 2
+    assert after["segments"][0]["voice"] == "Lời đọc bài đã biến đổi"
+    assert after["segments"][1]["voice"] == "Lời đọc bình luận 1"
+    assert after["segments"][1]["ref"] == "c1"
+
+
+def test_delete_postv_source_409_when_job_busy(client, pv, monkeypatch):  # noqa: F811
+    slug = pv["slug"]
+    monkeypatch.setattr(client.app.state.hbt.jobs, "is_busy", lambda s: s == slug)
+    res = client.delete(f"/api/projects/{slug}/postv/source")
+    assert res.status_code == 409

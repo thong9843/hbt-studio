@@ -28,21 +28,21 @@ def add_background(
     state: State,
     file: Annotated[UploadFile, File()],
     title: Annotated[str, Form()],
-    source: Annotated[str, Form()],
-    license: Annotated[str, Form()],
+    source: Annotated[str, Form()] = "",
+    license: Annotated[str, Form()] = "",
     url: Annotated[str, Form()] = "",
     tags: Annotated[str, Form(description="cách nhau bằng dấu phẩy")] = "",
 ):
+    clean_title = title.strip()
+    if not clean_title:
+        raise BadRequest("Thiếu tiêu đề clip nền")
     meta = {
-        "title": title.strip(),
+        "title": clean_title,
         "source": source.strip(),
         "license": license.strip(),
         "url": url.strip(),
         "tags": [t.strip() for t in tags.split(",") if t.strip()],
     }
-    missing = [k for k in ("title", "source", "license") if not meta[k]]
-    if missing:
-        raise BadRequest("Thiếu thông tin giấy phép: " + ", ".join(missing))
     tmp = save_upload(file, state.settings.workspace_dir / ".uploads", MAX_BACKGROUND_BYTES)
     try:
         return state.backgrounds.add(tmp, file.filename or "", meta)

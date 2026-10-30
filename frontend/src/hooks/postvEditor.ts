@@ -6,6 +6,8 @@ export interface PostvEditor {
   project: PostvProject;
   /** Sửa trên máy rồi tự lưu sau 1 s. */
   update: (fn: (p: PostvProject) => PostvProject) => void;
+  /** Áp dụng trạng thái mới từ server (như sau khi chạy auto hoặc nạp JSON) mà không ghi đè lưu bản cũ. */
+  applyServer: (fn: (p: PostvProject) => PostvProject) => void;
   /** Lưu ngay những gì đang chờ. */
   flush: () => Promise<void>;
   status: SaveStatus;

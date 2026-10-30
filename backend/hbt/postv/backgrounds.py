@@ -29,8 +29,8 @@ class BackgroundEntry(BaseModel):
     id: str  # slug từ tiêu đề, tạo một lần, không đổi
     file: str  # tên file trong library/backgrounds/
     title: str = Field(min_length=1)
-    source: str = Field(min_length=1)
-    license: str = Field(min_length=1)
+    source: str = ""
+    license: str = ""
     url: str = ""
     width: int = Field(gt=0)
     height: int = Field(gt=0)
@@ -154,10 +154,10 @@ class BackgroundLibrary:
             raise BadRequest("Không tạo được ảnh xem nhanh từ clip này")
 
     def add(self, src: Path, filename: str, meta: dict) -> BackgroundEntry:
-        """Thêm một clip: kiểm tra thông tin ghi công, video dọc đủ lớn, tạo ảnh xem nhanh."""
-        missing = [k for k in ("title", "source", "license") if not str(meta.get(k, "")).strip()]
-        if missing:
-            raise BadRequest("Thiếu thông tin giấy phép: " + ", ".join(missing))
+        """Thêm một clip: video dọc đủ lớn, tạo ảnh xem nhanh."""
+        title = str(meta.get("title", "")).strip()
+        if not title:
+            raise BadRequest("Thiếu tiêu đề clip nền")
         ext = Path(filename).suffix.lower()
         if ext not in BG_EXTENSIONS:
             raise BadRequest("Đuôi file nền không hợp lệ: " + ", ".join(sorted(BG_EXTENSIONS)))
@@ -171,14 +171,15 @@ class BackgroundLibrary:
         if duration < MIN_DURATION:
             raise BadRequest(f"Clip ngắn quá ({duration:.1f} s); cần ít nhất {MIN_DURATION:g} s")
         entries = self.list()
-        stem = slugify(str(meta["title"])) or "clip-nen"
+        stem = slugify(title) or "clip-nen"
         clip_id = _unique_id(stem, {e.id for e in entries})
         name = f"{clip_id}{ext}"
         self.root.mkdir(parents=True, exist_ok=True)
         try:
             entry = BackgroundEntry(
-                id=clip_id, file=name, title=str(meta["title"]).strip(),
-                source=str(meta["source"]).strip(), license=str(meta["license"]).strip(),
+                id=clip_id, file=name, title=title,
+                source=str(meta.get("source", "")).strip(),
+                license=str(meta.get("license", "")).strip(),
                 url=str(meta.get("url", "")).strip(), width=width, height=height,
                 fps=round(fps, 3), duration=round(duration, 3),
                 tags=[t.strip() for t in meta.get("tags", []) if str(t).strip()],

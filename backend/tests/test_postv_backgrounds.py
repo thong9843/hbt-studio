@@ -13,7 +13,7 @@ from tests.test_api import client  # noqa: F401
 
 pytestmark = needs_ffmpeg
 
-META = {"title": "Parkour 01", "source": "Tự quay", "license": "Tự quay", "url": "", "tags": []}
+META = {"title": "Parkour 01", "url": "", "tags": []}
 
 
 def make_clip(path, w=720, h=1280, seconds=4, fps=30, extra=()):
@@ -44,7 +44,7 @@ def test_add_reads_the_video_and_stores_file_thumb_and_index(lib, clip):
     assert (lib.root / "parkour-01.mp4").is_file() and not clip.exists()  # file được chuyển vào
     assert lib.thumb_path("parkour-01").read_bytes()[:2] == b"\xff\xd8"  # JPEG
     assert [e.id for e in lib.list()] == ["parkour-01"]
-    assert json.loads(lib.index_path.read_text(encoding="utf-8"))[0]["license"] == "Tự quay"
+    assert json.loads(lib.index_path.read_text(encoding="utf-8"))[0]["title"] == "Parkour 01"
 
     # Test remove
     lib.remove("parkour-01")
@@ -91,11 +91,29 @@ def test_same_title_gets_a_new_id(lib, tmp_path):
     assert (a.id, b.id) == ("parkour-01", "parkour-01-2")
 
 
-@pytest.mark.parametrize("missing", ["title", "source", "license"])
-def test_title_source_and_license_are_required(lib, clip, missing):
-    with pytest.raises(BadRequest, match=missing):
-        lib.add(clip, "in.mp4", {**META, missing: "  "})
+def test_title_is_required(lib, clip):
+    with pytest.raises(BadRequest, match="tiêu đề"):
+        lib.add(clip, "in.mp4", {**META, "title": "  "})
     assert lib.list() == []
+
+
+def test_legacy_entries_with_source_license_url_still_load(lib, clip):
+    """Mục cũ trong index.json còn các khoá source/license/url vẫn nạp được bình thường."""
+    legacy_meta = {
+        "title": "Legacy Clip",
+        "source": "Old Source",
+        "license": "CC-BY",
+        "url": "https://example.com",
+    }
+    lib.add(clip, "in.mp4", legacy_meta)
+    raw = json.loads(lib.index_path.read_text(encoding="utf-8"))
+    assert raw[0]["source"] == "Old Source"
+    assert raw[0]["license"] == "CC-BY"
+    entries = lib.list()
+    assert len(entries) == 1
+    assert entries[0].title == "Legacy Clip"
+    assert entries[0].source == "Old Source"
+    assert entries[0].license == "CC-BY"
 
 
 def test_landscape_video_is_refused(lib, tmp_path):
@@ -206,8 +224,8 @@ def test_api_add_list_play_and_thumb(client, clip):  # noqa: F811
     assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg"
 
 
-def test_api_rejects_missing_license_and_landscape(client, clip, tmp_path):  # noqa: F811
-    assert upload(client, clip, license="  ").status_code == 400
+def test_api_rejects_missing_title_and_landscape(client, clip, tmp_path):  # noqa: F811
+    assert upload(client, clip, title="  ").status_code == 400
     wide = make_clip(tmp_path / "w.mp4", w=1280, h=720)
     assert upload(client, wide).status_code == 400
     assert client.get("/api/backgrounds").json() == []

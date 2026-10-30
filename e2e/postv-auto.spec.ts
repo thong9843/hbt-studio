@@ -5,8 +5,7 @@ import { API, deleteProject } from './helpers';
 
 const SAMPLE_POST = `tac_gia
 1 giờ
-Hôm qua mình bỏ quên ví ở quán cà phê. May mà bạn nhân viên cất giữ hộ cẩn thận.
-120 bình luận · 45 chia sẻ
+Hôm qua mình để quên ví ở quán cà phê. May được bạn nhân viên giữ hộ.
 
 user_b
 40 phút
@@ -14,7 +13,7 @@ Quán ở đâu vậy bạn ơi?
 
 user_c
 20 phút
-Người tốt việc tốt, thả tim nè!`;
+May mắn quá, thả tim nha!`;
 
 const SCRIPT_JSON = JSON.stringify({
   postv_script: 1,
@@ -64,6 +63,14 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
     await autoPanel.getByRole('button', { name: 'Hài hước' }).click();
     await autoPanel.getByRole('button', { name: '2' }).click();
 
+    // Kiểm tra trạng thái VieNeu qua API trước khi chạy
+    const healthRes = await request.get(`${API}/health`);
+    const health = await healthRes.json();
+    const hasVieNeu = Boolean(health.vieneu);
+    if (hasVieNeu) {
+      test.setTimeout(600_000);
+    }
+
     // Bấm Tạo tự động
     const startBtn = autoPanel.getByRole('button', { name: vi.postv.auto.submit });
     await expect(startBtn).toBeEnabled();
@@ -74,26 +81,31 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
       timeout: 10_000,
     });
 
-    // Đợi hoặc là dừng ở pha 6 (thiếu VieNeu), hoặc hoàn tất sang Bước 4 (chờ VieNeu CPU + Whisper + render)
     const scriptBtn = page.getByRole('button', { name: vi.postv.auto.goToScript });
     const previewBtn = page.getByRole('button', { name: vi.postv.auto.goToPreview });
 
-    await expect(scriptBtn.or(previewBtn)).toBeVisible({ timeout: 180_000 });
-
-    if (await scriptBtn.isVisible()) {
-      // Dừng ở pha 6 với lỗi rõ, giữ kết quả kịch bản pha 1–5
+    if (hasVieNeu) {
+      // Có VieNeu: BẮT BUỘC tới Xem nhanh và có video
+      await expect(previewBtn).toBeVisible({ timeout: 540_000 });
+      await previewBtn.click();
+      await expect(page).toHaveURL(new RegExp(`/postv/${slug}/preview`));
+      // Chờ video preview sẵn sàng (sau chuỗi 7 pha đã tạo Xem nhanh)
+      const player = page.getByLabel(vi.postv.render.player);
+      await expect(player.or(page.locator('video'))).toBeVisible({ timeout: 30_000 });
+    } else {
+      // Thiếu VieNeu: BẮT BUỘC dừng pha 6 (lỗi rõ), giữ kịch bản pha 1–5
+      test.info().annotations.push({
+        type: 'info',
+        description: `Thiếu VieNeu: ${health.vieneu_note ?? 'chưa cài hoặc thiếu trọng số'}`,
+      });
+      await expect(scriptBtn).toBeVisible({ timeout: 180_000 });
       const project = await (await request.get(`${API}/projects/${slug}`)).json();
       expect(project.segments.length).toBeGreaterThan(0);
       expect(project.hook.text).toBeTruthy();
       await scriptBtn.click();
       await expect(page).toHaveURL(new RegExp(`/postv/${slug}/script`));
-    } else {
-      // Hoàn tất chuỗi 7 pha và mở Bước 4
-      await previewBtn.click();
-      await expect(page).toHaveURL(new RegExp(`/postv/${slug}/preview`));
     }
   } finally {
-    await page.goto('about:blank').catch(() => {});
     await deleteProject(request, slug);
   }
 });
@@ -142,7 +154,6 @@ test('PVA: Dán JSON kịch bản ở Bước 3 → Kiểm tra → Áp dụng th
       expect(updated.segments).toHaveLength(5);
     }).toPass({ timeout: 15_000 });
   } finally {
-    await page.goto('about:blank').catch(() => {});
     await deleteProject(request, slug);
   }
 });
