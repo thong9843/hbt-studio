@@ -260,9 +260,6 @@ export const vi = {
       submitting: 'Đang tải…',
       fields: {
         title: 'Tên clip',
-        source: 'Nguồn (ví dụ Tự quay)',
-        license: 'Giấy phép',
-        url: 'Liên kết nguồn (tuỳ chọn)',
         tags: 'Nhãn, cách nhau dấu phẩy (tuỳ chọn)',
       },
       lowRes: 'Dưới 1080×1920',

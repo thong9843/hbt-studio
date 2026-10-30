@@ -17,9 +17,9 @@ import { Input } from '../ui/Field';
 const T = vi.postv.library;
 type Key = keyof typeof T.fields;
 const KEYS = Object.keys(T.fields) as Key[];
-const REQUIRED: readonly Key[] = ['title', 'source', 'license'];
-const EMPTY: Record<Key, string> = { title: '', source: '', license: '', url: '', tags: '' };
-/** Ô một clip: ảnh xem nhanh 9:16, tên, thời lượng, giấy phép; tuỳ chọn có ô chọn hoặc nút xoá. */
+const REQUIRED: readonly Key[] = ['title'];
+const EMPTY: Record<Key, string> = { title: '', tags: '' };
+/** Ô một clip: ảnh xem nhanh 9:16, tên, thời lượng; tuỳ chọn có ô chọn hoặc nút xoá. */
 export function ClipTile({
   clip,
   selected,
@@ -70,7 +70,7 @@ export function ClipTile({
         {T.seconds(clip.duration)} · {T.size(clip.width, clip.height, clip.fps)}
       </p>
       <div className="flex flex-wrap gap-1">
-        <Badge tone="ok">{T.licensed(clip.license)}</Badge>
+        {clip.license && <Badge tone="ok">{T.licensed(clip.license)}</Badge>}
         {isLowRes(clip) && <Badge tone="yel">{T.lowRes}</Badge>}
       </div>
     </li>
@@ -92,7 +92,7 @@ export function AddBackgroundDialog({ open, onClose }: { open: boolean; onClose:
       onClose();
     },
   });
-  const ready = file !== null && REQUIRED.every((k) => fields[k].trim());
+  const ready = file !== null && Boolean(fields.title.trim());
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

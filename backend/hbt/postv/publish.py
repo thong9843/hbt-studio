@@ -34,7 +34,7 @@ def build_publish_text(project: PostvProject, backgrounds: Sequence[BackgroundEn
     ]
 
     blocks = ["\n".join(p for p in tiktok if p), "\n".join(youtube)]
-    credits = [f"Nền: {b.title} — {b.source} ({b.license})" for b in backgrounds]
+    credits = [f"Nền: {b.title}" for b in backgrounds]
     if credits or music:
         blocks.append("\n".join(["[Ghi công]", *credits, music]).strip())
     if project.thumbnail:

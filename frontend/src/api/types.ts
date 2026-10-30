@@ -382,9 +382,9 @@ export interface BackgroundEntry {
   id: string;
   file: string;
   title: string;
-  source: string;
-  license: string;
-  url: string;
+  source?: string;
+  license?: string;
+  url?: string;
   width: number;
   height: number;
   fps: number;
@@ -395,8 +395,8 @@ export interface BackgroundEntry {
 export interface NewBackgroundInput {
   file: File;
   title: string;
-  source: string;
-  license: string;
+  source?: string;
+  license?: string;
   url?: string;
   tags?: string;
 }

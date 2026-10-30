@@ -158,7 +158,7 @@ describe('Thư viện nền trên trang /postv', () => {
     expect(tiles[0].querySelector('img')).toHaveAttribute('src', '/api/backgrounds/a/thumb');
   });
 
-  it('adds a clip: needs file + name + source + licence, uploads multipart, then refreshes', async () => {
+  it('adds a clip: needs file + name, uploads multipart, then refreshes', async () => {
     const user = userEvent.setup();
     let list: unknown[] = [];
     const posted: FormData[] = [];
@@ -180,19 +180,12 @@ describe('Thư viện nền trên trang /postv', () => {
     await user.upload(within(dialog).getByLabelText('Chọn video'), file);
     expect(within(dialog).getByText('parkour-01.mp4')).toBeVisible();
     expect(within(dialog).getByLabelText(/^Tên clip/)).toHaveValue('parkour-01'); // gợi ý từ tên file
-    expect(submit).toBeDisabled(); // còn thiếu nguồn và giấy phép
-    await user.type(within(dialog).getByLabelText(/^Nguồn/), 'Tự quay');
-    await user.type(within(dialog).getByLabelText(/^Giấy phép/), 'Tự quay');
     expect(submit).toBeEnabled();
     await user.click(submit);
     await waitFor(() => expect(posted).toHaveLength(1));
     const form = posted[0];
     expect(form.get('file')).toBeInstanceOf(File);
-    expect([form.get('title'), form.get('source'), form.get('license')]).toEqual([
-      'parkour-01',
-      'Tự quay',
-      'Tự quay',
-    ]);
+    expect(form.get('title')).toBe('parkour-01');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(await screen.findByText('Parkour 01')).toBeVisible();
   });
@@ -212,8 +205,6 @@ describe('Thư viện nền trên trang /postv', () => {
       within(dialog).getByLabelText('Chọn video'),
       new File(['v'], 'ngang.mp4', { type: 'video/mp4' }),
     );
-    await user.type(within(dialog).getByLabelText(/^Nguồn/), 'x');
-    await user.type(within(dialog).getByLabelText(/^Giấy phép/), 'x');
     await user.click(within(dialog).getByRole('button', { name: 'Thêm' }));
     expect(await within(dialog).findByText(/Chỉ nhận video dọc/)).toBeVisible();
     expect(screen.getByRole('dialog', { name: 'Thêm clip nền' })).toBeVisible();
