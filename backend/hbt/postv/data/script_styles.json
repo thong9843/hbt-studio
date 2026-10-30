@@ -2,11 +2,7 @@
   {
     "id": "ke-chuyen",
     "name": "Kể chuyện",
-    "hook": [
-      "{text}",
-      "Chuyện thật khó tin: {text}",
-      "Nghe kể lại rằng: {text}"
-    ],
+    "hook": ["{text}", "Chuyện thật khó tin: {text}", "Nghe kể lại rằng: {text}"],
     "intro_post": [
       "Một bạn chia sẻ câu chuyện thế này:",
       "Có một bài đăng kể rằng:",
@@ -23,18 +19,12 @@
       "Liệu trong hoàn cảnh đó, bạn sẽ làm gì?",
       "Để lại suy nghĩ của bạn bên dưới nhé!"
     ],
-    "outro": [
-      "Bấm theo dõi Hay Biết Tuốt để lắng nghe thêm nhiều câu chuyện thú vị mỗi ngày nhé!"
-    ]
+    "outro": ["Bấm theo dõi Hay Biết Tuốt để lắng nghe thêm nhiều câu chuyện thú vị mỗi ngày nhé!"]
   },
   {
     "id": "hai-huoc",
     "name": "Hài hước",
-    "hook": [
-      "Cười xỉu với chuyện này: {text}",
-      "{text}",
-      "Đúng là chuyện dở khóc dở cười: {text}"
-    ],
+    "hook": ["Cười xỉu với chuyện này: {text}", "{text}", "Đúng là chuyện dở khóc dở cười: {text}"],
     "intro_post": [
       "Một pha xử lý cực kỳ hài hước được chia sẻ:",
       "Cư dân mạng đang cười nghiêng ngả với bài này:",
@@ -51,18 +41,12 @@
       "Xem xong cười muốn xỉu với các thánh bình luận!",
       "Bạn có pha nào hài hước tương tự chưa?"
     ],
-    "outro": [
-      "Thả tim và theo dõi kênh Hay Biết Tuốt để xả stress mỗi ngày nha!"
-    ]
+    "outro": ["Thả tim và theo dõi kênh Hay Biết Tuốt để xả stress mỗi ngày nha!"]
   },
   {
     "id": "drama",
     "name": "Drama",
-    "hook": [
-      "Vụ việc đang gây xôn xao: {text}",
-      "{text}",
-      "Căng đét chuyện này: {text}"
-    ],
+    "hook": ["Vụ việc đang gây xôn xao: {text}", "{text}", "Căng đét chuyện này: {text}"],
     "intro_post": [
       "Tình huống căng thẳng vừa được chia sẻ:",
       "Bài đăng đang gây tranh cãi nảy lửa:",
@@ -79,18 +63,12 @@
       "Theo bạn, ai mới là người có lý trong vụ này?",
       "Drama này vẫn chưa có hồi kết, bạn nghĩ sao?"
     ],
-    "outro": [
-      "Theo dõi Hay Biết Tuốt để không bỏ lỡ diễn biến tiếp theo nhé!"
-    ]
+    "outro": ["Theo dõi Hay Biết Tuốt để không bỏ lỡ diễn biến tiếp theo nhé!"]
   },
   {
     "id": "hong",
     "name": "Hóng",
-    "hook": [
-      "Tin nóng hổi vừa cập nhật: {text}",
-      "{text}",
-      "Hóng biến mới nhất: {text}"
-    ],
+    "hook": ["Tin nóng hổi vừa cập nhật: {text}", "{text}", "Hóng biến mới nhất: {text}"],
     "intro_post": [
       "Cư dân mạng đang rần rần chia sẻ:",
       "Mới hóng được vụ này cực hot:",
@@ -107,9 +85,7 @@
       "Cùng hóng tiếp xem chuyện này đi về đâu nhé!",
       "Nhanh tay để lại cảm nhận của bạn bên dưới!"
     ],
-    "outro": [
-      "Follow Hay Biết Tuốt để cùng hóng chuyện nhanh nhất mạng xã hội nha!"
-    ]
+    "outro": ["Follow Hay Biết Tuốt để cùng hóng chuyện nhanh nhất mạng xã hội nha!"]
   },
   {
     "id": "cam-dong",
@@ -135,8 +111,6 @@
       "Cuộc sống thật đẹp khi có những con người tử tế như vậy.",
       "Cảm ơn vì một câu chuyện thật ý nghĩa!"
     ],
-    "outro": [
-      "Cùng Hay Biết Tuốt lan tỏa những điều tốt đẹp mỗi ngày bạn nhé!"
-    ]
+    "outro": ["Cùng Hay Biết Tuốt lan tỏa những điều tốt đẹp mỗi ngày bạn nhé!"]
   }
 ]
