@@ -38,7 +38,8 @@ export function PostvAutoPanel({ project, disabled }: Props) {
   const [commentCount, setCommentCount] = useState(initialCount);
   const [jobId, setJobId] = useState<string | null>(null);
 
-  const { job, status, progress, cancel } = useJob(jobId);
+  const { job, progress, cancel } = useJob(jobId);
+  const status = job?.status ?? (jobId ? 'running' : null);
 
   const startAuto = useMutation({
     mutationFn: async () => {
@@ -105,9 +106,7 @@ export function PostvAutoPanel({ project, disabled }: Props) {
       {isRunning && (
         <div className="space-y-2 rounded-inner bg-soft p-3">
           <div className="flex items-center justify-between">
-            <span className="text-small font-semibold">
-              {progress.message || job?.message || T.submitting}
-            </span>
+            <span className="text-small font-semibold">{progress.message || T.submitting}</span>
             <span className="num text-tiny text-muted">{Math.round(progress.progress)}%</span>
           </div>
           <Progress value={progress.progress} label={T.title} />
