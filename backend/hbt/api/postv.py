@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import math
 import struct
+import subprocess
 import tempfile
 import wave
 from pathlib import Path
@@ -65,10 +66,42 @@ def put_postv_words(body: SensitiveWords, state: State):
     return state.postv_words.save(body)
 
 
-def _preview_background(project: PostvProject, state) -> Image.Image | None:
-    """Khung nền để xem thẻ: clip đầu của dự án, không có thì của thư viện, không có thì None."""
+def _preview_background(
+    project: PostvProject, state: State, t: float | None = None
+) -> Image.Image | None:
+    """Khung nền để xem thẻ: clip đầu của dự án, không có thì của thư viện, không có thì None.
+
+    Nếu `t` được truyền (giây t): trích khung bằng ffmpeg từ clip;
+    nếu không có clip hoặc lỗi thì dùng thumb.
+    """
     ids = project.background.clip_ids or [e.id for e in state.backgrounds.list()]
     for clip_id in ids:
+        entry = state.backgrounds.get(clip_id)
+        if entry is not None and t is not None and t >= 0:
+            clip_path = state.backgrounds.root / entry.file
+            if clip_path.is_file():
+                cmd = [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-ss",
+                    f"{t:.3f}",
+                    "-i",
+                    str(clip_path),
+                    "-vframes",
+                    "1",
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "png",
+                    "-",
+                ]
+                try:
+                    res = subprocess.run(cmd, capture_output=True, check=True)
+                    if res.stdout:
+                        return Image.open(io.BytesIO(res.stdout)).copy()
+                except Exception:
+                    pass
         try:
             return Image.open(state.backgrounds.thumb_path(clip_id)).copy()
         except (StorageError, OSError):
@@ -193,7 +226,7 @@ def postv_preview_png(
             raise NotFound(f"Không có bình luận '{ref}'")
 
     card_img = render_project_card(project, actual_kind, ref, tpl, censor, cfg.text)
-    bg = _preview_background(project, state)
+    bg = _preview_background(project, state, t=t)
     out = composite_preview(card_img, bg)
 
     # Phụ đề mẫu (nếu bật captions)

@@ -235,6 +235,12 @@ def test_postv_preview_png_endpoint(client, pv):  # noqa: F811
     assert r.headers["content-type"] == "image/png"
     assert len(r.content) > 100
 
+    # Có tham số t nhưng chưa có clip nền -> rơi về thumb hoặc nền mặc định
+    r_t = client.get(f"/api/projects/{slug}/postv/preview.png?t=1.5&w=270")
+    assert r_t.status_code == 200
+    assert r_t.headers["content-type"] == "image/png"
+    assert len(r_t.content) > 100
+
 
 def test_postv_thumbnail_preview_endpoint(client, pv):  # noqa: F811
     slug = pv["slug"]

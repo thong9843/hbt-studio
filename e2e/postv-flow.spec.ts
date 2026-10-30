@@ -111,6 +111,17 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     await expect(page.getByRole('button', { name: vi.postv.preview.viewStatic })).toBeVisible();
     await expect(page.getByRole('button', { name: vi.postv.preview.viewCard })).toBeVisible();
 
+    // Bấm Xem nhanh thật (giọng nhập file), chờ có video (sửa lệch PV6)
+    const quick = page.getByRole('button', { name: vi.postv.preview.quick, exact: true });
+    await expect(quick).toBeEnabled({ timeout: 30_000 });
+    await quick.click();
+    const aside = page.getByRole('complementary', { name: vi.postv.preview.previewOf });
+    await expect(aside.getByRole('progressbar', { name: vi.postv.render.progress })).toBeVisible();
+    const player = page.getByLabel(vi.postv.render.player);
+    await expect(player).toBeVisible({ timeout: 150_000 });
+    const src = await player.getAttribute('src');
+    expect(src).toBeTruthy();
+
     // Sang Bước 5: Xuất qua thanh 5 bước hoặc thanh điều hướng bên trái
     const toExport = page.getByRole('link', { name: new RegExp(`.*${vi.postv.steps[4]}$`) });
     await toExport.first().click();
@@ -123,6 +134,23 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     await expect(page.getByRole('button', { name: '30 fps' })).toBeVisible();
     await expect(page.getByRole('button', { name: '50 fps' })).toBeVisible();
     await expect(page.getByRole('button', { name: '60 fps' })).toBeVisible();
+
+    // Xuất bản đẹp 30 fps chỉ chạy khi có nền (tự bỏ qua kèm lý do)
+    const clips = await (await request.get(`${API}/backgrounds`)).json();
+    if (clips.length > 0) {
+      await page.getByRole('button', { name: '30 fps' }).click();
+      const exportBtn = page.getByRole('button', { name: vi.postv.export.final, exact: true });
+      await expect(exportBtn).toBeEnabled({ timeout: 30_000 });
+      await exportBtn.click();
+      await expect(page.getByRole('progressbar', { name: vi.postv.render.progress })).toBeVisible();
+      const finalPlayer = page.getByLabel(vi.postv.render.player);
+      await expect(finalPlayer).toBeVisible({ timeout: 180_000 });
+    } else {
+      test.info().annotations.push({
+        type: 'skip-export',
+        description: 'Tự bỏ qua Xuất bản đẹp vì thư viện nền trống (library/backgrounds)',
+      });
+    }
 
     // Thấy phần Ảnh bìa, bật ảnh bìa và thấy chip "Khung gameplay" / "Ảnh tải lên"
     await expect(page.getByRole('heading', { name: vi.postv.export.cover })).toBeVisible();
