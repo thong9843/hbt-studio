@@ -562,3 +562,19 @@ def delete_postv_music_asset(slug: str, state: State) -> None:
                 pass
         project.music = None
         state.storage.save_any(slug, project)
+
+
+# ===================================================================== Xoá nguồn (PV8)
+@router.delete("/projects/{slug}/postv/source", status_code=204)
+def delete_postv_source(slug: str, state: State) -> None:
+    """Xoá chữ nguồn: chỉ xoá post.text, comments[].text, source.url; giữ segments; không xoá lần xuất."""
+    project = state.storage.load_any(slug)
+    if not isinstance(project, PostvProject):
+        raise BadRequest(f"'{slug}' không phải dự án PostV")
+    if state.jobs.is_busy(slug):
+        raise Conflict("Dự án đang bận, hãy đợi hoặc huỷ job")
+    project.post.text = ""
+    for c in project.comments:
+        c.text = ""
+    project.source.url = ""
+    state.storage.save_any(slug, project)

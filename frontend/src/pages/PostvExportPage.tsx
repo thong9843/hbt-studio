@@ -39,6 +39,7 @@ export function PostvExportPage() {
 
   const [played, setPlayed] = useState<RenderRecord | null>(null);
   const [toDelete, setToDelete] = useState<RenderRecord | null>(null);
+  const [confirmDeleteSource, setConfirmDeleteSource] = useState(false);
   const [releasing, setReleasing] = useState<string | null>(null);
 
   const fps = project.settings.fps as Fps;
@@ -82,6 +83,24 @@ export function PostvExportPage() {
     mutationFn: () => api.cleanBuild(project.slug),
     onSuccess: () => toast.info(T.cleanDone),
     onError: (e) => toast.error(e),
+  });
+
+  const deleteSourceMutation = useMutation({
+    mutationFn: () => api.deletePostvSource(project.slug),
+    onSuccess: () => {
+      setConfirmDeleteSource(false);
+      update((p) => ({
+        ...p,
+        post: { ...p.post, text: '' },
+        comments: p.comments.map((c) => ({ ...c, text: '' })),
+        source: { ...p.source, url: '' },
+      }));
+      toast.info(T.deleteSourceDone);
+    },
+    onError: (e) => {
+      setConfirmDeleteSource(false);
+      toast.error(e);
+    },
   });
 
   const history = renders.data ?? [];
@@ -178,6 +197,15 @@ export function PostvExportPage() {
           >
             {T.cleanBuild}
           </Button>
+
+          <Button
+            tone="soft"
+            size="sm"
+            disabled={running || deleteSourceMutation.isPending}
+            onClick={() => setConfirmDeleteSource(true)}
+          >
+            {T.deleteSource}
+          </Button>
         </div>
       </div>
 
@@ -244,6 +272,18 @@ export function PostvExportPage() {
           busy={remove.isPending}
           onConfirm={() => void remove.mutate(toDelete)}
           onCancel={() => setToDelete(null)}
+        />
+      )}
+
+      {confirmDeleteSource && (
+        <ConfirmDialog
+          title={T.deleteSourceTitle}
+          message={T.deleteSourceBody}
+          confirmLabel={T.deleteSource}
+          danger
+          busy={deleteSourceMutation.isPending}
+          onConfirm={() => void deleteSourceMutation.mutate()}
+          onCancel={() => setConfirmDeleteSource(false)}
         />
       )}
     </div>

@@ -172,6 +172,20 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     await expect(cleanBtn).toBeVisible();
     await cleanBtn.click();
     await expect(page.getByText(vi.postv.export.cleanDone)).toBeVisible({ timeout: 10_000 });
+
+    // Bấm nút Xoá nguồn và xác nhận (PV8)
+    const delSourceBtn = page.getByRole('button', { name: vi.postv.export.deleteSource });
+    await expect(delSourceBtn).toBeVisible();
+    await delSourceBtn.click();
+    const delDialog = page.getByRole('dialog', { name: vi.postv.export.deleteSourceTitle });
+    await expect(delDialog).toBeVisible();
+    await delDialog.getByRole('button', { name: vi.postv.export.deleteSource }).click();
+    await expect(page.getByText(vi.postv.export.deleteSourceDone)).toBeVisible({ timeout: 10_000 });
+
+    // Kiểm tra API: post.text rỗng, segments giữ nguyên
+    const projAfter = await (await request.get(`${API}/projects/${slug}`)).json();
+    expect(projAfter.post.text).toBe('');
+    expect(projAfter.segments.length).toBeGreaterThan(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     await page.goto('about:blank').catch(() => {});
