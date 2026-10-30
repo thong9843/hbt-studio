@@ -47,6 +47,21 @@ def test_postv_defaults():
     assert p.segments == [] and p.comments == []
     assert p.hook.text == "" and p.hook.accent == ""  # trống = lấy câu đầu của bài
     assert p.style.caption.preset == "hbt" and p.style.caption.highlight_color is None
+    assert p.auto.style == "ke-chuyen" and p.auto.comments == 3
+    assert p.auto.voices == "random" and p.auto.seed == 1
+
+
+def test_old_postv_project_without_auto_field_loads_cleanly():
+    # Giả lập JSON dự án PostV cũ (PV1-PV6) chưa có trường "auto"
+    raw = postv(
+        post={"handle": "user1", "text": "Nội dung cũ"},
+        segments=[{"role": "post", "voice": "Lời đọc"}],
+    )
+    assert "auto" not in raw
+    p = PostvProject.model_validate(raw)
+    assert p.auto.style == "ke-chuyen"
+    assert p.auto.comments == 3
+    assert p.post.handle == "user1"
 
 
 def test_postv_roundtrip_keeps_kind():

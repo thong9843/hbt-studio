@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import shutil
 import threading
 import time
@@ -20,18 +21,27 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
-from hbt.models import Project
+from hbt.library import MusicLibrary
+from hbt.models import Music, Project
 from hbt.pipeline import cancel
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
+from hbt.postv.auto_script import build_auto_script, load_script_styles
 from hbt.postv.backgrounds import BackgroundLibrary, background_problems
 from hbt.postv.censor import CensorStore
 from hbt.postv.models import PostvProject
 from hbt.postv.render import render_postv
-from hbt.postv.voice import VoiceError, VoiceProvider, build_plan, synthesize_plan
+from hbt.postv.voice import (
+    VoiceError,
+    VoiceProvider,
+    VoiceUnavailable,
+    build_plan,
+    resolve_cast,
+    synthesize_plan,
+)
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
@@ -277,6 +287,36 @@ class JobManager:
         self._pool.submit(self._run, job)
         return job
 
+    def submit_postv_auto(
+        self,
+        slug: str,
+        *,
+        style: str = "ke-chuyen",
+        comments: int = 3,
+        voices: str = "random",
+        seed: int | None = None,
+    ) -> Job:
+        """Job chạy chuỗi 7 pha tự động cho dự án PostV (PVA)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới hỗ trợ tạo tự động")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        if seed is None:
+            seed = random.randint(1, 999999)
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_auto")
+        job.auto_options = {  # type: ignore[attr-defined]
+            "style": style,
+            "comments": comments,
+            "voices": voices,
+            "seed": seed,
+        }
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
     def cancel(self, job_id: str) -> Job:
         job = self.get(job_id)
         if job.finished:
@@ -309,6 +349,9 @@ class JobManager:
             job.started_at = time.time()
         if job.kind == "voice":
             self._run_voice(job)
+            return
+        if job.kind == "postv_auto":
+            self._run_postv_auto(job)
             return
         folder = self.storage.project_dir(job.slug)
         cfg = self.app_settings.load() if self.app_settings is not None else None
@@ -403,6 +446,143 @@ class JobManager:
         except RenderCancelled:
             job._finish(CANCELLED)
         except VoiceError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_postv_auto(self, job: Job) -> None:
+        """Thực thi chuỗi 7 pha tự động cho PostV (PVA)."""
+        pdir = self.storage.project_dir(job.slug)
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load_any(job.slug)
+                if not isinstance(project, PostvProject):
+                    raise Unprocessable("Chỉ dự án PostV mới hỗ trợ tạo tự động")
+
+                opts = getattr(job, "auto_options", {})
+                style_id = opts.get("style", "ke-chuyen")
+                comments_count = opts.get("comments", 3)
+                voices_mode = opts.get("voices", "random")
+                seed = opts.get("seed", 1)
+
+                # Pha 1: Kiểm tra nội dung bài gốc
+                job._progress(5, "parse", "Pha 1/7: Kiểm tra bài và bình luận")
+                if not project.post.text.strip():
+                    raise Unprocessable("Chưa có chữ bài gốc để tạo tự động")
+
+                # Pha 2 & 3: Soạn kịch bản theo phong cách
+                job._progress(15, "script", f"Pha 2–3/7: Soạn kịch bản phong cách '{style_id}'")
+                settings_dir = (
+                    self.storage.workspace_dir / "settings" if self.storage.workspace_dir else None
+                )
+                styles = load_script_styles(settings_dir)
+                project = build_auto_script(
+                    project,
+                    style_id=style_id,
+                    comments_count=comments_count,
+                    voices_mode=voices_mode,
+                    seed=seed,
+                    styles=styles,
+                )
+                project.auto.style = style_id
+                project.auto.comments = comments_count
+                project.auto.voices = voices_mode
+                project.auto.seed = seed
+                self.storage.save_any(job.slug, project)
+
+                # Pha 4: Gán giọng
+                job._progress(25, "cast", "Pha 4/7: Phân chia giọng đọc từng người")
+                if self.voice is not None:
+                    try:
+                        voices = self.voice.list_voices()
+                        speakers = [s.speaker or "narrator" for s in project.segments]
+                        unique_speakers = list(dict.fromkeys(speakers))
+                        manual_cast = {} if voices_mode == "random" else project.voice.cast
+                        cast = resolve_cast(unique_speakers, manual_cast, seed, voices)
+                        project.voice.cast = cast
+                        self.storage.save_any(job.slug, project)
+                    except Exception as e:
+                        log.warning("Không nạp được danh sách giọng: %s", e)
+
+                # Pha 5: Chọn nền & nhạc
+                job._progress(35, "assets", "Pha 5/7: Chọn clip nền và nhạc từ thư viện")
+                bg_lib = BackgroundLibrary(self.library_dir)
+                bg_entries = bg_lib.list()
+                if bg_entries and not project.background.clip_ids:
+                    rng = random.Random(seed)
+                    all_ids = [e.id for e in bg_entries]
+                    rng.shuffle(all_ids)
+                    project.background.clip_ids = all_ids[: min(3, len(all_ids))]
+                    project.background.seed = seed
+                music_lib = MusicLibrary(self.library_dir)
+                musics = music_lib.list()
+                if musics and project.music is None:
+                    rng = random.Random(seed)
+                    picked = rng.choice(musics)
+                    project.music = Music(id=picked.id, file=picked.file, title=picked.title)
+                self.storage.save_any(job.slug, project)
+
+                # Pha 6: Sinh giọng VieNeu
+                job._progress(45, "voice", "Pha 6/7: Sinh giọng đọc VieNeu")
+                # Yêu cầu số 1: DỪNG ở pha 6 nếu thiếu VieNeu, giữ kết quả pha 1–5, KHÔNG giả lập
+                if self.voice is None:
+                    raise VoiceUnavailable(
+                        "Chưa cấu hình bộ sinh giọng VieNeu. Kịch bản các pha 1–5 đã được lưu."
+                    )
+                st = self.voice.status()
+                if not st.ok:
+                    raise VoiceUnavailable(
+                        f"Thiếu VieNeu hoặc trọng số: {st.note}. Kịch bản các pha 1–5 đã được lưu."
+                    )
+
+                plan, cast = build_plan(project, self.voice.list_voices())
+                synthesize_plan(
+                    plan,
+                    pdir,
+                    self.voice,
+                    cast,
+                    job._progress,
+                )
+                latest = self.storage.load_any(job.slug)
+                latest.voice = latest.voice.model_copy(
+                    update={"engine": "vieneu", "file": "voice.wav", "trim_end": None}
+                )
+                self.storage.save_any(job.slug, latest)
+
+                # Pha 7: Dựng Xem nhanh 10 s
+                job._progress(80, "render", "Pha 7/7: Căn chữ và dựng Xem nhanh 10 s đầu")
+                cfg = self.app_settings.load() if self.app_settings is not None else None
+                opts = RenderOptions(
+                    preview=True,
+                    preview_seconds=10.0,
+                    library_dir=self.library_dir,
+                    brand_dir=self.brand_dir,
+                    whisper_model=cfg.whisper_model if cfg else None,
+                    whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
+                    job_id=job.id,
+                )
+                words = self.postv_words.load() if self.postv_words is not None else None
+                render_res = self._render_postv(
+                    pdir,
+                    opts,
+                    progress=lambda pct, step, msg: job._progress(
+                        80.0 + pct * 0.19, step, f"Pha 7/7: {msg}"
+                    ),
+                    cancel_token=job.token,
+                    censor_words=words,
+                )
+
+                rel = self.storage.rel
+                output = {
+                    "video": rel(render_res.video),
+                    "publish": rel(render_res.publish),
+                    "preview_seconds": 10.0,
+                    "project": self.storage.load_any(job.slug).model_dump(mode="json"),
+                }
+                job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except (VoiceError, Unprocessable) as e:
             job._finish(FAILED, error=str(e))
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
