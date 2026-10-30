@@ -287,7 +287,7 @@ export const vi = {
       animation: 'Hiệu ứng thẻ',
       smooth: 'Mượt',
       bounce: 'Nảy',
-      previewOf: 'Xem trước',
+      previewOf: 'Xem trước thẻ',
       tabs: { hook: 'Tiêu đề', post: 'Bài gốc' },
       quick: 'Xem nhanh',
       notReady: 'Chưa đủ để xem nhanh: cần lời đọc, file giọng và ít nhất một clip nền.',

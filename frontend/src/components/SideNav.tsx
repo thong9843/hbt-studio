@@ -8,8 +8,10 @@ import { useTheme } from '../hooks/useTheme';
 import { vi } from '../i18n/vi';
 import {
   ChatIcon,
+  EyeIcon,
   FilmIcon,
   FolderIcon,
+  GripIcon,
   HomeIcon,
   MoonIcon,
   MusicIcon,
@@ -145,6 +147,32 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
   );
 }
 
+/** Khối dự án PostV đang mở: tên + 5 bước PostV (chỉ khi ở /postv/:slug). */
+function OpenPostvProject({ slug, mini }: { slug: string; mini: boolean }) {
+  const { data } = useQuery({
+    queryKey: ['projects'],
+    queryFn: api.listProjects,
+    staleTime: 30_000,
+  });
+  const name = data?.find((p) => p.slug === slug)?.title ?? slug;
+  const base = `/postv/${slug}`;
+  const steps = vi.postv.steps;
+  return (
+    <div aria-label={vi.nav.openProject} role="group" className="mt-2 space-y-1">
+      {!mini && (
+        <p className="truncate px-3 pt-2 text-tiny font-semibold text-muted" title={name}>
+          {name}
+        </p>
+      )}
+      <NavItem to={base} end icon={<ChatIcon />} label={steps[0]} mini={mini} />
+      <NavItem to={`${base}/pick`} icon={<GripIcon />} label={steps[1]} mini={mini} />
+      <NavItem to={`${base}/script`} icon={<MusicIcon />} label={steps[2]} mini={mini} />
+      <NavItem to={`${base}/preview`} icon={<EyeIcon />} label={steps[3]} mini={mini} />
+      <NavItem to={`${base}/export`} icon={<UploadIcon />} label={steps[4]} mini={mini} />
+    </div>
+  );
+}
+
 /** Nút Sáng ↔ Tối: chữ và biểu tượng là chế độ hiện tại; thu 72 px chỉ còn biểu tượng. */
 function ThemeToggle({ mini }: { mini: boolean }) {
   const { theme, toggle } = useTheme();
@@ -202,8 +230,10 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
 /** Thanh trái cố định: rộng 232, hoặc 72 chỉ biểu tượng (DESIGN-HBT.md mục 5). */
 export function SideNav({ mini, render }: Props) {
   const { open: openNew } = useNewProject();
-  const open = useMatch('/p/:slug/*');
-  const slug = open?.params.slug;
+  const openVideo = useMatch('/p/:slug/*');
+  const openPostv = useMatch('/postv/:slug/*');
+  const videoSlug = openVideo?.params.slug;
+  const postvSlug = openPostv?.params.slug;
   return (
     <aside
       className={cx(
@@ -237,7 +267,8 @@ export function SideNav({ mini, render }: Props) {
           <NavItem to="/projects" icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
           <NavItem to="/postv" icon={<ChatIcon />} label={vi.nav.postv} mini={mini} />
         </div>
-        {slug && <OpenProject slug={slug} mini={mini} />}
+        {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
+        {postvSlug && <OpenPostvProject slug={postvSlug} mini={mini} />}
         <div className="mt-2">
           <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
         </div>
