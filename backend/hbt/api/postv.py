@@ -509,3 +509,47 @@ def restore_postv_backup(slug: str, backup_id: str, state: State):
     write_project_bytes(pdir, raw)
     restored = state.storage.load_any(slug)
     return {"ok": True, "restored_id": backup_id, "project": restored.model_dump(mode="json")}
+
+
+# ===================================================================== Gỡ Voice / Music
+@router.delete("/projects/{slug}/postv/assets/voice", status_code=204)
+def delete_postv_voice_asset(slug: str, state: State) -> None:
+    """Gỡ file giọng đã nạp/sinh (xoá file + bỏ tham chiếu) (PVA)."""
+    project = state.storage.load_any(slug)
+    if not isinstance(project, PostvProject):
+        raise BadRequest(f"'{slug}' không phải dự án PostV")
+    if state.jobs.is_busy(slug):
+        raise Conflict("Dự án đang bận, hãy đợi hoặc huỷ job")
+    if project.voice.file:
+        pdir = state.storage.project_dir(slug)
+        fpath = pdir / project.voice.file
+        try:
+            if fpath.is_file():
+                fpath.unlink()
+        except OSError:
+            pass
+        project.voice.file = None
+        project.voice.engine = "vieneu"
+        project.voice.trim_end = None
+        state.storage.save_any(slug, project)
+
+
+@router.delete("/projects/{slug}/postv/assets/music", status_code=204)
+def delete_postv_music_asset(slug: str, state: State) -> None:
+    """Gỡ nhạc nền đã chọn/nạp (xoá file trong project nếu có + bỏ tham chiếu) (PVA)."""
+    project = state.storage.load_any(slug)
+    if not isinstance(project, PostvProject):
+        raise BadRequest(f"'{slug}' không phải dự án PostV")
+    if state.jobs.is_busy(slug):
+        raise Conflict("Dự án đang bận, hãy đợi hoặc huỷ job")
+    if project.music is not None:
+        if project.music.file:
+            pdir = state.storage.project_dir(slug)
+            mf = pdir / project.music.file
+            try:
+                if mf.is_file():
+                    mf.unlink()
+            except OSError:
+                pass
+        project.music = None
+        state.storage.save_any(slug, project)

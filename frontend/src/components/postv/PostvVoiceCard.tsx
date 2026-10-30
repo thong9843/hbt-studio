@@ -6,7 +6,9 @@ import { usePostvEditor } from '../../hooks/postvEditor';
 import { useJob } from '../../hooks/useJob';
 import { vi } from '../../i18n/vi';
 import { AudioDrop } from '../audio/AudioDrop';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { ErrorNote } from '../ErrorNote';
+import { TrashIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -75,6 +77,16 @@ export function PostvVoiceCard() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Job | null>(null);
   const [version, setVersion] = useState(0);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+
+  const removeFileMutation = useMutation({
+    mutationFn: () => api.deletePostvVoice(slug),
+    onSuccess: () => {
+      update((p) => ({ ...p, voice: { ...p.voice, file: null } }));
+      setConfirmingRemove(false);
+      void queryClient.invalidateQueries({ queryKey: ['postv-voice', slug] });
+    },
+  });
 
   const info = useQuery({
     queryKey: ['postv-voice', slug, savedCount, version],
@@ -289,23 +301,47 @@ export function PostvVoiceCard() {
           />
           <ErrorNote error={upload.error} />
           {voice.file && (
-            <Input
-              label={A.trim}
-              type="number"
-              min={0}
-              step={0.1}
-              inputMode="decimal"
-              hint={<p className="mt-1 text-small text-muted">{A.trimHelp}</p>}
-              value={voice.trim_end ?? ''}
-              onChange={(e) =>
-                update((p) => ({
-                  ...p,
-                  voice: { ...p.voice, trim_end: trimValue(e.target.value) },
-                }))
-              }
-            />
+            <>
+              <div className="flex items-center justify-between">
+                <Button
+                  tone="danger"
+                  size="sm"
+                  icon={<TrashIcon size={14} />}
+                  onClick={() => setConfirmingRemove(true)}
+                >
+                  {A.remove}
+                </Button>
+              </div>
+              <Input
+                label={A.trim}
+                type="number"
+                min={0}
+                step={0.1}
+                inputMode="decimal"
+                hint={<p className="mt-1 text-small text-muted">{A.trimHelp}</p>}
+                value={voice.trim_end ?? ''}
+                onChange={(e) =>
+                  update((p) => ({
+                    ...p,
+                    voice: { ...p.voice, trim_end: trimValue(e.target.value) },
+                  }))
+                }
+              />
+            </>
           )}
+          <ErrorNote error={removeFileMutation.error} />
         </>
+      )}
+      {confirmingRemove && (
+        <ConfirmDialog
+          title={A.removeConfirmTitle}
+          message={A.removeConfirmMessage}
+          confirmLabel={A.remove}
+          danger
+          busy={removeFileMutation.isPending}
+          onConfirm={() => removeFileMutation.mutate()}
+          onCancel={() => !removeFileMutation.isPending && setConfirmingRemove(false)}
+        />
       )}
     </Card>
   );

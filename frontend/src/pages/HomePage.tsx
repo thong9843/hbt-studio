@@ -1,16 +1,20 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary, RenderSummary } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
-import { CheckIcon, PlayIcon } from '../components/icons';
+import { CheckIcon, MoreIcon, PlayIcon } from '../components/icons';
 import { CardImage } from '../components/ProjectCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Menu } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
+import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
 import { projectHref } from '../utils/projectHref';
@@ -41,7 +45,13 @@ function Dot({ on, label }: { on: boolean; label: string }) {
 }
 
 /** Thẻ "Tiếp tục làm": dự án sửa gần nhất. Chấm nguyên liệu lấy bằng một lần GET project, không poll. */
-function Continue({ project }: { project: ProjectSummary }) {
+function Continue({
+  project,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onDelete: (p: ProjectSummary) => void;
+}) {
   const t = vi.home;
   const status = projectStatus(project);
   const brief = useQuery({
@@ -61,6 +71,7 @@ function Continue({ project }: { project: ProjectSummary }) {
         <p className="text-tiny font-semibold text-muted">{t.continue}</p>
         <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
         <div className="flex flex-wrap items-center gap-2">
+          {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
           <Badge tone={TONE[status.kind]}>{status.label}</Badge>
           {series && <span className="text-small text-muted">{series}</span>}
         </div>
@@ -77,7 +88,7 @@ function Continue({ project }: { project: ProjectSummary }) {
         ) : (
           project.kind !== 'postv' && !brief.isError && <Skeleton width={260} height={20} />
         )}
-        <div className="mt-auto flex flex-wrap gap-2 pt-2">
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
           <Link to={projectHref(project)} className="ui-btn ui-btn-ink">
             {t.open}
           </Link>
@@ -93,6 +104,18 @@ function Continue({ project }: { project: ProjectSummary }) {
               {t.watch}
             </a>
           )}
+          <Menu
+            label={vi.projects.menu(project.title)}
+            icon={<MoreIcon />}
+            items={[
+              {
+                key: 'delete',
+                label: vi.projects.delete,
+                danger: true,
+                onSelect: () => onDelete(project),
+              },
+            ]}
+          />
         </div>
       </div>
     </Card>
@@ -146,7 +169,13 @@ function LastExport({ project, render }: { project: ProjectSummary; render: Rend
   );
 }
 
-function RecentCard({ project }: { project: ProjectSummary }) {
+function RecentCard({
+  project,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onDelete: (p: ProjectSummary) => void;
+}) {
   const status = projectStatus(project);
   const href = projectHref(project);
   return (
@@ -155,11 +184,32 @@ function RecentCard({ project }: { project: ProjectSummary }) {
         <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
           <CardImage src={projectImage(project)} />
         </div>
-        <div className="space-y-2 p-3">
-          <p className="line-clamp-2 text-small font-bold">{project.title}</p>
-          <Badge tone={TONE[status.kind]}>{status.label}</Badge>
-        </div>
       </Link>
+      <div className="flex items-start justify-between gap-2 p-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="line-clamp-2 text-small font-bold">
+            <Link to={href} className="hover:underline">
+              {project.title}
+            </Link>
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
+            <Badge tone={TONE[status.kind]}>{status.label}</Badge>
+          </div>
+        </div>
+        <Menu
+          label={vi.projects.menu(project.title)}
+          icon={<MoreIcon />}
+          items={[
+            {
+              key: 'delete',
+              label: vi.projects.delete,
+              danger: true,
+              onSelect: () => onDelete(project),
+            },
+          ]}
+        />
+      </div>
     </Card>
   );
 }
@@ -178,10 +228,28 @@ function HomeSkeleton() {
 export function HomePage() {
   const t = vi.home;
   const { open: openNew } = useNewProject();
+  const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: api.listProjects,
   });
+
+  const remove = useMutation({
+    mutationFn: (slug: string) => api.deleteProject(slug),
+    onSuccess: () => {
+      setDeleting(null);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      toast.info(vi.projects.deleted);
+    },
+    onError: (e) => {
+      setDeleting(null);
+      toast.error(e);
+    },
+  });
+
   // Danh sách đã sắp theo `updated_at` mới nhất trước.
   const latest = data?.[0];
   const last = data ? latestExport(data) : null;
@@ -204,7 +272,7 @@ export function HomePage() {
       {latest && (
         <>
           <div className="grid grid-cols-1 gap-6 min-[1024px]:grid-cols-[3fr_2fr]">
-            <Continue project={latest} />
+            <Continue project={latest} onDelete={(p) => setDeleting(p)} />
             {last ? (
               <LastExport project={last.project} render={last.render} />
             ) : (
@@ -227,10 +295,22 @@ export function HomePage() {
               </div>
               <ul className="grid grid-cols-2 gap-6 min-[1024px]:grid-cols-4">
                 {recent.map((p) => (
-                  <RecentCard key={p.slug} project={p} />
+                  <RecentCard key={p.slug} project={p} onDelete={(p) => setDeleting(p)} />
                 ))}
               </ul>
             </section>
+          )}
+
+          {deleting && (
+            <ConfirmDialog
+              title={vi.projects.deleteTitle}
+              message={vi.projects.confirmDelete(deleting.title)}
+              confirmLabel={vi.projects.delete}
+              danger
+              busy={remove.isPending}
+              onConfirm={() => remove.mutate(deleting.slug)}
+              onCancel={() => setDeleting(null)}
+            />
           )}
         </>
       )}

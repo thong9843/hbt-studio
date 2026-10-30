@@ -191,6 +191,23 @@ class BackgroundLibrary:
         self._write([*entries, entry])
         return entry
 
+    def remove(self, clip_id: str) -> None:
+        """Xoá clip nền khỏi thư viện: xoá file video, file thumb và mục trong index.json."""
+        _, video_path = self.find(clip_id)
+        thumb_path = self.thumbs_dir / f"{clip_id}.jpg"
+        entries = [e for e in self.list() if e.id != clip_id]
+        try:
+            if video_path.is_file():
+                video_path.unlink()
+        except OSError:
+            pass
+        try:
+            if thumb_path.is_file():
+                thumb_path.unlink()
+        except OSError:
+            pass
+        self._write(entries)
+
 
 def background_problems(clip_ids: list[str], library: BackgroundLibrary) -> list[str]:
     """Những gì còn thiếu ở phần nền để dựng được (rỗng nếu đủ). `clip_ids` rỗng = cả thư viện."""

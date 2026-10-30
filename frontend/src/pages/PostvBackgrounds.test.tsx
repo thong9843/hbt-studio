@@ -320,4 +320,25 @@ describe('Bước 4 · Xem trước: nền, thẻ, hiệu ứng', () => {
       'bounce',
     );
   });
+
+  it('allows deleting a background clip with confirmation', async () => {
+    const user = userEvent.setup();
+    const deleted = vi.fn(() => new Response(null, { status: 204 }));
+    backend(postv(), [clip('c1', { title: 'Clip Thử Nghiệm' })], {
+      'GET /api/projects': [postv()],
+      'DELETE /api/backgrounds/c1': deleted,
+    });
+    app('/postv');
+    const libCard = await screen.findByRole('region', { name: 'Thư viện nền' });
+    const clipTitle = await within(libCard).findByText('Clip Thử Nghiệm');
+    const clipItem = clipTitle.closest('li')!;
+    const delBtn = within(clipItem).getByRole('button', { name: /Xoá Clip Thử Nghiệm/ });
+    await user.click(delBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Xoá clip nền' });
+    expect(within(dialog).getByText(/Bạn có chắc muốn xoá clip "Clip Thử Nghiệm"\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
+    expect(deleted).toHaveBeenCalledTimes(1);
+  });
 });

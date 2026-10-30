@@ -346,4 +346,47 @@ describe('Thẻ Nhạc', () => {
     const music = await screen.findByRole('region', { name: 'Nhạc nền' });
     expect(within(music).getByRole('button', { name: 'Không nhạc' })).toBeVisible();
   });
+
+  it('allows removing an attached music file with confirmation', async () => {
+    const user = userEvent.setup();
+    const deleteMusic = vi.fn(() => new Response(null, { status: 204 }));
+    backend(postv({ music: { file: 'music.mp3', credit: 'Sample Artist' } }), info(), {
+      'GET /api/music': [],
+      'DELETE /api/projects/bai/postv/assets/music': deleteMusic,
+    });
+    app();
+    const musicCard = await screen.findByRole('region', { name: 'Nhạc nền' });
+    const removeBtn = within(musicCard).getByRole('button', { name: 'Gỡ file nhạc' });
+    await user.click(removeBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Gỡ file nhạc' });
+    expect(within(dialog).getByText(/Bạn có chắc muốn gỡ file nhạc này\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Gỡ file nhạc' }));
+    expect(deleteMusic).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Gỡ file giọng đã nạp', () => {
+  it('allows removing an uploaded voice file with confirmation', async () => {
+    const user = userEvent.setup();
+    const deleteVoice = vi.fn(() => new Response(null, { status: 204 }));
+    backend(
+      postv({ voice: { ...VOICE, engine: 'file', file: 'voice_input.wav' } }),
+      info({ engine: 'file', file: 'voice_input.wav' }),
+      {
+        'DELETE /api/projects/bai/postv/assets/voice': deleteVoice,
+      },
+    );
+    app();
+    const voiceCard = await screen.findByRole('region', { name: 'Giọng đọc' });
+    const removeBtn = within(voiceCard).getByRole('button', { name: 'Gỡ file giọng' });
+    await user.click(removeBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Gỡ file giọng' });
+    expect(within(dialog).getByText(/Bạn có chắc muốn gỡ file giọng này\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Gỡ file giọng' }));
+    expect(deleteVoice).toHaveBeenCalledTimes(1);
+  });
 });

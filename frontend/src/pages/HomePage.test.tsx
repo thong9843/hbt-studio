@@ -209,4 +209,29 @@ describe('HomePage', () => {
     const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
     expect(within(card).getByRole('link', { name: 'Mở dự án' })).toBeVisible();
   });
+
+  it('allows deleting a project from the ⋯ menu with confirmation dialog', async () => {
+    const user = userEvent.setup();
+    const deleted = vi.fn(() => json({ ok: true }));
+    stubFetch({
+      'GET /api/projects': [
+        summary('muoi', 'Muỗi'),
+        summary('postv-test', 'PostV Test', { kind: 'postv' }),
+      ],
+      'GET /api/projects/muoi': brief,
+      'DELETE /api/projects/muoi': deleted,
+    });
+    page();
+    const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
+    const menuBtn = within(card).getByRole('button', { name: /Thao tác: Muỗi/ });
+    await user.click(menuBtn);
+    const deleteBtn = await screen.findByRole('menuitem', { name: 'Xoá' });
+    await user.click(deleteBtn);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Xoá dự án?' });
+    expect(within(dialog).getByText(/Xoá dự án "Muỗi"\?/)).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
+    expect(deleted).toHaveBeenCalledTimes(1);
+  });
 });

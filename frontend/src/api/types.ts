@@ -338,6 +338,38 @@ export interface PostvProject {
   };
   publish: { hook: string; hashtags: string[] };
   thumbnail: Thumbnail | null;
+  auto?: PostvAutoOptions | null;
+}
+
+export interface PostvAutoOptions {
+  style: string;
+  comment_count: number;
+}
+
+export interface PostvScriptStyle {
+  id: string;
+  label: string;
+  description: string;
+  tone: string;
+  voice_style: string;
+}
+
+export interface ScriptJsonCheckResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: {
+    hook: string;
+    segments_count: number;
+    total_chars: number;
+    estimated_seconds: number;
+  };
+}
+
+export interface PostvBackupRecord {
+  id: string;
+  created_at: string;
+  bytes: number;
 }
 
 export type AnyProject = Project | PostvProject;

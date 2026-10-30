@@ -219,6 +219,10 @@ export const vi = {
       seconds: (s: number) => `${Math.round(s * 10) / 10} s`.replace('.', ','),
       size: (w: number, h: number, fps: number) => `${w}×${h} · ${Math.round(fps)} fps`,
       play: (title: string) => `Xem clip ${title}`,
+      delete: 'Xoá',
+      deleteConfirmTitle: 'Xoá clip nền',
+      deleteConfirmMessage: (title: string) =>
+        `Bạn có chắc muốn xoá clip "${title}"? File video và ảnh thu nhỏ sẽ bị xoá vĩnh viễn khỏi thư viện.`,
     },
     script: {
       listTitle: 'Lời đọc từng đoạn',
@@ -652,6 +656,10 @@ export const vi = {
       trimmed: 'Đã cắt đuôi',
       trimmedSeconds: (seconds: string) => `Đã cắt đuôi ${seconds} s`,
       listenTrimmed: 'Nghe phần đã cắt',
+      remove: 'Gỡ file giọng',
+      removeConfirmTitle: 'Gỡ file giọng',
+      removeConfirmMessage:
+        'Bạn có chắc muốn gỡ file giọng này? File sẽ bị xoá khỏi thư mục dự án.',
     },
     start: {
       title: 'Điểm bắt đầu nhạc',
@@ -679,6 +687,9 @@ export const vi = {
       noMatch: 'Không có bài nào hợp tâm trạng này.',
       credit: 'Ghi công',
       creditHelp: 'Dòng này được thêm vào publish.txt.',
+      remove: 'Gỡ file nhạc',
+      removeConfirmTitle: 'Gỡ file nhạc',
+      removeConfirmMessage: 'Bạn có chắc muốn gỡ file nhạc này? File sẽ bị xoá khỏi thư mục dự án.',
       upload: 'Tải nhạc',
       uploadTitle: 'Tải nhạc từ máy',
       uploadDrop: 'Thả file nhạc hoặc bấm để chọn',
