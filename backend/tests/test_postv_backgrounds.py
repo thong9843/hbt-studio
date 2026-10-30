@@ -53,7 +53,7 @@ def test_add_reads_the_video_and_stores_file_thumb_and_index(lib, clip):
     assert len(lib.list()) == 0
 
 
-def test_delete_background_endpoint(client, tmp_path):
+def test_delete_background_endpoint(client, tmp_path):  # noqa: F811
     in_clip = make_clip(tmp_path / "temp_in.mp4")
     with open(in_clip, "rb") as f:
         r = client.post(
