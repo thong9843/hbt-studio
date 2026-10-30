@@ -343,6 +343,7 @@ export interface PostvProject {
 
 export interface PostvAutoOptions {
   style: string;
+  comments?: number;
   comment_count: number;
 }
 

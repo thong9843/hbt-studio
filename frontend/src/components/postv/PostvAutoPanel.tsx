@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function PostvAutoPanel({ project, disabled }: Props) {
-  const { flush, update } = usePostvEditor();
+  const { flush } = usePostvEditor();
   const navigate = useNavigate();
 
   const stylesQuery = useQuery({
