@@ -171,6 +171,37 @@ describe('Bước 4 · Xem nhanh', () => {
     await user.click(await screen.findByRole('button', { name: 'Xem nhanh' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Chưa có clip nền nào');
   });
+
+  it('toggles captions, changes caption preset and plays bleep sound', async () => {
+    const user = userEvent.setup();
+    const playMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      'Audio',
+      vi.fn().mockImplementation(() => ({
+        play: playMock,
+        onended: null,
+        onerror: null,
+      })),
+    );
+    backend(postv(), {
+      'GET /api/projects/bai/postv/preview.png': () =>
+        new Response(new Blob(['x']), { status: 200 }),
+    });
+    app('/postv/bai/preview');
+
+    expect(await screen.findByRole('button', { name: 'HBT (Vàng)' })).toBeVisible();
+    const sampleChip = screen.getByRole('button', { name: 'Mẫu (Xanh lá)' });
+    await user.click(sampleChip);
+
+    const bleepBtn = screen.getByRole('button', { name: 'Nghe thử bíp' });
+    await user.click(bleepBtn);
+    expect(playMock).toHaveBeenCalled();
+
+    const cardChip = screen.getByRole('button', { name: 'Chỉ thẻ bài' });
+    await user.click(cardChip);
+    const fullChip = screen.getByRole('button', { name: 'Toàn khung 9:16' });
+    await user.click(fullChip);
+  });
 });
 
 describe('Bước 5 · Xuất bản đẹp', () => {

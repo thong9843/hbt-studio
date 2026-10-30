@@ -145,6 +145,31 @@ export const api = {
     if (opts.version !== undefined) q.set('v', String(opts.version));
     return `/api/projects/${enc(slug)}/postv/card.png?${q}`;
   },
+  /** Ảnh xem trước tĩnh 9:16 của PostV: nền + thẻ + phụ đề mẫu (PV6). */
+  postvPreviewUrl: (
+    slug: string,
+    opts?: {
+      kind?: 'hook' | 'post' | 'comment';
+      ref?: string;
+      w?: number;
+      version?: number;
+      t?: number;
+    },
+  ) => {
+    const q = new URLSearchParams();
+    if (opts?.kind) q.set('kind', opts.kind);
+    if (opts?.ref) q.set('ref', opts.ref);
+    if (opts?.w) q.set('w', String(opts.w));
+    if (opts?.version !== undefined) q.set('v', String(opts.version));
+    if (opts?.t !== undefined) q.set('t', String(opts.t));
+    const s = q.toString();
+    return `/api/projects/${enc(slug)}/postv/preview.png${s ? `?${s}` : ''}`;
+  },
+  /** URL tiếng bíp 1 kHz che từ (PV6). */
+  postvBleepUrl: () => '/api/postv/bleep.wav',
+  /** Xem trước ảnh bìa PostV (khung gameplay hoặc ảnh tải lên) (PV6). */
+  previewPostvThumbnail: (slug: string, thumbnail?: Thumbnail, signal?: AbortSignal) =>
+    apiPostBlob(`/projects/${enc(slug)}/postv/thumbnail/preview.jpg?w=360`, { thumbnail }, signal),
   attachLibraryMusic: (slug: string, id: string) =>
     apiRequest<AnyProject>('POST', `/projects/${enc(slug)}/music/from-library`, { json: { id } }),
 
