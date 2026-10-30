@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/Toast';
+import { vi as t } from '../i18n/vi';
 import { FakeEventSource, json, stubFetch } from '../test/fakes';
 import { renderWithProviders } from '../test/render';
 import { PostvExportPage } from './PostvExportPage';
@@ -202,6 +203,26 @@ describe('Bước 4 · Xem nhanh', () => {
     const fullChip = screen.getByRole('button', { name: 'Toàn khung 9:16' });
     await user.click(fullChip);
   });
+
+  it('displays video from listRenders when no active job is running', async () => {
+    backend(postv(), {
+      'GET /api/projects/bai/renders': [
+        {
+          job_id: 'j-prev',
+          project: 'bai',
+          video: '/files/bai/renders/j-prev/video.mp4',
+          preview: true,
+          duration: 10,
+          fps: 30,
+          created_at: '2026-10-30T10:00:00Z',
+        },
+      ],
+    });
+    app('/postv/bai/preview');
+    const player = await screen.findByLabelText(t.postv.render.player);
+    expect(player).toBeVisible();
+    expect(player).toHaveAttribute('src', '/files/bai/renders/j-prev/video.mp4');
+  });
 });
 
 describe('Bước 5 · Xuất bản đẹp', () => {
@@ -283,5 +304,28 @@ describe('Bước 5 · Xuất bản đẹp', () => {
     await user.click(addCover);
     expect(screen.getByRole('button', { name: 'Khung gameplay' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Ảnh tải lên' })).toBeVisible();
+  });
+
+  it('deletes source with confirmation dialog and calls API', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    backend(postv(), {
+      'DELETE /api/projects/bai/postv/source': () => {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    app('/postv/bai/export');
+
+    const delBtn = await screen.findByRole('button', { name: t.postv.export.deleteSource });
+    await user.click(delBtn);
+
+    const dialog = screen.getByRole('alertdialog', { name: t.postv.export.deleteSourceTitle });
+    expect(dialog).toBeVisible();
+
+    const confirmBtn = within(dialog).getByRole('button', { name: t.postv.export.deleteSource });
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(deleted).toBe(true));
   });
 });

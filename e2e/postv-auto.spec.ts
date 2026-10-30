@@ -5,8 +5,7 @@ import { API, deleteProject } from './helpers';
 
 const SAMPLE_POST = `tac_gia
 1 giờ
-Hôm qua mình bỏ quên ví ở quán cà phê. May mà bạn nhân viên cất giữ hộ cẩn thận.
-120 bình luận · 45 chia sẻ
+Hôm qua mình để quên ví ở quán cà phê. May được bạn nhân viên giữ hộ.
 
 user_b
 40 phút
@@ -14,7 +13,7 @@ Quán ở đâu vậy bạn ơi?
 
 user_c
 20 phút
-Người tốt việc tốt, thả tim nè!`;
+May mắn quá, thả tim nha!`;
 
 const SCRIPT_JSON = JSON.stringify({
   postv_script: 1,
@@ -107,18 +106,6 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
       await expect(page).toHaveURL(new RegExp(`/postv/${slug}/script`));
     }
   } finally {
-    await page
-      .evaluate(() => {
-        document.querySelectorAll('video, audio').forEach((el) => {
-          const m = el as HTMLMediaElement;
-          m.pause();
-          m.removeAttribute('src');
-          m.load();
-        });
-      })
-      .catch(() => {});
-    await page.goto('about:blank').catch(() => {});
-    await page.close().catch(() => {});
     await deleteProject(request, slug);
   }
 });
@@ -167,18 +154,6 @@ test('PVA: Dán JSON kịch bản ở Bước 3 → Kiểm tra → Áp dụng th
       expect(updated.segments).toHaveLength(5);
     }).toPass({ timeout: 15_000 });
   } finally {
-    await page
-      .evaluate(() => {
-        document.querySelectorAll('video, audio').forEach((el) => {
-          const m = el as HTMLMediaElement;
-          m.pause();
-          m.removeAttribute('src');
-          m.load();
-        });
-      })
-      .catch(() => {});
-    await page.goto('about:blank').catch(() => {});
-    await page.close().catch(() => {});
     await deleteProject(request, slug);
   }
 });
