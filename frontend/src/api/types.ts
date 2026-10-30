@@ -356,9 +356,11 @@ export interface PostvScriptStyle {
 
 export interface ScriptJsonCheckResult {
   ok: boolean;
-  errors: string[];
-  warnings: string[];
-  summary: {
+  issues?: string[];
+  errors?: string[];
+  warnings?: string[];
+  segments_count?: number;
+  summary?: {
     hook: string;
     segments_count: number;
     total_chars: number;

@@ -147,7 +147,9 @@ export function PostvScriptJsonDialog({ open, onClose }: Props) {
                 {checkResult.ok ? 'Hợp lệ' : 'Lỗi'}
               </Badge>
               <span className="text-small font-semibold">
-                {checkResult.ok ? T.valid : T.errors(checkResult.errors.length)}
+                {checkResult.ok
+                  ? T.valid
+                  : T.errors((checkResult.issues ?? checkResult.errors ?? []).length)}
               </span>
             </div>
 
@@ -162,17 +164,17 @@ export function PostvScriptJsonDialog({ open, onClose }: Props) {
               </p>
             )}
 
-            {checkResult.errors.length > 0 && (
+            {(checkResult.issues ?? checkResult.errors ?? []).length > 0 && (
               <ul className="list-disc pl-5 text-small text-danger">
-                {checkResult.errors.map((err, i) => (
+                {(checkResult.issues ?? checkResult.errors ?? []).map((err, i) => (
                   <li key={i}>{err}</li>
                 ))}
               </ul>
             )}
 
-            {checkResult.warnings.length > 0 && (
+            {(checkResult.warnings ?? []).length > 0 && (
               <ul className="list-disc pl-5 text-small text-amber-600 dark:text-amber-400">
-                {checkResult.warnings.map((warn, i) => (
+                {(checkResult.warnings ?? []).map((warn, i) => (
                   <li key={i}>{warn}</li>
                 ))}
               </ul>

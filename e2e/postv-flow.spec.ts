@@ -139,10 +139,12 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     const clips = await (await request.get(`${API}/backgrounds`)).json();
     if (clips.length > 0) {
       await page.getByRole('button', { name: '30 fps' }).click();
-      const exportBtn = page.getByRole('button', { name: vi.postv.export.final, exact: true });
+      const exportBtn = page.getByRole('button', { name: vi.postv.export.final(30), exact: true });
       await expect(exportBtn).toBeEnabled({ timeout: 30_000 });
       await exportBtn.click();
-      await expect(page.getByRole('progressbar', { name: vi.postv.render.progress })).toBeVisible();
+      await expect(
+        page.getByRole('progressbar', { name: vi.postv.render.progress }).first(),
+      ).toBeVisible();
       const finalPlayer = page.getByLabel(vi.postv.render.player);
       await expect(finalPlayer).toBeVisible({ timeout: 180_000 });
     } else {
@@ -162,7 +164,7 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
 
     // Thấy phần Nội dung đăng
     await expect(page.getByRole('heading', { name: vi.postv.export.publishContent })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Sao chép/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Sao chép/ }).first()).toBeVisible();
 
     // Thấy phần Lịch sử lần xuất và nút Dọn file tạm
     await expect(page.getByRole('heading', { name: vi.export.history.title })).toBeVisible();
@@ -172,6 +174,7 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     await expect(page.getByText(vi.postv.export.cleanDone)).toBeVisible({ timeout: 10_000 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    await page.goto('about:blank').catch(() => {});
     await deleteProject(request, slug);
   }
 });

@@ -70,6 +70,7 @@ class ScriptStyle:
         return {
             "id": self.id,
             "name": self.name,
+            "label": self.name,
             "hook": list(self.hook),
             "intro_post": list(self.intro_post),
             "intro_comment": list(self.intro_comment),

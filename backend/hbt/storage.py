@@ -145,7 +145,14 @@ def _now_iso(ts: float) -> str:
 def _write_json_atomic(path: Path, data: object) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError:
+            if attempt == 9:
+                raise
+            time.sleep(0.05)
 
 
 class Storage:

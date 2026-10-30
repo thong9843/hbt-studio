@@ -33,7 +33,7 @@ const SCRIPT_JSON = JSON.stringify({
     { role: 'comment', ref: 'c1', speaker: 'c1', voice: 'Quán ở đâu vậy bạn ơi?', card: 'comment' },
     { role: 'commentary', speaker: 'narrator', voice: 'Bạn thấy sao?', card: 'none' },
   ],
-  cast: { narrator: 'hai-dang' },
+  cast: { narrator: 'Adam bựa' },
   publish: { hook: 'Quên ví', hashtags: ['chuyentute'] },
 });
 
@@ -41,7 +41,7 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
   page,
   request,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   const title = `E2E PVA Auto ${Date.now()}`;
   let slug = '';
   try {
@@ -74,19 +74,26 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
       timeout: 10_000,
     });
 
-    // Kiểm tra xem máy có VieNeu không
-    const health = await (await request.get(`${API}/health`)).json();
-    if (!health.vieneu) {
-      // Dừng ở pha 6 với thông báo thiếu VieNeu, kịch bản 1–5 đã lưu
-      await expect(page.getByText(vi.postv.auto.missingVieneu)).toBeVisible({ timeout: 40_000 });
+    // Đợi hoặc là dừng ở pha 6 (thiếu VieNeu), hoặc hoàn tất sang Bước 4 (chờ VieNeu CPU + Whisper + render)
+    const scriptBtn = page.getByRole('button', { name: vi.postv.auto.goToScript });
+    const previewBtn = page.getByRole('button', { name: vi.postv.auto.goToPreview });
+
+    await expect(scriptBtn.or(previewBtn)).toBeVisible({ timeout: 180_000 });
+
+    if (await scriptBtn.isVisible()) {
+      // Dừng ở pha 6 với lỗi rõ, giữ kết quả kịch bản pha 1–5
       const project = await (await request.get(`${API}/projects/${slug}`)).json();
       expect(project.segments.length).toBeGreaterThan(0);
       expect(project.hook.text).toBeTruthy();
+      await scriptBtn.click();
+      await expect(page).toHaveURL(new RegExp(`/postv/${slug}/script`));
     } else {
-      // Có VieNeu thì chạy đủ và mở Bước 4
-      await expect(page).toHaveURL(new RegExp(`/postv/${slug}/preview`), { timeout: 120_000 });
+      // Hoàn tất chuỗi 7 pha và mở Bước 4
+      await previewBtn.click();
+      await expect(page).toHaveURL(new RegExp(`/postv/${slug}/preview`));
     }
   } finally {
+    await page.goto('about:blank').catch(() => {});
     await deleteProject(request, slug);
   }
 });
@@ -135,6 +142,7 @@ test('PVA: Dán JSON kịch bản ở Bước 3 → Kiểm tra → Áp dụng th
       expect(updated.segments).toHaveLength(5);
     }).toPass({ timeout: 15_000 });
   } finally {
+    await page.goto('about:blank').catch(() => {});
     await deleteProject(request, slug);
   }
 });

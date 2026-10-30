@@ -44,12 +44,9 @@ export function PostvAutoPanel({ project, disabled }: Props) {
   const startAuto = useMutation({
     mutationFn: async () => {
       await flush();
-      update((p) => ({
-        ...p,
-        auto: { style: selectedStyle, comment_count: commentCount },
-      }));
       return api.startPostvAuto(project.slug, {
         style: selectedStyle,
+        comments: commentCount,
         comment_count: commentCount,
       });
     },

@@ -13,7 +13,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Query, Response
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from hbt.api.deps import State
 from hbt.backups import create_backup, list_backups, read_backup, write_project_bytes
@@ -360,8 +360,17 @@ def get_postv_styles(state: State):
 class AutoBody(BaseModel):
     style: str = "ke-chuyen"
     comments: int = Field(default=3, ge=2, le=5)
+    comment_count: int | None = None
     voices: Literal["random", "manual"] = "random"
     seed: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def unify_comments(cls, values):
+        if isinstance(values, dict):
+            if "comment_count" in values and "comments" not in values:
+                values["comments"] = values["comment_count"]
+        return values
 
 
 @router.post("/projects/{slug}/postv/auto", status_code=202)
