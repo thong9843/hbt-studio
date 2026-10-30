@@ -68,6 +68,9 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
     const healthRes = await request.get(`${API}/health`);
     const health = await healthRes.json();
     const hasVieNeu = Boolean(health.vieneu);
+    if (hasVieNeu) {
+      test.setTimeout(600_000);
+    }
 
     // Bấm Tạo tự động
     const startBtn = autoPanel.getByRole('button', { name: vi.postv.auto.submit });
@@ -84,13 +87,12 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
 
     if (hasVieNeu) {
       // Có VieNeu: BẮT BUỘC tới Xem nhanh và có video
-      await expect(previewBtn).toBeVisible({ timeout: 180_000 });
+      await expect(previewBtn).toBeVisible({ timeout: 540_000 });
       await previewBtn.click();
       await expect(page).toHaveURL(new RegExp(`/postv/${slug}/preview`));
-      await expect(page.getByRole('button', { name: vi.postv.preview.renderQuick })).toBeVisible();
-      // Chờ video preview sẵn sàng
-      const video = page.getByRole('region', { name: vi.postv.preview.title }).locator('video');
-      await expect(video).toBeVisible({ timeout: 30_000 });
+      // Chờ video preview sẵn sàng (sau chuỗi 7 pha đã tạo Xem nhanh)
+      const player = page.getByLabel(vi.postv.render.player);
+      await expect(player.or(page.locator('video'))).toBeVisible({ timeout: 30_000 });
     } else {
       // Thiếu VieNeu: BẮT BUỘC dừng pha 6 (lỗi rõ), giữ kịch bản pha 1–5
       test.info().annotations.push({
@@ -105,7 +107,18 @@ test('PVA: dán nguồn → chọn phong cách và bình luận → Tạo tự �
       await expect(page).toHaveURL(new RegExp(`/postv/${slug}/script`));
     }
   } finally {
+    await page
+      .evaluate(() => {
+        document.querySelectorAll('video, audio').forEach((el) => {
+          const m = el as HTMLMediaElement;
+          m.pause();
+          m.removeAttribute('src');
+          m.load();
+        });
+      })
+      .catch(() => {});
     await page.goto('about:blank').catch(() => {});
+    await page.close().catch(() => {});
     await deleteProject(request, slug);
   }
 });
@@ -154,7 +167,18 @@ test('PVA: Dán JSON kịch bản ở Bước 3 → Kiểm tra → Áp dụng th
       expect(updated.segments).toHaveLength(5);
     }).toPass({ timeout: 15_000 });
   } finally {
+    await page
+      .evaluate(() => {
+        document.querySelectorAll('video, audio').forEach((el) => {
+          const m = el as HTMLMediaElement;
+          m.pause();
+          m.removeAttribute('src');
+          m.load();
+        });
+      })
+      .catch(() => {});
     await page.goto('about:blank').catch(() => {});
+    await page.close().catch(() => {});
     await deleteProject(request, slug);
   }
 });

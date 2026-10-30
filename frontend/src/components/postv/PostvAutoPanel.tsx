@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/endpoints';
@@ -21,8 +21,9 @@ interface Props {
 }
 
 export function PostvAutoPanel({ project, disabled }: Props) {
-  const { flush } = usePostvEditor();
+  const { flush, applyServer } = usePostvEditor();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const stylesQuery = useQuery({
     queryKey: ['postv-styles'],
@@ -38,7 +39,16 @@ export function PostvAutoPanel({ project, disabled }: Props) {
   const [commentCount, setCommentCount] = useState(initialCount);
   const [jobId, setJobId] = useState<string | null>(null);
 
-  const { job, progress, cancel } = useJob(jobId);
+  const { job, progress, cancel } = useJob(jobId, (finishedJob) => {
+    if (finishedJob.status === 'done') {
+      const out = finishedJob.output as { project?: PostvProject } | null | undefined;
+      if (out?.project) {
+        const nextProject = out.project;
+        applyServer(() => nextProject);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['renders', project.slug] });
+    }
+  });
   const status = job?.status ?? (jobId ? 'running' : null);
 
   const startAuto = useMutation({

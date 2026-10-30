@@ -177,7 +177,7 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
     const delSourceBtn = page.getByRole('button', { name: vi.postv.export.deleteSource });
     await expect(delSourceBtn).toBeVisible();
     await delSourceBtn.click();
-    const delDialog = page.getByRole('dialog', { name: vi.postv.export.deleteSourceTitle });
+    const delDialog = page.getByRole('alertdialog', { name: vi.postv.export.deleteSourceTitle });
     await expect(delDialog).toBeVisible();
     await delDialog.getByRole('button', { name: vi.postv.export.deleteSource }).click();
     await expect(page.getByText(vi.postv.export.deleteSourceDone)).toBeVisible({ timeout: 10_000 });
@@ -189,6 +189,7 @@ test('luồng PostV đủ 5 bước: dán nguồn → chọn đoạn → nạp f
   } finally {
     rmSync(dir, { recursive: true, force: true });
     await page.goto('about:blank').catch(() => {});
+    await page.close().catch(() => {});
     await deleteProject(request, slug);
   }
 });

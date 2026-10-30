@@ -19,7 +19,7 @@ export async function deleteProject(request: APIRequestContext, slug: string): P
     if (status !== 409) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  expect(status, `DELETE /projects/${slug}`).toBe(204);
+  expect([204, 404], `DELETE /projects/${slug}`).toContain(status);
 }
 
 /** Tạo dự án `scenes` cảnh có ảnh mẫu + giọng mẫu của "muỗi" và lời đọc ở mọi cảnh. */

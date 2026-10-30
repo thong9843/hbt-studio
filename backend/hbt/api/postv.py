@@ -78,10 +78,10 @@ def _preview_background(
     """
     ids = project.background.clip_ids or [e.id for e in state.backgrounds.list()]
     for clip_id in ids:
-        entry = state.backgrounds.get(clip_id)
-        if entry is not None and t is not None and t >= 0:
-            clip_path = state.backgrounds.root / entry.file
-            if clip_path.is_file():
+        entry = None
+        try:
+            entry, clip_path = state.backgrounds.find(clip_id)
+            if t is not None and t >= 0 and clip_path.is_file():
                 cmd = [
                     "ffmpeg",
                     "-v",
@@ -104,6 +104,8 @@ def _preview_background(
                         return Image.open(io.BytesIO(res.stdout)).copy()
                 except Exception:
                     pass
+        except (StorageError, OSError):
+            pass
         try:
             return Image.open(state.backgrounds.thumb_path(clip_id)).copy()
         except (StorageError, OSError):

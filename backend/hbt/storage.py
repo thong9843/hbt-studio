@@ -351,7 +351,7 @@ class Storage:
 
     def delete(self, slug: str) -> None:
         folder = self.project_dir(slug)
-        if not (folder / "project.json").is_file():
+        if not (folder / "project.json").is_file() and not folder.exists():
             raise NotFound(f"Không có project '{slug}'")
         # Windows: file vừa ghi/đang đọc (vd ảnh xem trước) làm rmtree lỗi trong chốc lát.
         for attempt in range(DELETE_ATTEMPTS):
