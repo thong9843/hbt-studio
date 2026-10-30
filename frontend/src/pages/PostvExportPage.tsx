@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { api } from '../api/endpoints';
 import type { Fps, RenderRecord } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { CopyIcon } from '../components/icons';
 import { HistoryGrid } from '../components/export/HistoryGrid';
 import { PublishCard } from '../components/export/PublishCard';
 import { PostvRenderPanel } from '../components/postv/PostvRenderPanel';
@@ -124,7 +125,28 @@ export function PostvExportPage() {
           <PublishCard url={media.publish} />
         ) : (
           <Card as="section" aria-label={T.publishContent} className="space-y-3">
-            <h2 className="text-h2 font-bold">{T.publishContent}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-h2 font-bold">{T.publishContent}</h2>
+              <Button
+                tone="soft"
+                size="sm"
+                icon={<CopyIcon size={16} />}
+                onClick={() => {
+                  const text = [
+                    project.publish?.hook || project.post?.text || '',
+                    sourceLineText,
+                    hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' '),
+                  ]
+                    .filter(Boolean)
+                    .join('\n\n');
+                  void navigator.clipboard.writeText(text).then(() => {
+                    toast.info(vi.export.publish.copied);
+                  });
+                }}
+              >
+                {vi.export.publish.copy}
+              </Button>
+            </div>
             <div className="space-y-2 rounded-inner bg-soft p-3 text-small">
               <p className="font-bold text-muted">[TikTok]</p>
               <p>{project.publish?.hook || project.post?.text || '...'}</p>

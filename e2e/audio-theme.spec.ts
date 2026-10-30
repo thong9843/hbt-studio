@@ -50,3 +50,32 @@ test('màn Âm thanh: ba thẻ, xem trước 9:16, Không nhạc', async ({ page
     await deleteProject(request, slug);
   }
 });
+
+test('nút Sáng/Tối hoạt động trên màn dự án PostV', async ({ page, request }) => {
+  const title = `E2E theme postv ${Date.now()}`;
+  let slug = '';
+  try {
+    const res = await request.post(`${API}/projects`, { data: { title, kind: 'postv' } });
+    expect(res.ok()).toBeTruthy();
+    slug = (await res.json()).slug;
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.goto(`/postv/${slug}`);
+
+    const toDark = page.getByRole('button', { name: vi.nav.theme.toDark });
+    await expect(toDark).toBeVisible();
+    await toDark.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+    // Chuyển sang bước Xuất và đổi lại Sáng
+    await page.goto(`/postv/${slug}/export`);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const toLight = page.getByRole('button', { name: vi.nav.theme.toLight });
+    await expect(toLight).toBeVisible();
+    await toLight.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await page.evaluate(() => localStorage.removeItem('hbt-theme'));
+  } finally {
+    await deleteProject(request, slug);
+  }
+});
