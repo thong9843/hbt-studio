@@ -124,6 +124,22 @@ describe('AppShell, wide (>= 1280 px)', () => {
     );
   });
 
+  it('adds the Ảnh step between Soạn video and Âm thanh only for a project with a draft', async () => {
+    stubFetch({ ...routes(), 'GET /api/projects/muoi/draft/exists': { exists: true } });
+    shell('/p/muoi/audio');
+    const group = screen.getByRole('group', { name: 'Dự án đang mở' });
+    await within(group).findByRole('link', { name: 'Ảnh' });
+    expect(
+      within(group)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Soạn video', 'Ảnh', 'Âm thanh', 'Xuất video']);
+    expect(within(group).getByRole('link', { name: 'Ảnh' })).toHaveAttribute(
+      'href',
+      '/p/muoi/images',
+    );
+  });
+
   it('shows the open postv project with its name and five steps inside /postv/:slug', async () => {
     stubFetch({
       'GET /api/health': health,

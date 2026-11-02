@@ -27,6 +27,7 @@ import type {
   RenderRecord,
   Scene,
   DraftCheck,
+  DraftDoc,
   DraftCreated,
   ScriptApplied,
   ScriptCheck,
@@ -111,6 +112,18 @@ export const api = {
   createDraft: (draft: string, title?: string) =>
     apiRequest<DraftCreated>('POST', '/gd2/draft/create', {
       json: { draft, title: title ?? null },
+    }),
+  /** Dự án có bản nháp GĐ2 không? Luôn 200 (không sinh 404 khi không có). */
+  draftExists: (slug: string) => apiGet<{ exists: boolean }>(`/projects/${enc(slug)}/draft/exists`),
+  getDraft: (slug: string) => apiGet<DraftDoc>(`/projects/${enc(slug)}/draft`),
+  /** Duyệt ảnh (lưu dấu ảnh từng cảnh) hoặc bỏ duyệt. 422 khi còn cảnh chưa có ảnh. */
+  setImagesApproved: (slug: string, approved: boolean) =>
+    apiRequest<DraftDoc>('PUT', `/projects/${enc(slug)}/draft/images-approved`, {
+      json: { approved },
+    }),
+  setScenePrompt: (slug: string, index: number, imagePrompt: string) =>
+    apiRequest<DraftDoc>('PUT', `/projects/${enc(slug)}/draft/scenes/${index}/prompt`, {
+      json: { image_prompt: imagePrompt },
     }),
   /** Kiểm khối JSON kịch bản (chuỗi người dùng dán). Không ghi gì. */
   checkScript: (slug: string, script: string, extra?: ScriptExtra) =>

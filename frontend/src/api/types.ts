@@ -489,6 +489,28 @@ export interface DraftCheck {
   music_match: { id: string; title: string } | null;
 }
 
+export interface DraftScene {
+  image_prompt: string;
+  image_prompt_ok: boolean;
+  /** Prompt đầy đủ để sao chép (đã nối phần phủ định); rỗng khi cảnh chưa có prompt. */
+  full_prompt: string;
+  /** Từ cấm (K17) có trong prompt. */
+  forbidden: string[];
+  /** Ảnh hiện tại còn khớp dấu ảnh lúc duyệt. */
+  image_approved: boolean;
+}
+
+/** `GET /projects/{slug}/draft`: nháp kèm trạng thái duyệt ảnh tính tại lúc đọc. */
+export interface DraftDoc {
+  draft: 1;
+  topic: string;
+  series_hint: string;
+  music_mood: string;
+  sources: { id: string; claim: string; url: string }[];
+  scenes: DraftScene[];
+  images_approved: boolean;
+}
+
 export interface DraftCreated {
   slug: string;
   project: Project;
