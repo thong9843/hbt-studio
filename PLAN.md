@@ -28,6 +28,8 @@ Claude (kịch bản) → Gemini web (8 ảnh) → Vbee (giọng đọc) → Pix
 
 **Ngoài phạm vi:** tự đăng lên TikTok/YouTube (cần duyệt API nhà phát triển), chạy trên internet, nhiều người dùng.
 
+> Ghi chú 02/11/2026: GĐ2 đã chốt lại hướng: kịch bản **không** gọi API (Claude chat xuất JSON nháp), ảnh qua ComfyUI local hoặc đường tay, giọng VieNeu local. Xem §6b và `docs/gd2/`. Chữ trong bảng trên giữ nguyên làm lịch sử.
+
 ## 3. Nguyên tắc
 
 1. **Chạy local, dữ liệu ở máy bạn.** Server chỉ mở ở `127.0.0.1`.
@@ -121,6 +123,20 @@ flowchart LR
 | Vitest | 58 file, 761 test |
 | e2e Playwright (Edge) | 7/7 |
 | `git diff v0.5.1 -- backend/hbt/pipeline/ reference/` | rỗng (X6); `PIPELINE_VERSION = 0112661f2845` |
+
+## 6b. Lộ trình Giai đoạn 2 (chốt 02/11/2026)
+
+Đặc tả: `docs/gd2/PRD.md`, `docs/gd2/IMPLEMENT-GD2.md`, `docs/gd2/PROMPT-KICH-BAN.md`. Mục tiêu: một chủ đề → một bản nháp HBT để duyệt, chi phí 0, app không gọi API trên mạng; giữ ba điểm duyệt kịch bản → ảnh → video.
+
+| Mốc | Việc | Máy | Buổi | Tag |
+|---|---|---|---|---|
+| **G0** · Docs | `docs/gd2/` (PRD, IMPLEMENT-GD2, PROMPT-KICH-BAN), PLAN §6b, sửa luật push trong `CLAUDE.md` | Cũ | 0,5 | không |
+| **G1** · Nháp | JSON `hbt_draft: 1`, Tạo dự án từ nháp, `draft.json`, kiểm K13–K18, tự chọn nhạc theo `music_mood` | Cũ | 1,5 | `v1.11.0` |
+| **G2** · Ảnh | Bước Ảnh: prompt từng cảnh, Sao chép, thả ảnh đúng cảnh, "đã duyệt ảnh" | Cũ | 1 | `v1.12.0` |
+| **G3** · Giọng | Giọng VieNeu cho HBT (`{}` và `|`), nhớ giọng đã chọn, tiến độ x/N, vẫn thả Vbee | Cũ | 1,5 | `v1.13.0` |
+| **G4** · ComfyUI | `ImageProvider` ComfyUI, từng cảnh / cả bộ, huỷ được, rẽ đường tay | Mới | 2 | `v1.14.0` |
+
+Thứ tự G1 → G2 → G3 → G4. Không sửa `backend/hbt/pipeline/`, `models.py`, `api/projects.py`; `PIPELINE_VERSION` giữ nguyên.
 
 ## 7. Rủi ro
 
@@ -226,6 +242,7 @@ flowchart LR
 | 29/10/2026 | **PV3:** thẻ bài và nền gameplay; clip nền chỉ nhận video dọc ≥ 720×1280, ≥ 3 s, bắt buộc tên, nguồn, giấy phép; ảnh thẻ xem trước do máy chủ vẽ cùng bộ vẽ với video; nền ghép bằng cắt thẳng | Theo K-36 đến K-39; không đụng `pipeline/`, `models.py`, `reference/` |
 | 29/10/2026 | **PV4:** giọng VieNeu chạy tiến trình con trong `backend/.venv-tts` (ghim `vieneu==3.8.3`, `HF_HUB_OFFLINE=1`, trọng số ở `models/hf_vieneu`); `voice.cast` chỉ lưu giọng chọn tay, người dẫn mặc định Adam bựa, người còn lại bốc theo `voice.seed` không trùng và xen nam/nữ; sinh giọng là job chung hàng đợi (tiến độ theo đoạn, huỷ được), cache theo hash lời + giọng; `/health` có `vieneu`, thanh trái hiện VieNeu (IMPLEMENT-POSTV mục 8e) | Theo K-35, K-40; không đụng `pipeline/`, `models.py`, `reference/` |
 | 29/10/2026 | **PV5:** dựng PostV bằng một lệnh ffmpeg; tắt watermark VieNeu và đổi `WORKER_REV` (giọng cũ sinh lại); thẻ "Nảy" phóng sẵn bằng Pillow vì ffmpeg không đổi cỡ khung giữa dòng; nền chỉ khoá theo `BG_VERSION` nên đổi thẻ không dựng lại nền; bíp giữ mức 0,35 | Chủ dự án chốt 29/10; không đụng `pipeline/`, `models.py`, `reference/` |
+| 02/11/2026 | **GĐ2 (G0):** kịch bản không gọi API (Claude chat → JSON nháp `hbt_draft: 1`, mã kiểm K13–K18, K16 so theo con số), ảnh ComfyUI local hoặc đường tay, giọng VieNeu cho HBT và giữ Vbee, nháp lưu `draft.json`; sửa `CLAUDE.md`: push nhánh khi kế hoạch đã duyệt có ghi, không push/merge khi lần chạy cuối giai đoạn đỏ, được tự merge/tag khi lời duyệt cho phép sẵn và `gh` báo CI xanh đúng HEAD, nhánh `feat/…`/`fix/…`/`docs/…`. Dòng 20/10 "Không tự push" giữ làm lịch sử | Chủ dự án chốt 02/11; không đụng `pipeline/`, `models.py`, `reference/`, `api/projects.py` |
 | 02/11/2026 | **Đợt `fix/cover-drop` + PV7 (không sticker):** sửa gốc thả ảnh bìa bị nuốt khi đang tải (không khoá vùng thả, xếp hàng các lần tải) và menu ⋯ thẻ dự án bị cắt (bỏ `overflow-hidden` ở Card); bình luận lồng bằng `>`; mẫu "Thẻ cố định" chọn ở Bước 5; `cli pack-media`/`unpack-media`; sticker tách thành PV7b (tải lên tay, chờ file mẫu); xoá hàng loạt ở Lịch sử vào Backlog | Chủ dự án chốt 02/11; không đụng `pipeline/`, `backend/hbt/models.py`, `reference/`, `api/projects.py` |
 | 30/10/2026 | **PV8:** clip nền chỉ bắt buộc tên (`title`), bỏ bắt buộc `source`/`license`/`url` khỏi form và `publish.py`, tương thích ngược mục cũ; `DELETE /projects/{slug}/postv/source` xoá chữ nguồn/bình luận giữ nguyên `segments` và các lần xuất (409 khi có job); cập nhật hướng dẫn PostV vào `README.md` và đồng bộ `IMPLEMENT.md` §9 (`images/<hash16>.<ext>`) | Chủ dự án chốt 30/10; không đụng `pipeline/`, `models.py`, `reference/`, `api/projects.py` |
 | 27/10/2026 | Lưới dự án: `ProjectSummary` thêm `cover` (bìa lần dựng gần nhất có bìa) và `last_final` (bản đẹp mới nhất); nhãn "Đã xuất · fps" / "Đã xem nhanh" / "Chưa dựng" (IMPLEMENT 13.B2, 13.B6). Mốc "không đổi pipeline" của M5 là tag `v0.5.1`, không phải `b240e97` | `last_render` có thể là Xem nhanh 10 s không có bìa; `v0.5.1` đã sửa `render.py` |
@@ -264,3 +281,8 @@ flowchart LR
 | PVA | ☑ | Xong 30/10/2026, đã merge 47e5466, v1.8.0, nhánh `feat/pva-auto` (từ `main` `b7e25a2`, tag `v1.7.0`). PVA Tự động: không AI viết lời (mẫu 5 phong cách `script_styles.json`), chuỗi 7 pha `POST /projects/{slug}/postv/auto` dừng ở Xem nhanh 10 s (thiếu VieNeu dừng ở pha 6 và lưu kịch bản pha 1–5), mỗi người một giọng; dán JSON kịch bản (kiểm tra, áp dụng, dùng lại `backups.py` 10 bản sao lưu, hoàn tác); menu xoá thẻ Trang chủ (HBT & PostV), nút xoá clip nền thư viện (409 nếu đang dùng), nút gỡ file giọng/nhạc đã nạp nhầm; e2e postv-auto và postv-flow (IMPLEMENT-POSTV mục 8 PVA). Kiểm chứng: pytest 1135 passed (gồm slow), Vitest 65 file / 942 test xanh, e2e 16 passed, tự xoá dự án; `git diff v1.7.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
 | PV8 | ☑ | Xong 30/10/2026, nhánh `feat/pv8-polish` (từ `main` `47e5466`, tag `v1.8.0`). Hoàn thiện PostV: bỏ bắt buộc `source`/`license`/`url` cho clip nền (chỉ cần `title`, tương thích ngược mục cũ); `DELETE /projects/{slug}/postv/source` + nút Xoá nguồn có hộp xác nhận ở bước 5 giữ nguyên kịch bản `segments` và lần xuất (409 khi có job); cập nhật hướng dẫn PostV vào `README.md`, sửa `IMPLEMENT.md` §9 (`images/<hash16>.<ext>`), dọn lệch PVA (IMPLEMENT-POSTV mục 8j). Kiểm chứng: pytest 1136 passed (gồm slow), Vitest 66 file / 945 test xanh; `git diff v1.8.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
 | PV7 | ☑ | Xong 02/11/2026, nhánh `feat/pv7-cover-drop` (từ `main` `def2332`, v1.9.0): fix thả ảnh bìa và menu ⋯, bình luận lồng, Thẻ cố định, `cli pack-media`/`unpack-media`. Sticker tách thành PV7b; xoá hàng loạt ở Lịch sử là Backlog. Kiểm chứng (máy cũ): pytest 1153 passed (gồm slow), Vitest 66 file / 947 test, e2e 17 passed, 0 skip; `git diff v1.9.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
+| G0 | ☐ | Docs GĐ2 trên nhánh `docs/gd2-spec` (từ `main` `1a11b11`), chờ chủ dự án duyệt; không merge, không tag |
+| G1 | ☐ | JSON nháp + Tạo dự án (tag `v1.11.0`) |
+| G2 | ☐ | Bước Ảnh (tag `v1.12.0`) |
+| G3 | ☐ | Giọng VieNeu cho HBT (tag `v1.13.0`) |
+| G4 | ☐ | ComfyUI, máy mới (tag `v1.14.0`) |
