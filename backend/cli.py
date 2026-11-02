@@ -1,16 +1,20 @@
 """Dòng lệnh: `python -m cli render <project_dir> [--preview] [--fps 30|50|60]` dựng video;
-`python -m cli bench-align <project_dir> [--models small,medium,large-v3]` đo Whisper."""
+`python -m cli bench-align <project_dir> [--models small,medium,large-v3]` đo Whisper;
+`python -m cli pack-media` / `unpack-media` chuyển media giữa hai máy (zip + sha256)."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from hbt.config import ALLOWED_FPS, WHISPER_MODELS, load_settings
+from hbt import transfer
+from hbt.config import ALLOWED_FPS, REPO_ROOT, WHISPER_MODELS, load_settings
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.bench import bench_align, format_rows
 from hbt.pipeline.ffutil import FFmpegError
@@ -65,7 +69,77 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TIMEOUT,
         help=f"giới hạn thời gian mỗi model, giây (mặc định {DEFAULT_TIMEOUT})",
     )
+    groups_help = (
+        f"nhóm media, cách nhau bằng dấu phẩy (mặc định tất cả: {','.join(transfer.GROUPS)})"
+    )
+    pk = sub.add_parser(
+        "pack-media", help="Gói media (nền, nhạc, giọng VieNeu, dự án mẫu) thành zip + manifest"
+    )
+    pk.add_argument("--out", type=Path, default=REPO_ROOT / "workspace" / "transfer")
+    pk.add_argument("--groups", help=groups_help)
+    pk.add_argument("--dry-run", action="store_true", help="chỉ đếm file và dung lượng")
+    up = sub.add_parser(
+        "unpack-media", help="Giải gói vào repo, kiểm sha256, không ghi đè file git theo dõi"
+    )
+    up.add_argument("src", type=Path, nargs="?", default=REPO_ROOT / "workspace" / "transfer")
+    up.add_argument("--groups", help=groups_help)
+    up.add_argument(
+        "--with-index", action="store_true", help="cho phép ghi đè index.json của thư viện"
+    )
+    up.add_argument("--force", action="store_true", help="ghi đè file có sẵn nhưng khác nội dung")
     return parser
+
+
+def _git_tracked(root: Path) -> set[str]:
+    """File git đang theo dõi (posix, tương đối). Không chạy được git thì chỉ coi các `index.json`
+    của thư viện là đang theo dõi (an toàn hơn là ghi đè)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True, timeout=60
+        ).stdout
+        return {p for p in out.decode("utf-8").split("\0") if p}
+    except (OSError, subprocess.SubprocessError):
+        return {"library/backgrounds/index.json", "library/music/index.json"}
+
+
+def _split(value: str | None) -> list[str] | None:
+    return [g.strip() for g in value.split(",") if g.strip()] if value else None
+
+
+def _media(args) -> int:
+    def log(m: str) -> None:
+        print(f"  {m}", flush=True)
+
+    try:
+        if args.command == "pack-media":
+            if args.dry_run:
+                for group, files in transfer.plan_pack(REPO_ROOT, _split(args.groups)).items():
+                    size = sum(p.stat().st_size for p in files)
+                    print(f"  {group}: {len(files)} file, {size / 1e6:.1f} MB")
+                return 0
+            transfer.pack(REPO_ROOT, args.out, _split(args.groups), log)
+            print(f"\nĐã ghi vào {args.out}")
+            return 0
+        report = transfer.unpack(
+            REPO_ROOT,
+            args.src,
+            tracked=_git_tracked(REPO_ROOT),
+            with_index=args.with_index,
+            force=args.force,
+            groups=_split(args.groups),
+            log=log,
+        )
+    except (transfer.TransferError, OSError, zipfile.BadZipFile) as e:
+        print(f"\nLỖI: {e}", file=sys.stderr)
+        return 1
+    print(
+        f"\nGhi {len(report.written)} · đã có {len(report.same)} · "
+        f"giữ nguyên file git theo dõi {len(report.protected)} · khác nội dung bỏ qua "
+        f"{len(report.differs)}"
+    )
+    for rel in report.differs:
+        print(f"  KHÁC: {rel} (thêm --force để ghi đè)")
+    return 0
 
 
 def _progress_printer():
@@ -140,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "bench-align":
         return _bench_align(args, parser)
+    if args.command in ("pack-media", "unpack-media"):
+        return _media(args)
 
     options = RenderOptions(
         preview=args.preview,

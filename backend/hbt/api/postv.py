@@ -132,7 +132,7 @@ def card_png(
         if cfg.enabled and cfg.blur_card
         else None
     )
-    tpl = load_template(project.template if project.template == "story_cards" else "story_cards")
+    tpl = load_template(project.template)
     if kind == "comment":
         if ref is None:
             raise Unprocessable("Cần `ref` (id bình luận) cho thẻ bình luận")
@@ -209,7 +209,7 @@ def postv_preview_png(
         if cfg.enabled and cfg.blur_card
         else None
     )
-    tpl = load_template(project.template if project.template == "story_cards" else "story_cards")
+    tpl = load_template(project.template)
 
     # Chọn loại thẻ
     actual_kind: Literal["hook", "post", "comment"]

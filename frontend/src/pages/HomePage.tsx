@@ -179,9 +179,9 @@ function RecentCard({
   const status = projectStatus(project);
   const href = projectHref(project);
   return (
-    <Card as="li" padded={false} className="ui-card-link overflow-hidden">
+    <Card as="li" padded={false} className="ui-card-link">
       <Link to={href} aria-label={`${vi.projects.open}: ${project.title}`} className="block">
-        <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
+        <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
           <CardImage src={projectImage(project)} />
         </div>
       </Link>

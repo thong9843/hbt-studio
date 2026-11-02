@@ -5,7 +5,10 @@ import './ui/ui.css';
 
 const IMAGE_ACCEPT = { 'image/png': [], 'image/jpeg': [], 'image/webp': [] };
 
-/** Vùng thả một ảnh bìa (PNG, JPG, WEBP). */
+/**
+ * Vùng thả một ảnh bìa (PNG, JPG, WEBP). `busy` chỉ đổi biểu tượng: không khoá vùng thả, vì khoá thì
+ * file thả lúc đang tải ảnh trước bị nuốt im lặng (nơi gọi tự xếp hàng các lần tải).
+ */
 export function CoverDrop({
   label,
   busy,
@@ -20,7 +23,6 @@ export function CoverDrop({
     accept: IMAGE_ACCEPT,
     maxFiles: 1,
     multiple: false,
-    disabled: busy,
   });
   return (
     <div>

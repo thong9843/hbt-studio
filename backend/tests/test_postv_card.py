@@ -270,3 +270,37 @@ def test_api_card_errors(client, pv):  # noqa: F811
     assert client.get("/api/projects/khong-co/postv/card.png").status_code == 404
     video = client.post("/api/projects", json={"title": "Muỗi", "scene_count": 3}).json()
     assert client.get(f"/api/projects/{video['slug']}/postv/card.png").status_code == 400
+
+
+# ------------------------------------------------------------------ bình luận lồng
+def test_reply_card_is_indented_with_a_vertical_line():
+    flat, _ = card()
+    reply, bottom = card(reply=True)
+    rp, c = TPL["reply"], TPL["card"]
+    left, top, right, low = bbox(reply)
+    assert left == c["x"] + rp["line_x"] and right == c["x"] + c["w"]
+    assert top == c["top"] and abs(low - bottom) <= 1
+    # đường kẻ dọc chạy hết chiều cao thẻ; giữa đường kẻ và thẻ là khoảng trong suốt
+    mid = (top + low) // 2
+    x_line = c["x"] + rp["line_x"] + rp["line_w"] // 2
+    assert reply.getpixel((x_line, mid))[:3] == tuple(
+        int(rp["line_color"][i : i + 2], 16) for i in (1, 3, 5)
+    )
+    assert reply.getpixel((c["x"] + rp["indent"] - 4, mid))[3] == 0
+    assert bbox(flat)[0] == c["x"]  # thẻ phẳng không đổi
+
+
+def test_api_card_follows_the_template_and_draws_replies_indented(client, pv):  # noqa: F811
+    pv["comments"].append(
+        {"id": "c2", "handle": "user_c", "text": "Đúng", "parent": "c1", "picked": True}
+    )
+    pv["template"] = "fixed_card"
+    assert client.put("/api/projects/bai-the", json=pv).status_code == 200
+    assert (
+        bbox(png(client, kind="post", layer="true"))[1]
+        == load_template("fixed_card")["card"]["top"]
+    )
+    reply = png(client, kind="comment", ref="c2", layer="true")
+    assert bbox(reply)[0] == 72 + TPL["reply"]["line_x"]  # có đường kẻ dọc
+    flat = png(client, kind="comment", ref="c1", layer="true")
+    assert bbox(flat)[0] == 72

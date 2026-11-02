@@ -127,6 +127,7 @@ export function PostvThumbnailEditor() {
   const [coverVersion, setCoverVersion] = useState(0);
 
   const upload = useMutation({
+    scope: { id: 'cover-upload' }, // các lần thả liên tiếp chạy lần lượt, không chồng nhau
     mutationFn: async (f: File) => {
       await flush();
       return api.uploadAsset(project.slug, 'cover', f);

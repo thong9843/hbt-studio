@@ -51,6 +51,7 @@ const postv = (over: Record<string, unknown> = {}) => ({
   background: { mode: 'auto', clip_ids: [], seed: 1, start_offset: null },
   voice: { engine: 'file', voice_id: null, file: 'voice.wav', trim_end: null, cast: {}, seed: 1 },
   music: null,
+  template: 'story_cards',
   settings: { fps: 60, captions: true, aligner: 'auto', outro: true, card_animation: 'smooth' },
   ...over,
 });
@@ -237,6 +238,20 @@ describe('Bước 5 · Xuất bản đẹp', () => {
     const last = saves[saves.length - 1] as { settings: { fps: number; outro: boolean } };
     expect(last.settings.fps).toBe(50);
     expect(last.settings.outro).toBe(false);
+  });
+
+  it('saves the card template choice (Thẻ cố định)', async () => {
+    const user = userEvent.setup();
+    const { saves } = backend(postv());
+    app('/postv/bai/export');
+    expect(await screen.findByRole('button', { name: 'Thẻ theo đoạn' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Thẻ cố định' }));
+    expect(screen.getByText(/đứng yên phía trên suốt video/)).toBeVisible();
+    await waitFor(() => expect(saves.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((saves[saves.length - 1] as { template: string }).template).toBe('fixed_card');
   });
 
   it('cancels a running render', async () => {

@@ -232,6 +232,23 @@ export function PostvExportPage() {
               ))}
             </div>
           </div>
+          <div className="ui-field">
+            <span className="ui-label" id="pv-template-label">
+              {T.template}
+            </span>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="pv-template-label">
+              {(['story_cards', 'fixed_card'] as const).map((value) => (
+                <Chip
+                  key={value}
+                  selected={project.template === value}
+                  onClick={() => update((p) => ({ ...p, template: value }))}
+                >
+                  {T.templates[value]}
+                </Chip>
+              ))}
+            </div>
+            <p className="text-small text-muted">{T.templateHelp[project.template]}</p>
+          </div>
           <Switch
             label={T.outro}
             checked={project.settings.outro}

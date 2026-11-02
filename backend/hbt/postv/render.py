@@ -61,7 +61,7 @@ POSTV_VERSION = hashlib.sha1(
     (
         cache.code_digest(sys.modules[__name__], bgbuild, cardfx, captions, censorfx, publish)
         + cache.code_digest(_card, _censor)
-        + cache.file_digest(_card.TEMPLATE_DIR / "story_cards.json")
+        + "".join(cache.file_digest(_card.TEMPLATE_DIR / f"{n}.json") for n in _card.TEMPLATES)
     ).encode()
 ).hexdigest()[:12]
 ALIGN_START, ALIGN_END = 10.0, 25.0  # khung tiến độ của bước 3 (Căn chữ)
@@ -410,7 +410,9 @@ def _render_postv(
     if partial:
         use_outro = False
         rep.say(f"Xem nhanh {partial:g} s đầu, không outro")
-    spans = cardfx.plan_cards([cardfx.card_of(s) for s in segs], starts, total)
+    spans = cardfx.plan_for_template(
+        project.template, [cardfx.card_of(s) for s in segs], starts, total
+    )
     if partial:
         spans = [s for s in spans if s.start < partial]
 
@@ -433,7 +435,7 @@ def _render_postv(
 
     # ---- 6. Thẻ (45–50)
     rep.at(45, "Thẻ")
-    tpl = load_template(project.template if project.template == "story_cards" else "story_cards")
+    tpl = load_template(project.template)
     card_censor = matchers if censor_cfg.blur_card and matchers else None
     cards = []
     for k, span in enumerate(spans):

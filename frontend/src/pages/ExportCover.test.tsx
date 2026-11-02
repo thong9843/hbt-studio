@@ -276,6 +276,44 @@ describe('Export tab: uploaded cover image', () => {
     expect(screen.queryByAltText('Ảnh bìa tải lên')).not.toBeInTheDocument();
   });
 
+  it('sends a valid image dropped while the previous (refused) upload is still running', async () => {
+    const posts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    open({
+      thumbnail: thumb(),
+      extra: {
+        'POST /api/projects/muoi/assets': async (_u: string, init?: RequestInit) => {
+          const name = ((init?.body as FormData).get('file') as File).name;
+          posts.push(name);
+          if (name === 'nho.png') {
+            await gate;
+            return new Response(JSON.stringify({ detail: 'Ảnh bìa quá nhỏ' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return jsonResponse({
+            kind: 'cover',
+            path: 'images/cover.png',
+            project: project({ thumbnail: withImage('images/cover.png') }),
+          });
+        },
+      },
+    });
+    const user = userEvent.setup();
+    const drop = await screen.findByLabelText(DROP);
+    await user.upload(drop, new File(['x'], 'nho.png', { type: 'image/png' }));
+    await waitFor(() => expect(posts).toEqual(['nho.png'])); // lần 1 đang chờ máy chủ
+    await user.upload(
+      screen.getByLabelText(DROP),
+      new File(['y'], 'bia.png', { type: 'image/png' }),
+    );
+    release();
+    await screen.findByAltText('Ảnh bìa tải lên');
+    expect(posts).toEqual(['nho.png', 'bia.png']);
+  });
+
   it('rejects a file that is not an image without calling the server', async () => {
     let posted = false;
     open({

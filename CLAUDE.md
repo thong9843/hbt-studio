@@ -23,7 +23,7 @@
 - Không commit khi lint hoặc test đang đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
 
 ## Quy trình mốc
-- Mỗi mốc một nhánh riêng `feat/mX-…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`), mỗi commit đều có lint và test xanh.
+- Mỗi mốc một nhánh riêng `feat/mX-…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`). Commit lẻ không bắt buộc xanh; chỉ đầu nhánh phải xanh.
 - Kết thúc mốc theo **đúng thứ tự**:
   1. Lint và test xanh.
   2. Commit cuối `chore(Mx): done`, chỉ cập nhật bảng Tiến độ trong `PLAN.md` và Nhật ký quyết định.
@@ -34,7 +34,9 @@
 - Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
 
 ## Quy trình theo đợt (chốt 27/10/2026)
-- Mỗi commit: `npm run lint` + test liên quan (chỉ sửa frontend → Vitest; sửa backend → `pytest -m "not slow"`). Có thể dùng `npm run test:fast` (pytest không slow + Vitest). Cuối đợt chạy đầy đủ **một lần**: `set -o pipefail && npm run lint && npm run test`. CI vẫn chạy đầy đủ, kể cả test `slow`.
+- Khi đang code, sau từng commit hoặc sửa nhỏ: **không** chạy pytest, Vitest, e2e. Sửa một test hỏng thì chỉ chạy lại riêng file đó nếu cần.
+- Xong cả giai đoạn: `set -o pipefail && npm run lint && npm run test` + `npm run e2e` **một lần** → commit → push. CI vẫn chạy đầy đủ, kể cả test `slow`.
+- Commit dọn hoặc docs sau giai đoạn: chỉ `npm run lint`, CI nhánh lo phần còn lại.
 - Test `slow` = dựng/căn chữ thật, từ 3 s trở lên mỗi test theo `pytest --durations=0` trên máy cũ; gắn `@pytest.mark.slow`. Thêm test dựng thật mới thì tự đo và gắn marker.
 - Kế hoạch đợt được duyệt xong thì làm hết các commit, báo **một lần** cuối đợt. Chỉ dừng khi: có điểm đặc tả chưa rõ, test đỏ không tự sửa được, cần đụng `pipeline/` hoặc `models.py`.
 - Cuối đợt được phép push nhánh `feat/mX-…` (không merge, không tag, không chờ CI). Merge và tag vẫn theo 6 bước đóng mốc.

@@ -413,6 +413,8 @@ export interface PostvParseResult {
     text: string;
     same_author: boolean;
     picked: boolean;
+    /** Id bình luận được trả lời (dòng đầu bắt đầu bằng ">"); tối đa 1 cấp. */
+    parent?: string | null;
   }[];
   /** Dòng chỉ gồm số có thể là số liệu; `block` 0 = bài gốc, i ≥ 1 = bình luận thứ i. */
   hints: { block: number; raw: string; value: number | null }[];

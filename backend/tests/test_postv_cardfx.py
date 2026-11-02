@@ -277,3 +277,25 @@ def test_hook_bounces_then_settles(tmp_path):
     settled = width(at(frames, 3.0))
     assert settled > 0 and width(at(frames, 1.15)) != settled
     assert width(at(frames, 2.0)) == settled
+
+
+# ------------------------------------------------------------------ Thẻ cố định (fixed_card)
+def test_fixed_card_is_one_still_post_card_for_the_whole_video():
+    from hbt.postv.cardfx import plan_for_template
+
+    items = [("hook", None), ("post", None), ("comment", "c1"), ("none", None)]
+    starts = [0, 3, 6, 9]  # mốc theo scene_offsets: bị bỏ qua với thẻ cố định
+    fixed = plan_for_template("fixed_card", items, starts, 15)
+    assert [(s.kind, s.ref, s.start, s.end, s.fresh, s.handoff) for s in fixed] == [
+        ("post", None, 0.0, 15, True, False)
+    ]
+    story = plan_for_template("story_cards", items, starts, 15)  # vẫn đổi thẻ theo mốc
+    assert [(s.kind, s.start) for s in story] == [("hook", 0), ("post", 3), ("comment", 6)]
+
+
+def test_fixed_card_template_sits_higher_and_has_the_same_keys():
+    fixed = load_template("fixed_card")
+    assert fixed["card"]["top"] < TPL["card"]["top"]
+    assert fixed.keys() == TPL.keys() and fixed["anim"] == TPL["anim"]
+    with pytest.raises(ValueError):
+        load_template("khong-co")

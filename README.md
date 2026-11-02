@@ -178,6 +178,18 @@ PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Thr
 
 Ở Bước 1, khối **Tạo tự động** cho phép chọn 1 trong 5 phong cách (`Kể chuyện`, `Hài hước`, `Drama`, `Hóng biến`, `Cảm động`) và số bình luận (2–5). Ứng dụng sẽ tự động chạy chuỗi 7 pha không dùng AI: làm sạch nội dung, sinh lời thoại, phân giọng ngẫu nhiên xen kẽ, chọn nền nhạc và dừng ở bản Xem nhanh 10 giây.
 
+### Chuyển media sang máy khác
+
+Thư viện nền, nhạc, giọng VieNeu và dự án mẫu không nằm trong Git. Gói ở máy nguồn rồi chép thư mục `workspace/transfer/` sang máy đích (chỉ cần `zipfile` của Python, không dùng mạng):
+
+```powershell
+backend\.venv\Scripts\python -m cli pack-media --dry-run          # chỉ xem số file và dung lượng
+backend\.venv\Scripts\python -m cli pack-media                    # ghi workspace/transfer/*.zip + manifest.json
+backend\.venv\Scripts\python -m cli unpack-media                  # ở máy đích, sau khi chép thư mục transfer
+```
+
+Chọn nhóm bằng `--groups backgrounds,music,hf_vieneu,samples`. Giải gói kiểm sha256 từng file và không ghi đè file Git đang theo dõi; `--with-index` cho phép chép cả `index.json` của thư viện, `--force` ghi đè file có sẵn nhưng khác nội dung.
+
 ## Lệnh hay dùng
 
 | Lệnh             | Việc                                       |
