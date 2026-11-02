@@ -211,7 +211,15 @@ Test: pytest `test_gd2_images.py`, `test_gd2_docs.py`; Vitest `ImagesTab.test.ts
 
 ### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0` cho G2+G3)
 
-Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4), mỗi cảnh một đoạn rồi nối `voice.wav`, tiến độ x/N, huỷ được, cache theo hash lời + giọng. Giọng nhớ (E4b). Vbee vẫn thả file. Test: provider giả cho CI; tiền xử lý `{}` / `|`; nút Tạo giọng tắt khi chưa chọn giọng. Test VieNeu thật gắn `slow` và không chạy ở CI.
+Tái dùng provider VieNeu của PostV (`.venv-tts`, `GET /voices`, cache `build/voice/`, `join_wavs`). Màn Âm thanh có thẻ **Giọng VieNeu** (mọi dự án HBT, không cần `draft.json`); VieNeu chưa cài thì thẻ **vẫn hiện** ghi chú ngắn, thả file Vbee ở thẻ Giọng đọc dùng như cũ.
+
+| Điểm cuối                                         | Việc                                                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /projects/{slug}/draft/voice`                | `{available, note, voice_id (đã nhớ), has_file, url, from_vieneu, seconds, used_voice_id, stale, scenes, estimated_seconds}`; luôn 200 với dự án HBT, 400 với PostV |
+| `POST /projects/{slug}/draft/voice` `{voice_id?}` | 202 `{job_id}`; bỏ `voice_id` = giọng đã nhớ; 422 chưa chọn giọng / giọng không có / không có lời; 503 chưa cài; 409 đang bận. Giọng dùng xong được nhớ             |
+| `GET`/`PUT /gd2/voice/preferences`                | Giọng HBT nhớ lần trước (`workspace/settings/gd2.json`)                                                                                                             |
+
+Job dùng `kind="voice"` (chung hàng đợi với job dựng) và rẽ nhánh theo loại dự án trong `_run_voice`. Test: pytest `test_gd2_voice.py`, `test_gd2_voice_api.py`, `test_gd2_voice_real.py` (`slow`, bỏ qua khi chưa cài VieNeu hoặc trên CI); Vitest `VieNeuCard.test.tsx`; e2e `gd2-voice.spec.ts`.
 
 ### G4 · ComfyUI (máy mới, ~2 buổi, tag `v1.14.0`)
 
@@ -257,3 +265,15 @@ Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4)
 | G2c | Thêm `GET …/draft/exists` (200 cả khi không có) để giao diện ẩn mục Ảnh mà không phát sinh yêu cầu 404                                                                                                                                                                |
 | G2d | Sửa prompt qua `PUT …/draft/scenes/{i}/prompt`. Prompt có từ cấm (K17) vẫn sao chép được, chỉ gắn nhãn                                                                                                                                                                |
 | G2e | Mẫu JSON trong `PROMPT-KICH-BAN.md` và `IMPLEMENT-GD2.md` §2.2 phải bằng `backend/tests/data/hbt-draft.sample.json` (có test)                                                                                                                                         |
+
+## 11. Quyết định đã chốt (G3, 02/11/2026)
+
+| #   | Chốt                                                                                                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| G3a | Thẻ và job áp cho **mọi dự án HBT** (không cần nháp); giữ đường dẫn `/draft/voice` như đặc tả                                                                                                                                  |
+| G3b | Chữ gửi VieNeu: `hiển thị{cách đọc}` → "cách đọc" (bỏ chữ hiển thị trước `{}`, giữ dấu câu ngay sau `}`); `\|` tách đoạn. Mỗi cảnh một hay nhiều đoạn, nối bằng khoảng im 0,25 s (`GAP_SECONDS`) kể cả giữa các cảnh           |
+| G3c | **Lệch K-33 (PostV):** PostV gửi nguyên văn cho VieNeu (không có `{}` hay `\|`); HBT thì tiền xử lý như G3b. Hai bên dùng chung bộ sinh giọng, cache và hàm nối, nhưng khác bước chuẩn bị chữ                                  |
+| G3d | Sinh xong đặt `project.voice = Voice(file="voice.wav")` (HBT chỉ có `file`, `trim_end`; không đặt `engine`). Các `voice.*` cũ xoá bằng `_remove_siblings` **sau** khi nối xong, nên lỗi hay huỷ giữa chừng giữ nguyên giọng cũ |
+| G3e | Đổi lời sau khi sinh: chỉ báo "Lời đã đổi, tạo lại giọng", không tự sinh lại. `build/hbt_voice.json` mất hoặc hỏng, hoặc giọng hiện tại không phải file VieNeu đã sinh (thả Vbee), thì coi là "không rõ", không báo cũ         |
+| G3f | Thẻ nhắc "Sẽ thay giọng hiện có" khi dự án đã có file giọng                                                                                                                                                                    |
+| G3g | Tiến độ theo cảnh ("Đang đọc cảnh x/N"); N là số cảnh có lời                                                                                                                                                                   |

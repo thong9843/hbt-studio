@@ -284,5 +284,5 @@ Thứ tự G1 → G2 → G3 → G4. Không sửa `backend/hbt/pipeline/`, `model
 | G0 | ☑ | Xong 02/11/2026, nhánh `docs/gd2-spec` (từ `main` `1a11b11`), CI xanh, đã merge `--no-ff` vào `main` (`addb98e`), không tag. Docs `docs/gd2/`, PLAN §6b, luật push trong `CLAUDE.md` |
 | G1 | ☑ | Xong 02/11/2026, nhánh `feat/g1-draft` (từ `addb98e`), CI xanh, đã merge `--no-ff` vào `main` (`5e92e8e`), tag `v1.11.0`. JSON nháp `hbt_draft`, Tạo dự án từ nháp, `draft.json`, K13–K18, tự chọn nhạc theo `moods` (IMPLEMENT-GD2 §6, §9). Kiểm chứng: pytest 1192, Vitest 67 file / 957 test, e2e 18 passed; `git diff addb98e -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
 | G2 | ☐ | Code xong 02/11/2026 trên nhánh `feat/g2-images` (từ `5e92e8e`), gộp tag `v1.13.0` với G3 (không tag `v1.12.0`). Bước Ảnh: prompt, Sao chép, thả ảnh, duyệt ảnh theo dấu ảnh (IMPLEMENT-GD2 §6, §10) |
-| G3 | ☐ | Đang làm trên `feat/g2-images` (G2+G3 một giai đoạn). Giọng VieNeu cho HBT; tag `v1.13.0` ở cuối giai đoạn |
+| G3 | ☐ | Code xong 02/11/2026 trên `feat/g2-images` (G2+G3 một giai đoạn). Giọng VieNeu cho HBT: `{}` và `|`, nhớ giọng, tiến độ x/N, huỷ được, thả Vbee vẫn dùng (IMPLEMENT-GD2 §6, §11). Test + CI chạy một lần ở cuối; tag `v1.13.0` sau đó |
 | G4 | ☐ | ComfyUI, máy mới (tag `v1.14.0`) |
