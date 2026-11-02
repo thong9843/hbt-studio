@@ -1053,7 +1053,7 @@ Nhánh `feat/cover-upload` (từ `main` `0e38efc`, tag `v1.0.0`), tag `v1.1.0`. 
 8. **Giao diện:** trong `ThumbnailEditor` (ngăn "Bìa & đăng" và tab Xuất video): vùng thả ảnh (`CoverDrop`), ảnh xem trước nhỏ (`?v=` tăng sau mỗi lần tải), nút **Bỏ ảnh**; có ảnh thì chip cảnh nền bị tắt kèm chú thích. Lưu bản nháp trước khi tải. Không thêm gói npm; thẻ Trang chủ không đổi.
 9. **Không làm:** chọn vị trí cắt (có thể thêm `thumbnail.focus` sau).
 10. **Tồn (ghi 28/10/2026):**
-    - (a) Thả ảnh bìa ngay sau một lần tải lỗi đôi khi không gửi đi; e2e đang chờ `networkidle` để né. Sửa ở đợt fix riêng, trước PostV.
-    - (b) e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`), chưa rõ gốc; chạy lại 3/3 và cả bộ 9/9 đều đạt.
+    - (a) **Đã sửa 02/11/2026.** Gốc: `CoverDrop` truyền `disabled: busy` cho `useDropzone`, nên lúc lần tải trước còn chạy thì `onChange` của ô nhập bị gỡ và file thả thêm bị nuốt im lặng. Giờ vùng thả không khoá khi bận, các lần tải xếp hàng bằng `scope` của `useMutation` (`ThumbnailEditor`, `PostvThumbnailEditor`). e2e từng "né" bằng `networkidle` vì ô kiểm "540 px" khớp cả lời trợ giúp (`.first()`) nên không đợi đúng lỗi của máy chủ; đã đổi sang `role=alert` và bỏ `networkidle`.
+    - (b) **Còn tồn.** e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`); chưa tái hiện được, không có thay đổi nào dựa trên phỏng đoán. Nghi ngờ: API đang khởi động/nạp lại (`uvicorn --reload`) trong khi Playwright chỉ chờ cổng 5173 của Vite. Nếu gặp lại, ghi giờ và `npm run dev` log để đối chiếu.
     - (c) Backlog: `make_covers` (`render.py`) tự chọn ảnh nền bằng 2 dòng, trong khi xem trước dùng `thumbnail.cover_background`; gộp về một hàm khi được phép sửa `render.py` lại.
     - (d) Tên ảnh cảnh thật là `images/<hash16>.<ext>`. Đã sửa mục 3 và mục 9; đối chiếu khớp với `storage.py`.
