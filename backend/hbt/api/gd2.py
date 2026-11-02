@@ -10,7 +10,14 @@ from pydantic import BaseModel
 
 from hbt.api.deps import State
 from hbt.gd2.service import check_draft
-from hbt.gd2.store import build_draft_doc, read_draft, write_draft
+from hbt.gd2.store import (
+    build_draft_doc,
+    effective_draft,
+    read_draft,
+    set_approved,
+    set_prompt,
+    write_draft,
+)
 from hbt.script import check_script
 from hbt.storage import BadRequest
 
@@ -69,6 +76,36 @@ def create(body: DraftCreateBody, state: State):
     }
 
 
+def _images(state: State, slug: str) -> list[str]:
+    return [scene.image for scene in state.storage.load(slug).scenes]
+
+
 @router.get("/projects/{slug}/draft")
 def get_draft(slug: str, state: State):
-    return read_draft(state.storage.project_dir(slug))
+    """Nháp kèm trạng thái duyệt ảnh tính tại lúc đọc (không ghi)."""
+    folder = state.storage.project_dir(slug)
+    doc = read_draft(folder)  # 404 khi không có nháp
+    return effective_draft(doc, _images(state, slug))
+
+
+class ApprovedBody(BaseModel):
+    approved: bool
+
+
+@router.put("/projects/{slug}/draft/images-approved")
+def put_images_approved(slug: str, body: ApprovedBody, state: State):
+    folder = state.storage.project_dir(slug)
+    read_draft(folder)  # 404 trước khi đọc ảnh
+    images = _images(state, slug)
+    return effective_draft(set_approved(folder, body.approved, images), images)
+
+
+class PromptBody(BaseModel):
+    image_prompt: str
+
+
+@router.put("/projects/{slug}/draft/scenes/{index}/prompt")
+def put_prompt(slug: str, index: int, body: PromptBody, state: State):
+    folder = state.storage.project_dir(slug)
+    read_draft(folder)
+    return effective_draft(set_prompt(folder, index, body.image_prompt), _images(state, slug))

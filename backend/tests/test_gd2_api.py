@@ -64,7 +64,12 @@ def test_create_builds_project_and_draft_json(client):  # noqa: F811
     assert d["scenes"][1]["image_prompt"].startswith("person breathing")
     assert d["images_approved"] is False
     assert not (folder / "draft.json.tmp").exists()
-    assert client.get(f"/api/projects/{slug}/draft").json() == d
+    got = client.get(f"/api/projects/{slug}/draft").json()
+    assert all(got[k] == v for k, v in d.items() if k != "scenes")
+    assert [(x["image_prompt"], x["image_prompt_ok"]) for x in got["scenes"]] == [
+        (x["image_prompt"], x["image_prompt_ok"]) for x in d["scenes"]
+    ]
+    assert all(not x["image_approved"] and x["full_prompt"] for x in got["scenes"])
 
 
 def test_create_title_override_and_unique_slug(client):  # noqa: F811
