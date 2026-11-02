@@ -34,6 +34,7 @@
 - Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
 
 ## Quy trình theo đợt (chốt 02/11/2026)
+- **Nhịp mới (chốt 02/11/2026):** một giai đoạn có thể gồm nhiều mốc trên cùng một nhánh. Xong mỗi mốc **không** chạy lint, test, e2e và không chờ hay báo CI. Test + CI chạy **một lần** ở cuối giai đoạn, do chủ dự án định (kế hoạch đã duyệt có thể ghi sẵn). Chỉ gắn tag ở cuối giai đoạn.
 - Khi đang code, sau từng commit hoặc sửa nhỏ: **không** chạy pytest, Vitest, e2e. Sửa một test hỏng thì chỉ chạy lại riêng file đó nếu cần.
 - Xong cả giai đoạn: `set -o pipefail && npm run lint && npm run test` + `npm run e2e` **một lần** → commit → push. CI vẫn chạy đầy đủ, kể cả test `slow`.
 - Commit dọn hoặc docs sau giai đoạn: chỉ `npm run lint`, CI nhánh lo phần còn lại.

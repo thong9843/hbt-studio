@@ -196,7 +196,7 @@ Tên chuẩn: đổi thì hỏi chủ dự án. Router đăng ký ở `main.py`;
 | Đọc `moods` có sẵn trong `library/music/index.json` (chỉ đọc); tự chọn nhạc                             | pytest: so chữ thường, bỏ dấu; không khớp → để trống; bài không có `moods` bị bỏ qua; bài thiếu `id` thì bỏ chọn và cảnh báo; index không bị ghi (nội dung và mtime)                                                                                                                                                                                                             |
 | Giao diện: nút **Tạo dự án từ JSON nháp** ở Trang chủ (theo `DESIGN-HBT.md` v2, chữ trong `vi.ts`)      | Vitest: hộp dán / thả file, danh sách lỗi và cảnh báo, nút tắt khi có lỗi; e2e: dán mẫu → vào trình soạn                                                                                                                                                                                                                                                                         |
 
-### G2 · Bước Ảnh (máy cũ, ~1 buổi, tag `v1.12.0`)
+### G2 · Bước Ảnh (máy cũ, ~1 buổi, gộp tag với G3)
 
 Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đúng cảnh (dùng `POST /projects/{slug}/assets`), cờ "đã duyệt ảnh" lưu **dấu ảnh từng cảnh**, cảnh K18 tự viết prompt. Màn `/p/:slug/images`, mục "Ảnh" ở thanh trái (giữa Soạn video và Âm thanh, chỉ khi có nháp), tab Xuất chỉ nhắc "Ảnh chưa duyệt" (không chặn xuất).
 
@@ -209,7 +209,7 @@ Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đ
 
 Test: pytest `test_gd2_images.py`, `test_gd2_docs.py`; Vitest `ImagesTab.test.tsx`, nhắc ở `ExportTab.screen.test.tsx`, mục thanh trái ở `AppShell.test.tsx`; e2e `gd2-images.spec.ts`.
 
-### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0`)
+### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0` cho G2+G3)
 
 Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4), mỗi cảnh một đoạn rồi nối `voice.wav`, tiến độ x/N, huỷ được, cache theo hash lời + giọng. Giọng nhớ (E4b). Vbee vẫn thả file. Test: provider giả cho CI; tiền xử lý `{}` / `|`; nút Tạo giọng tắt khi chưa chọn giọng. Test VieNeu thật gắn `slow` và không chạy ở CI.
 

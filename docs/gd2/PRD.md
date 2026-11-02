@@ -38,13 +38,13 @@ Các quyết định kỹ thuật E1–E7 nằm ở `IMPLEMENT-GD2.md`.
 
 ## 5. Phạm vi và mốc
 
-| Mốc | Nội dung                                                                    | Máy | Buổi | Tag       |
-| --- | --------------------------------------------------------------------------- | --- | ---- | --------- |
-| G0  | Docs `docs/gd2/`, PLAN §6b, sửa luật push trong `CLAUDE.md`                 | Cũ  | 0,5  | không     |
-| G1  | `hbt_draft: 1`, Tạo dự án từ nháp, `draft.json`, kiểm K13–K18, tự chọn nhạc | Cũ  | 1,5  | `v1.11.0` |
-| G2  | Bước Ảnh: prompt từng cảnh, Sao chép, thả ảnh đúng cảnh, "đã duyệt ảnh"     | Cũ  | 1    | `v1.12.0` |
-| G3  | Giọng VieNeu cho HBT, tiến độ x/N, vẫn thả Vbee                             | Cũ  | 1,5  | `v1.13.0` |
-| G4  | `ImageProvider` ComfyUI, từng cảnh / cả bộ, huỷ được, rẽ đường tay          | Mới | 2    | `v1.14.0` |
+| Mốc | Nội dung                                                                    | Máy | Buổi | Tag               |
+| --- | --------------------------------------------------------------------------- | --- | ---- | ----------------- |
+| G0  | Docs `docs/gd2/`, PLAN §6b, sửa luật push trong `CLAUDE.md`                 | Cũ  | 0,5  | không             |
+| G1  | `hbt_draft: 1`, Tạo dự án từ nháp, `draft.json`, kiểm K13–K18, tự chọn nhạc | Cũ  | 1,5  | `v1.11.0`         |
+| G2  | Bước Ảnh: prompt từng cảnh, Sao chép, thả ảnh đúng cảnh, "đã duyệt ảnh"     | Cũ  | 1    | gộp với G3        |
+| G3  | Giọng VieNeu cho HBT, tiến độ x/N, vẫn thả Vbee                             | Cũ  | 1,5  | `v1.13.0` (G2+G3) |
+| G4  | `ImageProvider` ComfyUI, từng cảnh / cả bộ, huỷ được, rẽ đường tay          | Mới | 2    | `v1.14.0`         |
 
 Thứ tự G1 → G2 → G3 → G4.
 
