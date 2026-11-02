@@ -66,6 +66,16 @@ def plan_cards(
     return spans
 
 
+def plan_for_template(
+    template: str, items: Sequence[tuple[str, str | None]], starts: Sequence[float], total: float
+) -> list[CardSpan]:
+    """`story_cards`: thẻ đổi theo mốc từng đoạn (`segment_starts` ← `scene_offsets`).
+    `fixed_card`: một thẻ bài gốc đứng yên suốt video; bình luận chỉ có lời đọc và phụ đề."""
+    if template == "fixed_card":
+        return [CardSpan("post", None, 0.0, total)]
+    return plan_cards(items, starts, total)
+
+
 def segment_starts(offsets: Sequence[float], n: int, x: float) -> list[float]:
     """Lúc đổi thẻ của từng đoạn: giữa khoảng nghỉ giữa hai đoạn lời (= mốc trượt + X/2)."""
     return [0.0, *(o + x / 2 for o in offsets)][:n]

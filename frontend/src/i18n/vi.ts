@@ -375,6 +375,13 @@ export const vi = {
     export: {
       title: 'Xuất bản đẹp',
       fps: 'fps bản đẹp',
+      template: 'Mẫu thẻ',
+      templates: { story_cards: 'Thẻ theo đoạn', fixed_card: 'Thẻ cố định' },
+      templateHelp: {
+        story_cards: 'Thẻ tiêu đề, bài gốc rồi từng bình luận đổi theo lời đọc.',
+        fixed_card:
+          'Một thẻ bài gốc đứng yên phía trên suốt video; bình luận chỉ được đọc và hiện ở phụ đề.',
+      },
       outro: 'Thêm outro (4 giây)',
       final: (fps: number) => `Xuất bản đẹp ${fps}fps`,
       help: '1080×1920, có nhạc, outro và ảnh bìa. Dựng một video 60 giây mất vài phút.',
