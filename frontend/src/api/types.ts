@@ -571,6 +571,35 @@ export interface ProjectVoice {
   estimated_seconds: number;
 }
 
+/** `GET /projects/{slug}/draft/voice`: giọng VieNeu của dự án HBT (GĐ2, G3). */
+export interface HbtVoiceInfo {
+  available: boolean;
+  note: string | null;
+  /** Giọng đã nhớ từ lần trước. */
+  voice_id: string | null;
+  has_file: boolean;
+  file: string | null;
+  url: string | null;
+  /** File hiện tại là file VieNeu đã sinh (không phải file thả vào). */
+  from_vieneu: boolean;
+  seconds: number | null;
+  used_voice_id: string | null;
+  /** Lời đã đổi sau lần sinh; `null` = không rõ. */
+  stale: boolean | null;
+  scenes: number;
+  estimated_seconds: number;
+}
+
+/** `output` của job sinh giọng HBT (`kind` là voice, dự án HBT). */
+export interface HbtVoiceJobOutput {
+  voice: string;
+  seconds: number;
+  scenes: { scene: number; start: number; end: number }[];
+  voice_id: string;
+  generated: number;
+  cached: number;
+}
+
 /** `output` của job sinh giọng (`Job.output` khi `kind` là voice). */
 export interface VoiceJobOutput {
   voice: string;
