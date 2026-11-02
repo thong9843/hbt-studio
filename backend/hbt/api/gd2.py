@@ -109,3 +109,9 @@ def put_prompt(slug: str, index: int, body: PromptBody, state: State):
     folder = state.storage.project_dir(slug)
     read_draft(folder)
     return effective_draft(set_prompt(folder, index, body.image_prompt), _images(state, slug))
+
+
+@router.get("/projects/{slug}/draft/exists")
+def draft_exists(slug: str, state: State):
+    """Có bản nháp không? Trả 200 cả khi không có, để giao diện ẩn mục mà không sinh lỗi 404."""
+    return {"exists": (state.storage.project_dir(slug) / "draft.json").is_file()}

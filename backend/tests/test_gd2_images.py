@@ -135,3 +135,12 @@ def test_prompt_index_out_of_range_and_no_draft(client):  # noqa: F811
     assert approve(client, plain).status_code == 404
     r = client.put(f"/api/projects/{plain}/draft/scenes/0/prompt", json={"image_prompt": "x"})
     assert r.status_code == 404
+
+
+def test_draft_exists_answers_200_either_way(client):  # noqa: F811
+    slug = make(client)
+    plain = client.post("/api/projects", json={"title": "Thường", "scene_count": 3}).json()["slug"]
+    assert client.get(f"/api/projects/{slug}/draft/exists").json() == {"exists": True}
+    r = client.get(f"/api/projects/{plain}/draft/exists")
+    assert r.status_code == 200 and r.json() == {"exists": False}
+    assert client.get("/api/projects/khong-co/draft/exists").json() == {"exists": False}
