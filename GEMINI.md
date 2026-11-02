@@ -5,7 +5,7 @@
 ## Bổ sung cho Antigravity
 - Trong tài liệu repo, chữ "Claude Code" nghĩa là bạn (agent Antigravity). Mọi luật áp cho Claude Code đều áp cho bạn.
 - Bắt đầu mỗi đợt bằng skill `kickoff` (.agents/skills/kickoff/SKILL.md).
-- Windows: chạy test bằng Git Bash để `set -o pipefail` và `&&` chạy đúng:
+- Windows: chạy test bằng Git Bash để `set -o pipefail` và `&&` chạy đúng. Chỉ chạy khi xong cả giai đoạn (theo CLAUDE.md, thêm `npm run e2e`), không chạy sau từng commit:
   "C:\Program Files\Git\bin\bash.exe" -lc "set -o pipefail && npm run lint && npm run test"
 - Không tự cài phần mềm hệ thống, không sửa PATH. Gói trong backend\.venv, backend\.venv-tts, npm chỉ cài khi kế hoạch đã duyệt có ghi.
 - Không dừng giữa đợt để hỏi; chỗ chưa rõ chọn phương án an toàn nhất, ghi "Cần chốt" trong báo cáo cuối.
