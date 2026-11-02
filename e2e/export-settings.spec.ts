@@ -66,8 +66,6 @@ test('Lịch sử: dựng Xem nhanh xong → menu ⋯ của lần xuất → Xo�
 
     // Chờ làm mới lịch sử/dự án sau khi dựng xong rồi mới thao tác (tránh bấm giữa lúc vẽ lại).
     await expect(page.getByText(vi.export.done, { exact: true }).first()).toBeVisible();
-    await page.waitForLoadState('networkidle');
-
     await menu.click();
     await page.getByRole('menuitem', { name: vi.export.history.remove, exact: true }).click();
     const dialog = page.getByRole('alertdialog', { name: vi.export.history.deleteTitle });
@@ -127,10 +125,10 @@ test('Ảnh bìa riêng: bật bìa → tải ảnh → xem trước → Bỏ �
       mimeType: 'image/png',
       buffer: solidPng(300, 400, [20, 20, 20]),
     });
-    await expect(page.getByText(/540 px/).first()).toBeVisible();
+    // Lời trợ giúp cũng có "540 px": phải đợi đúng thông báo lỗi của máy chủ.
+    await expect(page.getByRole('alert').filter({ hasText: /540 px/ })).toBeVisible();
     await expect(page.getByAltText(T.imageAlt)).toHaveCount(0);
 
-    await page.waitForLoadState('networkidle'); // chờ lưu + kiểm tra xong rồi mới thả ảnh kế
     // Ảnh ngang 960×540 (cạnh ngắn đúng 540): nhận, cắt giữa.
     await drop.setInputFiles({
       name: 'bia.png',

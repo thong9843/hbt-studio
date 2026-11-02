@@ -135,6 +135,7 @@ export function ThumbnailEditor({
   const thumb = project.thumbnail;
   const [coverVersion, setCoverVersion] = useState(0);
   const upload = useMutation({
+    scope: { id: 'cover-upload' }, // các lần thả liên tiếp chạy lần lượt, không chồng nhau
     mutationFn: async (f: File) => {
       await editor.flush(); // máy chủ chỉ nhận ảnh bìa khi khối thumbnail đã được lưu
       return api.uploadAsset(project.slug, 'cover', f);
