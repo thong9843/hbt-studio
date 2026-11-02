@@ -282,7 +282,7 @@ Thứ tự G1 → G2 → G3 → G4. Không sửa `backend/hbt/pipeline/`, `model
 | PV8 | ☑ | Xong 30/10/2026, nhánh `feat/pv8-polish` (từ `main` `47e5466`, tag `v1.8.0`). Hoàn thiện PostV: bỏ bắt buộc `source`/`license`/`url` cho clip nền (chỉ cần `title`, tương thích ngược mục cũ); `DELETE /projects/{slug}/postv/source` + nút Xoá nguồn có hộp xác nhận ở bước 5 giữ nguyên kịch bản `segments` và lần xuất (409 khi có job); cập nhật hướng dẫn PostV vào `README.md`, sửa `IMPLEMENT.md` §9 (`images/<hash16>.<ext>`), dọn lệch PVA (IMPLEMENT-POSTV mục 8j). Kiểm chứng: pytest 1136 passed (gồm slow), Vitest 66 file / 945 test xanh; `git diff v1.8.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
 | PV7 | ☑ | Xong 02/11/2026, nhánh `feat/pv7-cover-drop` (từ `main` `def2332`, v1.9.0): fix thả ảnh bìa và menu ⋯, bình luận lồng, Thẻ cố định, `cli pack-media`/`unpack-media`. Sticker tách thành PV7b; xoá hàng loạt ở Lịch sử là Backlog. Kiểm chứng (máy cũ): pytest 1153 passed (gồm slow), Vitest 66 file / 947 test, e2e 17 passed, 0 skip; `git diff v1.9.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py backend/hbt/api/projects.py` rỗng |
 | G0 | ☑ | Xong 02/11/2026, nhánh `docs/gd2-spec` (từ `main` `1a11b11`), CI xanh, đã merge `--no-ff` vào `main` (`addb98e`), không tag. Docs `docs/gd2/`, PLAN §6b, luật push trong `CLAUDE.md` |
-| G1 | ☐ | JSON nháp + Tạo dự án (tag `v1.11.0`) |
+| G1 | ☐ | Code xong 02/11/2026, nhánh `feat/g1-draft` (từ `addb98e`), chờ chủ dự án duyệt rồi mới tag `v1.11.0`. JSON nháp + Tạo dự án (IMPLEMENT-GD2 §6, §9) |
 | G2 | ☐ | Bước Ảnh (tag `v1.12.0`) |
 | G3 | ☐ | Giọng VieNeu cho HBT (tag `v1.13.0`) |
 | G4 | ☐ | ComfyUI, máy mới (tag `v1.14.0`) |
