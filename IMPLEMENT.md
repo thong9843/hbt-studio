@@ -723,6 +723,8 @@ class VoiceProvider(Protocol):    # VieNeu-TTS local / Vbee API / thủ công
 ```
 Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự động đều phải qua 3 điểm duyệt (kịch bản → ảnh → video).
 
+> Ghi chú 02/11/2026: GĐ2 đã chốt hướng khác (kịch bản không gọi API; JSON nháp từ Claude chat; ảnh ComfyUI/đường tay; giọng VieNeu). Xem `docs/gd2/IMPLEMENT-GD2.md`. Interface trên giữ nguyên làm lịch sử.
+
 ---
 
 ## 13. M5: giao diện mới + khối JSON kịch bản
