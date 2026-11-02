@@ -70,18 +70,11 @@
   ],
   "publish": {
     "hook": "Bạn có phải \"nam châm hút muỗi\"?",
-    "hashtags": [
-      "haybiettuot",
-      "muoi",
-      "visao"
-    ]
+    "hashtags": ["haybiettuot", "muoi", "visao"]
   },
   "thumbnail": {
     "scene": 1,
-    "lines": [
-      "VÌ SAO MUỖI",
-      "CHỌN BẠN?"
-    ],
+    "lines": ["VÌ SAO MUỖI", "CHỌN BẠN?"],
     "series": "",
     "accent": "#FFD43B"
   }
