@@ -477,6 +477,25 @@ export interface ScriptCheck {
   realign_scenes: number[];
 }
 
+/** Kết quả `POST /gd2/draft/check` (JSON nháp `hbt_draft`). */
+export interface DraftCheck {
+  ok: boolean;
+  errors: ScriptIssue[];
+  warnings: ScriptIssue[];
+  topic: string;
+  series_hint: string;
+  scenes: number;
+  counts: { json: number; project: number; after: number } | null;
+  music_match: { id: string; title: string } | null;
+}
+
+export interface DraftCreated {
+  slug: string;
+  project: Project;
+  warnings: ScriptIssue[];
+  music_match: { id: string; title: string } | null;
+}
+
 export interface ScriptApplied {
   project: Project;
   backup_id: string;

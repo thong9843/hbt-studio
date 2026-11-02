@@ -29,7 +29,7 @@
   2. Commit cuối `chore(Mx): done`, chỉ cập nhật bảng Tiến độ trong `PLAN.md` và Nhật ký quyết định.
   3. CI trên GitHub xanh.
   4. Báo cáo cho chủ dự án duyệt.
-  5. Chỉ sau khi chủ dự án duyệt, hoặc khi lời duyệt đã cho phép sẵn (khi đó tự merge/tag lúc `gh` báo CI xanh ở đúng HEAD): merge `--no-ff` vào `main`, gắn tag `v0.x.0`, push.
+  5. Chỉ sau khi chủ dự án duyệt, hoặc khi lời duyệt đã cho phép sẵn (khi đó tự merge/tag lúc `gh` báo CI xanh ở đúng HEAD): merge `--no-ff` vào `main`, gắn tag có chú thích (`git tag -a`), push.
   6. Báo hash commit cuối của `main` và tag.
 - Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
 
