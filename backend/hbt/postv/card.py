@@ -26,7 +26,12 @@ CensorMode = Literal["blur", "stars"]
 VIEWS_LABEL = "lượt xem"
 
 
+TEMPLATES = ("story_cards", "fixed_card")
+
+
 def load_template(name: str = "story_cards") -> dict:
+    if name not in TEMPLATES:
+        raise ValueError(f"Không có mẫu thẻ '{name}'")
     return json.loads((TEMPLATE_DIR / f"{name}.json").read_text(encoding="utf-8"))
 
 
@@ -265,14 +270,19 @@ def render_card(
     censor: list[CensorMatcher] | None = None,
     censor_mode: CensorMode = "blur",
     top: int | None = None,
+    reply: bool = False,
 ) -> tuple[Image.Image, int]:
-    """Thẻ bài gốc hoặc bình luận: avatar, tên, thời gian, chữ, số liệu. Trả (lớp RGBA, đáy)."""
+    """Thẻ bài gốc hoặc bình luận: avatar, tên, thời gian, chữ, số liệu. Trả (lớp RGBA, đáy).
+    `reply`: bình luận trả lời lồng, thẻ lùi vào và có đường kẻ dọc bên trái (`tpl["reply"]`)."""
     tpl = tpl or load_template()
     c, hd, b, st = tpl["card"], tpl["header"], tpl["body"], tpl["stats"]
     top = c["top"] if top is None else top
     text = _normalise(text)
     font = _font(b["font"], b["size"])
-    inner = c["w"] - 2 * c["pad"]
+    rp = tpl["reply"] if reply else None
+    indent = rp["indent"] if rp else 0
+    cx, cw = c["x"] + indent, c["w"] - indent
+    inner = cw - 2 * c["pad"]
     words = _words(text)
     _mark(words, _censor_spans(text, censor), "censored")
     lines = _ellipsize(_wrap(words, font, inner), b["max_lines"], font, inner)
@@ -290,8 +300,13 @@ def render_card(
     height = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
 
     img = _canvas(tpl)
-    img.alpha_composite(_round_rect((c["w"], height), c["radius"], _rgb(c["bg"])), (c["x"], top))
-    x0, y0 = c["x"] + c["pad"], top + c["pad"]
+    img.alpha_composite(_round_rect((cw, height), c["radius"], _rgb(c["bg"])), (cx, top))
+    if rp:  # đường kẻ dọc nối với bình luận mẹ, cao bằng thẻ
+        img.alpha_composite(
+            _round_rect((rp["line_w"], height), rp["line_w"] // 2, _rgb(rp["line_color"])),
+            (c["x"] + rp["line_x"], top),
+        )
+    x0, y0 = cx + c["pad"], top + c["pad"]
     img.alpha_composite(_avatar(hd["avatar"], hd["avatar_bg"], hd["avatar_fg"]), (x0, y0))
     tx = x0 + hd["avatar"] + hd["gap"]
     d = ImageDraw.Draw(img)
@@ -354,6 +369,7 @@ def render_project_card(
     """Lớp thẻ RGBA 1080×1920 của dự án PostV. `count_scale` ∈ [0, 1] thu nhỏ bốn số like,
     bình luận, đăng lại, chia sẻ (hiệu ứng số chạy tăng); lượt xem giữ nguyên.
     `ref` không có trong dự án thì ném `LookupError`."""
+    reply = False
     if kind == "hook":
         text = project.hook.text.strip() or hook_text_from_post(project.post.text)
         return render_hook(text, project.hook.accent, tpl, censor, censor_mode)[0]
@@ -364,11 +380,12 @@ def render_project_card(
         if src is None:
             raise LookupError(ref)
         text = src.text
+        reply = src.parent is not None
     image, _ = render_card(
         src.handle, src.age, text, likes=_scaled(src.likes, count_scale),
         replies=_scaled(src.replies, count_scale), reposts=_scaled(src.reposts, count_scale),
         shares=_scaled(src.shares, count_scale), views=src.views, tpl=tpl, censor=censor,
-        censor_mode=censor_mode,
+        censor_mode=censor_mode, reply=reply,
     )  # fmt: skip
     return image
 

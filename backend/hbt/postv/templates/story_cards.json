@@ -1,6 +1,7 @@
 {
   "canvas": { "w": 1080, "h": 1920 },
   "card": { "x": 72, "w": 936, "radius": 32, "pad": 36, "bg": "#FDFDFD", "top": 282 },
+  "reply": { "indent": 64, "line_x": 18, "line_w": 8, "line_color": "#C9C9D2" },
   "header": {
     "avatar": 70,
     "gap": 20,

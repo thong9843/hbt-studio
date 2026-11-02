@@ -102,7 +102,10 @@ export function PostvPickPage() {
           aria-label={vi.postv.source.commentRole}
         >
           {project.comments.map((c, i) => (
-            <li key={c.id} className="ui-inner flex items-center gap-3 p-3">
+            <li
+              key={c.id}
+              className={`ui-inner flex items-center gap-3 p-3 ${c.parent ? 'ml-8 border-l-4 border-line' : ''}`}
+            >
               <input
                 type="checkbox"
                 checked={c.picked}

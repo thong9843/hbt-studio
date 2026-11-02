@@ -65,7 +65,7 @@ export function PostvSourcePage() {
         handle: c.handle,
         age: c.age,
         text: c.text,
-        parent: null,
+        parent: c.parent ?? null,
         picked: c.picked,
         ...NO_STATS,
       })),
@@ -111,7 +111,15 @@ export function PostvSourcePage() {
       comments: p.comments.map((c) => (c.id === id ? { ...c, ...patch } : c)),
     }));
   const removeComment = (id: string) =>
-    update((p) => withSegments({ ...p, comments: p.comments.filter((c) => c.id !== id) }));
+    update((p) =>
+      withSegments({
+        ...p,
+        // bình luận con của thẻ bị xoá thành bình luận phẳng (parent phải trỏ tới bình luận còn tồn tại)
+        comments: p.comments
+          .filter((c) => c.id !== id)
+          .map((c) => (c.parent === id ? { ...c, parent: null } : c)),
+      }),
+    );
   const addComment = () =>
     update((p) =>
       withSegments({
@@ -160,7 +168,9 @@ export function PostvSourcePage() {
           reposts: target.reposts,
           shares: target.shares,
         },
-        comments: p.comments.map((c) => (c.id === id ? demoted : c)),
+        comments: p.comments.map((c) =>
+          c.id === id ? demoted : c.parent === id ? { ...c, parent: null } : c,
+        ),
         segments: [],
       };
     });

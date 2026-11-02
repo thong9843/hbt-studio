@@ -40,6 +40,7 @@ class ParsedComment(ParsedPost):
     id: str
     same_author: bool = False  # cùng tên với bài gốc: phần tiếp theo của chuỗi tác giả
     picked: bool = False
+    parent: str | None = None  # id bình luận được trả lời (dòng đầu bắt đầu bằng ">"), tối đa 1 cấp
 
 
 class StatHint(BaseModel):
@@ -119,6 +120,32 @@ def _clean_body(lines: list[str], block: int, hints: list[StatHint]) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _strip_reply_mark(block: ParsedPost) -> bool:
+    """Dòng đầu của thân bắt đầu bằng `>` thì bỏ dấu đó (và khoảng trắng sau nó), trả True."""
+    if not block.text.startswith(">"):
+        return False
+    block.text = block.text[1:].lstrip(" 	")
+    return True
+
+
+def _reply_parents(blocks: list[ParsedPost], warnings: list[str]) -> dict[int, str]:
+    """`{chỉ số bình luận: id bình luận mẹ}`. Dấu `>` trả lời bình luận phẳng ngay trước; ở khối
+    đầu hoặc khi bình luận trước đã là một trả lời (quá 1 cấp) thì coi là phẳng và cảnh báo."""
+    parents: dict[int, str] = {}
+    for i, block in enumerate(blocks):
+        if not _strip_reply_mark(block):
+            continue
+        if i == 0:
+            warnings.append("Dấu '>' ở bài gốc không có nghĩa trả lời: đã bỏ dấu và coi là phẳng.")
+        elif i == 1:
+            warnings.append("Bình luận 1 có dấu '>' nhưng ngay trước là bài gốc: coi là phẳng.")
+        elif (i - 1) in parents:
+            warnings.append(f"Bình luận {i} trả lời một trả lời (quá 1 cấp): coi là phẳng.")
+        else:
+            parents[i] = f"c{i - 1}"
+    return parents
+
+
 def parse_threads_text(raw: str) -> ParseResult:
     if len(raw) > MAX_TEXT:
         raise ValueError(f"Chữ dán dài quá {MAX_TEXT:,} ký tự".replace(",", "."))
@@ -163,6 +190,7 @@ def parse_threads_text(raw: str) -> ParseResult:
         blocks.append(ParsedPost(handle=handle, age=age, text=body))
 
     post = blocks[0]
+    replies = _reply_parents(blocks, warnings)
     comments = [
         ParsedComment(
             id=f"c{i}",
@@ -171,6 +199,7 @@ def parse_threads_text(raw: str) -> ParseResult:
             text=b.text,
             same_author=b.handle == post.handle,
             picked=i <= DEFAULT_PICKED,
+            parent=replies.get(i),
         )
         for i, b in enumerate(blocks[1:], 1)
     ]

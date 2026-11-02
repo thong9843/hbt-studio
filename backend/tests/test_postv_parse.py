@@ -197,3 +197,31 @@ def test_embed_with_non_https_permalink_is_ignored():
 def test_too_long_text_is_rejected():
     with pytest.raises(ValueError, match="dài quá"):
         parse_threads_text("a" * (MAX_TEXT + 1))
+
+
+# Trả lời lồng: dòng đầu của thân bắt đầu bằng ">" = trả lời bình luận phẳng ngay trước.
+def test_reply_marker_links_to_the_flat_comment_before_it():
+    raw = (
+        "user_a\n17h\nBài gốc\n"
+        "user_b\n14h\nBình luận một\n"
+        "user_c\n13h\n> Trả lời bình luận một\nthêm dòng\n"
+        "user_d\n9h\nBình luận khác\n"
+    )
+    r = parse_threads_text(raw)
+    assert [c.parent for c in r.comments] == [None, "c1", None]
+    assert r.comments[1].text == "Trả lời bình luận một\nthêm dòng"  # dấu ">" bị bỏ khỏi chữ
+    assert r.warnings == []
+
+
+def test_reply_to_a_reply_and_marker_on_the_first_block_are_flat_with_a_warning():
+    raw = (
+        "user_a\n17h\n> Bài gốc\n"
+        "user_b\n14h\n> Một\n"
+        "user_c\n13h\nHai\n"
+        "user_d\n12h\n> Ba trả lời Hai\n"
+        "user_e\n11h\n> Bốn trả lời Ba\n"
+    )
+    r = parse_threads_text(raw)
+    assert r.post.text == "Bài gốc"
+    assert [c.parent for c in r.comments] == [None, None, "c2", None]
+    assert len([w for w in r.warnings if "'>'" in w or "quá 1 cấp" in w]) == 3
