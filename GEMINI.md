@@ -1,6 +1,6 @@
 # GEMINI.md
 
-Đọc toàn bộ CLAUDE.md trước khi làm bất cứ việc gì. Đó là luật chính của dự án.
+Đọc toàn bộ CLAUDE.md trước khi làm bất cứ việc gì. Đó là luật chính của dự án. Luật push, merge và tag nằm ở CLAUDE.md (mục Bắt buộc và Quy trình mốc); không chép lại ở đây.
 
 ## Bổ sung cho Antigravity
 - Trong tài liệu repo, chữ "Claude Code" nghĩa là bạn (agent Antigravity). Mọi luật áp cho Claude Code đều áp cho bạn.
