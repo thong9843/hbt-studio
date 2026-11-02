@@ -164,4 +164,23 @@ describe('ImagesTab — bước Ảnh', () => {
     expect(within(rows[1]).getByText('Chưa duyệt')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Đã duyệt')).toBeInTheDocument();
   });
+
+  it('sends a project without a draft back to the editor', async () => {
+    stubFetch({
+      'GET /api/projects/muoi': full(),
+      'GET /api/projects/muoi/draft/exists': { exists: false },
+    });
+    renderWithProviders(
+      <ToastProvider>
+        <Routes>
+          <Route path="/p/:slug" element={<ComposePage />}>
+            <Route index element={<p>trang soạn</p>} />
+            <Route path="images" element={<ImagesTab />} />
+          </Route>
+        </Routes>
+      </ToastProvider>,
+      '/p/muoi/images',
+    );
+    expect(await screen.findByText('trang soạn')).toBeInTheDocument();
+  });
 });

@@ -8,7 +8,8 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Field';
-import { useDraft, useDraftExists } from '../hooks/useDraft';
+import { Navigate } from 'react-router-dom';
+import { useDraft, useDraftState } from '../hooks/useDraft';
 import { useProjectEditor } from '../hooks/projectEditor';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
@@ -193,7 +194,7 @@ export function ImagesTab() {
   const slug = project.slug;
   const toast = useToast();
   const queryClient = useQueryClient();
-  const exists = useDraftExists(slug);
+  const { exists, loaded } = useDraftState(slug);
   const { data: draft, error } = useDraft(slug, exists);
   const [uploading, setUploading] = useState(false);
 
@@ -229,6 +230,8 @@ export function ImagesTab() {
     onError: (e) => toast.error(e),
   });
 
+  // Dự án không có nháp: về trình soạn, không để trang trắng.
+  if (loaded && !exists) return <Navigate to={`/p/${slug}`} replace />;
   if (!exists) return null;
   if (error) {
     return (
