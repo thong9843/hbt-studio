@@ -6,7 +6,7 @@ import json
 import unicodedata
 from pathlib import Path
 
-from hbt.gd2.checks import full_prompt
+from hbt.gd2.checks import FORBIDDEN, full_prompt
 from hbt.gd2.draft import DraftSplit
 from hbt.storage import BadRequest, NotFound, Unprocessable, _write_json_atomic
 
@@ -61,6 +61,11 @@ def effective_draft(doc: dict, images: list[str]) -> dict:
             full_prompt(scene["image_prompt"])
             if scene.get("image_prompt_ok") and scene.get("image_prompt")
             else ""
+        )
+        scene["forbidden"] = list(
+            dict.fromkeys(
+                m.group(1).lower() for m in FORBIDDEN.finditer(scene.get("image_prompt") or "")
+            )
         )
         all_ok = all_ok and ok
     out["images_approved"] = all_ok

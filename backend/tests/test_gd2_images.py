@@ -144,3 +144,13 @@ def test_draft_exists_answers_200_either_way(client):  # noqa: F811
     r = client.get(f"/api/projects/{plain}/draft/exists")
     assert r.status_code == 200 and r.json() == {"exists": False}
     assert client.get("/api/projects/khong-co/draft/exists").json() == {"exists": False}
+
+
+def test_get_lists_forbidden_words_for_the_ui(client):  # noqa: F811
+    d = sample()
+    d["scenes"][0]["image_prompt"] = "a Vietnam map and some text"
+    slug = client.post("/api/gd2/draft/create", json={"draft": d}).json()["slug"]
+    scenes = draft(client, slug)["scenes"]
+    assert scenes[0]["forbidden"] == ["vietnam map", "text"]
+    assert scenes[1]["forbidden"] == []
+    assert scenes[0]["full_prompt"]  # vẫn cho sao chép
