@@ -11,7 +11,19 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from hbt.api import assets, backgrounds, files, health, lint, music, postv, projects, script, voices
+from hbt.api import (
+    assets,
+    backgrounds,
+    files,
+    gd2,
+    health,
+    lint,
+    music,
+    postv,
+    projects,
+    script,
+    voices,
+)
 from hbt.api import render as render_api
 from hbt.api import settings as settings_api
 from hbt.app_settings import AppSettingsStore
@@ -122,6 +134,7 @@ def create_app(
         postv,
         backgrounds,
         voices,
+        gd2,
     ):
         app.include_router(module.router, prefix="/api")
     return app
