@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from hbt.api.deps import State, file_url
 from hbt.api.render import JobCreated
+from hbt.gd2.prefs import Gd2Prefs
 from hbt.gd2.service import check_draft
 from hbt.gd2.store import (
     build_draft_doc,
@@ -19,7 +20,6 @@ from hbt.gd2.store import (
     set_prompt,
     write_draft,
 )
-from hbt.gd2.prefs import Gd2Prefs
 from hbt.gd2.voice import is_stale, read_meta, spoken_chunks
 from hbt.models import Project
 from hbt.postv.voice import CHARS_PER_SECOND, VoiceError
@@ -164,7 +164,7 @@ def put_voice_preferences(body: VoicePrefBody, state: State):
 def hbt_voice_info(slug: str, state: State):
     """Giọng của dự án HBT: file hiện có, giọng đã chọn, lời đã đổi sau khi sinh chưa.
 
-    Chưa cài VieNeu thì vẫn trả (`available=false`) để giao diện hiện ghi chú và dùng đường thả file."""
+    Chưa cài VieNeu thì vẫn trả `available=false` để giao diện hiện ghi chú."""
     project = _hbt(state, slug)
     folder = state.storage.project_dir(slug)
     status = state.voice.status()
@@ -205,4 +205,3 @@ def hbt_voice_synthesize(slug: str, state: State, body: HbtVoiceBody | None = No
     job = state.jobs.submit_hbt_voice(slug, voice_id)
     prefs.set_voice_id(voice_id)
     return {"job_id": job.id}
-

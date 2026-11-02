@@ -28,7 +28,9 @@ def test_real_hbt_voice_reads_spoken_text_and_pauses(tmp_path):
             Scene(voice="Chỉ vậy thôi."),
         ],
     )
-    assert spoken_chunks(project.scenes[0].voice) == ["Muỗi đánh hơi khí CO2 từ xa khoảng mười mét."]
+    assert spoken_chunks(project.scenes[0].voice) == [
+        "Muỗi đánh hơi khí CO2 từ xa khoảng mười mét."
+    ]
     plan = build_hbt_plan(project, DEFAULT_NARRATOR)
     assert len(plan) == 4  # cảnh 2 tách đôi ở `|`
     result = synthesize_hbt(plan, tmp_path, provider)

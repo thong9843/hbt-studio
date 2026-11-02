@@ -21,8 +21,8 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
-from hbt.library import MusicLibrary
 from hbt.gd2.voice import build_hbt_plan, spoken_chunks, synthesize_hbt
+from hbt.library import MusicLibrary
 from hbt.models import Music, Project, Voice
 from hbt.pipeline import cancel
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
@@ -483,7 +483,7 @@ class JobManager:
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
     def _run_hbt_voice(self, job: Job) -> None:
-        """Sinh giọng HBT: mỗi cảnh một hay nhiều đoạn (`{}` và `|` đã xử lý), nối thành `voice.wav`."""
+        """Sinh giọng HBT theo cảnh (đã xử lý {} và |), nối thành voice.wav."""
         voice_id: str = job.hbt_voice_id  # type: ignore[attr-defined]
         try:
             with cancel.use_token(job.token):
