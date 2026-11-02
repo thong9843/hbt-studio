@@ -21,8 +21,9 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
+from hbt.gd2.voice import build_hbt_plan, spoken_chunks, synthesize_hbt
 from hbt.library import MusicLibrary
-from hbt.models import Music, Project
+from hbt.models import Music, Project, Voice
 from hbt.pipeline import cancel
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
@@ -287,6 +288,34 @@ class JobManager:
         self._pool.submit(self._run, job)
         return job
 
+    def submit_hbt_voice(self, slug: str, voice_id: str) -> Job:
+        """Job sinh giọng VieNeu cho dự án HBT (GĐ2 G3); cùng `kind="voice"`, chung hàng đợi."""
+        project = self.storage.load_any(slug)
+        if isinstance(project, PostvProject):
+            raise Unprocessable("Dự án PostV sinh giọng ở bước Kịch bản và giọng")
+        if self.voice is None:
+            raise ServiceUnavailable("Chưa cấu hình bộ sinh giọng")
+        status = self.voice.status()
+        if not status.ok:
+            raise ServiceUnavailable(status.note)
+        try:
+            known = {v.id for v in self.voice.list_voices()}
+        except VoiceError as e:
+            raise ServiceUnavailable(str(e)) from e
+        if voice_id not in known:
+            raise Unprocessable("Giọng đã chọn không có trong danh sách giọng VieNeu")
+        if not any(spoken_chunks(s.voice) for s in project.scenes):
+            raise Unprocessable("Chưa có cảnh nào có lời đọc để sinh giọng")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        job.hbt_voice_id = voice_id  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
     def submit_postv_auto(
         self,
         slug: str,
@@ -348,7 +377,10 @@ class JobManager:
             job.status = RUNNING
             job.started_at = time.time()
         if job.kind == "voice":
-            self._run_voice(job)
+            if getattr(job, "hbt_voice_id", None):
+                self._run_hbt_voice(job)
+            else:
+                self._run_voice(job)
             return
         if job.kind == "postv_auto":
             self._run_postv_auto(job)
@@ -439,6 +471,39 @@ class JobManager:
                     "seconds": round(result.seconds, 2),
                     "segments": result.segments,
                     "cast": result.cast,
+                    "generated": result.generated,
+                    "cached": result.cached,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except VoiceError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_hbt_voice(self, job: Job) -> None:
+        """Sinh giọng HBT theo cảnh (đã xử lý {} và |), nối thành voice.wav."""
+        voice_id: str = job.hbt_voice_id  # type: ignore[attr-defined]
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load(job.slug)
+                job._progress(1, "voice", "Đang đọc lời các cảnh")
+                plan = build_hbt_plan(project, voice_id)
+                result = synthesize_hbt(
+                    plan, self.storage.project_dir(job.slug), self.voice, job._progress
+                )
+            latest = self.storage.load(job.slug)  # người dùng có thể đã sửa project lúc đọc
+            latest.voice = Voice(file="voice.wav")
+            self.storage.save(job.slug, latest)
+            job._progress(100, "voice", "Đã sinh xong giọng")
+            job._finish(
+                DONE,
+                output={
+                    "voice": self.storage.rel(result.file),
+                    "seconds": round(result.seconds, 2),
+                    "scenes": result.scenes,
+                    "voice_id": voice_id,
                     "generated": result.generated,
                     "cached": result.cached,
                 },

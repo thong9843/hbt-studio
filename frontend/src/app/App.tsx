@@ -12,6 +12,7 @@ import { PostvScriptPage } from '../pages/PostvScriptPage';
 import { PostvExportPage } from '../pages/PostvExportPage';
 import { PostvSourcePage } from '../pages/PostvSourcePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
+import { ImagesTab } from '../pages/ImagesTab';
 import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
 
@@ -27,6 +28,7 @@ export function App() {
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="p/:slug" element={<ComposePage />}>
           <Route index element={<ScenesTab />} />
+          <Route path="images" element={<ImagesTab />} />
           <Route path="audio" element={<AudioTab />} />
           <Route path="export" element={<ExportTab />} />
         </Route>

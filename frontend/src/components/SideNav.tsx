@@ -4,6 +4,7 @@ import { Link, NavLink, useMatch } from 'react-router-dom';
 import { fetchHealth, type Health } from '../api/client';
 import { api } from '../api/endpoints';
 import { useNewProject } from '../hooks/newProject';
+import { useDraftExists } from '../hooks/useDraft';
 import { useTheme } from '../hooks/useTheme';
 import { vi } from '../i18n/vi';
 import {
@@ -13,6 +14,7 @@ import {
   FolderIcon,
   GripIcon,
   HomeIcon,
+  ImageIcon,
   MoonIcon,
   MusicIcon,
   PlusIcon,
@@ -133,6 +135,7 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
   });
   const name = data?.find((p) => p.slug === slug)?.title ?? slug;
   const base = `/p/${slug}`;
+  const hasDraft = useDraftExists(slug); // dự án không có nháp thì ẩn mục Ảnh
   return (
     <div aria-label={vi.nav.openProject} role="group" className="mt-2 space-y-1">
       {!mini && (
@@ -141,6 +144,9 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
         </p>
       )}
       <NavItem to={base} end icon={<FilmIcon />} label={vi.nav.compose} mini={mini} />
+      {hasDraft && (
+        <NavItem to={`${base}/images`} icon={<ImageIcon />} label={vi.nav.images} mini={mini} />
+      )}
       <NavItem to={`${base}/audio`} icon={<MusicIcon />} label={vi.nav.audio} mini={mini} />
       <NavItem to={`${base}/export`} icon={<UploadIcon />} label={vi.nav.export} mini={mini} />
     </div>

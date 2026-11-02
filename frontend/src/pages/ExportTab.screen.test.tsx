@@ -96,6 +96,49 @@ function open(opts: {
 
 const settle = () => new Promise((r) => setTimeout(r, 200));
 
+describe('Xuất video: nhắc ảnh chưa duyệt', () => {
+  const draftDoc = (approved: boolean) => ({
+    draft: 1,
+    topic: 'Muỗi',
+    scenes: [],
+    images_approved: approved,
+  });
+
+  it('reminds with a link to the images step for a draft project, without blocking the render', async () => {
+    open({
+      extra: {
+        'GET /api/projects/muoi/draft/exists': { exists: true },
+        'GET /api/projects/muoi/draft': draftDoc(false),
+      },
+    });
+    const note = await screen.findByText('Ảnh chưa duyệt');
+    expect(
+      within(note.parentElement as HTMLElement).getByRole('link', { name: 'Sang bước Ảnh' }),
+    ).toHaveAttribute('href', '/p/muoi/images');
+    expect(await screen.findByRole('button', { name: /Xem nhanh/ })).toBeEnabled();
+  });
+
+  it('shows nothing when the images are approved or the project has no draft', async () => {
+    open({
+      extra: {
+        'GET /api/projects/muoi/draft/exists': { exists: true },
+        'GET /api/projects/muoi/draft': draftDoc(true),
+      },
+    });
+    await screen.findByRole('region', { name: 'Kiểm tra trước khi dựng' });
+    await settle();
+    expect(screen.queryByText('Ảnh chưa duyệt')).toBeNull();
+  });
+
+  it('shows nothing and asks no draft for a project without one', async () => {
+    const { mock } = open({ extra: { 'GET /api/projects/muoi/draft/exists': { exists: false } } });
+    await screen.findByRole('region', { name: 'Kiểm tra trước khi dựng' });
+    await settle();
+    expect(screen.queryByText('Ảnh chưa duyệt')).toBeNull();
+    expect(mock.mock.calls.some((c) => String(c[0]).endsWith('/muoi/draft'))).toBe(false);
+  });
+});
+
 describe('Xuất video: Kiểm tra', () => {
   it('says Sẵn sàng with the three counts when nothing is wrong', async () => {
     open({});

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import { MusicCard } from '../components/audio/MusicCard';
 import { MusicStartCard } from '../components/audio/MusicStartCard';
+import { VieNeuCard } from '../components/audio/VieNeuCard';
 import { VoiceCard } from '../components/audio/VoiceCard';
 import { PreviewPane } from '../components/compose/PreviewPane';
 import { EyeIcon } from '../components/icons';
@@ -69,6 +70,7 @@ export function AudioTab() {
         }
       >
         <div className="min-w-0 space-y-[18px] self-start">
+          <VieNeuCard />
           <VoiceCard latest={latest} />
           <MusicStartCard music={project.music} latest={latest} />
         </div>

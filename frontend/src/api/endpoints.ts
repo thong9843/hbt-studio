@@ -27,6 +27,8 @@ import type {
   RenderRecord,
   Scene,
   DraftCheck,
+  DraftDoc,
+  HbtVoiceInfo,
   DraftCreated,
   ScriptApplied,
   ScriptCheck,
@@ -111,6 +113,18 @@ export const api = {
   createDraft: (draft: string, title?: string) =>
     apiRequest<DraftCreated>('POST', '/gd2/draft/create', {
       json: { draft, title: title ?? null },
+    }),
+  /** Dự án có bản nháp GĐ2 không? Luôn 200 (không sinh 404 khi không có). */
+  draftExists: (slug: string) => apiGet<{ exists: boolean }>(`/projects/${enc(slug)}/draft/exists`),
+  getDraft: (slug: string) => apiGet<DraftDoc>(`/projects/${enc(slug)}/draft`),
+  /** Duyệt ảnh (lưu dấu ảnh từng cảnh) hoặc bỏ duyệt. 422 khi còn cảnh chưa có ảnh. */
+  setImagesApproved: (slug: string, approved: boolean) =>
+    apiRequest<DraftDoc>('PUT', `/projects/${enc(slug)}/draft/images-approved`, {
+      json: { approved },
+    }),
+  setScenePrompt: (slug: string, index: number, imagePrompt: string) =>
+    apiRequest<DraftDoc>('PUT', `/projects/${enc(slug)}/draft/scenes/${index}/prompt`, {
+      json: { image_prompt: imagePrompt },
     }),
   /** Kiểm khối JSON kịch bản (chuỗi người dùng dán). Không ghi gì. */
   checkScript: (slug: string, script: string, extra?: ScriptExtra) =>
@@ -221,6 +235,18 @@ export const api = {
   getProjectVoice: (slug: string) => apiGet<ProjectVoice>(`/projects/${enc(slug)}/voice`),
   synthesizeVoice: (slug: string) =>
     apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/voice/synthesize`),
+  /** Giọng VieNeu của dự án HBT (luôn 200; `available=false` khi chưa cài VieNeu). */
+  getHbtVoice: (slug: string) => apiGet<HbtVoiceInfo>(`/projects/${enc(slug)}/draft/voice`),
+  /** Sinh giọng HBT như một job; bỏ `voiceId` = giọng đã nhớ. */
+  synthesizeHbtVoice: (slug: string, voiceId?: string) =>
+    apiRequest<{ job_id: string }>('POST', `/projects/${enc(slug)}/draft/voice`, {
+      json: { voice_id: voiceId ?? null },
+    }),
+  getVoicePreference: () => apiGet<{ voice_id: string | null }>('/gd2/voice/preferences'),
+  setVoicePreference: (voiceId: string | null) =>
+    apiRequest<{ voice_id: string | null }>('PUT', '/gd2/voice/preferences', {
+      json: { voice_id: voiceId },
+    }),
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),

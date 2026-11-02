@@ -489,6 +489,28 @@ export interface DraftCheck {
   music_match: { id: string; title: string } | null;
 }
 
+export interface DraftScene {
+  image_prompt: string;
+  image_prompt_ok: boolean;
+  /** Prompt đầy đủ để sao chép (đã nối phần phủ định); rỗng khi cảnh chưa có prompt. */
+  full_prompt: string;
+  /** Từ cấm (K17) có trong prompt. */
+  forbidden: string[];
+  /** Ảnh hiện tại còn khớp dấu ảnh lúc duyệt. */
+  image_approved: boolean;
+}
+
+/** `GET /projects/{slug}/draft`: nháp kèm trạng thái duyệt ảnh tính tại lúc đọc. */
+export interface DraftDoc {
+  draft: 1;
+  topic: string;
+  series_hint: string;
+  music_mood: string;
+  sources: { id: string; claim: string; url: string }[];
+  scenes: DraftScene[];
+  images_approved: boolean;
+}
+
 export interface DraftCreated {
   slug: string;
   project: Project;
@@ -547,6 +569,35 @@ export interface ProjectVoice {
   /** Lời hoặc giọng đã đổi sau lần sinh gần nhất; null = chưa biết. */
   stale: boolean | null;
   estimated_seconds: number;
+}
+
+/** `GET /projects/{slug}/draft/voice`: giọng VieNeu của dự án HBT (GĐ2, G3). */
+export interface HbtVoiceInfo {
+  available: boolean;
+  note: string | null;
+  /** Giọng đã nhớ từ lần trước. */
+  voice_id: string | null;
+  has_file: boolean;
+  file: string | null;
+  url: string | null;
+  /** File hiện tại là file VieNeu đã sinh (không phải file thả vào). */
+  from_vieneu: boolean;
+  seconds: number | null;
+  used_voice_id: string | null;
+  /** Lời đã đổi sau lần sinh; `null` = không rõ. */
+  stale: boolean | null;
+  scenes: number;
+  estimated_seconds: number;
+}
+
+/** `output` của job sinh giọng HBT (`kind` là voice, dự án HBT). */
+export interface HbtVoiceJobOutput {
+  voice: string;
+  seconds: number;
+  scenes: { scene: number; start: number; end: number }[];
+  voice_id: string;
+  generated: number;
+  cached: number;
 }
 
 /** `output` của job sinh giọng (`Job.output` khi `kind` là voice). */

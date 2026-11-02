@@ -66,7 +66,7 @@
       "labels": [],
       "punch": true,
       "caption_y": null,
-      "image_prompt": "close-up of a mosquito on human skin, macro photo, soft light, vertical 9:16"
+      "image_prompt": "close-up of a mosquito on human skin, macro photo, vertical 9:16"
     },
     {
       "voice": "Muỗi đánh hơi khí CO2 từ xa khoảng 10{mười} mét.",
@@ -77,7 +77,7 @@
       "labels": [],
       "punch": false,
       "caption_y": null,
-      "image_prompt": "person breathing out in warm evening air, mosquitoes approaching, cinematic, vertical 9:16"
+      "image_prompt": "person breathing out in warm evening air, vertical 9:16"
     },
     {
       "voice": "Thở nhiều, đổ mồ hôi nhiều | thì muỗi tìm bạn dễ hơn.",
@@ -88,7 +88,7 @@
       "labels": [],
       "punch": false,
       "caption_y": null,
-      "image_prompt": "person jogging at dusk near a pond, sweat, mosquitoes in backlight, vertical 9:16"
+      "image_prompt": "person jogging at dusk near a pond, vertical 9:16"
     }
   ],
   "publish": {
@@ -196,13 +196,30 @@ Tên chuẩn: đổi thì hỏi chủ dự án. Router đăng ký ở `main.py`;
 | Đọc `moods` có sẵn trong `library/music/index.json` (chỉ đọc); tự chọn nhạc                             | pytest: so chữ thường, bỏ dấu; không khớp → để trống; bài không có `moods` bị bỏ qua; bài thiếu `id` thì bỏ chọn và cảnh báo; index không bị ghi (nội dung và mtime)                                                                                                                                                                                                             |
 | Giao diện: nút **Tạo dự án từ JSON nháp** ở Trang chủ (theo `DESIGN-HBT.md` v2, chữ trong `vi.ts`)      | Vitest: hộp dán / thả file, danh sách lỗi và cảnh báo, nút tắt khi có lỗi; e2e: dán mẫu → vào trình soạn                                                                                                                                                                                                                                                                         |
 
-### G2 · Bước Ảnh (máy cũ, ~1 buổi, tag `v1.12.0`)
+### G2 · Bước Ảnh (máy cũ, ~1 buổi, gộp tag với G3)
 
-Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đúng cảnh (dùng tải ảnh hiện có), cờ "đã duyệt ảnh", cảnh K18 hiện nhắc tự viết prompt. Test: Vitest cho bước Ảnh; pytest cho `images-approved`; e2e luồng đường tay.
+Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đúng cảnh (dùng `POST /projects/{slug}/assets`), cờ "đã duyệt ảnh" lưu **dấu ảnh từng cảnh**, cảnh K18 tự viết prompt. Màn `/p/:slug/images`, mục "Ảnh" ở thanh trái (giữa Soạn video và Âm thanh, chỉ khi có nháp), tab Xuất chỉ nhắc "Ảnh chưa duyệt" (không chặn xuất).
 
-### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0`)
+| Điểm cuối                                                       | Việc                                                                                                        |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET /projects/{slug}/draft/exists`                             | `{exists}`, luôn 200 (giao diện ẩn mục Ảnh mà không sinh 404)                                               |
+| `GET /projects/{slug}/draft`                                    | Nháp kèm, mỗi cảnh: `image_approved`, `full_prompt`, `forbidden`; `images_approved` tính lúc đọc, không ghi |
+| `PUT /projects/{slug}/draft/images-approved` `{approved}`       | Duyệt (lưu `approved_marks` = `scene.image` từng cảnh; thiếu ảnh → 422) hoặc bỏ duyệt (xoá dấu)             |
+| `PUT /projects/{slug}/draft/scenes/{i}/prompt` `{image_prompt}` | Đặt prompt (rỗng → `image_prompt_ok=false`); không đổi dấu duyệt                                            |
 
-Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4), mỗi cảnh một đoạn rồi nối `voice.wav`, tiến độ x/N, huỷ được, cache theo hash lời + giọng. Giọng nhớ (E4b). Vbee vẫn thả file. Test: provider giả cho CI; tiền xử lý `{}` / `|`; nút Tạo giọng tắt khi chưa chọn giọng. Test VieNeu thật gắn `slow` và không chạy ở CI.
+Test: pytest `test_gd2_images.py`, `test_gd2_docs.py`; Vitest `ImagesTab.test.tsx`, nhắc ở `ExportTab.screen.test.tsx`, mục thanh trái ở `AppShell.test.tsx`; e2e `gd2-images.spec.ts`.
+
+### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0` cho G2+G3)
+
+Tái dùng provider VieNeu của PostV (`.venv-tts`, `GET /voices`, cache `build/voice/`, `join_wavs`). Màn Âm thanh có thẻ **Giọng VieNeu** (mọi dự án HBT, không cần `draft.json`); VieNeu chưa cài thì thẻ **vẫn hiện** ghi chú ngắn, thả file Vbee ở thẻ Giọng đọc dùng như cũ.
+
+| Điểm cuối                                         | Việc                                                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /projects/{slug}/draft/voice`                | `{available, note, voice_id (đã nhớ), has_file, url, from_vieneu, seconds, used_voice_id, stale, scenes, estimated_seconds}`; luôn 200 với dự án HBT, 400 với PostV |
+| `POST /projects/{slug}/draft/voice` `{voice_id?}` | 202 `{job_id}`; bỏ `voice_id` = giọng đã nhớ; 422 chưa chọn giọng / giọng không có / không có lời; 503 chưa cài; 409 đang bận. Giọng dùng xong được nhớ             |
+| `GET`/`PUT /gd2/voice/preferences`                | Giọng HBT nhớ lần trước (`workspace/settings/gd2.json`)                                                                                                             |
+
+Job dùng `kind="voice"` (chung hàng đợi với job dựng) và rẽ nhánh theo loại dự án trong `_run_voice`. Test: pytest `test_gd2_voice.py`, `test_gd2_voice_api.py`, `test_gd2_voice_real.py` (`slow`, bỏ qua khi chưa cài VieNeu hoặc trên CI); Vitest `VieNeuCard.test.tsx`; e2e `gd2-voice.spec.ts`.
 
 ### G4 · ComfyUI (máy mới, ~2 buổi, tag `v1.14.0`)
 
@@ -238,3 +255,25 @@ Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4)
 | G1b | `series_hint` sai kiểu cũng là K15. `image_prompt: null` coi như thiếu (K18). Nút "Từ JSON nháp" đặt ở Trang chủ                                                         |
 | G1c | `images_approved` có trong `draft.json` từ G1 (mặc định `false`), chỉ G2 dùng; `PUT …/draft/images-approved` làm ở G2                                                    |
 | G1d | Mã cảnh báo thêm `MUSIC` (không phải K): thư viện nhạc không đọc được hoặc có bài thiếu `id`; khi đó để trống nhạc, không ghi gì                                         |
+
+## 10. Quyết định đã chốt (G2, 02/11/2026)
+
+| #   | Chốt                                                                                                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G2a | Duyệt ảnh lưu `approved_marks` (tên file ảnh từng cảnh, đã theo nội dung `images/<hash16>.<ext>`) trong `draft.json`. Đọc nháp: cảnh có ảnh khác dấu, hoặc chưa có ảnh, là chưa duyệt; `images_approved` chỉ đúng khi cả bộ khớp. Đưa ảnh về đúng ảnh cũ thì khớp lại |
+| G2b | Ảnh chưa duyệt **không chặn xuất**: tab Xuất chỉ nhắc kèm link sang bước Ảnh, và chỉ với dự án có nháp. Không đụng render, jobs, `api/projects.py`                                                                                                                    |
+| G2c | Thêm `GET …/draft/exists` (200 cả khi không có) để giao diện ẩn mục Ảnh mà không phát sinh yêu cầu 404                                                                                                                                                                |
+| G2d | Sửa prompt qua `PUT …/draft/scenes/{i}/prompt`. Prompt có từ cấm (K17) vẫn sao chép được, chỉ gắn nhãn                                                                                                                                                                |
+| G2e | Mẫu JSON trong `PROMPT-KICH-BAN.md` và `IMPLEMENT-GD2.md` §2.2 phải bằng `backend/tests/data/hbt-draft.sample.json` (có test)                                                                                                                                         |
+
+## 11. Quyết định đã chốt (G3, 02/11/2026)
+
+| #   | Chốt                                                                                                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G3a | Thẻ và job áp cho **mọi dự án HBT** (không cần nháp); giữ đường dẫn `/draft/voice` như đặc tả                                                                                                                                                                     |
+| G3b | Chữ gửi VieNeu: `hiển thị{cách đọc}` → "cách đọc" (bỏ chữ hiển thị trước `{}`, giữ dấu câu ngay sau `}`); `\|` tách đoạn. Mỗi cảnh một hay nhiều đoạn, nối bằng khoảng im 0,25 s (`GAP_SECONDS`) kể cả giữa các cảnh                                              |
+| G3c | **Lệch K-33 (PostV):** PostV gửi nguyên văn cho VieNeu (không có `{}` hay `\|`); HBT thì tiền xử lý như G3b. Hai bên dùng chung bộ sinh giọng, cache và hàm nối, nhưng khác bước chuẩn bị chữ                                                                     |
+| G3d | Sinh xong đặt `project.voice = Voice(file="voice.wav")` (HBT chỉ có `file`, `trim_end`; không đặt `engine`). Các `voice.*` cũ xoá bằng `_remove_siblings` **sau** khi nối xong, nên lỗi hay huỷ giữa chừng giữ nguyên giọng cũ                                    |
+| G3e | Đổi lời sau khi sinh: chỉ báo "Lời đã đổi, tạo lại giọng", không tự sinh lại. `build/hbt_voice.json` mất hoặc hỏng, hoặc `voice.wav` hiện tại không còn khớp băm SHA-256 lưu trong meta (thả Vbee đuôi .wav ghi đè cùng tên), thì coi là "không rõ", không báo cũ |
+| G3f | Thẻ nhắc "Sẽ thay giọng hiện có" khi dự án đã có file giọng                                                                                                                                                                                                       |
+| G3g | Tiến độ theo cảnh ("Đang đọc cảnh x/N"); N là số cảnh có lời                                                                                                                                                                                                      |

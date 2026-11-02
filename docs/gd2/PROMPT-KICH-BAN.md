@@ -71,7 +71,7 @@ Khi dán vào Claude chat, thay dòng `{ MẪU BÊN DƯỚI }` bằng nguyên kh
       "labels": [],
       "punch": true,
       "caption_y": null,
-      "image_prompt": "close-up of a mosquito on human skin, macro photo, soft light, vertical 9:16"
+      "image_prompt": "close-up of a mosquito on human skin, macro photo, vertical 9:16"
     },
     {
       "voice": "Muỗi đánh hơi khí CO2 từ xa khoảng 10{mười} mét.",
@@ -82,7 +82,7 @@ Khi dán vào Claude chat, thay dòng `{ MẪU BÊN DƯỚI }` bằng nguyên kh
       "labels": [],
       "punch": false,
       "caption_y": null,
-      "image_prompt": "person breathing out in warm evening air, mosquitoes approaching, cinematic, vertical 9:16"
+      "image_prompt": "person breathing out in warm evening air, vertical 9:16"
     },
     {
       "voice": "Thở nhiều, đổ mồ hôi nhiều | thì muỗi tìm bạn dễ hơn.",
@@ -93,7 +93,7 @@ Khi dán vào Claude chat, thay dòng `{ MẪU BÊN DƯỚI }` bằng nguyên kh
       "labels": [],
       "punch": false,
       "caption_y": null,
-      "image_prompt": "person jogging at dusk near a pond, sweat, mosquitoes in backlight, vertical 9:16"
+      "image_prompt": "person jogging at dusk near a pond, vertical 9:16"
     }
   ],
   "publish": {

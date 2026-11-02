@@ -8,11 +8,23 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from hbt.api.deps import State
+from hbt.api.deps import State, file_url
+from hbt.api.render import JobCreated
+from hbt.gd2.prefs import Gd2Prefs
 from hbt.gd2.service import check_draft
-from hbt.gd2.store import build_draft_doc, read_draft, write_draft
+from hbt.gd2.store import (
+    build_draft_doc,
+    effective_draft,
+    read_draft,
+    set_approved,
+    set_prompt,
+    write_draft,
+)
+from hbt.gd2.voice import from_vieneu, is_stale, spoken_chunks
+from hbt.models import Project
+from hbt.postv.voice import CHARS_PER_SECOND, VoiceError
 from hbt.script import check_script
-from hbt.storage import BadRequest
+from hbt.storage import BadRequest, ServiceUnavailable, Unprocessable
 
 router = APIRouter(tags=["gd2"])
 
@@ -69,6 +81,127 @@ def create(body: DraftCreateBody, state: State):
     }
 
 
+def _images(state: State, slug: str) -> list[str]:
+    return [scene.image for scene in state.storage.load(slug).scenes]
+
+
 @router.get("/projects/{slug}/draft")
 def get_draft(slug: str, state: State):
-    return read_draft(state.storage.project_dir(slug))
+    """Nháp kèm trạng thái duyệt ảnh tính tại lúc đọc (không ghi)."""
+    folder = state.storage.project_dir(slug)
+    doc = read_draft(folder)  # 404 khi không có nháp
+    return effective_draft(doc, _images(state, slug))
+
+
+class ApprovedBody(BaseModel):
+    approved: bool
+
+
+@router.put("/projects/{slug}/draft/images-approved")
+def put_images_approved(slug: str, body: ApprovedBody, state: State):
+    folder = state.storage.project_dir(slug)
+    read_draft(folder)  # 404 trước khi đọc ảnh
+    images = _images(state, slug)
+    return effective_draft(set_approved(folder, body.approved, images), images)
+
+
+class PromptBody(BaseModel):
+    image_prompt: str
+
+
+@router.put("/projects/{slug}/draft/scenes/{index}/prompt")
+def put_prompt(slug: str, index: int, body: PromptBody, state: State):
+    folder = state.storage.project_dir(slug)
+    read_draft(folder)
+    return effective_draft(set_prompt(folder, index, body.image_prompt), _images(state, slug))
+
+
+@router.get("/projects/{slug}/draft/exists")
+def draft_exists(slug: str, state: State):
+    """Có bản nháp không? Trả 200 cả khi không có, để giao diện ẩn mục mà không sinh lỗi 404."""
+    return {"exists": (state.storage.project_dir(slug) / "draft.json").is_file()}
+
+
+# ------------------------------------------------------------------ giọng VieNeu cho HBT (G3)
+def _hbt(state: State, slug: str) -> Project:
+    project = state.storage.load_any(slug)
+    if not isinstance(project, Project):
+        raise BadRequest(f"'{slug}' là dự án PostV, giọng PostV nằm ở bước Kịch bản và giọng")
+    return project
+
+
+def _known_voices(state: State) -> set[str] | None:
+    """Mã giọng VieNeu có sẵn; None khi chưa cài (không kiểm được)."""
+    if not state.voice.status().ok:
+        return None
+    try:
+        return {v.id for v in state.voice.list_voices()}
+    except VoiceError as e:
+        raise ServiceUnavailable(str(e)) from e
+
+
+class VoicePrefBody(BaseModel):
+    voice_id: str | None = None
+
+
+@router.get("/gd2/voice/preferences")
+def get_voice_preferences(state: State):
+    """Giọng HBT chọn lần trước (nhớ ở `workspace/settings/gd2.json`)."""
+    return {"voice_id": Gd2Prefs(state.settings.workspace_dir).voice_id()}
+
+
+@router.put("/gd2/voice/preferences")
+def put_voice_preferences(body: VoicePrefBody, state: State):
+    voice_id = (body.voice_id or "").strip() or None
+    known = _known_voices(state) if voice_id else None
+    if voice_id and known is not None and voice_id not in known:
+        raise Unprocessable("Giọng đã chọn không có trong danh sách giọng VieNeu")
+    Gd2Prefs(state.settings.workspace_dir).set_voice_id(voice_id)
+    return {"voice_id": voice_id}
+
+
+@router.get("/projects/{slug}/draft/voice")
+def hbt_voice_info(slug: str, state: State):
+    """Giọng của dự án HBT: file hiện có, giọng đã chọn, lời đã đổi sau khi sinh chưa.
+
+    Chưa cài VieNeu thì vẫn trả `available=false` để giao diện hiện ghi chú."""
+    project = _hbt(state, slug)
+    folder = state.storage.project_dir(slug)
+    status = state.voice.status()
+    v = project.voice
+    has_file = bool(v and (folder / v.file).is_file())
+    meta = from_vieneu(project, folder)  # chỉ khi voice.wav đúng là file VieNeu đã sinh
+    chars = sum(len(c) for s in project.scenes for c in spoken_chunks(s.voice))
+    return {
+        "available": status.ok,
+        "note": None if status.ok else status.note,
+        "voice_id": Gd2Prefs(state.settings.workspace_dir).voice_id(),
+        "has_file": has_file,
+        "file": v.file if has_file and v else None,
+        "url": file_url(f"projects/{slug}/{v.file}") if has_file and v else None,
+        "from_vieneu": meta is not None,
+        "seconds": meta.get("seconds") if meta else None,
+        "used_voice_id": meta.get("voice_id") if meta else None,
+        "stale": is_stale(project, folder) if has_file else None,
+        "scenes": sum(1 for s in project.scenes if spoken_chunks(s.voice)),
+        "estimated_seconds": round(chars / CHARS_PER_SECOND, 1),
+    }
+
+
+class HbtVoiceBody(BaseModel):
+    voice_id: str | None = None  # bỏ trống = giọng đã nhớ
+
+
+@router.post("/projects/{slug}/draft/voice", response_model=JobCreated, status_code=202)
+def hbt_voice_synthesize(slug: str, state: State, body: HbtVoiceBody | None = None):
+    """Sinh giọng VieNeu cho cả video HBT như một job (tiến độ theo cảnh, huỷ được: `/jobs/{id}`).
+
+    Giọng đã dùng được nhớ cho lần sau."""
+    _hbt(state, slug)
+    prefs = Gd2Prefs(state.settings.workspace_dir)
+    voice_id = ((body.voice_id if body else None) or prefs.voice_id() or "").strip()
+    if not voice_id:
+        raise Unprocessable("Chưa chọn giọng đọc")
+    job = state.jobs.submit_hbt_voice(slug, voice_id)
+    prefs.set_voice_id(voice_id)
+    return {"job_id": job.id}
