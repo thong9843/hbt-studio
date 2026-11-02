@@ -20,7 +20,7 @@ from hbt.gd2.store import (
     set_prompt,
     write_draft,
 )
-from hbt.gd2.voice import is_stale, read_meta, spoken_chunks
+from hbt.gd2.voice import from_vieneu, is_stale, spoken_chunks
 from hbt.models import Project
 from hbt.postv.voice import CHARS_PER_SECOND, VoiceError
 from hbt.script import check_script
@@ -170,7 +170,7 @@ def hbt_voice_info(slug: str, state: State):
     status = state.voice.status()
     v = project.voice
     has_file = bool(v and (folder / v.file).is_file())
-    meta = read_meta(folder)
+    meta = from_vieneu(project, folder)  # chỉ khi voice.wav đúng là file VieNeu đã sinh
     chars = sum(len(c) for s in project.scenes for c in spoken_chunks(s.voice))
     return {
         "available": status.ok,
@@ -179,7 +179,7 @@ def hbt_voice_info(slug: str, state: State):
         "has_file": has_file,
         "file": v.file if has_file and v else None,
         "url": file_url(f"projects/{slug}/{v.file}") if has_file and v else None,
-        "from_vieneu": bool(has_file and v and v.file == "voice.wav" and meta),
+        "from_vieneu": meta is not None,
         "seconds": meta.get("seconds") if meta else None,
         "used_voice_id": meta.get("voice_id") if meta else None,
         "stale": is_stale(project, folder) if has_file else None,

@@ -142,11 +142,20 @@ def synthesize_hbt(
     meta = {
         "signature": sig,
         "voice_id": plan[0].voice_id,
+        "sha256": _sha256(out),
         "seconds": seconds,
         "scenes": scenes,
     }
     (build / META_FILE).write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return HbtVoiceResult(out, seconds, scenes, len(todo), cached, sig)
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def read_meta(folder: Path) -> dict | None:
@@ -160,11 +169,25 @@ def read_meta(folder: Path) -> dict | None:
     return meta if isinstance(meta, dict) and "signature" in meta else None
 
 
+def from_vieneu(project: Project, folder: Path) -> dict | None:
+    """Meta của lần sinh VieNeu nếu `voice.wav` hiện tại đúng là file đó (so băm), ngược lại None.
+
+    Thả file Vbee đuôi .wav sẽ ghi đè `voice.wav` nên không thể chỉ dựa vào tên file."""
+    meta = read_meta(folder)
+    v = project.voice
+    if meta is None or v is None or v.file != "voice.wav":
+        return None
+    path = folder / "voice.wav"
+    if not path.is_file() or meta.get("sha256") != _sha256(path):
+        return None
+    return meta
+
+
 def is_stale(project: Project, folder: Path) -> bool | None:
     """Lời đã đổi sau lần sinh giọng VieNeu chưa? None = không rõ (không có `hbt_voice.json`,
     hoặc giọng hiện tại không phải file VieNeu đã sinh, vd thả file Vbee)."""
-    meta = read_meta(folder)
-    if meta is None or project.voice is None or project.voice.file != "voice.wav":
+    meta = from_vieneu(project, folder)
+    if meta is None:
         return None
     voice_id = meta.get("voice_id")
     if not isinstance(voice_id, str):

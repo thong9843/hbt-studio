@@ -143,7 +143,7 @@ def test_replaces_old_voice_files_of_other_extensions(tmp_path):
 def test_failure_keeps_the_old_voice(tmp_path):
     (tmp_path / "voice.wav").write_bytes(b"old")
     # lỗi xảy ra trước khi nối: file cũ còn nguyên
-    project = project_of("Một.", "Hai khó hơn.")
+    project = project_of("Một.", "Hai khó hơn.", "Ba.")
     with pytest.raises(VoiceError):
         run(tmp_path, project, provider=FakeVoice(fail_on="khó hơn"))
     assert (tmp_path / "voice.wav").read_bytes() == b"old"
