@@ -26,6 +26,8 @@ import type {
   RenderOptions,
   RenderRecord,
   Scene,
+  DraftCheck,
+  DraftCreated,
   ScriptApplied,
   ScriptCheck,
   ScriptExtra,
@@ -102,6 +104,14 @@ export const api = {
     );
   },
 
+  /** Kiểm JSON nháp `hbt_draft` (chuỗi người dùng dán). Không ghi gì. */
+  checkDraft: (draft: string) =>
+    apiRequest<DraftCheck>('POST', '/gd2/draft/check', { json: { draft } }),
+  /** Tạo dự án từ JSON nháp. 422 = còn lỗi (`body.errors`). */
+  createDraft: (draft: string, title?: string) =>
+    apiRequest<DraftCreated>('POST', '/gd2/draft/create', {
+      json: { draft, title: title ?? null },
+    }),
   /** Kiểm khối JSON kịch bản (chuỗi người dùng dán). Không ghi gì. */
   checkScript: (slug: string, script: string, extra?: ScriptExtra) =>
     apiRequest<ScriptCheck>('POST', `/projects/${enc(slug)}/script/check`, {

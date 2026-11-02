@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary, RenderSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { DraftDialog } from '../components/draft/DraftDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
 import { CheckIcon, MoreIcon, PlayIcon } from '../components/icons';
@@ -229,6 +230,7 @@ export function HomePage() {
   const t = vi.home;
   const { open: openNew } = useNewProject();
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const [draftOpen, setDraftOpen] = useState(false);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -257,7 +259,13 @@ export function HomePage() {
 
   return (
     <main className="mx-auto max-w-[1280px] space-y-8 px-6 py-10">
-      <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
+        <Button tone="soft" title={vi.gd2.buttonTitle} onClick={() => setDraftOpen(true)}>
+          {vi.gd2.button}
+        </Button>
+      </div>
+      <DraftDialog open={draftOpen} onClose={() => setDraftOpen(false)} />
 
       {isPending && <HomeSkeleton />}
       {error && (

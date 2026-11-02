@@ -58,6 +58,14 @@ const brief = project({
 });
 
 describe('HomePage', () => {
+  it('has a button that opens the draft JSON dialog, on top of the project list', async () => {
+    const user = userEvent.setup();
+    stubFetch({ 'GET /api/projects': [] });
+    page();
+    await user.click(screen.getByRole('button', { name: 'Từ JSON nháp' }));
+    expect(await screen.findByRole('dialog', { name: 'Tạo dự án từ JSON nháp' })).toBeVisible();
+  });
+
   it('greets with the title and shows skeletons while loading', async () => {
     stubFetch({ 'GET /api/projects': [summary('muoi', 'Muỗi')], 'GET /api/projects/muoi': brief });
     page();
