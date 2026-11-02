@@ -57,9 +57,9 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }:
   const href = projectHref(project);
   const t = vi.projects;
   return (
-    <Card as="li" padded={false} className="ui-card-link overflow-hidden">
+    <Card as="li" padded={false} className="ui-card-link">
       <Link to={href} aria-label={`${t.open}: ${project.title}`} className="block">
-        <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
+        <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
           <CardImage src={image} />
         </div>
       </Link>

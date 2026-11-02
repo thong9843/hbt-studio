@@ -49,3 +49,26 @@ test('tạo project, thêm 3 cảnh, lưu, tải lại vẫn đủ dữ liệu',
     await deleteProject(request, slug);
   }
 });
+
+test('menu ⋯ ở thẻ /projects hiện đủ mục Xoá (không bị cắt) và xoá được dự án', async ({
+  page,
+  request,
+}) => {
+  const title = `E2E menu ${Date.now()}`;
+  const created = await request.post(`${API}/projects`, { data: { title, scene_count: 3 } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const slug: string = (await created.json()).slug;
+  try {
+    await page.goto('/projects');
+    await page.getByRole('button', { name: vi.projects.menu(title), exact: true }).click();
+    const remove = page.getByRole('menuitem', { name: vi.projects.delete, exact: true });
+    await expect(remove).toBeVisible();
+    await remove.click();
+    const dialog = page.getByRole('alertdialog', { name: vi.projects.deleteTitle });
+    await dialog.getByRole('button', { name: vi.projects.delete, exact: true }).click();
+    await expect(page.getByText(vi.projects.deleted, { exact: true })).toBeVisible();
+    expect((await request.get(`${API}/projects/${slug}`)).status()).toBe(404);
+  } finally {
+    await deleteProject(request, slug);
+  }
+});
