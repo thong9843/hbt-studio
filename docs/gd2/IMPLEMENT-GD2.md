@@ -223,7 +223,19 @@ Job dùng `kind="voice"` (chung hàng đợi với job dựng) và rẽ nhánh t
 
 ### G4 · ComfyUI (máy mới, ~2 buổi, tag `v1.14.0`)
 
-`ComfyProvider` (E6), từng cảnh / cả bộ, huỷ được, rẽ đường tay khi không kết nối. Test: server ComfyUI giả; test thật chỉ trên máy mới.
+`ComfyProvider` (E6) cho `ImageProvider`: sinh ảnh từng cảnh hoặc cả bộ, huỷ được, rẽ đường tay khi không kết nối. Chỉ làm trên máy mới (RTX 2060 Super 8 GB); máy cũ chỉ viết mã và test bằng server giả.
+
+| Hạng mục         | Chốt                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mô hình          | **Checkpoint SDXL** (chủ dự án tự tải về thư mục `models/checkpoints` của ComfyUI; app không tải gì)                                                                       |
+| Kích thước       | **768×1344** (9:16)                                                                                                                                                        |
+| Tên checkpoint   | Đặt trong **cấu hình**, không mã cứng: `workspace/settings/gd2.json`, khoá `comfy.checkpoint` (cùng file với giọng nhớ ở §7). Chưa đặt thì nút tạo ảnh tắt và nhắc đặt tên |
+| Địa chỉ          | Chỉ `http://127.0.0.1:8188` (không cấu hình được, không gọi ra mạng)                                                                                                       |
+| Workflow         | File JSON trong repo: `backend/hbt/gd2/workflows/`; app điền prompt (đã nối phần phủ định), kích thước, seed, tên checkpoint                                               |
+| Không có ComfyUI | Không kết nối được hoặc thiếu checkpoint → tự rẽ **đường tay** (prompt + Sao chép + thả ảnh như G2), không lỗi                                                             |
+| Cài đặt          | Chủ dự án tự cài ComfyUI và tự tải checkpoint; app không cài hộ                                                                                                            |
+
+Test: server ComfyUI giả (kết nối, hàng đợi, huỷ, lỗi, thiếu checkpoint); test thật chỉ trên máy mới, gắn `slow` và bỏ qua khi không có ComfyUI.
 
 ### Quy tắc chung mọi mốc
 
@@ -236,12 +248,16 @@ Job dùng `kind="voice"` (chung hàng đợi với job dựng) và rẽ nhánh t
 
 ## 8. Cần chốt
 
-| #   | Điểm                                                       | Mặc định tạm                                                 |
-| --- | ---------------------------------------------------------- | ------------------------------------------------------------ |
-| C-1 | K10 `block`: đặc tả GĐ2 ghi "chặn tạo", M5 ghi "chặn xuất" | Làm đúng M5 (cảnh báo đỏ, chặn xuất); chờ chủ dự án xác nhận |
-| C-2 | `scenes[].source_ids`                                      | Không thêm (đã chốt: K16 so theo con số)                     |
-| C-3 | Danh sách giá trị `moods`                                  | Mở; chủ dự án gắn khi tải nhạc lên (trường `moods` có sẵn)   |
-| C-4 | Tên điểm cuối API                                          | Như mục 4                                                    |
+C-1 đến C-4 đã chốt ở §9 (G1); C-5, C-6 dành cho G4.
+
+| #   | Điểm                                                       | Mặc định tạm                                                       |
+| --- | ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| C-1 | K10 `block`: đặc tả GĐ2 ghi "chặn tạo", M5 ghi "chặn xuất" | Làm đúng M5 (cảnh báo đỏ, chặn xuất); chờ chủ dự án xác nhận       |
+| C-2 | `scenes[].source_ids`                                      | Không thêm (đã chốt: K16 so theo con số)                           |
+| C-3 | Danh sách giá trị `moods`                                  | Mở; chủ dự án gắn khi tải nhạc lên (trường `moods` có sẵn)         |
+| C-4 | Tên điểm cuối API                                          | Như mục 4                                                          |
+| C-5 | Tên file checkpoint SDXL                                   | Trong cấu hình `comfy.checkpoint`, không mã cứng; chủ dự án tự tải |
+| C-6 | Tên điểm cuối ComfyUI và khoá cấu hình (G4)                | Như mục 4 và bảng G4; chốt khi làm G4 nếu cần đổi                  |
 
 ## 9. Quyết định đã chốt (G1, 02/11/2026)
 
