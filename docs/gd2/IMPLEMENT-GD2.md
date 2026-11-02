@@ -198,7 +198,16 @@ Tên chuẩn: đổi thì hỏi chủ dự án. Router đăng ký ở `main.py`;
 
 ### G2 · Bước Ảnh (máy cũ, ~1 buổi, tag `v1.12.0`)
 
-Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đúng cảnh (dùng tải ảnh hiện có), cờ "đã duyệt ảnh", cảnh K18 hiện nhắc tự viết prompt. Test: Vitest cho bước Ảnh; pytest cho `images-approved`; e2e luồng đường tay.
+Prompt từng cảnh + nút Sao chép (có phần phủ định), thả ảnh đúng cảnh (dùng `POST /projects/{slug}/assets`), cờ "đã duyệt ảnh" lưu **dấu ảnh từng cảnh**, cảnh K18 tự viết prompt. Màn `/p/:slug/images`, mục "Ảnh" ở thanh trái (giữa Soạn video và Âm thanh, chỉ khi có nháp), tab Xuất chỉ nhắc "Ảnh chưa duyệt" (không chặn xuất).
+
+| Điểm cuối                                                       | Việc                                                                                                        |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET /projects/{slug}/draft/exists`                             | `{exists}`, luôn 200 (giao diện ẩn mục Ảnh mà không sinh 404)                                               |
+| `GET /projects/{slug}/draft`                                    | Nháp kèm, mỗi cảnh: `image_approved`, `full_prompt`, `forbidden`; `images_approved` tính lúc đọc, không ghi |
+| `PUT /projects/{slug}/draft/images-approved` `{approved}`       | Duyệt (lưu `approved_marks` = `scene.image` từng cảnh; thiếu ảnh → 422) hoặc bỏ duyệt (xoá dấu)             |
+| `PUT /projects/{slug}/draft/scenes/{i}/prompt` `{image_prompt}` | Đặt prompt (rỗng → `image_prompt_ok=false`); không đổi dấu duyệt                                            |
+
+Test: pytest `test_gd2_images.py`, `test_gd2_docs.py`; Vitest `ImagesTab.test.tsx`, nhắc ở `ExportTab.screen.test.tsx`, mục thanh trái ở `AppShell.test.tsx`; e2e `gd2-images.spec.ts`.
 
 ### G3 · Giọng VieNeu cho HBT (máy cũ, ~1,5 buổi, tag `v1.13.0`)
 
@@ -238,3 +247,13 @@ Tái dùng provider VieNeu của PostV (`.venv-tts`). Xử lý `{}` và `|` (E4)
 | G1b | `series_hint` sai kiểu cũng là K15. `image_prompt: null` coi như thiếu (K18). Nút "Từ JSON nháp" đặt ở Trang chủ                                                         |
 | G1c | `images_approved` có trong `draft.json` từ G1 (mặc định `false`), chỉ G2 dùng; `PUT …/draft/images-approved` làm ở G2                                                    |
 | G1d | Mã cảnh báo thêm `MUSIC` (không phải K): thư viện nhạc không đọc được hoặc có bài thiếu `id`; khi đó để trống nhạc, không ghi gì                                         |
+
+## 10. Quyết định đã chốt (G2, 02/11/2026)
+
+| #   | Chốt                                                                                                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G2a | Duyệt ảnh lưu `approved_marks` (tên file ảnh từng cảnh, đã theo nội dung `images/<hash16>.<ext>`) trong `draft.json`. Đọc nháp: cảnh có ảnh khác dấu, hoặc chưa có ảnh, là chưa duyệt; `images_approved` chỉ đúng khi cả bộ khớp. Đưa ảnh về đúng ảnh cũ thì khớp lại |
+| G2b | Ảnh chưa duyệt **không chặn xuất**: tab Xuất chỉ nhắc kèm link sang bước Ảnh, và chỉ với dự án có nháp. Không đụng render, jobs, `api/projects.py`                                                                                                                    |
+| G2c | Thêm `GET …/draft/exists` (200 cả khi không có) để giao diện ẩn mục Ảnh mà không phát sinh yêu cầu 404                                                                                                                                                                |
+| G2d | Sửa prompt qua `PUT …/draft/scenes/{i}/prompt`. Prompt có từ cấm (K17) vẫn sao chép được, chỉ gắn nhãn                                                                                                                                                                |
+| G2e | Mẫu JSON trong `PROMPT-KICH-BAN.md` và `IMPLEMENT-GD2.md` §2.2 phải bằng `backend/tests/data/hbt-draft.sample.json` (có test)                                                                                                                                         |
