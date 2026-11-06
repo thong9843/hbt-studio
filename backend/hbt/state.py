@@ -11,6 +11,7 @@ from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
 from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.censor import CensorStore
+from hbt.postv.memes import MemeLibrary
 from hbt.postv.voice import VoiceProvider
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Storage
@@ -28,3 +29,4 @@ class AppState:
     postv_words: CensorStore
     backgrounds: BackgroundLibrary
     voice: VoiceProvider
+    memes: MemeLibrary

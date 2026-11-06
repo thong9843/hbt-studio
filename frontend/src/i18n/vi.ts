@@ -359,6 +359,27 @@ export const vi = {
       deleteConfirmMessage: (title: string) =>
         `Bạn có chắc muốn xoá clip "${title}"? File video và ảnh thu nhỏ sẽ bị xoá vĩnh viễn khỏi thư viện.`,
     },
+    memes: {
+      title: 'Meme & Sticker phông xanh',
+      lead: 'Chọn meme phản ứng từ greenscreenmemes.com để chèn vào video',
+      searchPlaceholder: 'Tìm kiếm meme (vd: cat, laugh, crying, shocked, dance…)',
+      search: 'Tìm',
+      searching: 'Đang tìm…',
+      noResults: 'Không tìm thấy meme nào phù hợp.',
+      download: 'Tải & Sử dụng',
+      downloading: 'Đang tải…',
+      useMeme: 'Gắn Meme',
+      removeMeme: 'Gỡ Meme',
+      posLabel: 'Vị trí hiển thị',
+      pos: {
+        bottom_right: 'Góc dưới phải',
+        bottom_center: 'Giữa dưới',
+        center: 'Chính giữa',
+      },
+      duration: (s: number) => `${Math.round(s * 10) / 10} s`,
+      libraryTab: 'Đã tải về',
+      onlineTab: 'Tìm trực tuyến',
+    },
     script: {
       listTitle: 'Lời đọc từng đoạn',
       lead: 'Mỗi đoạn một ô. Viết chữ thường: VieNeu tự đọc số và viết tắt.',

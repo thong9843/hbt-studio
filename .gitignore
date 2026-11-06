@@ -5,6 +5,8 @@ library/music/**
 !library/music/index.json
 library/backgrounds/**
 !library/backgrounds/index.json
+library/memes/**
+!library/memes/index.json
 *.mp3
 *.m4a
 *.ogg

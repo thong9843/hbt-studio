@@ -169,8 +169,9 @@ def compose_postv(
     audio_bitrate: str,
     out: Path,
     on_frac,
+    memes: list[tuple[Path, float, float, str]] | None = None,
 ) -> None:
-    """Một lệnh ffmpeg: nền + thẻ (hiện dần/trượt/nảy) + phụ đề → thân; xfade 0,5 s với outro."""
+    """Một lệnh ffmpeg: nền + thẻ + meme + phụ đề → thân; xfade 0,5 s với outro."""
     scale = width / 1080
     inputs: list[str | Path] = ["-i", bg, "-f", "concat", "-safe", "0", "-i", caption_concat]
     graph = ["[0:v]null[b0]"]
@@ -181,6 +182,28 @@ def compose_postv(
             index, f"c{k}", asset, span, timing, tpl, fps, scale, prev, f"b{k + 1}"
         )
         prev, index = f"b{k + 1}", index + 1
+
+    # Chèn các meme phông xanh (chroma keying)
+    for m_idx, (m_path, m_start, m_dur, m_pos) in enumerate(memes or []):
+        inputs += ["-i", m_path]
+        m_w = round(420 * scale)
+        if m_pos == "center":
+            pos_expr = "x=(W-w)/2:y=(H-h)/2"
+        elif m_pos == "bottom_center":
+            pos_expr = f"x=(W-w)/2:y=H-h-{round(220 * scale)}"
+        else:  # bottom_right
+            pos_expr = f"x=W-w-{round(36 * scale)}:y=H-h-{round(220 * scale)}"
+
+        graph.append(
+            f"[{index}:v]colorkey=0x00FF00:0.35:0.15,scale={m_w}:-2:flags=lanczos,"
+            f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{m_idx}]"
+        )
+        graph.append(
+            f"[{prev}][m{m_idx}]overlay={pos_expr}:enable='between(t,{m_start:.4f},"
+            f"{m_start + m_dur:.4f})':eof_action=pass[b_m{m_idx}]"
+        )
+        prev = f"b_m{m_idx}"
+        index += 1
     cap = f"[1:v]fps={fps},format=rgba"
     if scale != 1.0:
         cap += f",scale=w='round(iw*{scale})':h='round(ih*{scale})':flags=lanczos"
@@ -450,6 +473,61 @@ def _render_postv(
         rep.tick(45 + 5 * (k + 1) / len(spans))
     rep.say(f"{len(cards)} thẻ")
 
+    # ---- 6b. Memes & Stickers phông xanh
+    meme_items: list[tuple[Path, float, float, str]] = []
+    meme_lib_dir = library_dir / "memes"
+    for k, seg in enumerate(segs):
+        m_id = getattr(seg, "meme_id", None)
+        if m_id:
+            m_file = meme_lib_dir / f"{m_id}.mp4"
+            if m_file.is_file():
+                m_start = starts[k] if k < len(starts) else 0.0
+                m_next = starts[k + 1] if k + 1 < len(starts) else total
+                m_seg_dur = max(0.5, m_next - m_start)
+                m_info = {}
+                try:
+                    m_info = probe(m_file)
+                    m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
+                except Exception:
+                    m_file_dur = 3.0
+                m_dur = min(m_file_dur, m_seg_dur)
+                m_pos = getattr(seg, "meme_pos", "bottom_right")
+                meme_items.append((m_file, m_start, m_dur, m_pos))
+
+                try:
+                    streams = m_info.get("streams", [])
+                    if any(s.get("codec_type") == "audio" for s in streams):
+                        m_audio = build / "memes" / f"m_{k}.wav"
+                        m_audio.parent.mkdir(parents=True, exist_ok=True)
+                        if not m_audio.is_file():
+                            subprocess.run(
+                                [
+                                    ffmpeg_exe(),
+                                    "-v",
+                                    "error",
+                                    "-y",
+                                    "-i",
+                                    str(m_file),
+                                    "-vn",
+                                    "-c:a",
+                                    "pcm_s16le",
+                                    "-ar",
+                                    "44100",
+                                    "-ac",
+                                    "1",
+                                    "-t",
+                                    f"{m_dur:.3f}",
+                                    str(m_audio),
+                                ],
+                                check=False,
+                            )
+                        if m_audio.is_file():
+                            sfx.append((m_audio, m_start, 0.85))
+                except Exception:
+                    pass
+    if meme_items:
+        rep.say(f"{len(meme_items)} meme phông xanh")
+
     # ---- 7. Âm thanh (50–55)
     rep.at(50, "Âm thanh")
     music_start = 0.0
@@ -519,7 +597,7 @@ def _render_postv(
         fps=q.fps, width=q.width, height=q.height, frames=int(round(body_seconds * q.fps)),
         outro_clip=outro_clip, audio_wav=final_audio, out_seconds=out_total,
         preset=q.final_preset, crf=q.final_crf, audio_bitrate=q.audio_bitrate, out=video,
-        on_frac=lambda f: rep.tick(60 + 38 * f),
+        on_frac=lambda f: rep.tick(60 + 38 * f), memes=meme_items,
     )  # fmt: skip
 
     # ---- 10. Kiểm tra đầu ra (98–100)
