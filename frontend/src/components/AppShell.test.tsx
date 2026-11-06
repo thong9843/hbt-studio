@@ -140,7 +140,8 @@ describe('AppShell, wide (>= 1280 px)', () => {
     );
   });
 
-  it('shows the open postv project with its name and five steps inside /postv/:slug', async () => {
+  it('shows the open postv project with its name and five steps inside /postv/:slug when advanced mode is on', async () => {
+    localStorage.setItem('hbt_advanced_mode', 'true');
     stubFetch({
       'GET /api/health': health,
       'GET /api/projects': [summary('bai', 'Bài đêm khuya')],
@@ -167,6 +168,20 @@ describe('AppShell, wide (>= 1280 px)', () => {
       'aria-current',
       'page',
     );
+  });
+
+  it('shows quick items (Tạo video, Video gần đây) inside /postv/:slug when advanced mode is off', async () => {
+    localStorage.removeItem('hbt_advanced_mode');
+    stubFetch({
+      'GET /api/health': health,
+      'GET /api/projects': [summary('bai', 'Bài đêm khuya')],
+    });
+    shell('/postv/bai/preview');
+    const group = screen.getByRole('group', { name: 'Dự án đang mở' });
+    expect(await within(group).findByText('Bài đêm khuya')).toBeInTheDocument();
+    const links = within(group).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual(['Tạo video', 'Video gần đây']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/postv', '/projects?kind=postv']);
   });
 
   it('falls back to the slug until the project list arrives', () => {
