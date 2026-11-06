@@ -155,7 +155,7 @@ PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Thr
 
 ### Quy trình 5 bước
 
-1. **Nhập nguồn:** Dán nội dung bài viết từ Threads (bài gốc và các bình luận), ứng dụng tự động nhận diện bài, bình luận, tác giả và số liệu (like, bình luận, chia sẻ).
+1. **Nhập nguồn:** Dán link bài viết từ Threads (bấm **Lấy từ link**) hoặc dán trực tiếp nội dung chữ; ứng dụng tự động bóc tách bài gốc, tác giả, hình ảnh và phân tách các lượt đối thoại (hoặc bình luận). Hỗ trợ nhận diện số liệu (like, bình luận, chia sẻ).
 2. **Chọn đoạn:** Chọn lọc các bình luận muốn đưa vào video, kéo thả hoặc dùng nút đổi thứ tự, xem ước tính thời lượng.
 3. **Kịch bản và giọng:**
    - Chỉnh sửa lời đọc từng đoạn (mỗi người một giọng đọc).
