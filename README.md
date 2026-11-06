@@ -159,6 +159,7 @@ PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Thr
 2. **Chọn đoạn:** Chọn lọc các bình luận muốn đưa vào video, kéo thả hoặc dùng nút đổi thứ tự, xem ước tính thời lượng.
 3. **Kịch bản và giọng:**
    - Chỉnh sửa lời đọc từng đoạn (mỗi người một giọng đọc).
+   - Gắn **Meme / Sticker phông xanh** phản ứng: tìm kiếm trực tuyến từ kho greenscreenmemes.com, tải về máy và chọn vị trí hiển thị (góc dưới phải, giữa dưới, chính giữa); app tự động tách nền phông xanh bằng filter FFmpeg và hòa âm thanh meme vào SFX.
    - Chọn giọng đọc VieNeu (nam/nữ) hoặc tải file giọng ngoài.
    - Hỗ trợ **Dán JSON kịch bản** (có kiểm tra lỗi và tối đa 10 bản sao lưu để hoàn tác).
    - Chọn nhạc nền và tinh chỉnh điểm bắt đầu.
