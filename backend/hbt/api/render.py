@@ -41,6 +41,7 @@ def job_view(job: Job) -> dict:
     return {
         "id": job.id,
         "project": job.slug,
+        "kind": getattr(job, "kind", "render"),
         "status": job.status,
         "progress": round(job.progress, 1),
         "step": job.step,
@@ -78,7 +79,11 @@ def list_active_jobs(state: State):
         {
             "id": j.id,
             "slug": j.slug,
-            "kind": "voice" if j.kind == "voice" else ("preview" if j.preview else "final"),
+            "kind": (
+                j.kind
+                if j.kind in ("postv_quick", "postv_auto", "voice")
+                else ("preview" if j.preview else "final")
+            ),
             "status": j.status,
             "progress": round(j.progress, 1),
             "step": j.step,
