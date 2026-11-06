@@ -57,6 +57,8 @@ export const api = {
     apiRequest<AnyProject>('PUT', `/projects/${enc(slug)}`, { json: project }),
   parsePostv: (text: string) =>
     apiRequest<PostvParseResult>('POST', '/postv/parse', { json: { text } }),
+  fetchThreads: (url: string) =>
+    apiRequest<PostvParseResult>('POST', '/postv/fetch-threads', { json: { url } }),
   postvCheck: (slug: string) =>
     apiRequest<PostvCheck>('POST', `/projects/${enc(slug)}/postv/script/check`, { json: {} }),
   saveProject: (slug: string, project: Project) =>

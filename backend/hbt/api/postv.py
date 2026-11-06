@@ -27,6 +27,7 @@ from hbt.postv.censor import compile_censor
 from hbt.postv.models import PostvHook, PostvProject, PostvSegment
 from hbt.postv.parse import MAX_TEXT, ParseResult, parse_threads_text
 from hbt.postv.script import check_script
+from hbt.postv.threads import ThreadsFetchError, extract_threads_post, is_threads_url
 from hbt.sensitive import SensitiveWords
 from hbt.storage import BadRequest, Conflict, NotFound, StorageError, Unprocessable
 
@@ -37,12 +38,34 @@ class ParseBody(BaseModel):
     text: str = Field(max_length=MAX_TEXT)
 
 
+class FetchThreadsBody(BaseModel):
+    url: str
+
+
 @router.post("/postv/parse", response_model=ParseResult)
 def parse(body: ParseBody):
-    """Hàm thuần: tách bài + bình luận từ chữ dán. Không ghi gì, không truy cập mạng."""
-    if not body.text.strip():
+    """Tách bài + bình luận từ chữ dán hoặc tự động bóc tách nếu dán URL Threads."""
+    trimmed = body.text.strip()
+    if not trimmed:
         raise Unprocessable("Chưa có chữ để tách")
+    if is_threads_url(trimmed):
+        try:
+            return extract_threads_post(trimmed)
+        except ThreadsFetchError as e:
+            raise Unprocessable(str(e)) from e
     return parse_threads_text(body.text)
+
+
+@router.post("/postv/fetch-threads", response_model=ParseResult)
+def fetch_threads(body: FetchThreadsBody):
+    """Trích xuất bài viết Threads trực tiếp từ URL."""
+    url = body.url.strip()
+    if not is_threads_url(url):
+        raise Unprocessable("Đường dẫn không phải link bài viết Threads hợp lệ")
+    try:
+        return extract_threads_post(url)
+    except ThreadsFetchError as e:
+        raise Unprocessable(str(e)) from e
 
 
 @router.post("/projects/{slug}/postv/script/check")
