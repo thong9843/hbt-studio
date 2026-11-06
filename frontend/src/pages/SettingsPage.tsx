@@ -6,7 +6,13 @@ import { api } from '../api/endpoints';
 import type { AppSettings, SensitiveWords } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
 import { LeaveGuard } from '../components/settings/LeaveGuard';
-import { FpsCard, HEX, ThemeCard, WhisperCard } from '../components/settings/GeneralCards';
+import {
+  AdvancedModeCard,
+  FpsCard,
+  HEX,
+  ThemeCard,
+  WhisperCard,
+} from '../components/settings/GeneralCards';
 import { WordsCard, type WordGroup } from '../components/settings/WordsCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -90,6 +96,7 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         <FpsCard value={value} onChange={change} />
         <ThemeCard value={value} onChange={change} />
       </div>
+      <AdvancedModeCard value={value} onChange={change} />
       <WhisperCard value={value} onChange={change} health={health.data} />
       <WordsCard
         groups={groups}

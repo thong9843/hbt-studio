@@ -8,6 +8,7 @@ import { HomePage } from '../pages/HomePage';
 import { PostvLayout } from '../pages/PostvLayout';
 import { PostvPickPage } from '../pages/PostvPickPage';
 import { PostvPreviewPage } from '../pages/PostvPreviewPage';
+import { PostvQuickPage } from '../pages/PostvQuickPage';
 import { PostvScriptPage } from '../pages/PostvScriptPage';
 import { PostvExportPage } from '../pages/PostvExportPage';
 import { PostvSourcePage } from '../pages/PostvSourcePage';
@@ -32,7 +33,8 @@ export function App() {
           <Route path="audio" element={<AudioTab />} />
           <Route path="export" element={<ExportTab />} />
         </Route>
-        <Route path="postv" element={<ProjectsPage kind="postv" />} />
+        <Route path="postv" element={<PostvQuickPage />} />
+        <Route path="postv/projects" element={<ProjectsPage kind="postv" />} />
         <Route path="postv/:slug" element={<PostvLayout />}>
           <Route index element={<PostvSourcePage />} />
           <Route path="pick" element={<PostvPickPage />} />

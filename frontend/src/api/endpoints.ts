@@ -19,6 +19,8 @@ import type {
   PostvCheck,
   PostvParseResult,
   PostvProject,
+  PostvQuickAutoResponse,
+  PostvQuickOptions,
   PostvScriptStyle,
   Project,
   ProjectCreate,
@@ -265,6 +267,17 @@ export const api = {
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
+  startPostvQuick: (body: {
+    url?: string;
+    text?: string;
+    options?: PostvQuickOptions;
+    force_new?: boolean;
+  }) => apiRequest<PostvQuickAutoResponse>('POST', '/postv/auto', { json: body }),
+  retryPostvQuick: (jobId: string) =>
+    apiRequest<{ job_id: string; project_slug: string; resumed_stage: string }>(
+      'POST',
+      `/postv/auto/${enc(jobId)}/retry`,
+    ),
   deleteRender: (slug: string, jobId: string) =>
     apiRequest<void>('DELETE', `/projects/${enc(slug)}/renders/${enc(jobId)}`),
   listRenders: (slug: string) => apiGet<RenderRecord[]>(`/projects/${enc(slug)}/renders`),

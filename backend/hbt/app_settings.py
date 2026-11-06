@@ -37,6 +37,7 @@ class AppSettings(BaseModel):
     theme: ThemeDefaults = Field(default_factory=ThemeDefaults)
     whisper_model: WhisperModelChoice = "auto"
     whisper_timeout_seconds: int = Field(default=900, ge=30, le=7200)
+    advanced_mode: bool = False
 
 
 class AppSettingsStore:

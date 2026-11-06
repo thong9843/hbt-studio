@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import wave
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Response
 from PIL import Image
@@ -20,6 +20,7 @@ from hbt.backups import create_backup, list_backups, read_backup, write_project_
 from hbt.config import BRAND_DIR
 from hbt.models import Publish, Thumbnail
 from hbt.pipeline.thumbnail import LOGO_FILE, render_cover
+from hbt.postv.auto import find_existing_url
 from hbt.postv.auto_script import load_script_styles
 from hbt.postv.captions import BAND, render_state, style_for
 from hbt.postv.card import composite_preview, load_template, render_project_card
@@ -66,6 +67,68 @@ def fetch_threads(body: FetchThreadsBody):
         return extract_threads_post(url)
     except ThreadsFetchError as e:
         raise Unprocessable(str(e)) from e
+
+
+class PostvQuickAutoBody(BaseModel):
+    url: str | None = None
+    text: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+    force_new: bool = False
+
+
+@router.post("/postv/auto")
+def postv_quick_auto(body: PostvQuickAutoBody, state: State):
+    """Bắt đầu chuỗi tự động hoá PostV 6 bước từ link hoặc chữ dán (PV9)."""
+    raw_input = (body.url or body.text or "").strip()
+    if not raw_input:
+        raise Unprocessable(
+            "Chưa có đường dẫn hoặc nội dung bài viết. Gợi ý: Dán chữ bài vào khung."
+        )
+
+    # Kiểm tra liên kết đã từng làm video
+    if is_threads_url(raw_input) and not body.force_new:
+        existing = find_existing_url(state.storage, raw_input)
+        if existing:
+            return {
+                "project_slug": existing,
+                "existing_slug": existing,
+                "job_id": None,
+            }
+
+    # Tạo dự án PostV mới
+    project = state.storage.create_postv("Video Threads")
+    slug = project.slug
+    if is_threads_url(raw_input):
+        project.source.url = raw_input
+        state.storage.save_any(slug, project)
+
+    job = state.jobs.submit_postv_quick(slug, raw_input, body.options)
+    return {
+        "project_slug": slug,
+        "job_id": job.id,
+        "existing_slug": None,
+    }
+
+
+@router.post("/postv/auto/{job_id}/retry")
+def postv_quick_retry(job_id: str, state: State):
+    """Thử lại chuỗi tự động từ bước gặp lỗi (PV9)."""
+    old_job = state.jobs.get(job_id)
+    if not old_job.finished or old_job.status != "failed":
+        raise Conflict(f"Chỉ có thể thử lại job đã thất bại (trạng thái: {old_job.status})")
+
+    failed_stage = getattr(old_job, "last_stage", None) or "fetch"
+    new_job = state.jobs.submit_postv_quick(
+        old_job.slug,
+        getattr(old_job, "auto_input", ""),
+        getattr(old_job, "auto_options", {}),
+        start_stage=failed_stage,
+    )
+    return {
+        "job_id": new_job.id,
+        "project_slug": old_job.slug,
+        "resumed_stage": failed_stage,
+    }
 
 
 @router.post("/projects/{slug}/postv/script/check")

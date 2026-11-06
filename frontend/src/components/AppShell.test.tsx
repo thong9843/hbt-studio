@@ -169,6 +169,20 @@ describe('AppShell, wide (>= 1280 px)', () => {
     );
   });
 
+  it('shows the postv 5 steps outside a project when advanced mode is on', async () => {
+    localStorage.setItem('hbt_advanced_mode', 'true');
+    stubFetch({
+      'GET /api/health': health,
+      'GET /api/projects': [{ ...summary('bai', 'Bài đêm khuya'), kind: 'postv' }],
+    });
+    shell('/');
+    const group = await screen.findByRole('group', { name: 'Dự án đang mở' });
+    expect(within(group).getByRole('link', { name: 'Nguồn' })).toHaveAttribute(
+      'href',
+      '/postv/bai',
+    );
+  });
+
   it('falls back to the slug until the project list arrives', () => {
     stubFetch(routes());
     shell('/p/muoi');

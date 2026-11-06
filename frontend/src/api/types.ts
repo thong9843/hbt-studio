@@ -229,7 +229,7 @@ export interface Job {
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final' | 'voice';
+  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto';
   status: 'queued' | 'running';
   progress: number;
   step: string;
@@ -249,6 +249,7 @@ export interface AppSettings {
   theme: Theme;
   whisper_model: 'auto' | 'small' | 'medium' | 'large-v3';
   whisper_timeout_seconds: number;
+  advanced_mode?: boolean;
 }
 
 export interface SensitiveCategory {
@@ -623,4 +624,42 @@ export interface VoiceJobOutput {
   generated: number;
   cached: number;
   cast: Record<string, string>;
+}
+
+export type PostvStage = 'fetch' | 'pick' | 'script' | 'voice' | 'render' | 'done';
+
+export interface PostvQuickOptions {
+  voice_id?: string | null;
+  fps?: 30 | 50 | 60;
+  outro?: boolean;
+  background?: 'auto' | 'manual';
+  music?: 'auto' | 'none';
+  max_comments?: number;
+  target_seconds?: number;
+}
+
+export interface PostvQuickAutoResponse {
+  project_slug: string;
+  job_id: string | null;
+  existing_slug: string | null;
+}
+
+export interface PostvStageEvent {
+  stage: PostvStage;
+  status: 'running' | 'done' | 'failed';
+  progress: number;
+  message: string;
+  data?: {
+    handle?: string;
+    snippet?: string;
+    picked_count?: number;
+    total_comments?: number;
+    target_seconds?: number;
+    estimated_seconds?: number;
+    video?: string;
+    cover?: string;
+    youtube_cover?: string;
+    publish?: string;
+    log?: string;
+  };
 }

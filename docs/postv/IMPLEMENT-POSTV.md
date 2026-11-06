@@ -545,3 +545,4 @@ Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 bu
 
 - **PV7b (06/11/2026):** Nới N4, backend gọi ra `threads.net` (lấy bài theo link) và `greenscreenmemes.com` (tìm/tải meme). Đường tạm; nguồn chính thức xem `claude/GD4-THREADS-SPEC.md`.
 - **Meme (06/11/2026):** Meme trong `library/memes/index.json` có trường `source` (URL gốc) và `license` ("chưa rõ" nếu không có).
+- **PV9 (06/11/2026):** Giao diện PostV dạng khung chat ("Dán link/chữ → Video" tại `/postv`), pipeline tự động 6 bước (`fetch` → `pick` → `script` → `voice` → `render` → `done`) qua SSE stream. Giữ nguyên màn 5 bước cũ thông qua nút "Chỉnh chi tiết" và chế độ nâng cao (công tắc trong Cài đặt).

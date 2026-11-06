@@ -153,7 +153,7 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
   );
 }
 
-/** Khối dự án PostV đang mở: tên + 5 bước PostV (chỉ khi ở /postv/:slug). */
+/** Khối dự án PostV đang mở: tên + 5 bước PostV (chỉ khi ở /postv/:slug hoặc khi bật Chế độ nâng cao). */
 function OpenPostvProject({ slug, mini }: { slug: string; mini: boolean }) {
   const { data } = useQuery({
     queryKey: ['projects'],
@@ -240,6 +240,21 @@ export function SideNav({ mini, render }: Props) {
   const openPostv = useMatch('/postv/:slug/*');
   const videoSlug = openVideo?.params.slug;
   const postvSlug = openPostv?.params.slug;
+  const isAdvanced = (() => {
+    try {
+      return localStorage.getItem('hbt_advanced_mode') === 'true';
+    } catch {
+      return false;
+    }
+  })();
+  const { data: allProjects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: api.listProjects,
+    staleTime: 30_000,
+  });
+  const latestPostvSlug = allProjects?.find((p) => p.kind === 'postv')?.slug;
+  const showPostvProjectSlug = postvSlug || (isAdvanced ? latestPostvSlug : undefined);
+
   return (
     <aside
       className={cx(
@@ -274,7 +289,7 @@ export function SideNav({ mini, render }: Props) {
           <NavItem to="/postv" icon={<ChatIcon />} label={vi.nav.postv} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
-        {postvSlug && <OpenPostvProject slug={postvSlug} mini={mini} />}
+        {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}
         <div className="mt-2">
           <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
         </div>

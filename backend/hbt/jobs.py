@@ -346,6 +346,30 @@ class JobManager:
         self._pool.submit(self._run, job)
         return job
 
+    def submit_postv_quick(
+        self,
+        slug: str,
+        input_text: str,
+        options: dict[str, Any] | None = None,
+        start_stage: str = "fetch",
+    ) -> Job:
+        """Job tự động hoá PostV 6 bước từ link/chữ đến video hoàn chỉnh (PV9)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới hỗ trợ chuỗi tự động")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_quick")
+        job.auto_input = input_text  # type: ignore[attr-defined]
+        job.auto_options = options or {}  # type: ignore[attr-defined]
+        job.start_stage = start_stage  # type: ignore[attr-defined]
+        job.last_stage = None  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
     def cancel(self, job_id: str) -> Job:
         job = self.get(job_id)
         if job.finished:
@@ -384,6 +408,9 @@ class JobManager:
             return
         if job.kind == "postv_auto":
             self._run_postv_auto(job)
+            return
+        if job.kind == "postv_quick":
+            self._run_postv_quick(job)
             return
         folder = self.storage.project_dir(job.slug)
         cfg = self.app_settings.load() if self.app_settings is not None else None
@@ -651,3 +678,9 @@ class JobManager:
             job._finish(FAILED, error=str(e))
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_postv_quick(self, job: Job) -> None:
+        """Chạy chuỗi tự động 6 bước của PostV (PV9)."""
+        from hbt.postv.auto import run_auto_job
+
+        run_auto_job(self, job)

@@ -131,3 +131,30 @@ export function ThemeCard({ value, onChange }: Props) {
     </Card>
   );
 }
+
+/** Thẻ Chế độ nâng cao: bật/tắt các mục 5 bước chi tiết của PostV trên thanh điều hướng (PV9). */
+export function AdvancedModeCard({ value, onChange }: Props) {
+  const isAdvanced = Boolean(value.advanced_mode);
+  return (
+    <Card as="section" aria-label={vi.postvQuick.advancedMode} className="space-y-3">
+      <h2 className="text-h2 font-bold">{vi.postvQuick.advancedMode}</h2>
+      <p className="text-small text-muted">{vi.postvQuick.advancedModeDesc}</p>
+      <div className="flex items-center gap-3">
+        <Chip
+          selected={isAdvanced}
+          onClick={() => {
+            const next = !isAdvanced;
+            try {
+              localStorage.setItem('hbt_advanced_mode', String(next));
+            } catch {
+              // ignore
+            }
+            onChange({ advanced_mode: next });
+          }}
+        >
+          {isAdvanced ? vi.common.yes : vi.common.no}
+        </Chip>
+      </div>
+    </Card>
+  );
+}
