@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -83,15 +83,17 @@ describe('PostvQuickPage', () => {
 
   it('enables submit button upon typing, submits on Enter and sends options', async () => {
     const user = userEvent.setup();
-    let sentBody: Record<string, unknown> | null = null;
+    const sent = {
+      body: null as { url?: string; options?: { fps?: number; target_seconds?: number } } | null,
+    };
 
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
-      'POST /api/postv/auto': async (_url, init) => {
-        sentBody = JSON.parse(init?.body as string);
+      'POST /api/postv/auto': async (_url: string, init?: RequestInit) => {
+        sent.body = JSON.parse(init?.body as string);
         return json({
           project_slug: 'postv-threads-123',
           job_id: 'job-auto-123',
@@ -113,11 +115,11 @@ describe('PostvQuickPage', () => {
     await user.click(submitBtn);
 
     await waitFor(() => {
-      expect(sentBody).not.toBeNull();
+      expect(sent.body).not.toBeNull();
     });
-    expect(sentBody?.url).toBe('https://www.threads.net/@user/post/xyz');
-    expect((sentBody?.options as Record<string, unknown>).fps).toBe(60);
-    expect((sentBody?.options as Record<string, unknown>).target_seconds).toBe(75);
+    expect(sent.body?.url).toBe('https://www.threads.net/@user/post/xyz');
+    expect(sent.body?.options?.fps).toBe(60);
+    expect(sent.body?.options?.target_seconds).toBe(75);
   });
 
   it('detects existing link and shows duplicate dialog, with open existing or force new', async () => {
@@ -129,7 +131,7 @@ describe('PostvQuickPage', () => {
       'GET /api/voices': defaultVoices,
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
-      'POST /api/postv/auto': async (_url, init) => {
+      'POST /api/postv/auto': async (_url: string, init?: RequestInit) => {
         const body = JSON.parse(init?.body as string);
         if (body.force_new) {
           secondCallForceNew = true;

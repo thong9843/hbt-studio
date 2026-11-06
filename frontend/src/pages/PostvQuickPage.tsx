@@ -127,7 +127,7 @@ export function PostvQuickPage() {
 
   // Nối SSE cho một Job đang chạy
   const connectSSE = useCallback(
-    (jId: string, _slug?: string) => {
+    (jId: string) => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
@@ -220,7 +220,7 @@ export function PostvQuickPage() {
         setJobId(runningJob.id);
         setProjectSlug(runningJob.slug);
         setSubmittedInput(`Dự án: ${runningJob.slug}`);
-        connectSSE(runningJob.id, runningJob.slug);
+        connectSSE(runningJob.id);
       }
     }
   }, [activeJobs, jobId, connectSSE]);
@@ -281,7 +281,7 @@ export function PostvQuickPage() {
           done: 'waiting',
         });
         setProgressPct(5);
-        connectSSE(res.job_id, res.project_slug);
+        connectSSE(res.job_id);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -315,7 +315,7 @@ export function PostvQuickPage() {
       const res = await api.retryPostvQuick(jobId);
       if (res.job_id) {
         setJobId(res.job_id);
-        connectSSE(res.job_id, res.project_slug);
+        connectSSE(res.job_id);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

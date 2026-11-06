@@ -14,22 +14,20 @@ from __future__ import annotations
 import logging
 import random
 import re
-import time
 import unicodedata
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from hbt.library import MusicLibrary
 from hbt.models import Music
-from hbt.pipeline.cancel import CancelToken, RenderCancelled
+from hbt.pipeline.cancel import RenderCancelled
 from hbt.pipeline.render import RenderOptions
 from hbt.postv.backgrounds import BackgroundLibrary
-from hbt.postv.models import PostvComment, PostvHook, PostvPost, PostvProject, PostvSegment
+from hbt.postv.models import PostvComment, PostvPost, PostvProject, PostvSegment
 from hbt.postv.parse import parse_threads_text
 from hbt.postv.script import estimate_seconds, voice_chars
 from hbt.postv.threads import ThreadsFetchError, extract_threads_post, is_threads_url
-from hbt.postv.voice import VoiceError, VoiceUnavailable, build_plan, synthesize_plan
+from hbt.postv.voice import VoiceUnavailable, build_plan, synthesize_plan
 from hbt.storage import Storage
 
 log = logging.getLogger(__name__)
@@ -241,16 +239,16 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
         except ThreadsFetchError as e:
             err_str = str(e)
             if "404" in err_str:
-                code = 404
-                msg = "[404] Bài viết Threads không tồn tại hoặc đã bị xoá. Gợi ý: Dán chữ bài vào khung."
+                msg = (
+                    "[404] Bài viết Threads không tồn tại hoặc đã bị xoá. "
+                    "Gợi ý: Dán chữ bài vào khung."
+                )
             elif any(
                 k in err_str.lower()
                 for k in ["kết nối", "máy chủ", "timeout", "connect", "network"]
             ):
-                code = 502
                 msg = "[502] Không thể kết nối tới Threads. Gợi ý: Dán chữ bài vào khung."
             else:
-                code = 422
                 msg = f"[422] {err_str}. Gợi ý: Dán chữ bài vào khung."
             raise RuntimeError(msg) from e
         except Exception as e:
@@ -261,7 +259,8 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
         parsed = parse_threads_text(clean_input)
         if not parsed.post or not parsed.post.text.strip():
             raise RuntimeError(
-                "[422] Không trích xuất được bài viết từ nội dung dán. Gợi ý: Dán chữ bài vào khung."
+                "[422] Không trích xuất được bài viết từ nội dung dán. "
+                "Gợi ý: Dán chữ bài vào khung."
             )
 
     project = job_manager.storage.load_any(job.slug)

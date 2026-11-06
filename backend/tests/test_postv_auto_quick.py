@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from hbt.main import app
-from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.render import RenderResult
 from hbt.postv.auto import (
+    STAGE_DONE,
     STAGE_FETCH,
     STAGE_PICK,
+    STAGE_RENDER,
     STAGE_SCRIPT,
     STAGE_VOICE,
-    STAGE_RENDER,
-    STAGE_DONE,
     find_existing_url,
     get_hook_text,
     run_auto_job,
 )
-from hbt.postv.models import PostvComment, PostvPost, PostvProject, PostvSegment
+from hbt.postv.models import PostvProject
 from hbt.postv.parse import ParsedComment, ParsedPost, ParseResult
 from hbt.postv.threads import ThreadsFetchError
 
