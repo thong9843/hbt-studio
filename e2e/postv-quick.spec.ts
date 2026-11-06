@@ -154,7 +154,7 @@ test('PV9: Dán link → thấy 6 bước tiến trình → thấy video hoàn t
   await textarea.fill('https://www.threads.net/@tac_gia/post/test123');
 
   // Bấm Tạo video
-  const createBtn = page.getByRole('button', { name: T.createBtn });
+  const createBtn = page.getByRole('main').getByRole('button', { name: T.createBtn });
   await expect(createBtn).toBeEnabled();
   await createBtn.click();
 
@@ -164,7 +164,7 @@ test('PV9: Dán link → thấy 6 bước tiến trình → thấy video hoàn t
   await expect(page.getByText(T.stages.script)).toBeVisible();
   await expect(page.getByText(T.stages.voice)).toBeVisible();
   await expect(page.getByText(T.stages.render)).toBeVisible();
-  await expect(page.getByText(T.stages.done)).toBeVisible();
+  await expect(page.getByText(T.stages.done, { exact: true })).toBeVisible();
 
   // Thấy thẻ kết quả video đã hoàn thành
   await expect(page.getByText(T.result.title)).toBeVisible({ timeout: 15_000 });

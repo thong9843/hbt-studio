@@ -153,33 +153,7 @@ function OpenProject({ slug, mini }: { slug: string; mini: boolean }) {
   );
 }
 
-/** Khối dự án PostV đang mở (chế độ rút gọn): Tạo video + Video gần đây (PV9). */
-function OpenPostvQuickProject({ slug, mini }: { slug: string; mini: boolean }) {
-  const { data } = useQuery({
-    queryKey: ['projects'],
-    queryFn: api.listProjects,
-    staleTime: 30_000,
-  });
-  const name = data?.find((p) => p.slug === slug)?.title ?? slug;
-  return (
-    <div aria-label={vi.nav.openProject} role="group" className="mt-2 space-y-1">
-      {!mini && (
-        <p className="truncate px-3 pt-2 text-tiny font-semibold text-muted" title={name}>
-          {name}
-        </p>
-      )}
-      <NavItem to="/postv" end icon={<PlusIcon />} label={vi.postvQuick.navCreate} mini={mini} />
-      <NavItem
-        to="/projects?kind=postv"
-        icon={<FolderIcon />}
-        label={vi.postvQuick.navRecent}
-        mini={mini}
-      />
-    </div>
-  );
-}
-
-/** Khối dự án PostV đang mở: tên + 5 bước PostV (chỉ khi bật Chế độ nâng cao). */
+/** Khối dự án PostV đang mở: tên + 5 bước PostV (chỉ khi ở /postv/:slug hoặc khi bật Chế độ nâng cao). */
 function OpenPostvProject({ slug, mini }: { slug: string; mini: boolean }) {
   const { data } = useQuery({
     queryKey: ['projects'],
@@ -273,6 +247,13 @@ export function SideNav({ mini, render }: Props) {
       return false;
     }
   })();
+  const { data: allProjects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: api.listProjects,
+    staleTime: 30_000,
+  });
+  const latestPostvSlug = allProjects?.find((p) => p.kind === 'postv')?.slug;
+  const showPostvProjectSlug = postvSlug || (isAdvanced ? latestPostvSlug : undefined);
 
   return (
     <aside
@@ -308,12 +289,7 @@ export function SideNav({ mini, render }: Props) {
           <NavItem to="/postv" icon={<ChatIcon />} label={vi.nav.postv} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
-        {postvSlug &&
-          (isAdvanced ? (
-            <OpenPostvProject slug={postvSlug} mini={mini} />
-          ) : (
-            <OpenPostvQuickProject slug={postvSlug} mini={mini} />
-          ))}
+        {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}
         <div className="mt-2">
           <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
         </div>

@@ -590,8 +590,8 @@ export function PostvQuickPage() {
             </div>
           )}
 
-          {/* TRƯỜNG HỢP 2: ĐANG CHẠY CHUỖI TỰ ĐỘNG HOẶC BỊ LỖI */}
-          {jobId && !isFinished && (
+          {/* TRƯỜNG HỢP 2: ĐANG CHẠY CHUỖI TỰ ĐỘNG HOẶC ĐÃ HOÀN THÀNH */}
+          {jobId && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               {/* Tin nhắn liên kết / trích đoạn người dùng vừa dán */}
               <div className="flex justify-end">
@@ -687,16 +687,18 @@ export function PostvQuickPage() {
                 )}
 
                 {/* Nút hành động */}
-                <div className="mt-6 flex justify-end gap-3 border-t border-line pt-4">
-                  <Button size="sm" tone="soft" onClick={handleCancel}>
-                    {T.progress.cancel}
-                  </Button>
-                  {errorMessage && (
-                    <Button size="sm" tone="brand" onClick={handleRetry}>
-                      {T.progress.retry}
+                {!isFinished && (
+                  <div className="mt-6 flex justify-end gap-3 border-t border-line pt-4">
+                    <Button size="sm" tone="soft" onClick={handleCancel}>
+                      {T.progress.cancel}
                     </Button>
-                  )}
-                </div>
+                    {errorMessage && (
+                      <Button size="sm" tone="brand" onClick={handleRetry}>
+                        {T.progress.retry}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </Card>
             </div>
           )}
