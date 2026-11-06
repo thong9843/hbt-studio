@@ -30,6 +30,7 @@ import type {
   DraftDoc,
   HbtVoiceInfo,
   DraftCreated,
+  MemeEntry,
   ScriptApplied,
   ScriptCheck,
   ScriptExtra,
@@ -57,6 +58,20 @@ export const api = {
     apiRequest<AnyProject>('PUT', `/projects/${enc(slug)}`, { json: project }),
   parsePostv: (text: string) =>
     apiRequest<PostvParseResult>('POST', '/postv/parse', { json: { text } }),
+  fetchThreads: (url: string) =>
+    apiRequest<PostvParseResult>('POST', '/postv/fetch-threads', { json: { url } }),
+  searchMemes: (q: string, count = 12) =>
+    apiGet<MemeEntry[]>(`/memes/search?q=${enc(q)}&count=${count}`),
+  listMemeLibrary: () => apiGet<MemeEntry[]>('/memes/library'),
+  downloadMeme: (body: {
+    meme_id: string;
+    video_url: string;
+    title: string;
+    poster_url?: string;
+    source?: string;
+    license?: string;
+  }) => apiRequest<MemeEntry>('POST', '/memes/download', { json: body }),
+  deleteMeme: (memeId: string) => apiRequest<{ status: string }>('DELETE', `/memes/${enc(memeId)}`),
   postvCheck: (slug: string) =>
     apiRequest<PostvCheck>('POST', `/projects/${enc(slug)}/postv/script/check`, { json: {} }),
   saveProject: (slug: string, project: Project) =>

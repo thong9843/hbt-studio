@@ -93,6 +93,17 @@ export function PostvSourcePage() {
     },
   });
 
+  const fetchThreads = useMutation({
+    mutationFn: (url: string) => api.fetchThreads(url),
+    onSuccess: (res) => {
+      setNotice(res.warnings);
+      if (res.post) {
+        if (hasSource) setPending(res);
+        else apply(res);
+      }
+    },
+  });
+
   async function pickFile(file: File | undefined) {
     if (!file) return;
     setFileError(null);
@@ -264,6 +275,14 @@ export function PostvSourcePage() {
               }
             />
           </div>
+          <Button
+            tone="soft"
+            busy={fetchThreads.isPending}
+            disabled={!isHttp(project.source.url) || fetchThreads.isPending}
+            onClick={() => fetchThreads.mutate(project.source.url.trim())}
+          >
+            {fetchThreads.isPending ? t.fetchingThreads : t.fetchThreads}
+          </Button>
           {isHttp(project.source.url) ? (
             <a
               href={project.source.url.trim()}
@@ -279,6 +298,7 @@ export function PostvSourcePage() {
             </Button>
           )}
         </div>
+        <ErrorNote error={fetchThreads.error} />
       </Card>
 
       {/* Cột 2: kết quả tách, sửa tay */}

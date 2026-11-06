@@ -18,6 +18,7 @@ from hbt.api import (
     gd2,
     health,
     lint,
+    memes,
     music,
     postv,
     projects,
@@ -32,6 +33,7 @@ from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
 from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.censor import CensorStore
+from hbt.postv.memes import MemeLibrary
 from hbt.postv.voice import VieNeuProvider, VoiceProvider
 from hbt.sensitive import SensitiveStore
 from hbt.state import AppState
@@ -91,6 +93,7 @@ def create_app(
         postv_words=postv_words,
         backgrounds=BackgroundLibrary(settings.library_dir),
         voice=voice,
+        memes=MemeLibrary(settings.library_dir),
     )
 
     @asynccontextmanager
@@ -134,6 +137,7 @@ def create_app(
         postv,
         backgrounds,
         voices,
+        memes,
         gd2,
     ):
         app.include_router(module.router, prefix="/api")

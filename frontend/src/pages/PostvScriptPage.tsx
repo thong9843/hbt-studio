@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { MemePickerModal } from '../components/postv/MemePickerModal';
 import { PostvMusicCard } from '../components/postv/PostvMusicCard';
 import { PostvScriptJsonDialog } from '../components/postv/PostvScriptJsonDialog';
 import { PostvVoiceCard } from '../components/postv/PostvVoiceCard';
@@ -24,6 +25,7 @@ export function PostvScriptPage() {
   const { project, update, flush } = usePostvEditor();
   const navigate = useNavigate();
   const [jsonDialogOpen, setJsonDialogOpen] = useState(false);
+  const [activeMemeIndex, setActiveMemeIndex] = useState<number | null>(null);
   const t = vi.postv.script;
   const roles = vi.postv.pick.roles;
   const V = vi.postv.voice;
@@ -38,6 +40,17 @@ export function PostvScriptPage() {
     update((p) => ({
       ...p,
       segments: p.segments.map((s, k) => (k === i ? { ...s, voice } : s)),
+    }));
+  const setMeme = (
+    i: number,
+    memeId: string | null,
+    pos?: 'bottom_right' | 'bottom_center' | 'center',
+  ) =>
+    update((p) => ({
+      ...p,
+      segments: p.segments.map((s, k) =>
+        k === i ? { ...s, meme_id: memeId, meme_pos: pos ?? s.meme_pos ?? 'bottom_right' } : s,
+      ),
     }));
   const total = totalSeconds(project.segments);
   const empty = project.segments.filter((s) => s.role !== 'commentary' && !s.voice.trim()).length;
@@ -76,6 +89,29 @@ export function PostvScriptPage() {
                   <span className="min-w-0 flex-1 truncate text-muted">
                     {t.reader(nameOf(who))}
                   </span>
+                  {s.meme_id ? (
+                    <div className="flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold truncate max-w-[120px]">
+                        🎬 {s.meme_id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setMeme(i, null)}
+                        className="text-xs text-danger hover:underline"
+                        title={vi.postv.memes.removeMeme}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveMemeIndex(i)}
+                      className="px-2 py-0.5 rounded text-xs bg-soft hover:bg-muted/20 text-muted font-semibold transition-colors"
+                    >
+                      + Meme
+                    </button>
+                  )}
                   <span className="num text-muted">
                     {t.chars(voiceChars(s.voice))} ·{' '}
                     {s.voice.trim() ? t.seconds(segmentSeconds(s)) : '—'}
@@ -119,6 +155,18 @@ export function PostvScriptPage() {
       </aside>
 
       <PostvScriptJsonDialog open={jsonDialogOpen} onClose={() => setJsonDialogOpen(false)} />
+
+      {activeMemeIndex !== null && (
+        <MemePickerModal
+          open={true}
+          onClose={() => setActiveMemeIndex(null)}
+          currentMemeId={project.segments[activeMemeIndex]?.meme_id}
+          currentPos={project.segments[activeMemeIndex]?.meme_pos}
+          onSelect={(memeId, pos) => {
+            setMeme(activeMemeIndex, memeId, pos);
+          }}
+        />
+      )}
     </div>
   );
 }

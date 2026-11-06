@@ -294,6 +294,22 @@ export interface PostvSegment {
   ref: string | null;
   /** Ai đọc đoạn: "narrator", "post" hoặc id bình luận; null/thiếu = theo vai trò. */
   speaker?: string | null;
+  meme_id?: string | null;
+  meme_pos?: 'bottom_right' | 'bottom_center' | 'center';
+}
+
+export interface MemeEntry {
+  id: string;
+  title: string;
+  file: string;
+  video_url: string;
+  poster_url: string;
+  duration: number;
+  width: number;
+  height: number;
+  downloaded: boolean;
+  source?: string;
+  license?: string;
 }
 
 /** Dự án PostV (docs/postv/IMPLEMENT-POSTV.md mục 3). Có `kind: "postv"`, không có `scenes`. */

@@ -73,6 +73,8 @@ class PostvSegment(_Model):
     ref: str | None = None  # id bình luận khi role == "comment"
     # ai đọc đoạn: "narrator", "post" hoặc id bình luận; None = theo `role` (6d)
     speaker: str | None = Field(default=None, max_length=40)
+    meme_id: str | None = None  # id meme từ library/memes/
+    meme_pos: Literal["bottom_right", "bottom_center", "center"] = "bottom_right"
 
 
 class PostvHook(_Model):
