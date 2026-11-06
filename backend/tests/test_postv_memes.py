@@ -55,6 +55,8 @@ def test_meme_library_download_and_find(meme_lib, monkeypatch):
         assert entry.title == "Mèo nhảy"
         assert entry.duration == 4.5
         assert entry.downloaded is True
+        assert entry.source == "https://media.greenscreenmemes.com/sample.mp4"
+        assert entry.license == "chưa rõ"
 
         found, path = meme_lib.find("cat-1")
         assert found.id == "cat-1"

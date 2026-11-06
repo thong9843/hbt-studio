@@ -43,6 +43,8 @@ class MemeEntry(BaseModel):
     width: int = 0
     height: int = 0
     downloaded: bool = False
+    source: str = ""  # URL gốc
+    license: str = "chưa rõ"  # giấy phép
 
 
 class MemeLibrary:
@@ -149,6 +151,8 @@ class MemeLibrary:
                         poster_url=poster_url,
                         duration=0.0,
                         downloaded=False,
+                        source=page_link or video_url,
+                        license="chưa rõ",
                     )
 
                 tasks = [fetch_item_details(p) for p in posts]
@@ -163,7 +167,15 @@ class MemeLibrary:
                 return [e for e in local_entries.values() if q_lower in e.title.lower()]
             return list(local_entries.values())
 
-    def download(self, meme_id: str, video_url: str, title: str, poster_url: str = "") -> MemeEntry:
+    def download(
+        self,
+        meme_id: str,
+        video_url: str,
+        title: str,
+        poster_url: str = "",
+        source: str = "",
+        license: str = "chưa rõ",
+    ) -> MemeEntry:
         """Tải file video meme MP4 về lưu trong library/memes/ và cập nhật index.json."""
         if not video_url.startswith(("http://", "https://")):
             raise BadRequest("URL video meme không hợp lệ")
@@ -178,6 +190,10 @@ class MemeLibrary:
             for e in entries:
                 if e.id == meme_id:
                     e.downloaded = True
+                    if source and not e.source:
+                        e.source = source
+                    if license and not e.license:
+                        e.license = license
                     return e
 
         # Tải video
@@ -214,6 +230,8 @@ class MemeLibrary:
             width=width,
             height=height,
             downloaded=True,
+            source=source or video_url,
+            license=license or "chưa rõ",
         )
 
         entries = [e for e in self._read_index() if e.id != meme_id]

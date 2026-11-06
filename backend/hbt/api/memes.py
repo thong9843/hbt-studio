@@ -16,6 +16,8 @@ class DownloadMemeBody(BaseModel):
     video_url: str
     title: str
     poster_url: str = ""
+    source: str = ""
+    license: str = "chưa rõ"
 
 
 @router.get("/memes/search", response_model=list[MemeEntry])
@@ -42,6 +44,8 @@ def download_meme_endpoint(body: DownloadMemeBody, state: State):
         video_url=body.video_url,
         title=body.title,
         poster_url=body.poster_url,
+        source=body.source,
+        license=body.license,
     )
 
 

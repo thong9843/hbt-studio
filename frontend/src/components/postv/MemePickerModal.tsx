@@ -53,6 +53,8 @@ export function MemePickerModal({
         video_url: meme.video_url,
         title: meme.title,
         poster_url: meme.poster_url,
+        source: meme.source || meme.video_url,
+        license: meme.license || 'chưa rõ',
       }),
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['memes-library'] });

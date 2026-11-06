@@ -68,6 +68,8 @@ export const api = {
     video_url: string;
     title: string;
     poster_url?: string;
+    source?: string;
+    license?: string;
   }) => apiRequest<MemeEntry>('POST', '/memes/download', { json: body }),
   deleteMeme: (memeId: string) => apiRequest<{ status: string }>('DELETE', `/memes/${enc(memeId)}`),
   postvCheck: (slug: string) =>

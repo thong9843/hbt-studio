@@ -308,6 +308,8 @@ export interface MemeEntry {
   width: number;
   height: number;
   downloaded: boolean;
+  source?: string;
+  license?: string;
 }
 
 /** Dự án PostV (docs/postv/IMPLEMENT-POSTV.md mục 3). Có `kind: "postv"`, không có `scenes`. */

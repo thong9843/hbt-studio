@@ -540,3 +540,8 @@ Tổng ước lượng (chưa tính đợt fix/cover-drop đã hoãn): **18,5 bu
 | R12 | Synth + render cùng lúc làm quá tải máy                                                                     | Thấp | Một luồng job (N5)                                                                                                                              |
 | R13 | Nối nhiều clip nền cắt thẳng nhìn giật                                                                      | Thấp | Mẫu của chủ dự án cũng cắt thẳng (7,5/15 s) → chấp nhận (K-17)                                                                                  |
 | R14 | Điều khoản Threads gốc chưa đọc **[?]**                                                                     | Vừa  | Chủ dự án đọc `help.instagram.com/769983657850414`                                                                                              |
+
+## 11. Nhật ký quyết định
+
+- **PV7b (06/11/2026):** Nới N4, backend gọi ra `threads.net` (lấy bài theo link) và `greenscreenmemes.com` (tìm/tải meme). Đường tạm; nguồn chính thức xem `claude/GD4-THREADS-SPEC.md`.
+- **Meme (06/11/2026):** Meme trong `library/memes/index.json` có trường `source` (URL gốc) và `license` ("chưa rõ" nếu không có).
