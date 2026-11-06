@@ -116,7 +116,11 @@ def test_api_memes_endpoints(client, monkeypatch):  # noqa: F811
     mock_resp.status_code = 200
     mock_resp.content = b"fake mp4 video bytes"
 
-    with patch("httpx.Client.get", return_value=mock_resp):
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_client.get.return_value = mock_resp
+
+    with patch("hbt.postv.memes.httpx.Client", return_value=mock_client):
         # 1. Download
         r_down = client.post(
             "/api/memes/download",
@@ -129,12 +133,12 @@ def test_api_memes_endpoints(client, monkeypatch):  # noqa: F811
         assert r_down.status_code == 200
         assert r_down.json()["id"] == "test-cat"
 
-        # 2. List library
-        r_list = client.get("/api/memes/library")
-        assert r_list.status_code == 200
-        items = r_list.json()
-        assert any(i["id"] == "test-cat" for i in items)
+    # 2. List library (ngoài with-patch để TestClient.get gọi vào FastAPI thật)
+    r_list = client.get("/api/memes/library")
+    assert r_list.status_code == 200
+    items = r_list.json()
+    assert any(i["id"] == "test-cat" for i in items)
 
-        # 3. Delete
-        r_del = client.delete("/api/memes/test-cat")
-        assert r_del.status_code == 200
+    # 3. Delete
+    r_del = client.delete("/api/memes/test-cat")
+    assert r_del.status_code == 200
