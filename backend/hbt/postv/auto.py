@@ -403,14 +403,14 @@ def _step_script(
         try:
             from hbt.api.gd2 import Gd2Prefs
 
-            settings_dir = (
-                job_manager.storage.workspace_dir / "settings"
+            ws_dir = (
+                job_manager.storage.workspace_dir
                 if hasattr(job_manager.storage, "workspace_dir")
                 and job_manager.storage.workspace_dir
                 else None
             )
-            if settings_dir:
-                chosen_voice = Gd2Prefs(settings_dir).voice_id()
+            if ws_dir:
+                chosen_voice = Gd2Prefs(ws_dir).voice_id()
         except Exception:
             pass
 

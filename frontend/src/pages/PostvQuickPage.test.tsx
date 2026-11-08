@@ -254,9 +254,9 @@ describe('PostvQuickPage', () => {
       es.emit('end', {
         status: 'done',
         output: {
-          video: 'renders/job-done-123/video.mp4',
-          cover: 'renders/job-done-123/cover.jpg',
-          publish: 'renders/job-done-123/publish.txt',
+          video: '/api/files/renders/job-done-123/video.mp4',
+          cover: '/api/files/renders/job-done-123/cover.jpg',
+          publish: '/api/files/renders/job-done-123/publish.txt',
           duration: 72.5,
           fps: 60,
           project_slug: 'postv-done',
@@ -266,9 +266,15 @@ describe('PostvQuickPage', () => {
 
     // Thẻ kết quả
     expect(await screen.findByText('Video đã hoàn tất!')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Tải video' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tải video' })).toHaveAttribute(
+      'href',
+      '/api/files/renders/job-done-123/video.mp4',
+    );
     expect(screen.getByRole('button', { name: 'Sao chép nội dung đăng' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Tải ảnh bìa' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tải ảnh bìa' })).toHaveAttribute(
+      'href',
+      '/api/files/renders/job-done-123/cover.jpg',
+    );
     expect(screen.getByRole('link', { name: 'Chỉnh chi tiết' })).toHaveAttribute(
       'href',
       '/postv/postv-done/export',

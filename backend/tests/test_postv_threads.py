@@ -44,11 +44,13 @@ def test_is_threads_url():
     assert is_threads_url("https://threads.net/@user/post/12345")
     assert is_threads_url("http://threads.net/t/abc_123")
     assert is_threads_url("www.threads.net/@abc/post/xyz")
+    assert is_threads_url("https://www.threads.com/share/EAZtg3gKD/")
 
     assert not is_threads_url("https://facebook.com/post/123")
     assert not is_threads_url("https://threads.net/")
     assert not is_threads_url("https://threads.net/@user")
     assert not is_threads_url("chữ thường không phải link")
+    assert not is_threads_url("https://www.threads.com/@user/post/123\nuser_a\n17h\nBài gốc")
 
 
 def test_extract_threads_post_success(monkeypatch):
