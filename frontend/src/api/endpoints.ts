@@ -44,7 +44,8 @@ import type {
 const enc = encodeURIComponent;
 
 /** URL của file trong workspace (đường dẫn tương đối so với workspace). */
-export const fileUrl = (rel: string) => `/api/files/${rel}`;
+export const fileUrl = (rel: string) =>
+  rel.startsWith('/api/files/') ? rel : `/api/files/${rel.replace(/^\/+/, '')}`;
 
 /** URL của file nằm trong thư mục project. */
 export const projectFileUrl = (slug: string, rel: string) => fileUrl(`projects/${slug}/${rel}`);

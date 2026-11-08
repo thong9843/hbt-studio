@@ -198,25 +198,51 @@ export function PostvQuickPage() {
       });
 
       es.onerror = () => {
-        // Tự đóng để EventSource reconnect theo cơ chế của trình duyệt
+        if (es.readyState === EventSource.CLOSED) {
+          void api
+            .getJob(jId)
+            .then((final) => {
+              if (final.status === 'done') {
+                setStageStatuses({
+                  fetch: 'done',
+                  pick: 'done',
+                  script: 'done',
+                  voice: 'done',
+                  render: 'done',
+                  done: 'done',
+                });
+                setProgressPct(100);
+                setIsFinished(true);
+                if (final.output) {
+                  setOutput(final.output as CompletedOutput);
+                }
+                void refetchProjects();
+              } else if (final.status === 'failed') {
+                setErrorMessage(final.error || 'Có lỗi xảy ra trong quá trình tạo video');
+              }
+            })
+            .catch(() => {});
+        }
       };
     },
     [refetchProjects],
   );
 
   // Phục hồi job đang chạy khi tải lại trang
+  const hasRestoredJobRef = useRef(false);
   const { data: activeJobs } = useQuery({
     queryKey: ['active-jobs'],
     queryFn: api.listActiveJobs,
-    refetchInterval: isFinished || !!errorMessage ? false : 3000,
+    refetchInterval: isFinished || !!errorMessage || !!jobId ? false : 3000,
   });
 
   useEffect(() => {
-    if (!jobId && activeJobs && activeJobs.length > 0) {
+    if (!hasRestoredJobRef.current && !jobId && activeJobs && activeJobs.length > 0) {
       const runningJob = activeJobs.find(
         (j) => (j.kind === 'postv_quick' || j.kind === 'postv_auto') && j.status === 'running',
       );
       if (runningJob) {
+        hasRestoredJobRef.current = true;
         setJobId(runningJob.id);
         setProjectSlug(runningJob.slug);
         setSubmittedInput(`Dự án: ${runningJob.slug}`);
@@ -266,6 +292,7 @@ export function PostvQuickPage() {
       }
 
       if (res.job_id) {
+        hasRestoredJobRef.current = true;
         setJobId(res.job_id);
         setProjectSlug(res.project_slug);
         setSubmittedInput(textToSubmit);
@@ -314,6 +341,7 @@ export function PostvQuickPage() {
     try {
       const res = await api.retryPostvQuick(jobId);
       if (res.job_id) {
+        hasRestoredJobRef.current = true;
         setJobId(res.job_id);
         connectSSE(res.job_id);
       }

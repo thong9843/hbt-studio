@@ -36,12 +36,14 @@ class ThreadsFetchError(Exception):
 def is_threads_url(url: str) -> bool:
     """Kiểm tra một chuỗi có phải là đường dẫn bài viết Threads hợp lệ không."""
     s = url.strip()
+    if not s or any(c.isspace() for c in s):
+        return False
     if not s.startswith(("http://", "https://")):
         s = "https://" + s
     try:
         parsed = urlparse(s)
         return parsed.netloc.lower() in THREADS_HOSTS and bool(
-            re.search(r"/(?:post|t)/[A-Za-z0-9_-]+", parsed.path)
+            re.search(r"/(?:post|t|share)/[A-Za-z0-9_-]+", parsed.path)
         )
     except Exception:
         return False
@@ -88,12 +90,13 @@ def extract_threads_post(url: str, timeout: float = 15.0) -> ParseResult:
 
     # 2. Xác định Handle (@username)
     raw_title = og.get("og:title", "")
+    final_path = getattr(getattr(resp, "url", None), "path", None) or parsed_url.path
     handle = "user"
     user_match = re.search(r"\(@([a-zA-Z0-9._]+)\)", raw_title)
     if user_match:
         handle = user_match.group(1).strip()
     else:
-        path_match = re.search(r"/@([a-zA-Z0-9._]+)", parsed_url.path)
+        path_match = re.search(r"/@([a-zA-Z0-9._]+)", f"{final_path} {parsed_url.path}")
         if path_match:
             handle = path_match.group(1).strip()
 
