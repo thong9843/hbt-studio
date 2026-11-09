@@ -45,7 +45,7 @@ export function ChattingHome() {
   // Lắng nghe tiến độ SSE khi có activeJob
   useEffect(() => {
     if (!activeJob) return;
-    const es = new EventSource(`/api/render/events/${activeJob.id}`);
+    const es = new EventSource(`/api/jobs/${activeJob.id}/events`);
 
     es.addEventListener('progress', (e) => {
       try {
@@ -118,7 +118,7 @@ export function ChattingHome() {
   const isOllamaMissing = !isStatusLoading && status && !status.ollama_running;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <main className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-8 text-center">
         <h1 className="flex items-center justify-center gap-3 text-3xl font-extrabold tracking-tight">
           <MessagesSquareIcon size={32} />
@@ -306,6 +306,6 @@ export function ChattingHome() {
           <p className="text-body text-muted">{vi.chatting.noRecent}</p>
         )}
       </div>
-    </div>
+    </main>
   );
 }

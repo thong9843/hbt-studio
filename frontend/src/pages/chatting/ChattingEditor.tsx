@@ -42,7 +42,7 @@ export function ChattingEditor() {
   // Lắng nghe tiến độ dựng SSE
   useEffect(() => {
     if (!renderJobId) return;
-    const es = new EventSource(`/api/render/events/${renderJobId}`);
+    const es = new EventSource(`/api/jobs/${renderJobId}/events`);
 
     es.addEventListener('progress', (e) => {
       try {

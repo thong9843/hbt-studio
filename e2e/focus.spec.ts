@@ -29,6 +29,7 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
       page.getByRole('link', { name: vi.nav.home, exact: true }),
       page.getByRole('link', { name: vi.nav.projects, exact: true }),
       page.getByRole('link', { name: vi.nav.postv, exact: true }),
+      page.getByRole('link', { name: vi.nav.chatting, exact: true }),
       page.getByRole('link', { name: vi.nav.settings, exact: true }),
       page.getByRole('button', { name: /^Đổi sang chế độ/ }),
     ];
@@ -37,7 +38,7 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
       await expect(stop).toBeFocused();
     }
     // Có vòng focus nhìn thấy (focus-visible) trên mục đang chọn bằng bàn phím.
-    const outline = await order[6].evaluate((el) => getComputedStyle(el).outlineStyle);
+    const outline = await order[7].evaluate((el) => getComputedStyle(el).outlineStyle);
     expect(outline).not.toBe('none');
 
     // 2. Dialog: Tab/Shift+Tab không ra ngoài; Esc đóng và trả focus về nút "Tạo video".
@@ -103,6 +104,7 @@ test('Tab/focus: thanh trái dự án PostV chứa đủ 5 bước và focus the
       page.getByRole('link', { name: vi.nav.home, exact: true }),
       page.getByRole('link', { name: vi.nav.projects, exact: true }),
       page.getByRole('link', { name: vi.nav.postv, exact: true }),
+      page.getByRole('link', { name: vi.nav.chatting, exact: true }),
       // 5 bước PostV ở thanh trái
       page.getByRole('link', { name: vi.postv.steps[0], exact: true }),
       page.getByRole('link', { name: vi.postv.steps[1], exact: true }),
