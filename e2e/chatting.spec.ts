@@ -70,4 +70,3 @@ test.describe('Chatting e2e flows (CH3)', () => {
     await request.delete(`${API}/chatting/${slug}`).catch(() => {});
   });
 });
-

@@ -32,4 +32,3 @@ ZALO_THEME = ChatTheme(
     seen_style="text",
     seen_text="Đã xem",
 )
-

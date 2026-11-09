@@ -14,4 +14,3 @@ THEMES: dict[str, ChatTheme] = {
 
 def get_theme(platform: str) -> ChatTheme:
     return THEMES.get(platform.lower(), MESSENGER_THEME)
-

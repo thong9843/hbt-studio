@@ -47,4 +47,3 @@ class ChatTheme:
     seen_style: Literal["mini_avatar", "text"] = "mini_avatar"
     seen_text: str = "Đã xem"
     seen_mini_avatar_size: int = 28
-

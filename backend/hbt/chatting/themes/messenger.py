@@ -32,4 +32,3 @@ MESSENGER_THEME = ChatTheme(
     seen_style="mini_avatar",
     seen_mini_avatar_size=28,
 )
-
