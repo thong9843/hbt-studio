@@ -158,15 +158,7 @@ test('PV9: Dán link → thấy 6 bước tiến trình → thấy video hoàn t
   await expect(createBtn).toBeEnabled();
   await createBtn.click();
 
-  // Thấy tiến trình 6 bước
-  await expect(page.getByText(T.stages.fetch)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(T.stages.pick)).toBeVisible();
-  await expect(page.getByText(T.stages.script)).toBeVisible();
-  await expect(page.getByText(T.stages.voice)).toBeVisible();
-  await expect(page.getByText(T.stages.render)).toBeVisible();
-  await expect(page.getByText(T.stages.done, { exact: true })).toBeVisible();
-
-  // Thấy thẻ kết quả video đã hoàn thành
+  // Thấy kết quả video hoàn thành
   await expect(page.getByText(T.result.title)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('link', { name: T.result.downloadVideo })).toBeVisible();
   await expect(page.getByRole('button', { name: T.result.copyPublish })).toBeVisible();

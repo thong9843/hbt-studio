@@ -64,6 +64,7 @@ class ChatDoc(BaseModel):
     music: str | None = "chill_02"
     characters: list[Character]
     messages: list[Message]
+    warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_rules(self) -> ChatDoc:

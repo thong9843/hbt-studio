@@ -8,10 +8,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hbt.chatting.llm import OllamaClient
+from hbt.chatting.llm import OllamaClient, sanitize_chat_raw
 from hbt.chatting.models import Character, ChatDoc, Message
 from hbt.chatting.render import render_chat_video
-from hbt.chatting.sources import fetch_reddit, parse_link
+from hbt.chatting.sources import fetch_reddit, fetch_threads, parse_link
 from hbt.chatting.store import (
     get_project_dir,
     save_chat,
@@ -61,10 +61,21 @@ def run_chatting_auto_job(
     t0_fetch = time.perf_counter()
 
     kind, link_url = parse_link(raw_input)
-    if kind == "threads":
-        raise ValueError("Chưa lấy được bài Threads, dán nội dung vào ô chat")
-
-    if kind == "reddit" and link_url:
+    if kind == "threads" and link_url:
+        try:
+            source_data = fetch_threads(link_url)
+        except Exception as e:
+            logger.warning("Không thể tải Threads trực tiếp: %s, chuyển sang dùng text dán", e)
+            lines = [line.strip() for line in raw_input.strip().splitlines() if line.strip()]
+            title = lines[0][:60] if lines else "Đoạn chat vui"
+            body = "\n".join(lines[1:]) if len(lines) > 1 else lines[0] if lines else "Nội dung"
+            source_data = {
+                "title": title,
+                "body": body,
+                "comments": [],
+                "source_url": link_url,
+            }
+    elif kind == "reddit" and link_url:
         source_data = fetch_reddit(link_url)
     else:
         # Dán chữ
@@ -113,6 +124,7 @@ def run_chatting_auto_job(
         platform=platform,
     )
     timings.update(llm_timings)
+    chat_raw = sanitize_chat_raw(chat_raw)
 
     # Khởi tạo ChatDoc
     characters: list[Character] = []
@@ -145,6 +157,7 @@ def run_chatting_auto_job(
         background={"name": background_name, "seed": 7},
         characters=characters,
         messages=messages,
+        warnings=chat_raw.get("warnings", []),
     )
 
     # Lưu chat.json và source.json

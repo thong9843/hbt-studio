@@ -1211,7 +1211,7 @@ Dự án có `kind: "postv"`, lưu trữ trong `workspace/projects/<slug>/projec
 
 | Mã | Quyết định | Chi tiết thực hiện |
 |---|---|---|
-| **CH-D1** | Mạng chỉ khi dán link Reddit | Backend chỉ gọi HTTP ngoài khi người dùng dán link Reddit (`www.reddit.com`, `old.reddit.com`, `redd.it`) qua endpoint `.json` công khai. **Link Threads trả 422** yêu cầu dán chữ (chờ GĐ4). Nguồn khác (Voz, Facebook): dán chữ thô. Socket bị chặn ngoài domain Reddit. |
+| **CH-D1** | Nguồn vào Reddit & Threads | Backend hỗ trợ link Reddit (.json công khai) và Threads: **dùng chung PV7b (`extract_threads_post`), rủi ro bị chặn; có đường dán chữ; chuyển API chính thức khi xong GĐ4**. Nguồn khác (Voz, Facebook): dán chữ thô. Socket bị chặn ngoài domain Reddit/Threads. Tự động sanitize kịch bản LLM (cắt tin $\le$ 900 ký tự ưu tiên giữ tin đầu + 2 tin cuối, lọc sticker dư) và trả cảnh báo hiển thị trên UI. |
 | **CH-D2** | Viết chat bằng Ollama local | Sử dụng Ollama tại `http://127.0.0.1:11434`. Model mặc định: **`qwen2.5:3b-instruct`** (cấu hình qua `.env` `CHATTING_MODEL`). Luôn gửi **`keep_alive: 0`** để giải phóng bộ nhớ RAM ngay sau khi sinh kịch bản. Format JSON schema. Đo thời gian `timings` từng pha. |
 | **CH-D3** | Lưu trữ độc lập | Lưu trữ dạng file JSON tại `workspace/chatting/<slug>/chat.json` + `source.json` + media. Không database, không đụng `api/projects.py`. |
 | **CH-D4** | Vẽ giao diện bằng Pillow | Khung hình 1080×1920 mô phỏng Messenger, Zalo: màu sắc, bóng đổ, bo góc chuẩn; **không chứa logo hay tên ứng dụng** trên video. |

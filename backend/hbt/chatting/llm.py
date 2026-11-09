@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from typing import Any
@@ -69,6 +70,173 @@ MOCK_CHAT_RESPONSE = {
         {"from": "me", "text": "Ok chốt luôn bạn ơi!", "sticker": "ok"},
     ],
 }
+
+
+def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Làm sạch và chuẩn hoá dữ liệu từ LLM để luôn thoả mãn mô hình ChatDoc:
+    - Tiêu đề: cắt ngắn tối đa 200 ký tự.
+    - Nhân vật: 2-4 nhân vật, đúng 1 nhân vật bên phải (side: right).
+    - Tin nhắn: 8-30 tin, mỗi tin tối đa 120 ký tự, tổng ký tự tối đa 900.
+    - Cắt tin để tổng <= 900 ký tự (ưu tiên giữ tin đầu + 2 tin cuối).
+    - Lọc sticker: tần suất tối đa 1 sticker mỗi 3 tin (cách nhau ít nhất 2 tin).
+    - Cảnh báo: trả danh sách warnings (số tin cắt, số sticker bỏ) để hiển thị trên UI.
+    """
+    from hbt.chatting.models import VALID_STICKER_TAGS
+
+    data = dict(parsed)
+    warnings: list[str] = []
+    title = str(data.get("title") or "Đoạn chat vui").strip()[:200]
+    data["title"] = title or "Đoạn chat vui"
+
+    # 1. Nhân vật
+    raw_chars = data.get("characters")
+    if not isinstance(raw_chars, list) or len(raw_chars) < 2:
+        chars = [
+            {"id": "me", "name": "Tôi", "side": "right"},
+            {"id": "a", "name": "Bạn", "side": "left"},
+        ]
+    else:
+        chars = []
+        seen_ids: set[str] = set()
+        for idx, c in enumerate(raw_chars[:4]):
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("id") or f"user_{idx}").strip()[:32]
+            if cid in seen_ids or not cid:
+                cid = f"char_{idx}"
+            seen_ids.add(cid)
+            name = str(c.get("name") or f"Người {idx + 1}").strip()[:64]
+            side = c.get("side")
+            if side not in ("left", "right"):
+                side = "left"
+            chars.append({"id": cid, "name": name, "side": side})
+
+        if len(chars) < 2:
+            chars.append({"id": "other", "name": "Bạn", "side": "left"})
+
+        # Đảm bảo đúng 1 nhân vật side right
+        rights = [c for c in chars if c["side"] == "right"]
+        if not rights:
+            chars[0]["side"] = "right"
+        elif len(rights) > 1:
+            for c in rights[1:]:
+                c["side"] = "left"
+
+    data["characters"] = chars
+    valid_cids = {c["id"] for c in chars}
+    default_right = next((c["id"] for c in chars if c["side"] == "right"), chars[0]["id"])
+    default_left = next((c["id"] for c in chars if c["side"] == "left"), chars[1]["id"])
+
+    # 2. Tin nhắn
+    raw_msgs = data.get("messages")
+    if not isinstance(raw_msgs, list):
+        raw_msgs = []
+
+    clean_msgs: list[dict[str, Any]] = []
+    raw_sticker_count = 0
+
+    for idx, m in enumerate(raw_msgs):
+        if not isinstance(m, dict):
+            continue
+        sender = str(m.get("from") or "").strip()
+        if sender not in valid_cids:
+            sender = default_right if idx % 2 == 0 else default_left
+
+        text = str(m.get("text") or "").strip()
+        if not text:
+            text = "..."
+        if len(text) > 120:
+            text = text[:117] + "..."
+
+        st = m.get("sticker")
+        if st is not None:
+            raw_sticker_count += 1
+            st = str(st).strip()
+            if st not in VALID_STICKER_TAGS:
+                st = None
+
+        clean_msgs.append(
+            {
+                "from": sender,
+                "text": text,
+                "sticker": st,
+            }
+        )
+
+    cut_msgs_count = 0
+
+    # Nếu ít hơn 8 tin -> bổ sung thêm cho đủ 8
+    if len(clean_msgs) < 8:
+        while len(clean_msgs) < 8:
+            idx = len(clean_msgs)
+            sender = default_right if idx % 2 == 0 else default_left
+            clean_msgs.append(
+                {
+                    "from": sender,
+                    "text": "Haha thật luôn đấy!" if idx % 2 == 0 else "Ủa sao hay vậy?",
+                    "sticker": None,
+                }
+            )
+    else:
+        # Nếu > 30 tin hoặc tổng ký tự > 900:
+        # Cắt bớt tin từ phần giữa, ưu tiên giữ tin đầu (index 0) và 2 tin cuối (len-2, len-1)
+        # Giữ tối thiểu 8 tin
+        while len(clean_msgs) > 8 and (
+            len(clean_msgs) > 30 or sum(len(m["text"]) for m in clean_msgs) > 900
+        ):
+            # Cắt 1 tin ở giữa (từ index 1 đến len(clean_msgs) - 3)
+            # Chọn tin dài nhất ở phần giữa để giảm tổng ký tự nhanh nhất
+            mid_indices = list(range(1, len(clean_msgs) - 2))
+            if not mid_indices:
+                break
+            best_idx = max(mid_indices, key=lambda i: len(clean_msgs[i]["text"]))
+            clean_msgs.pop(best_idx)
+            cut_msgs_count += 1
+
+        # Nếu sau khi cắt tin còn 8 tin mà tổng ký tự vẫn > 900:
+        # Rút ngắn các tin ở giữa để tổng <= 900
+        total_chars = sum(len(m["text"]) for m in clean_msgs)
+        if total_chars > 900:
+            for idx in range(1, len(clean_msgs) - 2):
+                if total_chars <= 880:
+                    break
+                excess = total_chars - 880
+                cur_len = len(clean_msgs[idx]["text"])
+                cut = min(excess, max(0, cur_len - 30))
+                if cut > 0:
+                    clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
+                    total_chars -= cut
+
+    # 3. Lọc sticker: tối đa 1 sticker mỗi 3 tin và cách nhau ít nhất 2 tin (khoảng cách index >= 3)
+    max_stickers = math.ceil(len(clean_msgs) / 3)
+    kept_stickers = 0
+    last_sticker_idx = -99
+
+    for idx, m in enumerate(clean_msgs):
+        if m.get("sticker") is not None:
+            if kept_stickers < max_stickers and (idx - last_sticker_idx >= 3):
+                kept_stickers += 1
+                last_sticker_idx = idx
+            else:
+                m["sticker"] = None
+
+    dropped_stickers_count = max(0, raw_sticker_count - kept_stickers)
+
+    # 4. Tạo cảnh báo (warnings)
+    if cut_msgs_count > 0:
+        warnings.append(
+            f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
+            "để kịch bản không vượt quá 900 ký tự."
+        )
+    if dropped_stickers_count > 0:
+        warnings.append(
+            f"Đã bỏ {dropped_stickers_count} sticker dư thừa "
+            "để đảm bảo tối đa 1 sticker mỗi 3 tin nhắn."
+        )
+
+    data["messages"] = clean_msgs
+    data["warnings"] = warnings
+    return data
 
 
 class OllamaClient:
@@ -178,6 +346,7 @@ class OllamaClient:
                     and isinstance(parsed.get("characters"), list)
                     and isinstance(parsed.get("messages"), list)
                 ):
+                    parsed = sanitize_chat_raw(parsed)
                     elapsed_s = round(time.perf_counter() - t0, 3)
                     timings = {
                         "llm_s": elapsed_s,

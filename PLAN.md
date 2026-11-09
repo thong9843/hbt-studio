@@ -100,6 +100,7 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 - **CH-D5 (07/11/2026):** Avatar nhân vật kéo thả người dùng hoặc vẽ tròn chữ cái đầu của tên nhân vật.
 - **CH-D6 (07/11/2026):** Sticker từ thư viện local `library/stickers/<tag>/` (10 tag cảm xúc); index.json, chọn ngẫu nhiên theo seed.
 - **CH-D7 (07/11/2026):** 2 Theme ban đầu: Messenger và Zalo; cấu trúc mở rộng ThemeBase hỗ trợ thêm theme sau.
+- **Quyết định 09/11/2026 (Threads Chatting & Sanitize):** Threads trong Chatting dùng chung PV7b (`extract_threads_post`), rủi ro bị chặn; có đường dán chữ; chuyển API chính thức khi xong GĐ4. Tự động sanitize kịch bản LLM (cắt tin $\le$ 900 ký tự ưu tiên giữ tin đầu + 2 tin cuối, lọc sticker dư), trả cảnh báo số tin cắt và sticker bỏ trên UI.
 
 ---
 
@@ -118,5 +119,8 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 | PV7b | ☑ | `v1.14.0`| Meme phông xanh, bóc link Threads tự động |
 | PV9 | ☑ | `v1.15.2`| Quick UI PostV dán link 1 chạm (e2e baseline 22 passed) |
 | **CH0–CH4**| ☑ | **`v1.16.0`**| **Chatting hoàn chỉnh (Ollama Qwen2.5-3B, Messenger/Zalo, stickers, UI 3 cột, bench ~91s, gộp tài liệu)** |
+| **Fix Chatting** | ☑ | **`v1.16.1`** | **Sanitize LLM (cắt tin $\le$ 900 ký tự giữ đầu + 2 cuối, lọc sticker), cảnh báo UI, hỗ trợ Threads** |
+| G4 | ☐ | `v1.17.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
+| GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |
 | G4 | ☐ | `v1.17.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
 | GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |

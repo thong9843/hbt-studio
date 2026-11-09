@@ -83,4 +83,47 @@ describe('Chatting Pages (Vitest)', () => {
     expect(screen.getByText('Xem nhanh')).toBeInTheDocument();
     expect(screen.getByText('Xuất bản đẹp')).toBeInTheDocument();
   });
+
+  it('ChattingEditor: hiển thị thông báo cảnh báo cắt tin và bỏ sticker nếu có', async () => {
+    const mockDocWithWarnings = {
+      hbt_chat: 1,
+      title: 'Đoạn chat có cảnh báo',
+      platform: 'messenger',
+      source: { kind: 'pasted' },
+      background: { name: 'minecraft4-1080p60', seed: 7 },
+      characters: [
+        { id: 'me', name: 'Tôi', side: 'right', voice: 'Adam bựa' },
+        { id: 'a', name: 'Linh', side: 'left', voice: 'Trúc Ly' },
+      ],
+      messages: [
+        { from: 'a', text: 'Ngủ chưa bạn?', sticker: null },
+        { from: 'me', text: 'Chưa, đang thức nè', sticker: 'cuoi' },
+      ],
+      warnings: [
+        'Đã cắt bớt 2 tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) để kịch bản không vượt quá 900 ký tự.',
+        'Đã bỏ 3 sticker dư thừa để đảm bảo tối đa 1 sticker mỗi 3 tin nhắn.',
+      ],
+    };
+
+    stubFetch({
+      'GET /api/chatting/warn-slug': {
+        slug: 'warn-slug',
+        doc: mockDocWithWarnings,
+        source: { title: 'Đoạn chat có cảnh báo', body: '...' },
+        renders: [],
+        preview_url: null,
+      },
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/chatting/:slug" element={<ChattingEditor />} />
+      </Routes>,
+      '/chatting/warn-slug',
+    );
+
+    expect(await screen.findByText(/Lưu ý kịch bản/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã cắt bớt 2 tin nhắn/)).toBeInTheDocument();
+    expect(screen.getByText(/Đã bỏ 3 sticker dư thừa/)).toBeInTheDocument();
+  });
 });
