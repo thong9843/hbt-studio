@@ -98,3 +98,22 @@ def test_fetch_reddit_403_or_429():
     with patch("httpx.Client.get", return_value=mock_resp):
         with pytest.raises(ValueError, match="Không lấy được bài, dán nội dung vào ô chat"):
             fetch_reddit(f"https://redd.it/{post_id}")
+
+
+def test_fetch_threads_success():
+    from unittest.mock import MagicMock
+
+    from hbt.chatting.sources import fetch_threads
+
+    fake_parse = MagicMock()
+    fake_parse.post.handle = "testuser"
+    fake_parse.post.text = "Hôm nay trời đẹp đi uống cà phê"
+    comment_mock = MagicMock()
+    comment_mock.text = "Quán cà phê view đẹp quá"
+    fake_parse.comments = [comment_mock]
+
+    with patch("hbt.postv.threads.extract_threads_post", return_value=fake_parse):
+        res = fetch_threads("https://www.threads.net/@testuser/post/123")
+        assert res["title"] == "Bài viết Threads của @testuser"
+        assert res["body"] == "Hôm nay trời đẹp đi uống cà phê"
+        assert res["comments"] == ["Quán cà phê view đẹp quá"]

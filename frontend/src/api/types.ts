@@ -715,6 +715,7 @@ export interface ChatDoc {
   platform: 'messenger' | 'zalo';
   characters: ChatCharacter[];
   messages: ChatMessage[];
+  warnings?: string[];
   background?: string;
   music?: string;
   settings?: {

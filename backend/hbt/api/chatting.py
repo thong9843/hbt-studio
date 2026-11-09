@@ -11,9 +11,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
-from hbt.chatting.llm import OllamaClient
+from hbt.chatting.llm import OllamaClient, sanitize_chat_raw
 from hbt.chatting.models import ChatDoc, Message
-from hbt.chatting.sources import parse_link
 from hbt.chatting.stickers import count_stickers_per_tag
 from hbt.chatting.store import (
     delete_project,
@@ -67,16 +66,8 @@ def list_chatting_projects(state: State) -> list[dict[str, Any]]:
 def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any]:
     """Tạo dự án Chatting và khởi động job chatting_auto 4 pha."""
     raw_input = body.input.strip()
-    kind, _ = parse_link(raw_input)
 
-    # 1. Kiểm tra link Threads (bản này chưa hỗ trợ)
-    if kind == "threads":
-        raise HTTPException(
-            status_code=422,
-            detail="Chưa lấy được bài Threads, dán nội dung vào ô chat",
-        )
-
-    # 2. Kiểm tra Ollama
+    # 1. Kiểm tra Ollama
     default_m = "qwen2.5:3b-instruct"
     model_name = os.environ.get(
         "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
@@ -228,16 +219,39 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
             comments=source.get("comments"),
             platform=doc.platform,
         )
+        chat_raw = sanitize_chat_raw(chat_raw)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi sinh kịch bản Ollama: {e}") from e
 
-    # Cập nhật messages và title
+    # Cập nhật messages, warnings và title (khớp người gửi với doc.characters hiện tại)
+    char_map: dict[str, str] = {}
+    new_rights = [c["id"] for c in chat_raw.get("characters", []) if c.get("side") == "right"]
+    new_lefts = [c["id"] for c in chat_raw.get("characters", []) if c.get("side") != "right"]
+    old_rights = [c.id for c in doc.characters if c.side == "right"]
+    old_lefts = [c.id for c in doc.characters if c.side != "right"]
+
+    default_old_right = (
+        old_rights[0] if old_rights else (doc.characters[0].id if doc.characters else "me")
+    )
+    default_old_left = (
+        old_lefts[0] if old_lefts else (doc.characters[-1].id if doc.characters else "other")
+    )
+
+    for nr in new_rights:
+        char_map[nr] = default_old_right
+    for i, nl in enumerate(new_lefts):
+        char_map[nl] = old_lefts[i] if i < len(old_lefts) else default_old_left
+
     messages: list[Message] = []
     for m in chat_raw.get("messages", []):
-        messages.append(Message(from_=m["from"], text=m["text"], sticker=m.get("sticker")))
+        sender = char_map.get(
+            m["from"], default_old_right if m["from"] in new_rights else default_old_left
+        )
+        messages.append(Message(from_=sender, text=m["text"], sticker=m.get("sticker")))
 
     doc.title = chat_raw.get("title", doc.title)
     doc.messages = messages
+    doc.warnings = chat_raw.get("warnings", [])
     save_chat(state.settings.workspace_dir, slug, doc)
 
     # Cập nhật timings

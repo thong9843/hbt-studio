@@ -111,3 +111,37 @@ def fetch_reddit(url_or_id: str, timeout: float = 15.0) -> dict[str, str | list[
         "comments": comments,
         "source_url": url_or_id,
     }
+
+
+def fetch_threads(url: str, timeout: float = 15.0) -> dict[str, str | list[str]]:
+    """Lấy bài viết Threads qua hbt.postv.threads.extract_threads_post."""
+    try:
+        from hbt.postv.threads import extract_threads_post
+
+        parsed = extract_threads_post(url, timeout=timeout)
+        handle = ""
+        selftext = ""
+        if parsed.post:
+            handle = getattr(parsed.post, "handle", "") or ""
+            selftext = getattr(parsed.post, "text", "") or ""
+        title = f"Bài viết Threads của @{handle}" if handle else "Bài viết Threads"
+        comments = [c.text for c in (parsed.comments or []) if getattr(c, "text", "").strip()]
+        if len(comments) > 5:
+            comments = comments[:5]
+
+        total_len = len(title) + len(selftext) + sum(len(c) for c in comments)
+        if total_len > MAX_INPUT_CHARS:
+            excess = total_len - MAX_INPUT_CHARS
+            if len(selftext) > excess + 200:
+                selftext = selftext[: len(selftext) - excess] + "..."
+            else:
+                comments = comments[:2]
+
+        return {
+            "title": title,
+            "body": selftext,
+            "comments": comments,
+            "source_url": url,
+        }
+    except Exception as e:
+        raise ValueError(f"Không lấy được bài Threads: {e}") from e

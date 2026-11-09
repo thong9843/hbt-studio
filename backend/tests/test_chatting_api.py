@@ -27,7 +27,7 @@ def test_get_chatting_status(client):
     assert isinstance(data["stickers"], dict)
 
 
-def test_create_threads_link_returns_422(client):
+def test_create_threads_link_accepted(client):
     res = client.post(
         "/api/chatting",
         json={
@@ -35,8 +35,9 @@ def test_create_threads_link_returns_422(client):
             "platform": "messenger",
         },
     )
-    assert res.status_code == 422
-    assert "Chưa lấy được bài Threads, dán nội dung vào ô chat" in res.json()["detail"]
+    assert res.status_code == 200
+    assert "slug" in res.json()
+    assert "job_id" in res.json()
 
 
 def test_create_and_manage_chatting_project(client):

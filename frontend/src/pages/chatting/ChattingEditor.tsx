@@ -149,9 +149,13 @@ export function ChattingEditor() {
       return;
     setIsSaving(true);
     try {
-      await api.regenChattingProject(slug);
+      const res = await api.regenChattingProject(slug);
       refetch();
-      setNotice('Đã viết lại kịch bản!');
+      if (res.doc?.warnings && res.doc.warnings.length > 0) {
+        setNotice(`Đã viết lại kịch bản! (Có ${res.doc.warnings.length} lưu ý)`);
+      } else {
+        setNotice('Đã viết lại kịch bản!');
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Lỗi AI: ${msg}`);
@@ -325,6 +329,19 @@ export function ChattingEditor() {
         {notice && (
           <div className="mt-4 rounded-xl bg-tint-yel/60 p-3 text-tiny font-bold text-text">
             {notice}
+          </div>
+        )}
+
+        {doc.warnings && doc.warnings.length > 0 && (
+          <div className="mt-4 rounded-xl border border-tint-yel/60 bg-tint-yel/20 p-3.5 text-tiny text-text">
+            <div className="flex items-center gap-1.5 font-bold text-accent">
+              <span>⚠️ Lưu ý kịch bản:</span>
+            </div>
+            <ul className="mt-1 list-disc list-inside space-y-0.5 text-muted">
+              {doc.warnings.map((w: string, i: number) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
           </div>
         )}
 
