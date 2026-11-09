@@ -20,7 +20,7 @@ from hbt.postv.auto import (
     get_hook_text,
     run_auto_job,
 )
-from hbt.postv.models import PostvProject
+from hbt.postv.models import PostvComment, PostvProject
 from hbt.postv.parse import ParsedComment, ParsedPost, ParseResult
 from hbt.postv.threads import ThreadsFetchError
 
@@ -315,3 +315,95 @@ def test_run_auto_job_cancel(tmp_path: Path):
     run_auto_job(jm, job)
 
     assert job.status == "cancelled"
+
+
+def test_filter_comments_rules():
+    from hbt.postv.auto import _filter_comments
+    from hbt.postv.censor import CensorMatcher
+    import re
+
+    censor = [CensorMatcher(word="từcấm", category="block", pattern=re.compile(r"từcấm"))]
+
+    raw_comments = [
+        PostvComment(id="c1", handle="u1", text="Ngắn quá", age="1h"),  # < 15 ký tự -> loại
+        PostvComment(id="c2", handle="u2", text="😂😂😂 !!! ???", age="1h"),  # chỉ emoji/ký hiệu -> loại
+        PostvComment(id="c3", handle="u3", text="Bình luận này hợp lệ và có độ dài đủ chuẩn.", age="1h", likes=50),
+        PostvComment(id="c4", handle="u4", text="Bình luận này hợp lệ và có độ dài đủ chuẩn.", age="1h", likes=20),  # trùng lặp -> loại
+        PostvComment(id="c5", handle="u5", text="Nội dung có chứa từcấm này nhé bạn ơi.", age="1h"),  # chứa từ cấm -> loại
+        PostvComment(id="c6", handle="u6", text="Một bình luận khác cũng rất hay và ý nghĩa.", age="1h", likes=100),
+    ]
+
+    filtered = _filter_comments(raw_comments, censor)
+    assert len(filtered) == 2
+    assert filtered[0].id == "c3"
+    assert filtered[1].id == "c6"
+
+
+def test_step_script_starts_with_post_without_hook():
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_script
+
+    slug = "test-no-hook"
+    proj = PostvProject(version=1, kind="postv", slug=slug, title="No Hook")
+    proj.post.text = "Bài viết mở đầu bằng nội dung chính luôn. Không có hook thừa."
+    proj.comments = [
+        PostvComment(id="c1", handle="u1", text="Bình luận đầu tiên đủ dài và chuẩn.", age="1h", picked=True)
+    ]
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    jm.voice = None
+
+    job = Job("job5", slug, False, 60, True, False, kind="postv_quick")
+
+    _step_script(jm, job, {}, MagicMock())
+
+    saved = proj
+    assert saved.hook.text == ""
+    assert len(saved.segments) == 2
+    assert saved.segments[0].role == "post"
+    assert saved.segments[0].card == "post"
+    assert saved.segments[0].voice == proj.post.text
+    assert saved.segments[1].role == "comment"
+    assert saved.segments[1].card == "comment"
+
+
+def test_step_pick_accumulates_to_target_seconds():
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+
+    # Mỗi comment dài ~ 165 ký tự (~ 10 giây đọc theo READ_CPS=16.5)
+    comment_text = "Đây là một bình luận rất chi tiết và sâu sắc có độ dài tương đương mười giây đọc để kiểm thử khả năng tích luỹ thời lượng tự động của hệ thống."
+    slug = "test-target-duration"
+
+    # Post dài ~ 165 ký tự (~ 10 giây đọc)
+    post_text = "Bài viết mở đầu có độ dài tương đương mười giây đọc để làm mốc tính thời lượng ban đầu của kịch bản video."
+
+    comments = [
+        PostvComment(id=f"c{i}", handle=f"u{i}", text=f"{comment_text} (ý kiến góc nhìn số {i})", age="1h", likes=100 - i)
+        for i in range(1, 10)
+    ]
+
+    # Target 30s: Post (6.4s) + 3 comments (~10s mỗi cmt) = ~36s -> chọn 3 bình luận
+    proj30 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 30")
+    proj30.post.text = post_text
+    proj30.comments = [c.model_copy() for c in comments]
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj30
+    job30 = Job("job-30", slug, False, 60, True, False, kind="postv_quick")
+
+    _step_pick(jm, job30, {"target_seconds": 30}, MagicMock())
+    picked30 = [c for c in proj30.comments if c.picked]
+    assert len(picked30) == 3
+
+    # Target 60s: Post (6.4s) + 6 comments (~10s mỗi cmt) = ~66s -> chọn 6 bình luận
+    proj60 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 60")
+    proj60.post.text = post_text
+    proj60.comments = [c.model_copy() for c in comments]
+    jm.storage.load_any.return_value = proj60
+    job60 = Job("job-60", slug, False, 60, True, False, kind="postv_quick")
+
+    _step_pick(jm, job60, {"target_seconds": 60}, MagicMock())
+    picked60 = [c for c in proj60.comments if c.picked]
+    assert len(picked60) == 6

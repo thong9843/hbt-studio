@@ -67,6 +67,61 @@ def test_extract_threads_post_success(monkeypatch):
         assert res.post.text == "Hôm nay trời đẹp quá mọi người ơi!"
         assert res.post.age == "vừa xong"
         assert res.comments == []
+        assert any("Copy cả trang bài" in w for w in res.warnings)
+
+
+SAMPLE_WITH_COMMENTS_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta property="og:title" content="Tác Giả (@author) on Threads" />
+  <meta property="og:description" content="Nội dung bài viết rất hấp dẫn và lôi cuốn." />
+</head>
+<body>
+  <script type="application/json">
+  {
+    "data": {
+      "reply_threads": [
+        {
+          "post": {
+            "user": {"username": "commenter_1"},
+            "caption": {"text": "Bình luận đầu tiên với nhiều góc nhìn mới mẻ."},
+            "like_count": 88
+          }
+        },
+        {
+          "post": {
+            "user": {"username": "commenter_2"},
+            "caption": {"text": "Bình luận thứ hai đóng góp ý kiến xây dựng."},
+            "like_count": 12
+          }
+        }
+      ]
+    }
+  }
+  </script>
+</body>
+</html>
+"""
+
+
+def test_extract_threads_post_with_json_comments():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = SAMPLE_WITH_COMMENTS_HTML
+
+    with patch("httpx.Client.get", return_value=mock_resp):
+        res = extract_threads_post("https://www.threads.net/@author/post/123456")
+
+        assert res.post.handle == "author"
+        assert res.post.text == "Nội dung bài viết rất hấp dẫn và lôi cuốn."
+        assert len(res.comments) == 2
+        assert res.comments[0].handle == "commenter_1"
+        assert res.comments[0].text == "Bình luận đầu tiên với nhiều góc nhìn mới mẻ."
+        assert res.comments[0].likes == 88
+        assert res.comments[1].handle == "commenter_2"
+        assert res.comments[1].text == "Bình luận thứ hai đóng góp ý kiến xây dựng."
+        assert res.comments[1].likes == 12
 
 
 def test_extract_threads_post_dialogue_splitting():
