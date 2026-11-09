@@ -94,7 +94,8 @@ class ChatDoc(BaseModel):
         for i, m in enumerate(self.messages):
             if m.from_ not in char_ids:
                 raise ValueError(
-                    f"Tin nhắn {i + 1} có người gửi '{m.from_}' không nằm trong nhân vật"
+                    f"Tin nhắn thứ {i + 1} có người gửi '{m.from_}' "
+                    "không tồn tại trong danh sách nhân vật"
                 )
 
         # 5. Tần suất sticker <= 1 sticker / 3 tin

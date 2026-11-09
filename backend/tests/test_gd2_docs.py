@@ -8,7 +8,9 @@ import pytest
 
 from tests.gd2_kit import SAMPLE
 
-DOCS = Path(__file__).resolve().parents[2] / "docs" / "gd2"
+DOCS = Path(__file__).resolve().parents[2] / "docs" / "archive" / "gd2"
+if not DOCS.exists():
+    DOCS = Path(__file__).resolve().parents[2] / "docs" / "gd2"
 
 
 def sample_block(path: Path, heading: str) -> dict:

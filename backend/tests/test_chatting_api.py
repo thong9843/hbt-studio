@@ -1,6 +1,7 @@
 """Tests cho API Chatting (/api/chatting/...) (CH1)."""
 
 import io
+import time
 
 import pytest
 from fastapi.testclient import TestClient
