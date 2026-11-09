@@ -294,7 +294,6 @@ export function SideNav({ mini, render }: Props) {
             label={vi.nav.chatting}
             mini={mini}
           />
-          <NavItem to="/chatting" icon={<MessagesSquareIcon />} label={vi.nav.chatting} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
         {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}

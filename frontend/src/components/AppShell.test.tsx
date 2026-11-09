@@ -84,7 +84,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'Dự án', 'PostV', 'Cài đặt']);
+    expect(labels).toEqual(['Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt']);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
@@ -231,7 +231,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
   it('is reachable by keyboard in reading order', async () => {
     stubFetch(routes());
     shell();
-    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'PostV', 'Cài đặt'];
+    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt'];
     for (const name of order) {
       await userEvent.tab();
       expect(document.activeElement).toHaveAccessibleName(name);
