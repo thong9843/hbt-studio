@@ -663,3 +663,57 @@ export interface PostvStageEvent {
     log?: string;
   };
 }
+
+export interface ChatCharacter {
+  id: string;
+  name: string;
+  avatar?: string | null;
+  side: 'left' | 'right';
+  voice_id?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  from: string;
+  text: string;
+  sticker?: string | null;
+}
+
+export interface ChatDoc {
+  hbt_chat: number;
+  slug?: string;
+  title: string;
+  platform: 'messenger' | 'zalo';
+  characters: ChatCharacter[];
+  messages: ChatMessage[];
+  background?: string;
+  music?: string;
+  settings?: {
+    fps?: number;
+    show_header?: boolean;
+    header_title?: string;
+  };
+}
+
+export interface ChatProjectDetail {
+  slug: string;
+  doc: ChatDoc;
+  source: Record<string, unknown> | null;
+  renders: Array<Record<string, unknown>>;
+  preview_url: string | null;
+}
+
+export interface ChatProjectSummary {
+  slug: string;
+  title: string;
+  platform: string;
+  updated_at: string;
+  characters_count: number;
+  messages_count: number;
+  has_render: boolean;
+  timings?: {
+    llm_s?: number;
+    fetch_s?: number;
+    llm_tokens?: number;
+  };
+}

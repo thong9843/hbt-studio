@@ -151,7 +151,7 @@ backend\.venv\Scripts\python -m cli bench-align workspace/projects/<tên-dự-á
 
 ## Hướng dẫn dùng PostV (Video câu chuyện dọc)
 
-PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Threads + phụ đề Hooked), tài liệu đặc tả tại `docs/postv/IMPLEMENT-POSTV.md`.
+PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Threads + phụ đề Hooked), tài liệu đặc tả gộp tại `IMPLEMENT.md` (mục PostV).
 
 ### Quy trình 5 bước
 

@@ -1,10 +1,34 @@
-# HBT Studio — Đặc tả triển khai (cho Claude Code)
+# HBT Studio — Đặc tả triển khai hợp nhất (cho Claude Code)
 
-> Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `reference/pipeline/*.py` → `DESIGN.md`.
-> Phiên bản: v1.4 · 21/10/2026 (v1.1 thương hiệu HBT; v1.2 50fps, outro, lời đọc 750 ký tự; v1.3 outro có lời; v1.4 ảnh bìa).
-> **Mục 4b–4d bên dưới GHI ĐÈ các tham số cũ ở mục 4** khi có mâu thuẫn.
-> Phạm vi file này: **Giai đoạn 1** (mốc M0–M4). Giai đoạn 2 chỉ định nghĩa interface ở mục 12.
-> Mọi tham số dựng video trong `reference/` **đã chạy thật trên 6 video**: giữ nguyên, trừ khi file này ghi khác.
+> Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `DESIGN-HBT.md`.
+> Phiên bản: **v2.0 · 09/11/2026** — Đặc tả kỹ thuật duy nhất và toàn diện của dự án HBT Studio (gồm HBT v1.x, GĐ2 bán tự động, PostV video ngắn/đối thoại, và Chatting video tin nhắn).
+> Nguyên tắc tài liệu: **Đặc tả chỉ ở IMPLEMENT.md, kế hoạch chỉ ở PLAN.md**. File cũ chuyển vào `docs/archive/`.
+> Mọi tham số dựng video trong `reference/` đã chạy thật: giữ nguyên, trừ khi các mục bổ sung ghi đè có duyệt.
+
+---
+
+## Mục lục đặc tả
+
+- [0. Môi trường (Windows 10/11)](#0-môi-trường-windows-1011)
+- [1. Cấu trúc repo](#1-cấu-trúc-repo)
+- [2. Luồng dữ liệu tổng quát](#2-luồng-dữ-liệu-tổng-quát)
+- [3. Mô hình dữ liệu HBT](#3-mô-hình-dữ-liệu)
+- [4. Pipeline dựng video HBT](#4-pipeline-dựng-video)
+  - [4b. Mặc định 50fps](#4b-mặc-định-50fps-bổ-sung-21102026)
+  - [4c. Outro 4 giây](#4c-outro-4-giây-bổ-sung-21102026)
+  - [4d. Giới hạn lời đọc 750 ký tự & cắt đuôi giọng](#4d-giới-hạn-lời-đọc-750-ký-tự-và-cắt-đuôi-giọng-bổ-sung-21102026)
+  - [4e. Ảnh bìa tự động](#4e-ảnh-bìa-tự-động-bổ-sung-21102026)
+- [5. Phụ đề karaoke & Whisper](#5-phụ-đề-karaoke--whisper)
+- [6. Âm thanh](#6-âm-thanh)
+- [7. Kiểm tra từ nhạy cảm](#7-kiểm-tra-từ-nhạy-cảm)
+- [8. Nội dung đăng (Publish)](#8-nội-dung-đăng-publish)
+- [9. Backend API (FastAPI)](#9-backend-api-fastapi)
+- [10. Frontend (React + Vite)](#10-frontend-react--vite)
+- [11. Kiểm thử](#11-kiểm-thử)
+- [12. Giai đoạn 2 (GĐ2) — Tạo nội dung bán tự động](#12-giai-đoạn-2-gđ2--tạo-nội-dung-bán-tự-động-draft-comfyui-vieneu-nhạc)
+- [13. M5: Giao diện mới + khối JSON kịch bản](#13-m5-giao-diện-mới--khối-json-kịch-bản)
+- [14. PostV — Video dạng bài viết ngắn & đối thoại](#14-postv--video-dạng-bài-viết-ngắn--đối-thoại)
+- [15. Chatting — Video đoạn chat tin nhắn 9:16](#15-chatting--video-đoạn-chat-tin-nhắn-916)
 
 ---
 
@@ -706,24 +730,83 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 
 ---
 
-## 12. Giai đoạn 2 — interface để sẵn (chưa làm)
+## 12. Giai đoạn 2 (GĐ2) — Tạo nội dung bán tự động (Draft, ComfyUI, VieNeu, Nhạc)
 
-```python
-class ScriptProvider(Protocol):   # Claude API / Gemini API
-    def draft(self, topic: str, series: str, n_scenes: int) -> ProjectDraft: ...
-    # Bản nháp bắt buộc có: lời đọc từng cảnh (số viết dạng 100{một trăm}), thẻ chữ,
-    # prompt ảnh (không chữ, không bản đồ VN), thể loại nhạc + từ khoá Pixabay,
-    # nguồn kiểm chứng cho từng số liệu, và phải qua lint từ nhạy cảm (mục 7).
+> Chốt 02/11/2026. Hướng triển khai: Kịch bản **không** gọi API ngoài mạng (Claude chat xuất JSON nháp `hbt_draft: 1`), ảnh tạo qua ComfyUI local hoặc đường tay, giọng VieNeu-TTS local cho HBT. Giữ nguyên 3 điểm duyệt: kịch bản → ảnh → video.
+> Ràng buộc cứng: không sửa `backend/hbt/models.py`, `backend/hbt/pipeline/`, `reference/`, `backend/hbt/api/projects.py`; `PIPELINE_VERSION` giữ nguyên.
 
-class ImageProvider(Protocol):    # Forge API (--api) / ComfyUI API / thủ công
-    def generate(self, prompt: str, style: str, w: int = 768, h: int = 1344) -> bytes: ...
+### 12.1 Quyết định kỹ thuật (E1–E7)
 
-class VoiceProvider(Protocol):    # VieNeu-TTS local / Vbee API / thủ công
-    def synthesize(self, text: str, voice_id: str) -> bytes: ...
+| Mã | Quyết định | Chi tiết |
+|---|---|---|
+| **E1** | Dữ liệu nháp lưu `draft.json` | Đặt cạnh `project.json` trong thư mục dự án (`workspace/projects/<slug>/draft.json`). |
+| **E2** | JSON nháp `hbt_draft: 1` dạng phẳng | Bộ đọc tách các trường nháp (`topic`, `series_hint`, `music_mood`, `sources`, `image_prompt`) lưu vào `draft.json`; phần còn lại đưa vào bộ kiểm M5 (`ScriptIn`, K1–K12) không đổi. Thêm nút "Tạo dự án từ JSON nháp" ở Trang chủ. |
+| **E2b** | Tâm trạng nhạc `music_mood` | Dùng khoá gốc `music_mood` (chuỗi), không lồng vào `music` (trường cấm K4). |
+| **E3** | Kiểm tra nháp K13–K18 | Kết hợp bộ kiểm K1–K12 của M5 và K13–K18 riêng của GĐ2. |
+| **E4** | VieNeu cho HBT | Trước khi đọc: `{cách đọc}` → đọc chữ trong ngoặc; `|` → nghỉ 0,25 s; nối 0,25 s giữa các cảnh → `voice.wav`, lưu vào `voice.file`. Pipeline nhận file giọng như cũ. |
+| **E4b** | Giọng HBT nhớ lựa chọn | Không có giọng mặc định cứng; app nhớ lựa chọn gần nhất lưu ở `workspace/settings/gd2_prefs.json` (`hbt_voice`). Chưa chọn thì nút Tạo giọng tắt + nhắc chọn. |
+| **E5** | Tự chọn nhạc theo mood | Đọc trường `moods[]` có sẵn trong `library/music/index.json`. Khớp không dấu, chữ thường với `music_mood`. Tự động chọn bài đầu tiên khớp, không khớp thì để trống. Chỉ ĐỌC index, không ghi. |
+| **E6** | ComfyUI local | Cổng `http://127.0.0.1:8188`, workflow JSON trong repo, sinh ảnh 768×1344 dọc. ComfyUI không chạy → rẽ đường tay. |
+| **E7** | Tách module riêng | Toàn bộ mã GĐ2 nằm tại `backend/hbt/gd2/` và `backend/hbt/api/gd2.py`, router gắn ở `main.py`. Không sửa `api/projects.py`. |
+
+### 12.2 Định dạng JSON nháp `hbt_draft: 1` và `draft.json`
+
+JSON dán tạo dự án (`hbt_draft: 1`):
+```json
+{
+  "hbt_draft": 1,
+  "topic": "Vì sao muỗi thích đốt một số người hơn?",
+  "series_hint": "Vì sao…",
+  "music_mood": "tò mò",
+  "sources": [
+    { "id": "s1", "claim": "Muỗi phát hiện CO2 từ xa khoảng 10 m", "url": "https://www.cdc.gov/mosquitoes/" }
+  ],
+  "scenes": [
+    {
+      "voice": "Có người ngồi cả buổi không sao, | có người bị đốt sưng cả chân.",
+      "card": { "y": "top", "lines": [{ "text": "VÌ SAO MUỖI", "size": "l", "color": "ink" }, { "text": "CHỌN BẠN?", "size": "xl", "color": "accent" }] },
+      "labels": [],
+      "punch": true,
+      "caption_y": null,
+      "image_prompt": "close-up of a mosquito on human skin, macro photo, vertical 9:16"
+    }
+  ],
+  "publish": { "hook": "Bạn có phải "nam châm hút muỗi"?", "hashtags": ["haybiettuot", "muoi", "visao"] },
+  "thumbnail": { "scene": 1, "lines": ["VÌ SAO MUỖI", "CHỌN BẠN?"], "series": "", "accent": "#FFD43B" }
+}
 ```
-Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự động đều phải qua 3 điểm duyệt (kịch bản → ảnh → video).
 
-> Ghi chú 02/11/2026: GĐ2 đã chốt hướng khác (kịch bản không gọi API; JSON nháp từ Claude chat; ảnh ComfyUI/đường tay; giọng VieNeu). Xem `docs/gd2/IMPLEMENT-GD2.md`. Interface trên giữ nguyên làm lịch sử.
+File lưu trữ `draft.json`:
+```json
+{
+  "draft": 1,
+  "topic": "Vì sao muỗi thích đốt một số người hơn?",
+  "series_hint": "Vì sao…",
+  "music_mood": "tò mò",
+  "sources": [{ "id": "s1", "claim": "Muỗi phát hiện CO2 từ xa khoảng 10 m", "url": "https://www.cdc.gov/mosquitoes/" }],
+  "scenes": [{ "image_prompt": "close-up of a mosquito...", "image_prompt_ok": true }],
+  "images_approved": false
+}
+```
+
+### 12.3 Bộ quy tắc kiểm tra K13–K18
+
+| Mã | Kiểm tra | Mức | Hành vi |
+|---|---|---|---|
+| **K13** | `hbt_draft` ≠ 1, hoặc thiếu/rỗng `topic` | Lỗi | Chặn tạo dự án |
+| **K14** | `sources[]` sai dạng (thiếu id/claim/url, hoặc id trùng) | Lỗi | Chặn tạo dự án |
+| **K15** | `music_mood` sai kiểu chuỗi, hoặc `image_prompt` không phải chuỗi | Lỗi | Chặn tạo dự án |
+| **K16** | Số liệu trong lời đọc thiếu nguồn trong `sources[].claim` | Cảnh báo | Hiện cảnh báo "Cảnh n: số X chưa có nguồn" (so theo con số, chuẩn hoá bỏ dấu chấm phẩy) |
+| **K17** | `image_prompt` chứa từ cấm (`text`, `chữ`, `map`, `bản đồ`, `Vietnam map`) | Cảnh báo | Nhắc xoá từ cấm tránh AI vẽ sai/thiếu chủ quyền |
+| **K18** | Thiếu `image_prompt` hoặc rỗng | Cảnh báo | Đánh dấu `image_prompt_ok: false`, cảnh đó đi đường tay |
+
+### 12.4 API GĐ2 (`backend/hbt/api/gd2.py`)
+
+- `POST /gd2/draft/check`: Nhận `{draft}`, kiểm tra không ghi đĩa; trả `{ok, errors[], warnings[], scenes, music_match}`.
+- `POST /gd2/draft/create`: Nhận `{draft, title?}`, tạo dự án, bóc trường nháp lưu `draft.json`, áp phần kịch bản vào `project.json`, tự chọn nhạc theo mood.
+- `GET /projects/{slug}/draft`: Đọc nội dung `draft.json` (404 nếu không có).
+- `PUT /projects/{slug}/draft/images-approved`: Đặt cờ `{approved: bool}` (404 nếu không có nháp).
+- `POST /projects/{slug}/draft/voice`: Tạo job tổng hợp giọng VieNeu cho toàn bộ cảnh HBT (`kind: "voice"`), lưu tiến độ theo cảnh.
 
 ---
 
@@ -1059,3 +1142,200 @@ Nhánh `feat/cover-upload` (từ `main` `0e38efc`, tag `v1.0.0`), tag `v1.1.0`. 
     - (b) **Còn tồn.** e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`); chưa tái hiện được, không có thay đổi nào dựa trên phỏng đoán. Nghi ngờ: API đang khởi động/nạp lại (`uvicorn --reload`) trong khi Playwright chỉ chờ cổng 5173 của Vite. Nếu gặp lại, ghi giờ và `npm run dev` log để đối chiếu.
     - (c) Backlog: `make_covers` (`render.py`) tự chọn ảnh nền bằng 2 dòng, trong khi xem trước dùng `thumbnail.cover_background`; gộp về một hàm khi được phép sửa `render.py` lại.
     - (d) Tên ảnh cảnh thật là `images/<hash16>.<ext>`. Đã sửa mục 3 và mục 9; đối chiếu khớp với `storage.py`.
+
+
+---
+
+## 14. PostV — Video dạng bài viết ngắn & đối thoại
+
+> Chức năng video thứ 2 của HBT Studio (bắt đầu 29/10/2026, các mốc PV0–PV9, tag `v1.2.0`–`v1.15.2`).
+> Mục tiêu: chuyển thể bài viết mạng xã hội (Threads, Facebook, Reddit...) thành video dọc 9:16 trên nền gameplay, đọc bằng giọng VieNeu đa nhân vật, có phụ đề karaoke nhanh và thẻ bài Pillow.
+> Nguyên tắc độc lập (N8, K-34): Mã nguồn PostV nằm riêng trong `backend/hbt/postv/` và `frontend/src/pages/postv/`. Không sửa `backend/hbt/pipeline/`, `backend/hbt/models.py`, `reference/`, `backend/hbt/api/projects.py`.
+
+### 14.1 Nguyên tắc kỹ thuật & Quyết định chính (K-01 đến K-48)
+
+| Mã | Nội dung quyết định |
+|---|---|
+| **K-01** | Bộ dựng `postv/render.py` độc lập, tái sử dụng các bước encoding FFmpeg nhưng không sửa `pipeline/render.py`. |
+| **K-02, K-11** | Video dọc 1080×1920; mặc định **60 fps** (hỗ trợ 30 và 50 fps). |
+| **K-03** | Thời lượng tự do, khuyến nghị dưới 120 s (bỏ giới hạn 750 ký tự của Vbee). |
+| **K-04, K-35** | Giọng đọc: **VieNeu-TTS local** chạy tiến trình con trong `backend/.venv-tts`. Người dẫn mặc định Adam bựa, người bình luận xen kẽ nam/nữ theo `voice.seed`. |
+| **K-05, K-10** | Nền gameplay: Video dọc ≥ 720×1280, ≥ 3 s, có giấy phép/nguồn. Nối nhiều clip cắt thẳng nếu kịch bản dài. |
+| **K-06** | Ảnh bìa: Lấy khung hình gameplay hoặc ảnh tải lên cắt tỉ lệ 3:4 / 3:2. |
+| **K-23, K-26** | Thẻ bài trắng bo góc rộng ~90%, đỉnh y ≈ 12–35%. Có số liệu ♥ like, bình luận, chia sẻ. Phụ đề 1–3 từ màu vàng `#FFD43B` hoặc xanh lá. |
+| **K-27, K-41** | **Che từ nhạy cảm riêng:** Danh sách `postv/data/censor_words.json` + từ mức `block` của HBT. So khớp có dấu ("đéo" không trùng "đeo"). Bíp 1 kHz (âm lượng 0.35) + làm mờ thẻ chữ và phụ đề. Mức cảnh báo chỉ nhắc, không che. |
+| **K-33, K-37** | Không dùng ký hiệu `{cách đọc}` hay `|` trong kịch bản PostV (VieNeu tự xử lý). |
+| **K-36, K-38** | Giao diện: Thanh 5 bước ngang ở đầu màn hình `/postv/:slug`, trang tổng quan `/postv` riêng. |
+| **K-42–K-48** | PVA Tự động: Chuỗi 7 pha tự động sinh video dừng ở Xem nhanh 10 s; 5 phong cách lời dẫn (Kể chuyện, Hài hước, Drama, Hóng, Cảm động). |
+| **PV7b** | Meme phông xanh (`greenscreenmemes.com`, `library/memes/`): Lọc phông bằng FFmpeg `colorkey=0x00FF00:0.35:0.15` chèn cùng sfx. Bóc tách link Threads tự động qua Meta Bot SSR protocol. |
+| **PV9** | Giao diện Quick UI "Dán link/chữ → Video" tại `/postv`: Khung chat đơn giản, SSE streaming 6 pha (`fetch` → `pick` → `script` → `voice` → `render` → `done`), thẻ kết quả video 9:16. |
+
+### 14.2 Mô hình dữ liệu PostV (`postv/models.py`)
+
+Dự án có `kind: "postv"`, lưu trữ trong `workspace/projects/<slug>/project.json`:
+- `source`: Dữ liệu gốc bóc tách (`post`, `comments[]`, `stats`).
+- `script`: Tiêu đề, phong cách lời dẫn (`style`), danh sách `segments[]`.
+- `segments[]`: Từng đoạn video `{id, kind, speaker, text, voice, card, start, duration}` với `kind` gồm `hook`, `post`, `comment`.
+- `style`: Cấu hình `card_style` (Mượt / Nảy), `caption_style` (màu highlight, cỡ chữ), `fps` (60/50/30).
+- `background`: Cấu hình danh sách clip gameplay và nhạc nền (`music_volume: 0.15`, ducking −27 LUFS).
+
+### 14.3 Thư viện nền Gameplay (`library/backgrounds/`)
+
+- Cấu trúc: `library/backgrounds/<id>.<ext>` kèm file mô tả `index.json`.
+- Kiểm định: Chỉ chấp nhận video dọc (chiều cao > chiều rộng), độ phân giải tối thiểu 720×1280.
+- Bắt buộc ghi nhận tên clip (`title`), nguồn và giấy phép bản quyền.
+
+### 14.4 Bộ dựng PostV (`postv/render.py`)
+
+- Dựng hoàn chỉnh bằng **một lệnh FFmpeg duy nhất**:
+  - Filter graph phức tạp xử lý: Nối video nền gameplay, overlay thẻ Pillow theo timestamp, áp dụng subtitle karaoke, ducking âm thanh nhạc nền (−27 LUFS khi có tiếng đọc, −14 LUFS khi im lặng), chèn âm thanh bíp che từ nhạy cảm (1 kHz).
+  - Tốc độ dựng: ~1.6–1.8 s mỗi giây video trên CPU máy cũ.
+
+### 14.5 API PostV chính
+
+- `POST /postv/parse`: Phân tích link hoặc văn bản dán thành bài và các bình luận.
+- `POST /postv/auto`: Chạy toàn bộ luồng tự động 6 bước qua SSE stream.
+- `POST /projects/{slug}/postv/render`: Tạo job dựng video (fast 10s preview hoặc final full 60fps).
+- `POST /projects/{slug}/postv/voice/synthesize`: Tạo job tổng hợp giọng VieNeu cho các segments.
+- `GET/PUT /settings/postv-words`: Đọc và cập nhật danh sách từ che nhạy cảm của PostV.
+
+---
+
+## 15. Chatting — Video đoạn chat tin nhắn 9:16
+
+> Chức năng video thứ 3 của HBT Studio (triển khai 09/11/2026, các mốc CH0–CH4, tag `v1.16.0`).
+> Mục tiêu: Biến các câu chuyện, bài tâm sự, tranh luận trên mạng (Reddit, Threads, text thô) thành video chat 9:16 sinh động kiểu Messenger / Zalo, tin nhắn hiện từng dòng kèm tiếng gõ/pop, sticker cảm xúc, đọc bằng giọng VieNeu trên nền gameplay.
+> Độc lập hoàn toàn: Mã nguồn nằm tại `backend/hbt/chatting/`, API mount tại `backend/hbt/api/chatting.py`, giao diện tại `frontend/src/pages/chatting/`. Dữ liệu lưu tại `workspace/chatting/<slug>/`.
+
+### 15.1 Quyết định kỹ thuật đã chốt (CH-D1 đến CH-D7)
+
+| Mã | Quyết định | Chi tiết thực hiện |
+|---|---|---|
+| **CH-D1** | Mạng chỉ khi dán link Reddit | Backend chỉ gọi HTTP ngoài khi người dùng dán link Reddit (`www.reddit.com`, `old.reddit.com`, `redd.it`) qua endpoint `.json` công khai. **Link Threads trả 422** yêu cầu dán chữ (chờ GĐ4). Nguồn khác (Voz, Facebook): dán chữ thô. Socket bị chặn ngoài domain Reddit. |
+| **CH-D2** | Viết chat bằng Ollama local | Sử dụng Ollama tại `http://127.0.0.1:11434`. Model mặc định: **`qwen2.5:3b-instruct`** (cấu hình qua `.env` `CHATTING_MODEL`). Luôn gửi **`keep_alive: 0`** để giải phóng bộ nhớ RAM ngay sau khi sinh kịch bản. Format JSON schema. Đo thời gian `timings` từng pha. |
+| **CH-D3** | Lưu trữ độc lập | Lưu trữ dạng file JSON tại `workspace/chatting/<slug>/chat.json` + `source.json` + media. Không database, không đụng `api/projects.py`. |
+| **CH-D4** | Vẽ giao diện bằng Pillow | Khung hình 1080×1920 mô phỏng Messenger, Zalo: màu sắc, bóng đổ, bo góc chuẩn; **không chứa logo hay tên ứng dụng** trên video. |
+| **CH-D5** | Avatar nhân vật linh hoạt | Ảnh đại diện do người dùng tải lên (vuông 256×256) hoặc tự động vẽ hình tròn chứa chữ cái đầu của tên nhân vật. |
+| **CH-D6** | Thư viện Sticker local | Sticker phân loại theo 10 thẻ cảm xúc trong `library/stickers/<tag>/`. Ứng dụng quét lập chỉ mục `index.json`, chọn sticker ngẫu nhiên theo seed. |
+| **CH-D7** | Hỗ trợ 2 Theme ban đầu | Triển khai 2 theme `messenger` và `zalo` kế thừa từ `ThemeBase`. Dễ dàng bổ sung thêm iMessage, Instagram trong tương lai. |
+
+### 15.2 Mô hình dữ liệu `chat.json` (`hbt_chat: 1`)
+
+File `workspace/chatting/<slug>/chat.json` tuân thủ schema Pydantic:
+- `hbt_chat`: Phiên bản định dạng, cố định bằng `1`.
+- `slug`: Định danh duy nhất (chỉ gồm `[a-z0-9-]`, tối đa 60 ký tự).
+- `title`: Tiêu đề đoạn hội thoại.
+- `theme`: Chủ đề giao diện (`messenger` hoặc `zalo`).
+- `characters[]`: Danh sách từ **2 đến 4 nhân vật**.
+  - `id`: Định danh (`c1`, `c2`...).
+  - `name`: Tên hiển thị (tối đa 24 ký tự).
+  - `avatar`: Đường dẫn ảnh hoặc `null`.
+  - `is_right`: Boolean, **đúng 1 nhân vật có `is_right: true`** (người nhắn chính, bong bóng bên phải).
+  - `voice_id`: ID giọng VieNeu gán cho nhân vật.
+- `messages[]`: Danh sách từ **8 đến 30 tin nhắn**.
+  - `id`: Mã tin nhắn (`m1`, `m2`...).
+  - `character_id`: ID nhân vật gửi.
+  - `text`: Nội dung tin nhắn (tối đa 900 ký tự).
+  - `sticker_tag`: Tag cảm xúc (thuộc 10 tag quy định) hoặc `null`. Tần suất sticker: **tối đa 1 sticker trên mỗi 3 tin nhắn**.
+- `background`: Cấu hình nền gameplay (`library/backgrounds/`).
+- `music`: Nhạc nền và âm lượng (`ducking`: −27 LUFS khi có tiếng đọc, −14 LUFS khi im lặng).
+- `settings`: Cấu hình `fps` (mặc định 60, hỗ trợ 30/50), `resolution` (1080×1920), `show_header` (true).
+- `renders[]`: Lịch sử các lần xuất video.
+
+### 15.3 Kịch bản & Ollama Prompt
+
+**Prompt hệ thống (`SYSTEM_PROMPT`):**
+Quy định vai trò chuyển thể bài viết mạng xã hội thành cuộc hội thoại kịch tính, ngắn gọn, tự nhiên giữa 2–4 người.
+- Nhân vật bên phải là người kể chuyện chính hoặc người nhận tin.
+- Lời thoại thuần phong cách nhắn tin tiếng Việt đời thường, không văn vở.
+- Phân bổ sticker vào các thời điểm cao trào cảm xúc.
+- Đầu ra bắt buộc định dạng chuẩn xác theo JSON schema của `ChatDoc`.
+
+**Đo lường thời gian (Timings):**
+Mọi lần chạy ghi nhận `timings` vào `source.json`:
+- `fetch_s`: Thời gian tải nguồn bài (Reddit API).
+- `llm_s`: Thời gian Ollama sinh kịch bản chat.
+- `llm_tokens`: Số lượng token sinh ra.
+- `llm_retry`: Số lần thử lại nếu JSON sai định dạng.
+- `model`: Tên model đã thực thi.
+- Đoạn đo benchmark trên máy cũ (i5-10400, CPU 12 threads) đạt trung vị ~91 s với model `qwen2.5:3b-instruct`.
+
+### 15.4 Thư viện Sticker (10 tags chuẩn)
+
+Thư mục `library/stickers/` chia làm 10 danh mục cảm xúc:
+1. `vui`: Vui vẻ, cười mỉm, hài lòng.
+2. `buon`: Buồn bã, ủ rũ, chán nản.
+3. `tuc_gian`: Giận dữ, bốc hoả, cáu gắt.
+4. `ngac_nhien`: Bất ngờ, mắt chữ O miệng chữ A.
+5. `khoc`: Khóc to, nước mắt giàn giụa.
+6. `ha_he`: Cười hả hê, đắc ý, cười lăn lộn.
+7. `nga_ngua`: Té ngửa, cạn lời, sốc.
+8. `bat_luc`: Bất lực, ôm đầu, thở dài.
+9. `chao`: Vẫy tay chào, làm quen.
+10. `dong_y`: Gật đầu, đồng tình, giơ ngón cái.
+Lệnh `python -m cli stickers-index` tự động quét các file ảnh (`.png`, `.webp`, `.gif`) và cập nhật `library/stickers/index.json`.
+
+### 15.5 Theme & Đồ hoạ Pillow (`backend/hbt/chatting/draw.py`)
+
+- Kích thước khung hình: 1080×1920 px (dọc 9:16).
+- Thanh tiêu đề (Header): 120 px ở đỉnh, hiển thị avatar nhóm/đối phương, tên người nhận, nút gọi video/thoại mô phỏng.
+- Bong bóng chat:
+  - Tin nhắn bên trái: Nền xám nhạt (Messenger) hoặc trắng (Zalo), chữ đen, bo góc mềm mại.
+  - Tin nhắn bên phải: Nền xanh gradient (Messenger) hoặc xanh biển (Zalo), chữ trắng.
+  - Avatar: Tròn đường kính 72 px, nằm cạnh tin nhắn đầu tiên trong chuỗi tin cùng người.
+  - Typing dots: 3 chấm nhảy sinh động báo hiệu đang gõ tin nhắn trước khi tin xuất hiện.
+  - Sticker: Vẽ trực tiếp vào dòng chat, kích thước tối đa 360 px, giữ tỷ lệ gốc.
+- Cuộn hội thoại: Tự động tính toán toạ độ y và cuộn mượt khi các tin nhắn mới xuất hiện tràn màn hình.
+
+### 15.6 Dòng thời gian & Quy tắc nhịp điệu (Timeline)
+
+Mỗi tin nhắn trải qua các pha thời gian chuẩn:
+1. `Intro`: 0.4 s mở đầu cảnh.
+2. `Typing`: 0.6 s hiển thị 3 chấm đang gõ (nếu tin có chữ).
+3. `Pop`: 150 ms hiệu ứng bung nở tin nhắn.
+4. `Voice`: Thời lượng phát file âm thanh giọng đọc VieNeu của tin nhắn đó.
+5. `Sticker`: 0.8 s dừng lại để người xem kịp nhìn nhận cảm xúc sticker.
+6. `Pause`: 0.25 s khoảng nghỉ trước khi chuyển sang tin nhắn kế tiếp.
+7. `Outro`: 1.5 s dừng hình ở cuối video trước khi kết thúc.
+
+### 15.7 Tổng hợp giọng đọc & Che từ nhạy cảm
+
+- Tích hợp VieNeu worker: Từng tin nhắn được sinh file âm thanh riêng biệt tại `workspace/chatting/<slug>/audio/m_{id}.wav`.
+- Phân vai giọng: Tự động phân bổ các voice ID trong VieNeu cho các nhân vật tham gia chat.
+- Che từ nhạy cảm: Tái sử dụng bộ kiểm duyệt K-41 (`postv/censor.py`), tự động che từ tục tĩu hoặc nhạy cảm mức `block` bằng tiếng bíp 1 kHz.
+- Dự phòng an toàn: Khi máy thiếu trọng số TTS hoặc worker không khả dụng, hệ thống tự động sinh file wav tĩnh mô phỏng thời lượng ước tính (`len(text) / 16.5 s`) để video vẫn dựng được bình thường.
+
+### 15.8 Bộ dựng Render & FFmpeg
+
+- Sinh kịch bản `ffconcat` từ các ảnh khung hình vẽ bằng Pillow tương ứng với từng mốc thời gian.
+- Trộn luồng âm thanh: Ghép các đoạn voice wav đúng mốc giây, chèn hiệu ứng âm thanh tiếng gõ bàn phím (typing sfx) và tiếng tin nhắn đến (pop sfx).
+- Ghép video nền gameplay ngẫu nhiên từ `library/backgrounds/` theo seed.
+- Nhạc nền tự động áp dụng bộ nén sidechain ducking (−27 LUFS khi có tiếng thoại, phục hồi −14 LUFS khi im lặng).
+- Chế độ dựng:
+  - Bản xem nhanh (`fast`): 30 fps, độ phân giải 540×960, preset `ultrafast`.
+  - Bản đẹp (`final`): 60 fps (hoặc 50 fps), độ phân giải 1080×1920, preset `medium`.
+
+### 15.9 API Chatting (`backend/hbt/api/chatting.py`)
+
+- `GET /chatting/status`: Kiểm tra trạng thái Ollama local và danh sách model khả dụng. Trả về thông báo thân thiện cho UI khi Ollama chưa bật.
+- `POST /chatting/sources/parse`: Phân tích URL Reddit lấy bài viết hoặc tiếp nhận văn bản dán.
+- `POST /chatting/create`: Tạo dự án chat mới từ dữ liệu kịch bản.
+- `GET /chatting/{slug}` & `PUT /chatting/{slug}`: Đọc và cập nhật toàn bộ cấu hình dự án chat.
+- `DELETE /chatting/{slug}`: Xoá dự án chat và toàn bộ dữ liệu media liên quan.
+- `POST /chatting/{slug}/assets/avatar`: Tải ảnh đại diện đại diện nhân vật.
+- `POST /chatting/{slug}/render`: Gửi yêu cầu dựng video (fast preview hoặc final).
+- `POST /chatting/auto`: Job chạy tự động toàn trình 4 pha (`fetch` → `llm` → `voice` → `render`), phát tiến độ thời gian thực qua Server-Sent Events (SSE) kèm số giây chạy thực tế của pha LLM.
+
+### 15.10 Giao diện người dùng Chatting
+
+- **Trang chủ Chatting (`/chatting`):**
+  - Khung nhập liệu đa năng: dán link Reddit hoặc dán văn bản trực tiếp.
+  - Các chip tuỳ chọn nhanh: Chọn theme (Messenger/Zalo), chọn nền gameplay, chọn nhạc nền, chọn tốc độ khung hình (60/30 fps).
+  - Thanh tiến trình 4 pha SSE: Hiển thị trạng thái trực quan từng pha, đếm số giây thời gian thực cho bước viết chat bằng Ollama.
+  - Lưới các dự án chat gần đây kèm thumbnail và trạng thái lần xuất.
+  - Màn hình thông báo thân thiện: "Chưa thấy Ollama. Mở Ollama rồi thử lại." khi chưa khởi động Ollama daemon.
+- **Trình soạn thảo Chatting (`/chatting/:slug`):**
+  - Thiết kế 3 cột chuyên nghiệp:
+    - Cột trái: Quản lý nhân vật (tên, avatar, giọng VieNeu, vị trí trái/phải) và danh sách tin nhắn thu nhỏ.
+    - Cột giữa: Trình soạn thảo chi tiết từng tin nhắn, đổi người gửi, chọn sticker cảm xúc từ thư viện trực quan.
+    - Cột phải: Khung xem trước video 9:16 thời gian thực, các tuỳ chọn xuất video (Xem nhanh / Xuất bản đẹp), trình phát video kết quả và nút tải về.

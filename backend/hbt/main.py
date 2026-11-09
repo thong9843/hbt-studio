@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from hbt.api import (
     assets,
     backgrounds,
+    chatting,
     files,
     gd2,
     health,
@@ -139,6 +140,7 @@ def create_app(
         voices,
         memes,
         gd2,
+        chatting,
     ):
         app.include_router(module.router, prefix="/api")
     return app

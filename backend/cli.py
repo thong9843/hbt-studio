@@ -87,6 +87,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-index", action="store_true", help="cho phép ghi đè index.json của thư viện"
     )
     up.add_argument("--force", action="store_true", help="ghi đè file có sẵn nhưng khác nội dung")
+
+    sub.add_parser("stickers-index", help="Quét library/stickers/ và tạo index.json")
+
+    cb = sub.add_parser("chatting-bench", help="Đo hiệu năng Ollama viết kịch bản Chatting")
+    cb.add_argument("sample_file", type=Path, help="file text mẫu")
+    cb.add_argument("--model", help="tên model Ollama (mặc định theo .env)")
+    cb.add_argument(
+        "--runs", type=int, default=3, help="số lượt chạy để tính trung vị (mặc định 3)"
+    )
     return parser
 
 
@@ -216,6 +225,30 @@ def main(argv: list[str] | None = None) -> int:
         return _bench_align(args, parser)
     if args.command in ("pack-media", "unpack-media"):
         return _media(args)
+    if args.command == "stickers-index":
+        from hbt.chatting.stickers import build_index
+
+        settings = load_settings()
+        idx = build_index(settings.library_dir)
+        total = sum(len(v) for v in idx.values())
+        idx_path = settings.library_dir / "stickers" / "index.json"
+        print(f"Đã lập index cho {len(idx)} tag sticker ({total} file) tại {idx_path}")
+        return 0
+    if args.command == "chatting-bench":
+        from hbt.chatting.bench import run_bench
+
+        res = run_bench(args.sample_file, model=args.model, runs=args.runs)
+        if not res["ok"]:
+            print(f"LỖI: {res['error']}", file=sys.stderr)
+            return 1
+        print(
+            f"\nKết quả Chatting Benchmark ({res['model']}):\n"
+            f"  Số lượt chạy : {res['runs']}\n"
+            f"  Trung vị llm_s: {res['median_llm_s']} s "
+            f"(min {res['min_llm_s']}s, max {res['max_llm_s']}s)\n"
+            f"  Tokens trung bình: {res['avg_tokens']}"
+        )
+        return 0
 
     options = RenderOptions(
         preview=args.preview,
