@@ -25,6 +25,7 @@ CHUNK = 1024 * 1024
 GROUPS: dict[str, tuple[str, bool]] = {
     "backgrounds": ("library/backgrounds", True),
     "music": ("library/music", True),
+    "stickers": ("library/stickers", False),
     "hf_vieneu": ("models/hf_vieneu", False),
     "samples": ("workspace/samples", False),
 }

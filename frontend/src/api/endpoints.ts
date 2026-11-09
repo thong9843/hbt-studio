@@ -39,6 +39,9 @@ import type {
   ScriptJsonCheckResult,
   SensitiveWords,
   Theme,
+  ChatDoc,
+  ChatProjectDetail,
+  ChatProjectSummary,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -52,6 +55,35 @@ export const projectFileUrl = (slug: string, rel: string) => fileUrl(`projects/$
 
 export const api = {
   listProjects: () => apiGet<ProjectSummary[]>('/projects'),
+  getChattingStatus: () =>
+    apiGet<{
+      ollama_running: boolean;
+      model_available: boolean;
+      model_name: string;
+      stickers: Record<string, number>;
+      total_stickers: number;
+    }>('/chatting/status'),
+  listChattingProjects: () => apiGet<ChatProjectSummary[]>('/chatting/projects'),
+  createChattingProject: (input: { input: string; platform: string; background: string }) =>
+    apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
+  getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
+  updateChattingProject: (slug: string, doc: ChatDoc) =>
+    apiRequest<{ ok: boolean; doc: ChatDoc }>('PUT', `/chatting/${enc(slug)}`, { json: doc }),
+  regenChattingProject: (slug: string) =>
+    apiRequest<{ ok: boolean; doc: ChatDoc; timings: Record<string, unknown> }>(
+      'POST',
+      `/chatting/${enc(slug)}/regen`,
+    ),
+  renderChattingProject: (slug: string, preview: boolean) =>
+    apiRequest<{ job_id: string; slug: string; preview: boolean }>(
+      'POST',
+      `/chatting/${enc(slug)}/render`,
+      {
+        json: { preview },
+      },
+    ),
+  deleteChattingProject: (slug: string) =>
+    apiRequest<{ ok: boolean }>('DELETE', `/chatting/${enc(slug)}`),
   createProject: (input: ProjectCreate) =>
     apiRequest<AnyProject>('POST', '/projects', { json: input }),
   getProject: (slug: string) => apiGet<Project>(`/projects/${enc(slug)}`),

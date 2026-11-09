@@ -15,6 +15,7 @@ import {
   GripIcon,
   HomeIcon,
   ImageIcon,
+  MessagesSquareIcon,
   MoonIcon,
   MusicIcon,
   PlusIcon,
@@ -287,6 +288,13 @@ export function SideNav({ mini, render }: Props) {
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
           <NavItem to="/projects" icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
           <NavItem to="/postv" icon={<ChatIcon />} label={vi.nav.postv} mini={mini} />
+          <NavItem
+            to="/chatting"
+            icon={<MessagesSquareIcon />}
+            label={vi.nav.chatting}
+            mini={mini}
+          />
+          <NavItem to="/chatting" icon={<MessagesSquareIcon />} label={vi.nav.chatting} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
         {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}

@@ -7,6 +7,8 @@ library/backgrounds/**
 !library/backgrounds/index.json
 library/memes/**
 !library/memes/index.json
+library/stickers/**
+!library/stickers/index.json
 *.mp3
 *.m4a
 *.ogg

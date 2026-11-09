@@ -16,6 +16,8 @@ import { ProjectsPage } from '../pages/ProjectsPage';
 import { ImagesTab } from '../pages/ImagesTab';
 import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
+import { ChattingHome } from '../pages/chatting/ChattingHome';
+import { ChattingEditor } from '../pages/chatting/ChattingEditor';
 
 // Trang xem bộ thành phần: chỉ có khi `npm run dev`. Vite thay `import.meta.env.DEV` bằng
 // `false` khi build nên cả nhánh này (và file trang) bị loại khỏi dist/.
@@ -42,6 +44,8 @@ export function App() {
           <Route path="preview" element={<PostvPreviewPage />} />
           <Route path="export" element={<PostvExportPage />} />
         </Route>
+        <Route path="chatting" element={<ChattingHome />} />
+        <Route path="chatting/:slug" element={<ChattingEditor />} />
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (
           <Route

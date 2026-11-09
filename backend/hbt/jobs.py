@@ -412,6 +412,12 @@ class JobManager:
         if job.kind == "postv_quick":
             self._run_postv_quick(job)
             return
+        if job.kind == "chatting_auto":
+            self._run_chatting_auto(job)
+            return
+        if job.kind == "chatting_render":
+            self._run_chatting_render(job)
+            return
         folder = self.storage.project_dir(job.slug)
         cfg = self.app_settings.load() if self.app_settings is not None else None
         opts = RenderOptions(
@@ -684,3 +690,124 @@ class JobManager:
         from hbt.postv.auto import run_auto_job
 
         run_auto_job(self, job)
+
+    def submit_chatting_auto(
+        self,
+        raw_input: str,
+        platform: str = "messenger",
+        background_name: str = "minecraft4-1080p60",
+        slug: str | None = None,
+    ) -> Job:
+        """Job tự động hoá Chatting 4 pha: Lấy bài -> Viết chat -> Giọng -> Xem nhanh."""
+        job_slug = slug or f"chat-{uuid.uuid4().hex[:6]}"
+        job = Job(uuid.uuid4().hex[:12], job_slug, False, None, None, False, kind="chatting_auto")
+        job.chatting_input = raw_input  # type: ignore[attr-defined]
+        job.chatting_platform = platform  # type: ignore[attr-defined]
+        job.chatting_background = background_name  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_chatting_render(
+        self,
+        slug: str,
+        preview: bool = False,
+    ) -> Job:
+        """Job dựng video Chatting (preview hoặc full)."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng), hãy đợi xong hoặc huỷ")
+        job = Job(uuid.uuid4().hex[:12], slug, preview, None, None, False, kind="chatting_render")
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_chatting_auto(self, job: Job) -> None:
+        """Thực thi job chatting_auto 4 pha."""
+        from hbt.chatting.service import run_chatting_auto_job
+
+        def on_event(event_type: str, data: dict[str, Any]) -> None:
+            pct = data.get("percent", 0)
+            phase = data.get("phase", "")
+            msg = data.get("text", "")
+            job._emit(event_type, data)
+            if event_type == "progress":
+                job._progress(pct, phase, msg)
+
+        try:
+            workspace_dir = self.storage.workspace_dir
+            library_dir = self.library_dir
+            brand_dir = self.brand_dir
+            voice_provider = self.voice
+            chatting_model = (
+                self.app_settings.load().whisper_model  # fallback if needed
+                if False
+                else os.environ.get("CHATTING_MODEL", "qwen2.5:3b-instruct")
+            )
+
+            slug, video_path = run_chatting_auto_job(
+                workspace_dir=workspace_dir,
+                library_dir=library_dir,
+                brand_dir=brand_dir,
+                voice_provider=voice_provider,
+                chatting_model=chatting_model,
+                raw_input=job.chatting_input,
+                platform=job.chatting_platform,
+                background_name=job.chatting_background,
+                slug_override=job.slug if not job.slug.startswith("chat-") else None,
+                emit_event=on_event,
+            )
+
+            job.slug = slug
+            output = {
+                "slug": slug,
+                "video": f"/api/chatting/{slug}/renders/{video_path.name}",
+            }
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job chatting_auto: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_chatting_render(self, job: Job) -> None:
+        """Thực thi job chatting_render."""
+        from hbt.chatting.render import render_chat_video
+        from hbt.chatting.store import load_chat
+
+        def on_progress(pct: int, msg: str) -> None:
+            job._progress(pct, "render", msg)
+            job._emit("progress", {"percent": pct, "text": msg})
+
+        try:
+            workspace_dir = self.storage.workspace_dir
+            library_dir = self.library_dir
+            brand_dir = self.brand_dir
+            voice_provider = self.voice
+
+            doc = load_chat(workspace_dir, job.slug)
+            video_path = render_chat_video(
+                workspace_dir=workspace_dir,
+                slug=job.slug,
+                doc=doc,
+                voice_provider=voice_provider,
+                library_dir=library_dir,
+                brand_dir=brand_dir,
+                preview=job.preview,
+                progress=on_progress,
+            )
+
+            output = {
+                "slug": job.slug,
+                "video": f"/api/chatting/{job.slug}/renders/{video_path.name}",
+                "preview": job.preview,
+            }
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job chatting_render: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
