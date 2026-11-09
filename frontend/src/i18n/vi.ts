@@ -1119,6 +1119,10 @@ export const vi = {
     },
     result: {
       title: 'Video đã hoàn tất!',
+      summary: (picked: number, total: number, sec: number) =>
+        `Dùng ${picked}/${total} bình luận · video ${sec}s`,
+      durationWarning: (target: number, actual: number) =>
+        `Thời lượng video (${actual}s) ngắn hơn mục tiêu (${target}s) do bài viết có ít bình luận phù hợp`,
       downloadVideo: 'Tải video',
       copyPublish: 'Sao chép nội dung đăng',
       copiedPublish: 'Đã sao chép!',

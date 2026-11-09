@@ -41,6 +41,7 @@ class ParsedComment(ParsedPost):
     same_author: bool = False  # cùng tên với bài gốc: phần tiếp theo của chuỗi tác giả
     picked: bool = False
     parent: str | None = None  # id bình luận được trả lời (dòng đầu bắt đầu bằng ">"), tối đa 1 cấp
+    likes: int = 0
 
 
 class StatHint(BaseModel):
@@ -175,10 +176,18 @@ def parse_threads_text(raw: str) -> ParseResult:
             warnings=["Không nhận ra bài hay bình luận nào. Hãy sửa tay hoặc dán lại."],
         )
 
-    if source_url is None:  # liên kết dán ở đầu (vd threads.com/share/…): chỉ lưu, không truy cập
+    if source_url is None:  # liên kết dán ở đầu hoặc trang copy (chỉ lưu, không truy cập)
         source_url = next(
             (ln.strip() for ln in lines[: headers[0]] if URL_LINE.match(ln.strip())), None
         )
+    if source_url is None:
+        url_match = re.search(r"https?://(?:www\.)?threads\.(?:net|com)/\S+", text)
+        if url_match:
+            source_url = url_match.group(0).rstrip(".,)\"'>")
+        else:
+            gen_match = re.search(r"https?://\S+", text)
+            if gen_match:
+                source_url = gen_match.group(0).rstrip(".,)\"'>")
 
     hints: list[StatHint] = []
     blocks: list[ParsedPost] = []
@@ -191,18 +200,22 @@ def parse_threads_text(raw: str) -> ParseResult:
 
     post = blocks[0]
     replies = _reply_parents(blocks, warnings)
-    comments = [
-        ParsedComment(
-            id=f"c{i}",
-            handle=b.handle,
-            age=b.age,
-            text=b.text,
-            same_author=b.handle == post.handle,
-            picked=i <= DEFAULT_PICKED,
-            parent=replies.get(i),
+    comments = []
+    for i, b in enumerate(blocks[1:], 1):
+        block_likes = [h.value for h in hints if h.block == i and h.value is not None]
+        likes = block_likes[0] if block_likes else 0
+        comments.append(
+            ParsedComment(
+                id=f"c{i}",
+                handle=b.handle,
+                age=b.age,
+                text=b.text,
+                same_author=b.handle == post.handle,
+                picked=i <= DEFAULT_PICKED,
+                parent=replies.get(i),
+                likes=likes,
+            )
         )
-        for i, b in enumerate(blocks[1:], 1)
-    ]
     if not comments:
         warnings.append("Chỉ thấy bài gốc, chưa có bình luận.")
     if hints:

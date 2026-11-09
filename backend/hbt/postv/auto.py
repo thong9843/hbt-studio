@@ -281,19 +281,67 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
             text=c.text,
             parent=c.parent,
             picked=True,
-            likes=None,
+            likes=getattr(c, "likes", None),
         )
         for c in parsed.comments
     ]
     job_manager.storage.save_any(job.slug, project)
+
+    fetch_msg = f"Đã tải bài viết của @{project.post.handle}"
+    if not project.comments:
+        fetch_msg += (
+            " (chưa có bình luận. Gợi ý: Copy cả trang bài (Ctrl+A) "
+            "rồi dán vào đây để thêm bình luận)"
+        )
+    else:
+        fetch_msg += f" ({len(project.comments)} bình luận)"
+
     emit_stage_event(
         job,
         stage=STAGE_FETCH,
         status="done",
         progress=STAGE_PROGRESS[STAGE_FETCH],
-        message=f"Đã tải bài viết của @{project.post.handle}",
+        message=fetch_msg,
         logger=logger,
     )
+
+
+def _filter_comments(
+    comments: list[PostvComment],
+    censor_matchers: list[Any] | None = None,
+) -> list[PostvComment]:
+    """Lọc bình luận trước khi xếp hạng:
+    - >= 15 ký tự
+    - không chỉ toàn emoji / ký hiệu (phải chứa ít nhất 1 chữ hoặc số)
+    - không trùng lặp nội dung
+    - không chứa từ mức chặn (censor block)
+    """
+    valid: list[PostvComment] = []
+    seen: set[str] = set()
+
+    for c in comments:
+        raw = c.text.strip()
+        # 1. < 15 ký tự -> bỏ
+        if len(raw) < 15:
+            continue
+        # 2. Chỉ toàn emoji / ký hiệu (không có chữ hay số) -> bỏ
+        if not any(ch.isalnum() for ch in raw):
+            continue
+        # 3. Trùng lặp -> bỏ
+        norm = re.sub(r"\s+", " ", unicodedata.normalize("NFC", raw).casefold()).strip()
+        if norm in seen:
+            continue
+        # 4. Có từ mức chặn -> bỏ
+        if censor_matchers:
+            from hbt.postv.censor import find_censor_hits
+
+            if find_censor_hits(raw, censor_matchers):
+                continue
+
+        seen.add(norm)
+        valid.append(c)
+
+    return valid
 
 
 def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logging.Logger) -> None:
@@ -311,34 +359,39 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
     target_seconds = float(options.get("target_seconds", 75))
-    max_comments = int(options.get("max_comments", 5))
+    max_comments = int(options.get("max_comments", 20))
 
-    hook_text = get_hook_text(project.post.text, max_len=160)
-    current_chars = voice_chars(hook_text) + voice_chars(project.post.text)
+    # Chuẩn bị bộ lọc từ mức chặn nếu có
+    matchers = None
+    if getattr(job_manager, "postv_words", None):
+        try:
+            from hbt.postv.censor import compile_censor
+
+            words = job_manager.postv_words.load()
+            if words:
+                matchers = compile_censor(words, levels=("block",))
+        except Exception:
+            pass
+
+    # Lọc bình luận theo quy tắc
+    valid_comments = _filter_comments(project.comments, matchers)
+
+    # Ước tính thời lượng bằng bộ ước lượng chuẩn (script/check), bắt đầu trực tiếp từ bài gốc
+    current_chars = voice_chars(project.post.text)
     current_sec = estimate_seconds(current_chars)
 
-    # Sắp xếp bình luận: nhiều like nhất, không có like thì theo thứ tự gốc
-    indexed_comments = list(enumerate(project.comments))
+    # Sắp xếp bình luận hợp lệ: nhiều like nhất, không có like thì theo thứ tự ban đầu
     sorted_comments = sorted(
-        indexed_comments,
-        key=lambda pair: (-(pair[1].likes if pair[1].likes is not None else -1), pair[0]),
+        valid_comments,
+        key=lambda c: (-(c.likes if c.likes is not None else -1), c.id),
     )
 
     picked_ids: set[str] = set()
-    for _, comment in sorted_comments:
-        if len(picked_ids) >= max_comments:
+    for comment in sorted_comments:
+        if current_sec >= target_seconds or len(picked_ids) >= max_comments:
             break
         picked_ids.add(comment.id)
         current_chars += voice_chars(comment.text)
-        current_sec = estimate_seconds(current_chars)
-        if current_sec >= target_seconds:
-            break
-
-    # Nếu chưa có bình luận nào được chọn nhưng có comments, lấy tối thiểu comment đầu
-    if not picked_ids and project.comments:
-        for c in project.comments[:max_comments]:
-            picked_ids.add(c.id)
-            current_chars += voice_chars(c.text)
         current_sec = estimate_seconds(current_chars)
 
     for c in project.comments:
@@ -359,7 +412,10 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         stage=STAGE_PICK,
         status="done",
         progress=STAGE_PROGRESS[STAGE_PICK],
-        message=f"Đã chọn {len(picked_ids)} bình luận (ước tính ≈ {current_sec:.0f}s)",
+        message=(
+            f"Đã chọn {len(picked_ids)}/{len(project.comments)} "
+            f"bình luận (ước tính ≈ {current_sec:.0f}s)"
+        ),
         data=data,
         logger=logger,
     )
@@ -382,10 +438,11 @@ def _step_script(
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
     hook_text = get_hook_text(project.post.text, max_len=160)
-    project.hook.text = hook_text
+    project.publish.hook = hook_text
+    project.hook.text = ""  # Bỏ hẳn thẻ hook ở Quick
 
+    # Video bắt đầu bằng bài gốc (role=post, card=post), không có segment hook
     segments: list[PostvSegment] = [
-        PostvSegment(role="hook", card="hook", voice=hook_text, speaker="narrator"),
         PostvSegment(role="post", card="post", voice=project.post.text, speaker="post"),
     ]
 
@@ -565,15 +622,31 @@ def _step_render(
         censor_words=words,
     )
 
+    picked_cnt = len([c for c in project.comments if c.picked])
+    total_cnt = len(project.comments)
+    target_sec = float(options.get("target_seconds", 75))
+    duration_rounded = round(res.duration, 1)
+
+    warning_msg = None
+    if duration_rounded < target_sec - 5.0:
+        warning_msg = (
+            f"Thời lượng video ({duration_rounded:g}s) ngắn hơn mục tiêu "
+            f"({target_sec:g}s) do bài viết có ít bình luận phù hợp."
+        )
+
     output = {
         "video": _safe_rel(job_manager.storage, res.video),
         "cover": _safe_rel(job_manager.storage, res.cover),
         "youtube_cover": _safe_rel(job_manager.storage, res.youtube_cover),
         "publish": _safe_rel(job_manager.storage, res.publish),
         "log": _safe_rel(job_manager.storage, res.log),
-        "duration": round(res.duration, 3),
+        "duration": duration_rounded,
         "fps": res.fps,
         "project_slug": job.slug,
+        "picked_comments": picked_cnt,
+        "total_comments": total_cnt,
+        "target_seconds": target_sec,
+        "warning": warning_msg,
     }
 
     emit_stage_event(
