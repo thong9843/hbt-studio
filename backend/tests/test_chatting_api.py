@@ -88,7 +88,13 @@ def test_create_and_manage_chatting_project(client):
     assert avatar_res.json()["ok"] is True
     assert "avatars/me.png" in avatar_res.json()["avatar"]
 
-    # 5. Xoá dự án
+    # 5. Xoá dự án (đợi job chạy xong để nhả file lock)
+    for _ in range(50):
+        job = client.app.state.hbt.jobs.get(job_id)
+        if job.finished:
+            break
+        time.sleep(0.1)
+
     del_res = client.delete(f"/api/chatting/{slug}")
     assert del_res.status_code == 200
 

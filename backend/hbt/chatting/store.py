@@ -136,5 +136,15 @@ def list_projects(workspace_dir: Path) -> list[dict[str, Any]]:
 
 def delete_project(workspace_dir: Path, slug: str) -> None:
     project_dir = get_project_dir(workspace_dir, slug)
-    if project_dir.is_dir():
-        shutil.rmtree(project_dir)
+    if not project_dir.is_dir():
+        return
+    for attempt in range(5):
+        try:
+            shutil.rmtree(project_dir)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(0.1)

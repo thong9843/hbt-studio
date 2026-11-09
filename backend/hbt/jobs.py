@@ -757,7 +757,7 @@ class JobManager:
                 raw_input=job.chatting_input,
                 platform=job.chatting_platform,
                 background_name=job.chatting_background,
-                slug_override=job.slug if not job.slug.startswith("chat-") else None,
+                slug_override=job.slug,
                 emit_event=on_event,
             )
 
