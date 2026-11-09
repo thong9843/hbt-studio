@@ -744,7 +744,7 @@ export function PostvQuickPage() {
                 </div>
                 <h1 className="text-h2 font-extrabold text-ink">{T.result.title}</h1>
                 <p className="mt-1 text-small font-semibold text-muted">
-                  {T.result.summary(
+                  {T.result.summary?.(
                     output.picked_comments ?? pickData?.picked_count ?? 0,
                     output.total_comments ?? pickData?.total_comments ?? 0,
                     Math.round(output.duration ?? 0),
