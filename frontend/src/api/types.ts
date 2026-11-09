@@ -185,7 +185,7 @@ export interface MusicEntry {
   bpm: number | null;
 }
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'running' | 'waiting_pick' | 'done' | 'failed' | 'cancelled';
 
 export interface JobOutput {
   video: string;
@@ -230,7 +230,7 @@ export interface ActiveJob {
   id: string;
   slug: string;
   kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto';
-  status: 'queued' | 'running';
+  status: 'queued' | 'running' | 'waiting_pick';
   progress: number;
   step: string;
 }
@@ -636,6 +636,28 @@ export interface PostvQuickOptions {
   music?: 'auto' | 'none';
   max_comments?: number;
   target_seconds?: number;
+  pick_mode?: 'auto' | 'manual';
+}
+
+export interface PostvPickComment {
+  id: string;
+  handle: string;
+  age?: string | null;
+  text: string;
+  likes?: number | null;
+  picked?: boolean;
+  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | null;
+}
+
+export interface PostvPickData {
+  handle: string;
+  post_text: string;
+  snippet?: string;
+  comments: PostvPickComment[];
+  picked_count: number;
+  total_comments: number;
+  target_seconds: number;
+  estimated_seconds: number;
 }
 
 export interface PostvQuickAutoResponse {
@@ -646,7 +668,7 @@ export interface PostvQuickAutoResponse {
 
 export interface PostvStageEvent {
   stage: PostvStage;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'waiting_pick';
   progress: number;
   message: string;
   data?: {
@@ -657,10 +679,17 @@ export interface PostvStageEvent {
     target_seconds?: number;
     estimated_seconds?: number;
     video?: string;
-    cover?: string;
-    youtube_cover?: string;
+    cover?: string | null;
+    youtube_cover?: string | null;
     publish?: string;
+    duration?: number;
+    fps?: number;
+    project_slug?: string;
+    post_text?: string;
+    comments?: PostvPickComment[];
     log?: string;
+    warning?: string | null;
+    [key: string]: unknown;
   };
 }
 

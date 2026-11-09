@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import threading
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -306,12 +307,36 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
     )
 
 
+MIN_COMMENT_LENGTH = 8
+
+
+def inspect_comment_filter(
+    comment: PostvComment,
+    seen: set[str],
+    censor_matchers: list[Any] | None = None,
+) -> str | None:
+    """Trả về lý do không đạt ('ngắn', 'trùng', 'từ nhạy cảm'), None nếu hợp lệ."""
+    raw = comment.text.strip()
+    if len(raw) < MIN_COMMENT_LENGTH or not any(ch.isalnum() for ch in raw):
+        return "ngắn"
+    norm = re.sub(r"\s+", " ", unicodedata.normalize("NFC", raw).casefold()).strip()
+    if norm in seen:
+        return "trùng"
+    if censor_matchers:
+        from hbt.postv.censor import find_censor_hits
+
+        if find_censor_hits(raw, censor_matchers):
+            return "từ nhạy cảm"
+    seen.add(norm)
+    return None
+
+
 def _filter_comments(
     comments: list[PostvComment],
     censor_matchers: list[Any] | None = None,
 ) -> list[PostvComment]:
     """Lọc bình luận trước khi xếp hạng:
-    - >= 15 ký tự
+    - >= 8 ký tự (MIN_COMMENT_LENGTH)
     - không chỉ toàn emoji / ký hiệu (phải chứa ít nhất 1 chữ hoặc số)
     - không trùng lặp nội dung
     - không chứa từ mức chặn (censor block)
@@ -320,26 +345,9 @@ def _filter_comments(
     seen: set[str] = set()
 
     for c in comments:
-        raw = c.text.strip()
-        # 1. < 15 ký tự -> bỏ
-        if len(raw) < 15:
-            continue
-        # 2. Chỉ toàn emoji / ký hiệu (không có chữ hay số) -> bỏ
-        if not any(ch.isalnum() for ch in raw):
-            continue
-        # 3. Trùng lặp -> bỏ
-        norm = re.sub(r"\s+", " ", unicodedata.normalize("NFC", raw).casefold()).strip()
-        if norm in seen:
-            continue
-        # 4. Có từ mức chặn -> bỏ
-        if censor_matchers:
-            from hbt.postv.censor import find_censor_hits
-
-            if find_censor_hits(raw, censor_matchers):
-                continue
-
-        seen.add(norm)
-        valid.append(c)
+        reason = inspect_comment_filter(c, seen, censor_matchers)
+        if reason is None:
+            valid.append(c)
 
     return valid
 
@@ -359,7 +367,6 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
     target_seconds = float(options.get("target_seconds", 75))
-    max_comments = int(options.get("max_comments", 20))
 
     # Chuẩn bị bộ lọc từ mức chặn nếu có
     matchers = None
@@ -388,37 +395,80 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
 
     picked_ids: set[str] = set()
     for comment in sorted_comments:
-        if current_sec >= target_seconds or len(picked_ids) >= max_comments:
+        if current_sec >= target_seconds:
             break
         picked_ids.add(comment.id)
         current_chars += voice_chars(comment.text)
         current_sec = estimate_seconds(current_chars)
 
+    # Kiểm tra lý do lọc cho từng bình luận để UI hiển thị
+    filter_seen: set[str] = set()
+    all_comments_data = []
     for c in project.comments:
+        reason = inspect_comment_filter(c, filter_seen, matchers)
         c.picked = c.id in picked_ids
+        all_comments_data.append(
+            {
+                "id": c.id,
+                "handle": c.handle,
+                "age": c.age,
+                "text": c.text,
+                "likes": c.likes if c.likes is not None else 0,
+                "picked": c.picked,
+                "filter_reason": reason,
+            }
+        )
 
     job_manager.storage.save_any(job.slug, project)
 
     data = {
         "handle": project.post.handle,
         "snippet": project.post.text[:120],
+        "post_text": project.post.text,
+        "comments": all_comments_data,
         "picked_count": len(picked_ids),
         "total_comments": len(project.comments),
         "target_seconds": target_seconds,
         "estimated_seconds": current_sec,
     }
-    emit_stage_event(
-        job,
-        stage=STAGE_PICK,
-        status="done",
-        progress=STAGE_PROGRESS[STAGE_PICK],
-        message=(
-            f"Đã chọn {len(picked_ids)}/{len(project.comments)} "
-            f"bình luận (ước tính ≈ {current_sec:.0f}s)"
-        ),
-        data=data,
-        logger=logger,
-    )
+
+    pick_mode = options.get("pick_mode", "auto")
+    if pick_mode == "manual":
+        job._pick_event = threading.Event()
+        job._waiting_pick_data = data
+        with job._lock:
+            job.status = "waiting_pick"
+        emit_stage_event(
+            job,
+            stage=STAGE_PICK,
+            status="waiting_pick",
+            progress=STAGE_PROGRESS[STAGE_PICK],
+            message="Đang chờ bạn chọn bình luận…",
+            data=data,
+            logger=logger,
+        )
+        # Chờ người dùng chọn bình luận và gửi POST /postv/auto/{job_id}/pick
+        waited = job._pick_event.wait(timeout=1800.0)
+        if job.token.cancelled:
+            raise RenderCancelled()
+        if not waited:
+            raise RuntimeError("Hết thời gian chờ chọn bình luận (timeout 30 phút).")
+        with job._lock:
+            job.status = "running"
+        project = job_manager.storage.load_any(job.slug)
+    else:
+        emit_stage_event(
+            job,
+            stage=STAGE_PICK,
+            status="done",
+            progress=STAGE_PROGRESS[STAGE_PICK],
+            message=(
+                f"Đã chọn {len(picked_ids)}/{len(project.comments)} "
+                f"bình luận (ước tính ≈ {current_sec:.0f}s)"
+            ),
+            data=data,
+            logger=logger,
+        )
 
 
 def _step_script(
@@ -455,19 +505,25 @@ def _step_script(
     project.segments = segments
 
     # Giọng đọc: tuỳ chọn voice_id hoặc giọng nhớ gần nhất
+    ws_dir = (
+        job_manager.storage.workspace_dir
+        if hasattr(job_manager.storage, "workspace_dir") and job_manager.storage.workspace_dir
+        else None
+    )
     chosen_voice = options.get("voice_id")
-    if not chosen_voice:
+    if not chosen_voice and ws_dir:
         try:
-            from hbt.api.gd2 import Gd2Prefs
+            from hbt.postv.prefs import PostvPrefs
 
-            ws_dir = (
-                job_manager.storage.workspace_dir
-                if hasattr(job_manager.storage, "workspace_dir")
-                and job_manager.storage.workspace_dir
-                else None
-            )
-            if ws_dir:
-                chosen_voice = Gd2Prefs(ws_dir).voice_id()
+            chosen_voice = PostvPrefs(ws_dir).voice_id()
+        except Exception:
+            pass
+
+    if not chosen_voice and ws_dir:
+        try:
+            from hbt.gd2.prefs import Gd2Prefs
+
+            chosen_voice = Gd2Prefs(ws_dir).voice_id()
         except Exception:
             pass
 
@@ -480,6 +536,13 @@ def _step_script(
             pass
 
     if chosen_voice:
+        if ws_dir:
+            try:
+                from hbt.postv.prefs import PostvPrefs
+
+                PostvPrefs(ws_dir).set_voice_id(chosen_voice)
+            except Exception:
+                pass
         project.voice.voice_id = chosen_voice
         all_speakers = ["narrator", "post", *[c.id for c in picked_comments]]
         project.voice.cast = {s: chosen_voice for s in all_speakers}
@@ -631,7 +694,8 @@ def _step_render(
     if duration_rounded < target_sec - 5.0:
         warning_msg = (
             f"Thời lượng video ({duration_rounded:g}s) ngắn hơn mục tiêu "
-            f"({target_sec:g}s) do bài viết có ít bình luận phù hợp."
+            f"({target_sec:g}s) do bài viết có ít bình luận phù hợp. "
+            "Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang."
         )
 
     output = {
