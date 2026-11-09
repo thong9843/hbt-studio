@@ -56,9 +56,14 @@ def test_create_and_manage_chatting_project(client):
     assert slug
     assert job_id
 
-    # 2. Đọc dự án
-    get_res = client.get(f"/api/chatting/{slug}")
-    assert get_res.status_code == 200
+    # 2. Đọc dự án (đợi job hoàn tất tạo file chat.json)
+    get_res = None
+    for _ in range(50):
+        get_res = client.get(f"/api/chatting/{slug}")
+        if get_res.status_code == 200:
+            break
+        time.sleep(0.1)
+    assert get_res is not None and get_res.status_code == 200
     project_data = get_res.json()
     assert project_data["slug"] == slug
     assert "doc" in project_data
