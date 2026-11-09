@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter
+from fastapi.responses import FileResponse
 
 from hbt.api.deps import State, file_url
 from hbt.api.render import JobCreated
@@ -40,6 +41,34 @@ def list_voices(state: State):
     except VoiceError as e:
         raise ServiceUnavailable(str(e)) from e
     return {"default": DEFAULT_NARRATOR, "voices": [v.view() for v in voices]}
+
+
+@router.get("/voices/{voice_id}/sample")
+def voice_sample(voice_id: str, state: State):
+    """Nghe thử 1 câu mẫu của giọng VieNeu (có cache file trên disk)."""
+    ws_dir = getattr(state.storage, "workspace_dir", None)
+    if not ws_dir:
+        from pathlib import Path
+
+        ws_dir = Path("workspace")
+    cache_dir = ws_dir / "cache" / "voice_samples"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sample_file = cache_dir / f"{voice_id}.wav"
+    if not sample_file.is_file():
+        text = "Xin chào, đây là giọng đọc thử nghiệm của HBT Studio."
+        data = None
+        if state.voice is not None:
+            try:
+                data = state.voice.synthesize(text, voice_id)
+            except Exception:
+                data = None
+        if data:
+            sample_file.write_bytes(data)
+        else:
+            from hbt.postv.voice import _write_tone
+
+            _write_tone(sample_file, 1.5, voice_id)
+    return FileResponse(str(sample_file), media_type="audio/wav")
 
 
 @router.get("/projects/{slug}/voice")

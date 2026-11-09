@@ -131,6 +131,151 @@ def postv_quick_retry(job_id: str, state: State):
     }
 
 
+class PostvPickBody(BaseModel):
+    comment_ids: list[str]
+
+
+class PostvSettingsBody(BaseModel):
+    voice_id: str
+
+
+@router.post("/postv/auto/{job_id}/pick")
+def postv_quick_pick(job_id: str, body: PostvPickBody, state: State):
+    """Chọn danh sách bình luận thủ công và tiếp tục dựng video từ bước script."""
+    job = state.jobs.get(job_id)
+    if job.status != "waiting_pick":
+        raise Conflict(
+            f"Chỉ có thể chọn bình luận khi job ở trạng thái waiting_pick (hiện tại: {job.status})"
+        )
+
+    project = state.storage.load_any(job.slug)
+    if not isinstance(project, PostvProject):
+        raise BadRequest(f"'{job.slug}' không phải dự án PostV")
+
+    chosen_set = set(body.comment_ids)
+    by_id = {c.id: c for c in project.comments}
+
+    chosen_comments = []
+    for cid in body.comment_ids:
+        if cid in by_id:
+            c = by_id[cid]
+            c.picked = True
+            chosen_comments.append(c)
+
+    other_comments = []
+    for c in project.comments:
+        if c.id not in chosen_set:
+            c.picked = False
+            other_comments.append(c)
+
+    project.comments = chosen_comments + other_comments
+    state.storage.save_any(job.slug, project)
+
+    pick_event = getattr(job, "_pick_event", None)
+    if pick_event is not None and not pick_event.is_set():
+        pick_event.set()
+        return {
+            "ok": True,
+            "job_id": job.id,
+            "project_slug": job.slug,
+            "status": "running",
+        }
+
+    new_job = state.jobs.submit_postv_quick(
+        job.slug,
+        getattr(job, "auto_input", ""),
+        getattr(job, "auto_options", {}),
+        start_stage="script",
+    )
+    return {
+        "ok": True,
+        "job_id": new_job.id,
+        "project_slug": job.slug,
+        "status": "running",
+    }
+
+
+@router.get("/postv/auto/{job_id}/pick")
+def get_postv_quick_pick_data(job_id: str, state: State):
+    """Lấy dữ liệu bài viết và danh sách bình luận cho bảng chọn bình luận thủ công."""
+    job = state.jobs.get(job_id)
+    pick_data = getattr(job, "_waiting_pick_data", None)
+    if pick_data:
+        res = dict(pick_data)
+        res["job_id"] = job.id
+        return res
+
+    project = state.storage.load_any(job.slug)
+    if not isinstance(project, PostvProject):
+        raise BadRequest(f"'{job.slug}' không phải dự án PostV")
+
+    from hbt.postv.auto import inspect_comment_filter
+    from hbt.postv.script import estimate_seconds, voice_chars
+
+    current_chars = voice_chars(project.post.text)
+    current_sec = estimate_seconds(current_chars)
+
+    seen: set[str] = set()
+    comments_data = []
+    for c in project.comments:
+        reason = inspect_comment_filter(c, seen)
+        comments_data.append(
+            {
+                "id": c.id,
+                "handle": c.handle,
+                "age": c.age,
+                "text": c.text,
+                "likes": c.likes if c.likes is not None else 0,
+                "picked": c.picked,
+                "filter_reason": reason,
+            }
+        )
+
+    return {
+        "job_id": job.id,
+        "handle": project.post.handle,
+        "post_text": project.post.text,
+        "snippet": project.post.text[:120],
+        "comments": comments_data,
+        "picked_count": len([c for c in project.comments if c.picked]),
+        "total_comments": len(project.comments),
+        "target_seconds": float(getattr(job, "auto_options", {}).get("target_seconds", 75)),
+        "estimated_seconds": current_sec,
+    }
+
+
+@router.get("/postv/settings")
+def get_postv_settings(state: State):
+    """Lấy cài đặt ghi nhớ của PostV (giọng đọc gần nhất)."""
+    ws_dir = getattr(state.storage, "workspace_dir", None)
+    if not ws_dir:
+        ws_dir = Path("workspace")
+    from hbt.postv.prefs import PostvPrefs
+
+    return {"voice_id": PostvPrefs(ws_dir).voice_id()}
+
+
+@router.post("/postv/settings")
+def set_postv_settings(body: PostvSettingsBody, state: State):
+    """Lưu cài đặt ghi nhớ của PostV (giọng đọc gần nhất)."""
+    ws_dir = getattr(state.storage, "workspace_dir", None)
+    if not ws_dir:
+        ws_dir = Path("workspace")
+    from hbt.postv.prefs import PostvPrefs
+
+    PostvPrefs(ws_dir).set_voice_id(body.voice_id)
+    return {"ok": True, "voice_id": body.voice_id}
+
+
+@router.delete("/postv/{slug}", status_code=204)
+def delete_postv_project(slug: str, state: State):
+    """Xoá dự án PostV (không đụng api/projects.py)."""
+    if state.jobs.is_busy(slug):
+        raise Conflict("Dự án đang bận (đang dựng), không thể xoá")
+    state.storage.delete(slug)
+    return Response(status_code=204)
+
+
 @router.post("/projects/{slug}/postv/script/check")
 def script_check(slug: str, state: State):
     """Ước thời lượng và nhắc từ nhạy cảm của dự án PostV (chỉ nhắc, không chặn)."""

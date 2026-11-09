@@ -18,6 +18,7 @@ import type {
   PostvBackupRecord,
   PostvCheck,
   PostvParseResult,
+  PostvPickData,
   PostvProject,
   PostvQuickAutoResponse,
   PostvQuickOptions,
@@ -311,6 +312,18 @@ export const api = {
       'POST',
       `/postv/auto/${enc(jobId)}/retry`,
     ),
+  getPostvPickData: (jobId: string) => apiGet<PostvPickData>(`/postv/auto/${enc(jobId)}/pick`),
+  submitPostvPick: (jobId: string, commentIds: string[]) =>
+    apiRequest<{ job_id: string; project_slug: string; status: string }>(
+      'POST',
+      `/postv/auto/${enc(jobId)}/pick`,
+      { json: { comment_ids: commentIds } },
+    ),
+  getPostvSettings: () => apiGet<{ voice_id: string | null }>('/postv/settings'),
+  savePostvSettings: (body: { voice_id: string }) =>
+    apiRequest<{ ok: boolean; voice_id: string }>('POST', '/postv/settings', { json: body }),
+  deletePostvProject: (slug: string) => apiRequest<void>('DELETE', `/postv/${enc(slug)}`),
+  voiceSampleUrl: (voiceId: string) => `/api/voices/${encodeURIComponent(voiceId)}/sample`,
   deleteRender: (slug: string, jobId: string) =>
     apiRequest<void>('DELETE', `/projects/${enc(slug)}/renders/${enc(jobId)}`),
   listRenders: (slug: string) => apiGet<RenderRecord[]>(`/projects/${enc(slug)}/renders`),

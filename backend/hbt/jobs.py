@@ -375,6 +375,8 @@ class JobManager:
         if job.finished:
             raise Conflict(f"Job đã kết thúc ({job.status})")
         job.token.cancel()
+        if hasattr(job, "_pick_event"):
+            job._pick_event.set()
         if not job._cancel_if_queued():
             job.wait(CANCEL_WAIT)  # đang chạy: chờ luồng dựng dừng hẳn
         return job
@@ -384,6 +386,8 @@ class JobManager:
             jobs = [j for j in self._jobs.values() if not j.finished]
         for j in jobs:
             j.token.cancel()
+            if hasattr(j, "_pick_event"):
+                j._pick_event.set()
         self._pool.shutdown(wait=True, cancel_futures=True)
 
     # ---------------------------------------------------------------- chạy

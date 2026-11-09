@@ -326,7 +326,7 @@ def test_filter_comments_rules():
     censor = [CensorMatcher(word="từcấm", category="block", pattern=re.compile(r"từcấm"))]
 
     raw_comments = [
-        PostvComment(id="c1", handle="u1", text="Ngắn quá", age="1h"),
+        PostvComment(id="c1", handle="u1", text="Ngắn", age="1h"),
         PostvComment(id="c2", handle="u2", text="😂😂😂 !!! ???", age="1h"),
         PostvComment(
             id="c3",
@@ -438,3 +438,191 @@ def test_step_pick_accumulates_to_target_seconds():
     _step_pick(jm, job60, {"target_seconds": 60}, MagicMock())
     picked60 = [c for c in proj60.comments if c.picked]
     assert len(picked60) == 6
+
+
+def test_inspect_comment_filter_and_min_length_constant():
+    import re
+
+    from hbt.postv.auto import MIN_COMMENT_LENGTH, inspect_comment_filter
+    from hbt.postv.censor import CensorMatcher
+
+    assert MIN_COMMENT_LENGTH == 8
+
+    censor = [CensorMatcher(word="từcấm", category="block", pattern=re.compile(r"từcấm"))]
+    seen = set()
+
+    # < 8 ký tự -> "ngắn"
+    c_short = PostvComment(id="c1", handle="u1", text="Ngắn", age="1h")
+    assert inspect_comment_filter(c_short, seen, censor) == "ngắn"
+
+    # Chỉ emoji / ký hiệu -> "ngắn"
+    c_emoji = PostvComment(id="c2", handle="u2", text="😂😂😂 !!! ???", age="1h")
+    assert inspect_comment_filter(c_emoji, seen, censor) == "ngắn"
+
+    # Bình luận hợp lệ >= 8 ký tự
+    c_valid = PostvComment(id="c3", handle="u3", text="Bình luận này hợp lệ đủ chuẩn.", age="1h")
+    assert inspect_comment_filter(c_valid, seen, censor) is None
+
+    # Trùng lặp
+    c_dup = PostvComment(id="c4", handle="u4", text="Bình luận này hợp lệ đủ chuẩn.", age="1h")
+    assert inspect_comment_filter(c_dup, seen, censor) == "trùng"
+
+    # Chứa từ nhạy cảm
+    c_bad = PostvComment(id="c5", handle="u5", text="Có chứa từcấm ở đây nha bạn.", age="1h")
+    assert inspect_comment_filter(c_bad, seen, censor) == "từ nhạy cảm"
+
+
+def test_step_pick_manual_mode_pauses_and_sets_waiting_pick():
+    import threading
+
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+
+    slug = "test-manual-pick"
+    proj = PostvProject(version=1, kind="postv", slug=slug, title="Manual Pick")
+    proj.post.text = "Bài viết gốc của tác giả có nội dung đầy đủ."
+    proj.comments = [
+        PostvComment(
+            id="c1", handle="u1", text="Bình luận 1 rất chất lượng và dài vừa đủ.", age="1h"
+        ),
+        PostvComment(id="c2", handle="u2", text="Ngắn", age="1h"),
+    ]
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    job = Job("job-manual", slug, False, 60, True, False, kind="postv_quick")
+
+    checked_waiting = False
+
+    def fake_wait(self, timeout=None):
+        nonlocal checked_waiting
+        assert job.status == "waiting_pick"
+        assert hasattr(job, "_pick_event")
+        checked_waiting = True
+        return True
+
+    with (
+        patch.object(threading.Event, "wait", fake_wait),
+        patch("hbt.postv.auto.emit_stage_event") as emit_mock,
+    ):
+        _step_pick(jm, job, {"pick_mode": "manual", "target_seconds": 60}, MagicMock())
+
+    assert checked_waiting is True
+    assert job.status == "running"
+    # Kiểm tra event waiting_pick đã được emit
+    waiting_emits = [
+        call for call in emit_mock.call_args_list if call.kwargs.get("status") == "waiting_pick"
+    ]
+    assert len(waiting_emits) == 1
+    call_kwargs = waiting_emits[0].kwargs
+    assert call_kwargs["stage"] == "pick"
+    assert "comments" in call_kwargs["data"]
+    comments_data = call_kwargs["data"]["comments"]
+    assert len(comments_data) == 2
+    assert comments_data[0]["id"] == "c1"
+    assert comments_data[0]["filter_reason"] is None
+    assert comments_data[1]["id"] == "c2"
+    assert comments_data[1]["filter_reason"] == "ngắn"
+
+
+def test_api_postv_settings_endpoint(client):
+    # GET ban đầu trả về default (rỗng hoặc file chưa có)
+    r_get = client.get("/api/postv/settings")
+    assert r_get.status_code == 200
+
+    # POST lưu giọng mới
+    r_post = client.post("/api/postv/settings", json={"voice_id": "mai-anh"})
+    assert r_post.status_code == 200
+    assert r_post.json()["voice_id"] == "mai-anh"
+
+    # GET lại kiểm tra đã nhớ
+    r_get2 = client.get("/api/postv/settings")
+    assert r_get2.status_code == 200
+    assert r_get2.json()["voice_id"] == "mai-anh"
+
+
+def test_api_postv_delete_endpoint(client):
+    # Tạo một project PostV
+    r_create = client.post("/api/projects", json={"title": "Video Cần Xoá", "kind": "postv"})
+    assert r_create.status_code == 201
+    slug = r_create.json()["slug"]
+
+    # Kiểm tra project tồn tại
+    assert client.get(f"/api/projects/{slug}").status_code == 200
+
+    # Gọi DELETE /api/postv/{slug}
+    r_del = client.delete(f"/api/postv/{slug}")
+    assert r_del.status_code == 204
+
+    # Kiểm tra project đã bị xoá
+    assert client.get(f"/api/projects/{slug}").status_code == 404
+
+    # Xoá project không tồn tại trả về 404
+    assert client.delete(f"/api/postv/{slug}").status_code == 404
+
+
+def test_api_voices_sample_endpoint(client):
+    import wave
+
+    cache_dir = client.tmp / "workspace" / "cache" / "voice_samples"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sample_wav = cache_dir / "test-voice.wav"
+
+    # Tạo một file wav dummy hợp lệ
+    with wave.open(str(sample_wav), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(24000)
+        wf.writeframes(b"\x00\x00" * 2400)
+
+    r = client.get("/api/voices/test-voice/sample")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("audio/wav")
+    assert len(r.content) > 0
+
+
+def test_api_postv_pick_endpoints(client):
+    import threading
+
+    from hbt.jobs import Job
+
+    # Tạo project postv
+    r_create = client.post("/api/projects", json={"title": "Pick API Test", "kind": "postv"})
+    assert r_create.status_code == 201
+    slug = r_create.json()["slug"]
+
+    hbt_state = client.app.state.hbt
+    proj = hbt_state.storage.load_any(slug)
+    proj.post.text = "Bài viết gốc"
+    proj.comments = [
+        PostvComment(id="c1", handle="u1", text="Bình luận 1", age="1h"),
+        PostvComment(id="c2", handle="u2", text="Bình luận 2", age="1h"),
+    ]
+    hbt_state.storage.save_any(slug, proj)
+
+    # Đăng ký job đang ở waiting_pick
+    job = Job("job-pick-test", slug, False, 60, True, False, kind="postv_quick")
+    job.status = "waiting_pick"
+    job._pick_event = threading.Event()
+    hbt_state.jobs._jobs[job.id] = job
+
+    # GET /api/postv/auto/{job_id}/pick
+    r_get = client.get(f"/api/postv/auto/{job.id}/pick")
+    assert r_get.status_code == 200
+    data = r_get.json()
+    assert data["job_id"] == job.id
+    assert len(data["comments"]) == 2
+
+    # POST /api/postv/auto/{job_id}/pick
+    r_pick = client.post(
+        f"/api/postv/auto/{job.id}/pick",
+        json={"comment_ids": ["c2", "c1"]},
+    )
+    assert r_pick.status_code == 200
+    assert r_pick.json()["ok"] is True
+    assert job._pick_event.is_set()
+
+    # Kiểm tra project comments đã được cập nhật thứ tự và picked
+    updated_proj = hbt_state.storage.load_any(slug)
+    assert updated_proj.comments[0].id == "c2" and updated_proj.comments[0].picked is True
+    assert updated_proj.comments[1].id == "c1" and updated_proj.comments[1].picked is True
