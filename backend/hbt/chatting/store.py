@@ -139,13 +139,13 @@ def delete_project(workspace_dir: Path, slug: str) -> None:
     project_dir = get_project_dir(workspace_dir, slug)
     if not project_dir.is_dir():
         return
-    for attempt in range(5):
+    for attempt in range(15):
         try:
             shutil.rmtree(project_dir)
             return
         except FileNotFoundError:
             return
         except OSError:
-            if attempt == 4:
+            if attempt == 14:
                 raise
-            time.sleep(0.1)
+            time.sleep(0.2)
