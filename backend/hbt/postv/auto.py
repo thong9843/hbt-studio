@@ -289,7 +289,10 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
 
     fetch_msg = f"Đã tải bài viết của @{project.post.handle}"
     if not project.comments:
-        fetch_msg += " (chưa có bình luận. Gợi ý: Copy cả trang bài (Ctrl+A) rồi dán vào đây để thêm bình luận)"
+        fetch_msg += (
+            " (chưa có bình luận. Gợi ý: Copy cả trang bài (Ctrl+A) "
+            "rồi dán vào đây để thêm bình luận)"
+        )
     else:
         fetch_msg += f" ({len(project.comments)} bình luận)"
 
@@ -331,6 +334,7 @@ def _filter_comments(
         # 4. Có từ mức chặn -> bỏ
         if censor_matchers:
             from hbt.postv.censor import find_censor_hits
+
             if find_censor_hits(raw, censor_matchers):
                 continue
 
@@ -362,6 +366,7 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     if getattr(job_manager, "postv_words", None):
         try:
             from hbt.postv.censor import compile_censor
+
             words = job_manager.postv_words.load()
             if words:
                 matchers = compile_censor(words, levels=("block",))
@@ -407,7 +412,10 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         stage=STAGE_PICK,
         status="done",
         progress=STAGE_PROGRESS[STAGE_PICK],
-        message=f"Đã chọn {len(picked_ids)}/{len(project.comments)} bình luận (ước tính ≈ {current_sec:.0f}s)",
+        message=(
+            f"Đã chọn {len(picked_ids)}/{len(project.comments)} "
+            f"bình luận (ước tính ≈ {current_sec:.0f}s)"
+        ),
         data=data,
         logger=logger,
     )
@@ -621,7 +629,10 @@ def _step_render(
 
     warning_msg = None
     if duration_rounded < target_sec - 5.0:
-        warning_msg = f"Thời lượng video ({duration_rounded:g}s) ngắn hơn mục tiêu ({target_sec:g}s) do bài viết có ít bình luận phù hợp."
+        warning_msg = (
+            f"Thời lượng video ({duration_rounded:g}s) ngắn hơn mục tiêu "
+            f"({target_sec:g}s) do bài viết có ít bình luận phù hợp."
+        )
 
     output = {
         "video": _safe_rel(job_manager.storage, res.video),

@@ -318,19 +318,38 @@ def test_run_auto_job_cancel(tmp_path: Path):
 
 
 def test_filter_comments_rules():
+    import re
+
     from hbt.postv.auto import _filter_comments
     from hbt.postv.censor import CensorMatcher
-    import re
 
     censor = [CensorMatcher(word="từcấm", category="block", pattern=re.compile(r"từcấm"))]
 
     raw_comments = [
-        PostvComment(id="c1", handle="u1", text="Ngắn quá", age="1h"),  # < 15 ký tự -> loại
-        PostvComment(id="c2", handle="u2", text="😂😂😂 !!! ???", age="1h"),  # chỉ emoji/ký hiệu -> loại
-        PostvComment(id="c3", handle="u3", text="Bình luận này hợp lệ và có độ dài đủ chuẩn.", age="1h", likes=50),
-        PostvComment(id="c4", handle="u4", text="Bình luận này hợp lệ và có độ dài đủ chuẩn.", age="1h", likes=20),  # trùng lặp -> loại
-        PostvComment(id="c5", handle="u5", text="Nội dung có chứa từcấm này nhé bạn ơi.", age="1h"),  # chứa từ cấm -> loại
-        PostvComment(id="c6", handle="u6", text="Một bình luận khác cũng rất hay và ý nghĩa.", age="1h", likes=100),
+        PostvComment(id="c1", handle="u1", text="Ngắn quá", age="1h"),
+        PostvComment(id="c2", handle="u2", text="😂😂😂 !!! ???", age="1h"),
+        PostvComment(
+            id="c3",
+            handle="u3",
+            text="Bình luận này hợp lệ và có độ dài đủ chuẩn.",
+            age="1h",
+            likes=50,
+        ),
+        PostvComment(
+            id="c4",
+            handle="u4",
+            text="Bình luận này hợp lệ và có độ dài đủ chuẩn.",
+            age="1h",
+            likes=20,
+        ),
+        PostvComment(id="c5", handle="u5", text="Nội dung có chứa từcấm này nhé bạn ơi.", age="1h"),
+        PostvComment(
+            id="c6",
+            handle="u6",
+            text="Một bình luận khác cũng rất hay và ý nghĩa.",
+            age="1h",
+            likes=100,
+        ),
     ]
 
     filtered = _filter_comments(raw_comments, censor)
@@ -347,7 +366,9 @@ def test_step_script_starts_with_post_without_hook():
     proj = PostvProject(version=1, kind="postv", slug=slug, title="No Hook")
     proj.post.text = "Bài viết mở đầu bằng nội dung chính luôn. Không có hook thừa."
     proj.comments = [
-        PostvComment(id="c1", handle="u1", text="Bình luận đầu tiên đủ dài và chuẩn.", age="1h", picked=True)
+        PostvComment(
+            id="c1", handle="u1", text="Bình luận đầu tiên đủ dài và chuẩn.", age="1h", picked=True
+        )
     ]
 
     jm = MagicMock()
@@ -372,15 +393,25 @@ def test_step_pick_accumulates_to_target_seconds():
     from hbt.jobs import Job
     from hbt.postv.auto import _step_pick
 
-    # Mỗi comment dài ~ 165 ký tự (~ 10 giây đọc theo READ_CPS=16.5)
-    comment_text = "Đây là một bình luận rất chi tiết và sâu sắc có độ dài tương đương mười giây đọc để kiểm thử khả năng tích luỹ thời lượng tự động của hệ thống."
+    comment_text = (
+        "Đây là một bình luận rất chi tiết và sâu sắc có độ dài tương đương "
+        "mười giây đọc để kiểm thử khả năng tích luỹ thời lượng tự động của hệ thống."
+    )
     slug = "test-target-duration"
 
-    # Post dài ~ 165 ký tự (~ 10 giây đọc)
-    post_text = "Bài viết mở đầu có độ dài tương đương mười giây đọc để làm mốc tính thời lượng ban đầu của kịch bản video."
+    post_text = (
+        "Bài viết mở đầu có độ dài tương đương mười giây đọc "
+        "để làm mốc tính thời lượng ban đầu của kịch bản video."
+    )
 
     comments = [
-        PostvComment(id=f"c{i}", handle=f"u{i}", text=f"{comment_text} (ý kiến góc nhìn số {i})", age="1h", likes=100 - i)
+        PostvComment(
+            id=f"c{i}",
+            handle=f"u{i}",
+            text=f"{comment_text} (ý kiến {i})",
+            age="1h",
+            likes=100 - i,
+        )
         for i in range(1, 10)
     ]
 

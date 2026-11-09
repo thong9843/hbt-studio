@@ -750,11 +750,20 @@ export function PostvQuickPage() {
                     Math.round(output.duration ?? 0),
                   )}
                 </p>
-                {((output.target_seconds && output.duration && output.duration < output.target_seconds - 5) || output.warning) && (
+                {((output.target_seconds &&
+                  output.duration &&
+                  output.duration < output.target_seconds - 5) ||
+                  output.warning) && (
                   <div className="mx-auto mt-2 max-w-md rounded-xl border border-accent/40 bg-accent/10 p-2.5 text-tiny text-ink">
                     <div className="flex items-center justify-center gap-2 font-medium">
                       <AlertIcon size={16} className="text-accent shrink-0" />
-                      <span>{output.warning || T.result.durationWarning(output.target_seconds!, Math.round(output.duration!))}</span>
+                      <span>
+                        {output.warning ||
+                          T.result.durationWarning(
+                            output.target_seconds!,
+                            Math.round(output.duration!),
+                          )}
+                      </span>
                     </div>
                   </div>
                 )}

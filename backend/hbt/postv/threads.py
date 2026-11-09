@@ -136,7 +136,7 @@ def extract_threads_post(url: str, timeout: float = 15.0) -> ParseResult:
     # 5. Trích xuất bình luận từ dữ liệu JSON nhúng trong HTML của Threads
     comments = _extract_comments_from_html(raw_html, handle, caption)
 
-    # Nếu không có bình luận qua JSON, kiểm tra bài viết dạng đối thoại (Chồng: / Vợ: / Nam: / Nữ: ...)
+    # Nếu không có bình luận qua JSON, kiểm tra bài đối thoại (Chồng: / Vợ: ...)
     if not comments:
         lines = [line.strip() for line in caption.splitlines() if line.strip()]
         dialogue_lines: list[tuple[str, str]] = []
@@ -228,7 +228,9 @@ def _extract_comments_from_html(
                             age="vừa xong",
                             text=clean_text,
                             likes=likes,
-                            same_author=(clean_user.casefold() == main_handle.lstrip("@").casefold()),
+                            same_author=(
+                                clean_user.casefold() == main_handle.lstrip("@").casefold()
+                            ),
                             picked=False,
                         )
                     )

@@ -176,7 +176,7 @@ def parse_threads_text(raw: str) -> ParseResult:
             warnings=["Không nhận ra bài hay bình luận nào. Hãy sửa tay hoặc dán lại."],
         )
 
-    if source_url is None:  # liên kết dán ở đầu hoặc bất kỳ đâu trong trang copy (chỉ lưu, không truy cập)
+    if source_url is None:  # liên kết dán ở đầu hoặc trang copy (chỉ lưu, không truy cập)
         source_url = next(
             (ln.strip() for ln in lines[: headers[0]] if URL_LINE.match(ln.strip())), None
         )
