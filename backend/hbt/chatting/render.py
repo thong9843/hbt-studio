@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import struct
 import time
 import wave
 from collections.abc import Callable
@@ -19,7 +20,7 @@ from PIL import Image
 
 from hbt.chatting.draw import ChatFrameRenderer
 from hbt.chatting.models import ChatDoc, Message
-from hbt.chatting.stickers import pick_sticker
+from hbt.chatting.stickers import load_sticker_or_meme_image, pick_sticker
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
@@ -38,41 +39,48 @@ def assemble_voice_track(
     out_wav: Path,
     sample_rate: int = 24000,
 ) -> None:
-    """Tạo track giọng duy nhất bằng cách đặt từng file wav vào đúng mốc thời gian."""
+    """Tạo track âm thanh tổng hợp (giọng nói + SFX) bằng cách cộng dồn mẫu PCM 16-bit."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     total_samples = int(total_duration * sample_rate)
     buffer = bytearray(total_samples * 2)  # 16-bit mono
 
-    for start_time, wav_path, _dur in audio_events:
-        if not wav_path.is_file():
+    for start_time, audio_path, _dur in audio_events:
+        if not audio_path.is_file():
             continue
         try:
-            with wave.open(str(wav_path), "rb") as wf:
-                channels = wf.getnchannels()
-                rate = wf.getframerate()
-                sampwidth = wf.getsampwidth()
-                raw_data = wf.readframes(wf.getnframes())
+            raw_data = b""
+            # Nếu là file wav chuẩn
+            if audio_path.suffix.lower() == ".wav":
+                try:
+                    with wave.open(str(audio_path), "rb") as wf:
+                        channels = wf.getnchannels()
+                        rate = wf.getframerate()
+                        sampwidth = wf.getsampwidth()
+                        if rate == sample_rate and channels == 1 and sampwidth == 2:
+                            raw_data = wf.readframes(wf.getnframes())
+                except Exception:
+                    raw_data = b""
 
-                # Chuyển đổi sang mono sample_rate nếu khác
-                if rate != sample_rate or channels != 1 or sampwidth != 2:
-                    # Dùng ffmpeg resample nhanh
-                    tmp_resampled = wav_path.with_name(f"{wav_path.stem}_resampled.wav")
-                    run_ffmpeg(
-                        [
-                            "-y",
-                            "-v",
-                            "error",
-                            "-i",
-                            str(wav_path),
-                            "-ac",
-                            "1",
-                            "-ar",
-                            str(sample_rate),
-                            "-c:a",
-                            "pcm_s16le",
-                            str(tmp_resampled),
-                        ]
-                    )
+            # Nếu chưa có raw_data hoặc là file mp3/cần resample: dùng ffmpeg convert sang mono wav
+            if not raw_data:
+                tmp_resampled = out_wav.parent / f"tmp_{time.time_ns()}_{audio_path.stem}.wav"
+                run_ffmpeg(
+                    [
+                        "-y",
+                        "-v",
+                        "error",
+                        "-i",
+                        str(audio_path),
+                        "-ac",
+                        "1",
+                        "-ar",
+                        str(sample_rate),
+                        "-c:a",
+                        "pcm_s16le",
+                        str(tmp_resampled),
+                    ]
+                )
+                if tmp_resampled.is_file():
                     with wave.open(str(tmp_resampled), "rb") as rwf:
                         raw_data = rwf.readframes(rwf.getnframes())
                     try:
@@ -80,19 +88,49 @@ def assemble_voice_track(
                     except Exception:
                         pass
 
-                start_idx = int(start_time * sample_rate) * 2
-                end_idx = min(len(buffer), start_idx + len(raw_data))
-                copy_len = end_idx - start_idx
-                if copy_len > 0 and start_idx < len(buffer):
-                    buffer[start_idx:end_idx] = raw_data[:copy_len]
+            start_idx = int(start_time * sample_rate) * 2
+            end_idx = min(len(buffer), start_idx + len(raw_data))
+            copy_len = end_idx - start_idx
+            if copy_len > 0 and start_idx < len(buffer):
+                # Cộng dồn mẫu PCM 16-bit với kiểm soát chống tràn âm (audio mixing)
+                for k in range(0, copy_len, 2):
+                    cur_val = struct.unpack_from("<h", buffer, start_idx + k)[0]
+                    add_val = struct.unpack_from("<h", raw_data, k)[0]
+                    mixed = max(-32768, min(32767, cur_val + add_val))
+                    struct.pack_into("<h", buffer, start_idx + k, mixed)
         except Exception as e:
-            logger.warning("Không trộn được wav %s: %s", wav_path, e)
+            logger.warning("Không trộn được âm thanh %s: %s", audio_path, e)
 
     with wave.open(str(out_wav), "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(buffer)
+
+
+def pick_sfx_file(library_dir: Path, kind: str) -> Path | None:
+    """Lấy file hiệu ứng âm thanh từ library/sfx/ (pop, typing, ding)."""
+    sfx_dir = library_dir / "sfx"
+    if not sfx_dir.is_dir():
+        return None
+    if kind == "pop":
+        cand = sfx_dir / "dragon-studio-pop-402324.mp3"
+        if cand.is_file():
+            return cand
+        cand_list = sorted(sfx_dir.glob("*pop*.mp3"))
+        return cand_list[0] if cand_list else None
+    if kind == "typing":
+        cand = sfx_dir / "universfield-fast-swoosh-383967.mp3"
+        if cand.is_file():
+            return cand
+        cand_list = sorted(sfx_dir.glob("*swoosh*.mp3"))
+        return cand_list[0] if cand_list else None
+    if kind == "ding":
+        cand = sfx_dir / "freesound_community-snd_fragment_retrievewav-14728.mp3"
+        if cand.is_file():
+            return cand
+        return None
+    return None
 
 
 def pick_background_clip(library_dir: Path, bg_name: str | None) -> Path | None:
@@ -232,7 +270,9 @@ def render_chat_video(
             stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
             if stk_file and stk_file.is_file():
                 try:
-                    stk_img = Image.open(stk_file).convert("RGBA")
+                    stk_img = load_sticker_or_meme_image(
+                        stk_file, cache_dir=build_dir / "memes_cache"
+                    )
                 except Exception:
                     pass
 
@@ -363,10 +403,26 @@ def render_chat_video(
     concat_file = frames_dir / "frames.ffconcat"
     concat_file.write_text("".join(concat_lines), encoding="utf-8")
 
-    # 4. Trộn âm thanh (60-75%)
+    # 4. Trộn âm thanh và SFX (60-75%)
     tick(60, "Trộn âm thanh và nhạc nền")
     voice_mix_wav = build_dir / "voice_mix.wav"
     event_tuples = [(e.start_time, e.wav_path, e.duration) for e in timeline.audio_events]
+
+    # Kích hoạt âm thanh SFX từ library/sfx/
+    sfx_pop = pick_sfx_file(library_dir, "pop")
+    sfx_typing = pick_sfx_file(library_dir, "typing")
+    sfx_ding = pick_sfx_file(library_dir, "ding")
+
+    for state in timeline.states:
+        if state.start_time >= target_duration:
+            break
+        if state.show_typing and sfx_typing:
+            event_tuples.append((state.start_time, sfx_typing, 0.4))
+        elif state.scale_last_msg < 1.0 and sfx_pop:
+            event_tuples.append((state.start_time, sfx_pop, 0.3))
+        elif state.active_sticker and sfx_ding:
+            event_tuples.append((state.start_time, sfx_ding, 0.5))
+
     assemble_voice_track(event_tuples, target_duration, voice_mix_wav)
 
     music_file = pick_music_file(library_dir, doc.music)
