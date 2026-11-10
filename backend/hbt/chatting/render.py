@@ -19,11 +19,13 @@ from pathlib import Path
 
 from PIL import Image
 
+from hbt.chatting.audio import mix_voice_and_bgm_playlist
 from hbt.chatting.draw import ChatFrameRenderer
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
 from hbt.chatting.stickers import (
     extract_meme_audio,
+    find_meme_by_emojis,
     get_meme_metadata,
     load_sticker_or_meme_image,
     pick_sticker,
@@ -31,13 +33,46 @@ from hbt.chatting.stickers import (
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
-from hbt.pipeline import audio
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, str], None]
+
+
+def cubic_ease_out(t: float) -> float:
+    """Hàm nội suy Cubic Ease-Out 1 - (1 - t)^3 cho chuyển động cuộn 60fps mượt mà."""
+    tc = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - tc) ** 3
+
+
+def spring_scale_curve(num_frames: int = 18) -> list[float]:
+    """Đường cong Spring Easing 18 sub-frames (0.80 -> 0.92 -> 1.03 -> 0.99 -> 1.0) chuẩn 60fps."""
+    if num_frames <= 1:
+        return [1.0]
+    anchors = [
+        (0.00, 0.80),
+        (0.28, 0.92),
+        (0.58, 1.03),
+        (0.80, 0.99),
+        (1.00, 1.00),
+    ]
+    out: list[float] = []
+    for k in range(num_frames):
+        t = k / float(num_frames - 1)
+        val = 1.0
+        for j in range(len(anchors) - 1):
+            t0, v0 = anchors[j]
+            t1, v1 = anchors[j + 1]
+            if t0 <= t <= t1:
+                local_t = (t - t0) / (t1 - t0) if t1 > t0 else 1.0
+                # Smoothstep cục bộ giúp chuyển tiếp vận tốc giữa các neo nảy hoàn toàn liên tục
+                smooth = local_t * local_t * (3.0 - 2.0 * local_t)
+                val = v0 + (v1 - v0) * smooth
+                break
+        out.append(round(val, 4))
+    return out
 
 
 def assemble_voice_track(
@@ -245,14 +280,35 @@ def render_chat_video(
 
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
+
+    # Bộ nhớ theo phiên video: xoay vòng meme không lặp lại cho tới khi hết kho của tag
+    used_memes: set[str] = set()
+    state_meme_files: dict[int, Path] = {}
+    for st_idx, st in enumerate(active_states):
+        if st.active_sticker:
+            chosen: Path | None = None
+            if st.visible_count > 0:
+                msg_text = (
+                    getattr(doc.messages[st.visible_count - 1], "display_text", None)
+                    or doc.messages[st.visible_count - 1].text
+                )
+                chosen = find_meme_by_emojis(library_dir, msg_text, used_memes=used_memes)
+            if chosen is None:
+                chosen = pick_sticker(
+                    library_dir, st.active_sticker, doc.background.seed, used_memes=used_memes
+                )
+            if chosen is not None and chosen.is_file():
+                state_meme_files[st_idx] = chosen
+
     chunk_size = 15  # Xử lý tối đa 15 state mỗi chunk để giữ RAM ổn định trên 16GB
     chunk_files: list[Path] = []
     frame_counter = 0
-    current_scroll_y = 0
+    current_scroll_y: float = 0.0
 
     chunk_concat_lines: list[str] = []
     chunk_pngs: list[Path] = []
     last_chunk_fname = ""
+    spring_scales = spring_scale_curve(18)
 
     def save_subframe(
         v_msgs: list[Message],
@@ -263,7 +319,7 @@ def render_chat_video(
         s_right: bool = False,
         scale_msg: float = 1.0,
         s_seen: bool = True,
-        s_scroll: int | None = None,
+        s_scroll: float | None = None,
         is_cutin: bool = False,
         dur: float = 0.05,
     ) -> None:
@@ -286,7 +342,7 @@ def render_chat_video(
         img.close()
         chunk_pngs.append(fpath)
         chunk_concat_lines.append(f"file '{fname}'\n")
-        chunk_concat_lines.append(f"duration {dur:.3f}\n")
+        chunk_concat_lines.append(f"duration {dur:.4f}\n")
         last_chunk_fname = fname
         frame_counter += 1
 
@@ -303,7 +359,7 @@ def render_chat_video(
             global_i = chunk_idx + local_i
             stk_img = None
             if state.active_sticker and not state.is_meme_cutin:
-                stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+                stk_file = state_meme_files.get(global_i)
                 if stk_file and stk_file.is_file():
                     try:
                         stk_img = load_sticker_or_meme_image(stk_file)
@@ -320,18 +376,17 @@ def render_chat_video(
                 active_sticker_img=stk_img,
                 show_seen=state.show_seen,
             )
-            target_scroll_y = max(0, total_content_h - content_area_h)
+            target_scroll_y = float(max(0, total_content_h - content_area_h))
 
+            # 1. Typing 60fps: 18 sub-frames + Cubic Ease-Out cuộn dạng float
             if state.show_typing:
-                num_sub = 12
+                num_sub = 18
                 sub_dur = frame_dur / num_sub
                 for k in range(num_sub):
                     if target_scroll_y > current_scroll_y:
-                        t = min(1.0, (k + 1) / 6.0)
-                        ease = 1.0 - (1.0 - t) ** 2
-                        scroll_k = int(
-                            current_scroll_y + (target_scroll_y - current_scroll_y) * ease
-                        )
+                        t = (k + 1) / float(num_sub)
+                        ease = cubic_ease_out(t)
+                        scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
                     else:
                         scroll_k = target_scroll_y
                     save_subframe(
@@ -348,17 +403,15 @@ def render_chat_video(
                     )
                 current_scroll_y = target_scroll_y
 
+            # 2. Pop-up chuẩn 60fps: 18 sub-frames Spring Easing (0.80->0.92->1.03->0.99->1.0)
             elif state.scale_last_msg < 1.0:
-                scales = [0.72, 0.84, 0.94, 1.02, 1.01, 1.0]
-                num_sub = len(scales)
-                sub_dur = frame_dur / num_sub
-                for k, scale in enumerate(scales):
+                num_sub = len(spring_scales)
+                sub_dur = frame_dur / float(num_sub)
+                for k, scale in enumerate(spring_scales):
                     if target_scroll_y > current_scroll_y:
                         t = (k + 1) / float(num_sub)
-                        ease = 1.0 - (1.0 - t) ** 2
-                        scroll_k = int(
-                            current_scroll_y + (target_scroll_y - current_scroll_y) * ease
-                        )
+                        ease = cubic_ease_out(t)
+                        scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
                     else:
                         scroll_k = target_scroll_y
                     save_subframe(
@@ -375,16 +428,15 @@ def render_chat_video(
                     )
                 current_scroll_y = target_scroll_y
 
+            # 3. Scroll 60fps: nội suy 18 sub-frames bằng Cubic Ease-Out với toạ độ float
             elif target_scroll_y > current_scroll_y and frame_dur >= 0.2:
-                scroll_dur = min(0.18, frame_dur * 0.5)
-                num_sub = 6
-                sub_dur = scroll_dur / num_sub
+                scroll_dur = min(0.30, frame_dur * 0.75)
+                num_sub = 18
+                sub_dur = scroll_dur / float(num_sub)
                 for k in range(num_sub):
                     t = (k + 1) / float(num_sub)
-                    ease = 1.0 - (1.0 - t) ** 2
-                    scroll_k = int(
-                        current_scroll_y + (target_scroll_y - current_scroll_y) * ease
-                    )
+                    ease = cubic_ease_out(t)
+                    scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
                     save_subframe(
                         v_msgs=visible_msgs,
                         s_typing=False,
@@ -498,9 +550,7 @@ def render_chat_video(
     sfx_typing = pick_sfx_file(library_dir, "typing")
     sfx_ding = pick_sfx_file(library_dir, "ding")
 
-    for state in timeline.states:
-        if state.start_time >= target_duration:
-            break
+    for st_idx, state in enumerate(active_states):
         if state.show_typing and sfx_typing:
             event_tuples.append((state.start_time, sfx_typing, 0.4))
         elif state.scale_last_msg < 1.0 and sfx_pop:
@@ -511,7 +561,7 @@ def render_chat_video(
         elif state.active_sticker:
             meme_audio_played = False
             if state.is_meme_cutin:
-                stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+                stk_file = state_meme_files.get(st_idx)
                 if stk_file and stk_file.is_file():
                     meta = get_meme_metadata(library_dir, stk_file.name)
                     st_time = float(meta.get("start_time", 0.0))
@@ -531,33 +581,26 @@ def render_chat_video(
 
     assemble_voice_track(event_tuples, target_duration, voice_mix_wav)
 
-    music_file = pick_music_file(library_dir, doc.music)
     final_audio = build_dir / "final_audio.wav"
-
-    if music_file and music_file.is_file():
-        try:
-            # Ducking: giọng -14 LUFS, nhạc -27 LUFS
-            audio.mix_audio(
-                voice_mix_wav, music_file, 0.0, target_duration, final_audio, build_dir, []
-            )
-        except Exception as e:
-            logger.warning("Trộn nhạc ducking thất bại: %s, dùng track giọng thuần", e)
-            shutil.copyfile(voice_mix_wav, final_audio)
-    else:
-        shutil.copyfile(voice_mix_wav, final_audio)
+    mix_voice_and_bgm_playlist(
+        voice_mix_wav=voice_mix_wav,
+        library_dir=library_dir,
+        music_name=doc.music,
+        total_duration=target_duration,
+        out_wav=final_audio,
+        workdir=build_dir,
+    )
 
     # 5. Ghép các phân đoạn video + Colorkey Meme Overlay + Audio (75-95%)
     tick(75, "Ghép video FFmpeg theo phân đoạn")
     render_id = int(time.time())
     out_mp4 = renders_dir / f"render_{render_id}.mp4"
 
-    # Thu thập danh sách meme video chuyển động cần chèn bằng colorkey
+    # Thu thập danh sách meme video chuyển động cần chèn bằng colorkey (đã xoay vòng không lặp lại)
     meme_clips: list[tuple[Path, float, float, float]] = []
-    for state in timeline.states:
-        if state.start_time >= target_duration:
-            break
+    for st_idx, state in enumerate(active_states):
         if state.is_meme_cutin and state.active_sticker:
-            stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+            stk_file = state_meme_files.get(st_idx)
             if (
                 stk_file
                 and stk_file.is_file()

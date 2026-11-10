@@ -468,7 +468,7 @@ class ChatFrameRenderer:
         sticker_from_right: bool = False,
         scale_last_msg: float = 1.0,
         show_seen: bool = True,
-        scroll_offset_override: int | None = None,
+        scroll_offset_override: float | None = None,
         is_meme_cutin: bool = False,
     ) -> Image.Image:
         """Dựng một khung hình 1080x1920 hoàn chỉnh (tối ưu RAM cho kịch bản dài tới 5 phút)."""
@@ -489,7 +489,7 @@ class ChatFrameRenderer:
         header_img = self.draw_header(other_char)
         content_area_h = frame_max_h - self.theme.header_height
 
-        # Tính tổng chiều cao nội dung và độ cuộn trước (tránh cấp phát ảnh khổng lồ tốn RAM)
+        # Tính tổng chiều cao nội dung và giữ toạ độ cuộn dạng float đến bước vẽ cuối
         sticker_for_layout = active_sticker_img if not is_meme_cutin else None
         total_content_h = self.get_content_height(
             visible_messages,
@@ -498,18 +498,21 @@ class ChatFrameRenderer:
             show_seen=show_seen,
         )
         if scroll_offset_override is not None:
-            scroll_offset = max(0, scroll_offset_override)
+            scroll_f = max(0.0, float(scroll_offset_override))
         elif total_content_h > content_area_h:
-            scroll_offset = total_content_h - content_area_h
+            scroll_f = float(total_content_h - content_area_h)
         else:
-            scroll_offset = 0
+            scroll_f = 0.0
 
         # Chỉ cấp phát canvas vùng nhìn thấy (viewport) để tiết kiệm RAM tối đa
         visible_content = Image.new("RGBA", (frame_w, content_area_h), (0, 0, 0, 0))
         content_draw = ImageDraw.Draw(visible_content)
 
+        def to_screen_y(y_pos: float) -> int:
+            return round(y_pos - scroll_f)
+
         def in_viewport(y_top: int, item_h: int) -> bool:
-            vy = y_top - scroll_offset
+            vy = y_top - scroll_f
             return (vy + item_h) >= -40 and vy <= content_area_h + 40
 
         cur_y = 20
@@ -522,7 +525,7 @@ class ChatFrameRenderer:
                 tbox = self.font_seen.getbbox(time_str)
                 tw = tbox[2] - tbox[0]
                 content_draw.text(
-                    ((frame_w - tw) // 2, cur_y - scroll_offset),
+                    ((frame_w - tw) // 2, to_screen_y(cur_y)),
                     time_str,
                     fill="#8A8D91",
                     font=self.font_seen,
@@ -537,7 +540,7 @@ class ChatFrameRenderer:
                     mtbox = self.font_seen.getbbox(mid_time_str)
                     mtw = mtbox[2] - mtbox[0]
                     content_draw.text(
-                        ((frame_w - mtw) // 2, cur_y - scroll_offset),
+                        ((frame_w - mtw) // 2, to_screen_y(cur_y)),
                         mid_time_str,
                         fill="#8A8D91",
                         font=self.font_seen,
@@ -555,7 +558,7 @@ class ChatFrameRenderer:
                     th = tbox[3] - tbox[1]
                     pill_w = max(180, tw + 40)
                     px = (frame_w - pill_w) // 2
-                    py = cur_y - scroll_offset + 4
+                    py = to_screen_y(cur_y + 4)
                     content_draw.rounded_rectangle(
                         [(px, py), (px + pill_w, py + pill_h)],
                         radius=18,
@@ -610,7 +613,7 @@ class ChatFrameRenderer:
                 char_hex, _ = self.get_char_color(char.id)
                 av_size = self.theme.bubble_left_avatar_size
                 content_draw.text(
-                    (24 + av_size + 18, cur_y - scroll_offset),
+                    (24 + av_size + 18, to_screen_y(cur_y)),
                     char.name,
                     fill=char_hex,
                     font=self.font_sender_name,
@@ -661,7 +664,7 @@ class ChatFrameRenderer:
                 b_img = scaled_img
                 bubble_w, bubble_h = sw, sh
 
-            draw_y = cur_y - scroll_offset
+            draw_y = to_screen_y(cur_y)
             # Định vị trí x, y trên visible_content và kẹp toạ độ ngang an toàn
             if is_right:
                 bx = frame_w - 28 - bubble_w
@@ -691,7 +694,7 @@ class ChatFrameRenderer:
                 av_img = self.avatar_images.get(char.id)
                 _, char_rgba = self.get_char_color(char.id)
                 av = make_circular_avatar(av_img, char, av_size, char_rgba)
-                vy = cur_y - scroll_offset
+                vy = to_screen_y(cur_y)
                 visible_content.paste(av, (24, vy + typing_b.height - av_size), av)
                 visible_content.paste(typing_b, (24 + av_size + 14, vy), typing_b)
                 av.close()
@@ -711,7 +714,7 @@ class ChatFrameRenderer:
 
             if in_viewport(cur_y, stk_resized.height + 16):
                 sx = (frame_w - 28 - stk_resized.width) if sticker_from_right else (24 + 48 + 14)
-                visible_content.paste(stk_resized, (sx, cur_y - scroll_offset), stk_resized)
+                visible_content.paste(stk_resized, (sx, to_screen_y(cur_y)), stk_resized)
             if stk_resized is not active_sticker_img:
                 stk_resized.close()
             cur_y += (int(sh * (360.0 / max(sw, sh))) if (sw > 360 or sh > 360) else sh) + 16
@@ -722,7 +725,7 @@ class ChatFrameRenderer:
             last_char = self.characters.get(last_msg.from_)
             if last_char and last_char.side == "right":
                 if in_viewport(cur_y - 8, 28):
-                    vy = cur_y - scroll_offset
+                    vy = to_screen_y(cur_y)
                     if self.theme.seen_style == "mini_avatar":
                         av_mini_size = self.theme.seen_mini_avatar_size
                         _, col = self.get_char_color(other_char.id)

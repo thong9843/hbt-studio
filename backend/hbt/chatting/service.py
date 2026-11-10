@@ -178,9 +178,7 @@ def run_chatting_auto_job(
     characters: list[Character] = []
     for idx, c in enumerate(chat_raw.get("characters", [])):
         default_v = (
-            "Adam bựa"
-            if c["side"] == "right"
-            else default_voices[(idx + 1) % len(default_voices)]
+            "Adam bựa" if c["side"] == "right" else default_voices[(idx + 1) % len(default_voices)]
         )
         characters.append(
             Character(

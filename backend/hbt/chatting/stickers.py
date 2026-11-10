@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from pathlib import Path
 from typing import Any
 
@@ -92,29 +93,50 @@ def get_meme_metadata(library_dir: Path, meme_file_or_name: Path | str) -> dict[
     }
 
 
-def find_meme_by_emojis(library_dir: Path, text: str) -> Path | None:
-    """Nhận diện cụm emoji cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️) để chọn chính xác meme."""
+def find_meme_by_emojis(
+    library_dir: Path,
+    text: str,
+    used_memes: set[str] | None = None,
+) -> Path | None:
+    """Nhận diện cụm emoji cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️) và xoay vòng meme không lặp lại."""
     memes_dir = get_memes_dir(library_dir)
     meta_list = load_memes_metadata(library_dir)
 
-    # 1. So khớp trực tiếp với danh sách emojis trong metadata của từng meme
-    best_meme = None
-    best_score = 0
+    # 1. Tìm tất cả meme khớp emoji đạt điểm cao nhất (kèm tag chính nếu cần fallback xoay vòng)
+    scored: list[tuple[int, Path, list[str]]] = []
     for m in meta_list:
         emojis = m.get("emojis", [])
         score = sum(text.count(em) for em in emojis)
-        if score > best_score:
-            best_score = score
-            best_meme = m
+        if score > 0:
+            cand = memes_dir / m["file"]
+            if cand.is_file():
+                scored.append((score, cand, m.get("tags", [])))
 
-    if best_meme and best_score > 0:
-        cand = memes_dir / best_meme["file"]
-        if cand.is_file():
-            return cand
+    if scored:
+        max_score = max(s for s, _, _ in scored)
+        top_cands = [p for s, p, _ in scored if s == max_score]
+        if used_memes is not None:
+            unused = [p for p in top_cands if p.name not in used_memes]
+            if unused:
+                chosen = random.choice(unused)
+                used_memes.add(chosen.name)
+                return chosen
+            # Nếu ứng viên khớp trực tiếp đã dùng hết -> xoay vòng trong cùng nhóm tag
+            first_tags = scored[0][2]
+            if first_tags:
+                tag_pick = pick_sticker(library_dir, first_tags[0], used_memes=used_memes)
+                if tag_pick is not None:
+                    return tag_pick
+            # Fallback nếu tag chỉ có duy nhất clip này: reset và chọn lại
+            used_memes.difference_update({p.name for p in top_cands})
+            chosen = random.choice(top_cands)
+            used_memes.add(chosen.name)
+            return chosen
+        return random.choice(top_cands)
 
-    # 2. So khớp theo nhóm cảm xúc emoji chung
+    # 2. So khớp theo nhóm cảm xúc emoji chung kèm xoay vòng used_memes
     if "👁️👄👁️" in text or "👁👄👁" in text:
-        return pick_sticker(library_dir, "soc")
+        return pick_sticker(library_dir, "soc", used_memes=used_memes)
 
     scores = {}
     for tag, emojis in EMOJI_TAG_MAP.items():
@@ -123,7 +145,7 @@ def find_meme_by_emojis(library_dir: Path, text: str) -> Path | None:
             scores[tag] = score
     if scores:
         best_tag = max(scores.items(), key=lambda x: x[1])[0]
-        return pick_sticker(library_dir, best_tag)
+        return pick_sticker(library_dir, best_tag, used_memes=used_memes)
 
     return None
 
@@ -146,8 +168,14 @@ def count_stickers_per_tag(library_dir: Path) -> dict[str, int]:
     return {tag: len(index.get(tag, [])) for tag in sorted(VALID_STICKER_TAGS)}
 
 
-def pick_sticker(library_dir: Path, tag: str, seed: int = 0) -> Path | None:
-    """Chọn file meme/sticker theo tag cảm xúc và seed."""
+def pick_sticker(
+    library_dir: Path,
+    tag: str,
+    seed: int = 0,  # Giữ tham số tương thích ngược, dùng random.choice xoay vòng
+    used_memes: set[str] | None = None,
+) -> Path | None:
+    """Chọn ngẫu nhiên file meme/sticker theo tag, loại trừ `used_memes` và tự reset khi hết kho."""
+    _ = seed
     if tag not in VALID_STICKER_TAGS:
         logger.warning("Tag sticker không hợp lệ: %s", tag)
         return None
@@ -160,18 +188,33 @@ def pick_sticker(library_dir: Path, tag: str, seed: int = 0) -> Path | None:
         logger.warning("Tag '%s' chưa có file meme nào trong %s", tag, memes_dir)
         return None
 
-    chosen_file = files[abs(seed) % len(files)]
-    full_path = memes_dir / chosen_file
-    if full_path.is_file():
-        return full_path
+    # Gom toàn bộ đường dẫn tồn tại trên đĩa
+    existing_paths: list[Path] = []
+    for fname in files:
+        full_path = memes_dir / fname
+        if full_path.is_file():
+            existing_paths.append(full_path)
+            continue
+        sub_path = memes_dir / tag / fname
+        if sub_path.is_file():
+            existing_paths.append(sub_path)
 
-    # Fallback cấu trúc thư mục con <tag>/<file>
-    sub_path = memes_dir / tag / chosen_file
-    if sub_path.is_file():
-        return sub_path
+    if not existing_paths:
+        logger.warning("File meme không tồn tại trong %s cho tag '%s'", memes_dir, tag)
+        return None
 
-    logger.warning("File meme không tồn tại: %s", full_path)
-    return None
+    if used_memes is None:
+        return random.choice(existing_paths)
+
+    unused = [p for p in existing_paths if p.name not in used_memes]
+    if not unused:
+        # Toàn bộ kho clip của tag đã dùng hết -> reset nhóm clip này để xoay vòng lượt mới
+        used_memes.difference_update({p.name for p in existing_paths})
+        unused = existing_paths
+
+    chosen = random.choice(unused)
+    used_memes.add(chosen.name)
+    return chosen
 
 
 def extract_meme_audio(

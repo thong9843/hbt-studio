@@ -133,17 +133,17 @@ def build_timeline(
             )
             cur_time += 0.6
 
-        # Pop tin nhắn: 0.15s (scale 0.85 -> 1.0)
+        # Pop tin nhắn chuẩn 60fps: 0.30s = 18 sub-frames (~0.01667s/frame, scale 0.80 -> 1.0)
         states.append(
             TimelineState(
                 start_time=cur_time,
-                duration=0.15,
+                duration=0.30,
                 visible_count=idx + 1,
-                scale_last_msg=0.85,
+                scale_last_msg=0.80,
                 show_seen=False,
             )
         )
-        cur_time += 0.15
+        cur_time += 0.30
 
         # Đọc tin nhắn: wav_dur
         if wav_path.is_file():
