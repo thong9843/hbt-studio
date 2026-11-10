@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 from hbt.chatting.draw import ChatFrameRenderer
-from hbt.chatting.models import ChatDoc
+from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.stickers import pick_sticker
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import build_timeline
@@ -184,10 +184,44 @@ def render_chat_video(
                     pass
 
     renderer = ChatFrameRenderer(theme, doc.characters, avatar_images)
+    content_area_h = renderer.theme.frame_max_height - renderer.theme.header_height
 
     # Tạo danh sách frame png + ffconcat
     concat_lines = ["ffconcat version 1.0\n"]
     total_states = len(timeline.states)
+    frame_counter = 0
+    current_scroll_y = 0
+
+    def save_subframe(
+        v_msgs: list[Message],
+        s_typing: bool = False,
+        t_char_id: str | None = None,
+        t_pulse: int = 0,
+        s_img: Image.Image | None = None,
+        s_right: bool = False,
+        scale_msg: float = 1.0,
+        s_seen: bool = True,
+        s_scroll: int | None = None,
+        dur: float = 0.05,
+    ) -> None:
+        nonlocal frame_counter
+        img = renderer.render_chat_view(
+            visible_messages=v_msgs,
+            show_typing=s_typing,
+            typing_char_id=t_char_id,
+            typing_pulse_step=t_pulse,
+            active_sticker_img=s_img,
+            sticker_from_right=s_right,
+            scale_last_msg=scale_msg,
+            show_seen=s_seen,
+            scroll_offset_override=s_scroll,
+        )
+        fname = f"frame_{frame_counter:05d}.png"
+        fpath = frames_dir / fname
+        img.save(fpath, format="PNG")
+        concat_lines.append(f"file '{fname}'\n")
+        concat_lines.append(f"duration {dur:.3f}\n")
+        frame_counter += 1
 
     for i, state in enumerate(timeline.states):
         if state.start_time >= target_duration:
@@ -203,30 +237,128 @@ def render_chat_video(
                     pass
 
         visible_msgs = doc.messages[: state.visible_count]
-        frame_img = renderer.render_chat_view(
-            visible_messages=visible_msgs,
+        frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
+
+        # Tính toán độ cuộn mong muốn
+        total_content_h = renderer.get_content_height(
+            visible_msgs,
             show_typing=state.show_typing,
-            typing_char_id=state.typing_char_id,
             active_sticker_img=stk_img,
-            sticker_from_right=state.sticker_from_right,
-            scale_last_msg=state.scale_last_msg,
             show_seen=state.show_seen,
         )
+        target_scroll_y = max(0, total_content_h - content_area_h)
 
-        frame_file = frames_dir / f"frame_{i:04d}.png"
-        frame_img.save(frame_file, format="PNG")
+        # 1. Trường hợp typing: 12 sub-frames tạo sóng sin nhấp nhô mượt
+        if state.show_typing:
+            num_sub = 12
+            sub_dur = frame_dur / num_sub
+            for k in range(num_sub):
+                if target_scroll_y > current_scroll_y:
+                    t = min(1.0, (k + 1) / 6.0)
+                    ease = 1.0 - (1.0 - t) ** 2
+                    scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
+                else:
+                    scroll_k = target_scroll_y
+                save_subframe(
+                    v_msgs=visible_msgs,
+                    s_typing=True,
+                    t_char_id=state.typing_char_id,
+                    t_pulse=k,
+                    s_img=stk_img,
+                    s_right=state.sticker_from_right,
+                    scale_msg=1.0,
+                    s_seen=state.show_seen,
+                    s_scroll=scroll_k,
+                    dur=sub_dur,
+                )
+            current_scroll_y = target_scroll_y
 
-        frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
-        concat_lines.append(f"file '{frame_file.name}'\n")
-        concat_lines.append(f"duration {frame_dur:.3f}\n")
+        # 2. Trường hợp popup tin nhắn: 6 sub-frames tạo scale ease-out và cuộn trượt
+        elif state.scale_last_msg < 1.0:
+            scales = [0.72, 0.84, 0.94, 1.02, 1.01, 1.0]
+            num_sub = len(scales)
+            sub_dur = frame_dur / num_sub
+            for k, scale in enumerate(scales):
+                if target_scroll_y > current_scroll_y:
+                    t = (k + 1) / float(num_sub)
+                    ease = 1.0 - (1.0 - t) ** 2
+                    scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
+                else:
+                    scroll_k = target_scroll_y
+                save_subframe(
+                    v_msgs=visible_msgs,
+                    s_typing=False,
+                    t_char_id=None,
+                    t_pulse=0,
+                    s_img=stk_img,
+                    s_right=state.sticker_from_right,
+                    scale_msg=scale,
+                    s_seen=state.show_seen,
+                    s_scroll=scroll_k,
+                    dur=sub_dur,
+                )
+            current_scroll_y = target_scroll_y
+
+        # 3. Trường hợp cuộn mượt khi xuất hiện nội dung dài vượt trang
+        elif target_scroll_y > current_scroll_y and frame_dur >= 0.2:
+            scroll_dur = min(0.18, frame_dur * 0.5)
+            num_sub = 6
+            sub_dur = scroll_dur / num_sub
+            for k in range(num_sub):
+                t = (k + 1) / float(num_sub)
+                ease = 1.0 - (1.0 - t) ** 2
+                scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
+                save_subframe(
+                    v_msgs=visible_msgs,
+                    s_typing=False,
+                    t_char_id=None,
+                    t_pulse=0,
+                    s_img=stk_img,
+                    s_right=state.sticker_from_right,
+                    scale_msg=state.scale_last_msg,
+                    s_seen=state.show_seen,
+                    s_scroll=scroll_k,
+                    dur=sub_dur,
+                )
+            current_scroll_y = target_scroll_y
+            remain_dur = frame_dur - scroll_dur
+            if remain_dur > 0.005:
+                save_subframe(
+                    v_msgs=visible_msgs,
+                    s_typing=False,
+                    t_char_id=None,
+                    t_pulse=0,
+                    s_img=stk_img,
+                    s_right=state.sticker_from_right,
+                    scale_msg=state.scale_last_msg,
+                    s_seen=state.show_seen,
+                    s_scroll=current_scroll_y,
+                    dur=remain_dur,
+                )
+
+        # 4. Giữ frame tĩnh cho các pha thoại và pha nghỉ
+        else:
+            current_scroll_y = target_scroll_y
+            save_subframe(
+                v_msgs=visible_msgs,
+                s_typing=False,
+                t_char_id=None,
+                t_pulse=0,
+                s_img=stk_img,
+                s_right=state.sticker_from_right,
+                scale_msg=state.scale_last_msg,
+                s_seen=state.show_seen,
+                s_scroll=current_scroll_y,
+                dur=frame_dur,
+            )
 
         pct = 35 + int(25 * (i + 1) / total_states)
         tick(pct, f"Vẽ trạng thái {i + 1}/{total_states}")
 
     # File cuối của ffconcat
-    if len(timeline.states) > 0:
-        last_file = frames_dir / f"frame_{min(len(timeline.states) - 1, total_states - 1):04d}.png"
-        concat_lines.append(f"file '{last_file.name}'\n")
+    if frame_counter > 0:
+        last_file_name = f"frame_{frame_counter - 1:05d}.png"
+        concat_lines.append(f"file '{last_file_name}'\n")
 
     concat_file = frames_dir / "frames.ffconcat"
     concat_file.write_text("".join(concat_lines), encoding="utf-8")

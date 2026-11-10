@@ -69,3 +69,50 @@ def test_render_chat_frame_dimensions():
 
     assert img.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
     assert img.mode == "RGBA"
+
+
+def test_typing_bubble_pulse():
+    characters = [Character(id="a", name="Linh", side="left")]
+    theme = get_theme("messenger")
+    renderer = ChatFrameRenderer(theme, characters)
+
+    b0 = renderer.draw_typing_bubble(pulse_step=0)
+    b6 = renderer.draw_typing_bubble(pulse_step=6)
+    assert b0.size == (128, 64)
+    assert b6.size == (128, 64)
+    # Hai frame pulse_step khác nhau phải có pixel khác nhau do sóng sin di chuyển
+    assert b0.tobytes() != b6.tobytes()
+
+
+def test_grouped_bubbles_and_content_height():
+    characters = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    theme = get_theme("messenger")
+    renderer = ChatFrameRenderer(theme, characters)
+
+    # 3 tin nhắn liên tiếp cùng người gửi
+    messages = [
+        Message(from_="a", text="Tin 1 của Linh"),
+        Message(from_="a", text="Tin 2 của Linh tiếp theo"),
+        Message(from_="a", text="Tin 3 của Linh kết thúc nhóm"),
+        Message(from_="me", text="Tin phản hồi của tôi"),
+    ]
+
+    h_empty = renderer.get_content_height([])
+    h_msgs = renderer.get_content_height(messages)
+    assert h_msgs > h_empty
+
+    h_typing = renderer.get_content_height(messages, show_typing=True)
+    assert h_typing > h_msgs
+
+    # Render với scroll offset và scale
+    img = renderer.render_chat_view(
+        visible_messages=messages,
+        show_typing=True,
+        scale_last_msg=0.85,
+        scroll_offset_override=50,
+    )
+    assert img.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
+
