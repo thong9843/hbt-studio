@@ -23,7 +23,7 @@ from hbt.models import (
 )
 
 POSTV_FPS = 60  # fps mặc định của PostV (K-11); khác `DEFAULT_FPS` của video HBT
-MAX_SEGMENTS = 80
+MAX_SEGMENTS = 120
 MAX_COMMENTS = 200
 COMMENT_ID = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
@@ -66,6 +66,8 @@ class PostvComment(PostvStats):
     text: str = ""
     parent: str | None = None
     picked: bool = True
+    media: list[str] = Field(default_factory=list)
+    media_urls: list[str] = Field(default_factory=list)
 
 
 class PostvSegment(_Model):

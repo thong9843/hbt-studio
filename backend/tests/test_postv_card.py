@@ -342,3 +342,43 @@ def test_full_post_card_does_not_truncate_long_post_at_6_lines():
     img_full = render_project_card(proj, "post", None, TPL, None, "blur")
     assert bbox(img_full)[3] > low_6 + 40
     assert diff(img_6lines, img_full) is not None
+
+
+def test_card_media_respects_840x550_fit_and_comment_images(tmp_path):
+    from hbt.postv.card import _build_media_block, render_project_card
+    from hbt.postv.models import PostvProject
+
+    wide_img = Image.new("RGB", (1920, 1080), (10, 120, 220))
+    tall_img = Image.new("RGB", (900, 1800), (220, 90, 20))
+    fit_wide = _build_media_block([wide_img], 864, 600)
+    fit_tall = _build_media_block([tall_img], 864, 600)
+    assert fit_wide.width <= 840 and fit_wide.height <= 550
+    assert fit_tall.width <= 840 and fit_tall.height <= 550
+    # Giữ nguyên aspect ratio 16:9 và 1:2
+    assert fit_wide.width / fit_wide.height == pytest.approx(16 / 9, abs=0.05)
+    assert fit_tall.height / fit_tall.width == pytest.approx(2.0, abs=0.05)
+
+    # Ảnh đính kèm ngay trên bình luận và lưu trong workspace/projects/<slug>/media/
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    c_img = media_dir / "c1_01.png"
+    tall_img.save(c_img)
+    proj = PostvProject.model_validate(
+        {
+            "slug": "cmt-img",
+            "title": "CmtImg",
+            "post": {"handle": "author", "text": "Bài gốc"},
+            "comments": [
+                {
+                    "id": "c1",
+                    "handle": "viewer",
+                    "text": "Kèm ảnh minh hoạ đây nè!",
+                    "media": ["media/c1_01.png"],
+                }
+            ],
+        }
+    )
+    c_card = render_project_card(proj, "comment", "c1", TPL, None, "blur", project_dir=tmp_path)
+    c_no_img, low_no_img = render_card("viewer", "", "Kèm ảnh minh hoạ đây nè!")
+    assert bbox(c_card)[3] > low_no_img + 150
+    assert diff(c_no_img, c_card) is not None

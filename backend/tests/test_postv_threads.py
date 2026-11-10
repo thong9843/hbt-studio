@@ -314,3 +314,60 @@ def test_extract_threads_nested_replies_key():
     assert len(res.comments) == 2
     assert res.comments[0].id == "c1" and res.comments[0].parent is None
     assert res.comments[1].id == "c2" and res.comments[1].parent == "c1"
+
+
+def test_extract_threads_45_items_with_comment_media(tmp_path):
+    import json
+
+    items = []
+    for i in range(1, 31):
+        items.append(
+            {
+                "post": {
+                    "user": {"username": f"u_{i}"},
+                    "caption": {"text": f"Bình luận thứ {i} cực mặn mà từ cộng đồng Threads!"},
+                    "like_count": 100 - i,
+                    **(
+                        {
+                            "image_versions2": {
+                                "candidates": [
+                                    {
+                                        "url": f"https://scontent.cdninstagram.com/v/c{i}.jpg",
+                                        "width": 720,
+                                        "height": 720,
+                                    }
+                                ]
+                            }
+                        }
+                        if i == 1
+                        else {}
+                    ),
+                },
+                "direct_replies": (
+                    [
+                        {
+                            "user": {"username": f"rep_{i}"},
+                            "caption": {"text": f"Reply con nối đuôi ngay dưới u_{i}!"},
+                            "like_count": 30,
+                        }
+                    ]
+                    if i <= 15
+                    else []
+                ),
+            }
+        )
+    payload_json = json.dumps({"edges": [{"node": x} for x in items]})
+    html_45 = (
+        '<html><head><meta property="og:title" content="Host (@host) on Threads" />'
+        '<meta property="og:description" content="Bài viết gốc nhiều tương tác." />'
+        f'</head><body><script type="application/json">{payload_json}</script>'
+        "</body></html>"
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = html_45
+    with patch("httpx.Client.get", return_value=mock_resp):
+        res = extract_threads_post("https://www.threads.net/@host/post/DEEP45")
+    assert len(res.comments) == 45
+    assert res.comments[0].media_urls == ["https://scontent.cdninstagram.com/v/c1.jpg"]
+    assert res.comments[1].parent == "c1"

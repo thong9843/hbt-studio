@@ -52,6 +52,7 @@ class ParsedComment(ParsedPost):
     parent: str | None = None  # id bình luận được trả lời (dòng đầu bắt đầu bằng ">"), tối đa 1 cấp
     likes: int = 0
     replies: int = 0
+    media_urls: list[str] = []
 
 
 class StatHint(BaseModel):
@@ -129,7 +130,7 @@ def _clean_body(lines: list[str], block: int, hints: list[StatHint]) -> str:
         s = raw.strip()
         if _is_noise(s):
             continue
-        if block == 0 and re.fullmatch(r"!\[[^\]]*\]\(https?://[^\s)]+\)", s):
+        if re.fullmatch(r"!\[[^\]]*\]\(https?://[^\s)]+\)", s):
             continue
         kept.append(s)
     # dòng chỉ gồm số/số kèm K, M: có thể là số liệu → báo, bỏ khỏi chữ (trừ khi là cả thân)
@@ -231,14 +232,17 @@ def parse_threads_text(raw: str) -> ParseResult:
     blocks: list[ParsedPost] = []
     reply_targets: dict[int, str] = {}
     post_media_urls: list[str] = []
+    comment_media_urls: dict[int, list[str]] = {}
     for n, start in enumerate(headers):
         end = headers[n + 1] if n + 1 < len(headers) else len(lines)
         handle = lines[start].strip().lstrip("@")
         age = age_label(lines[start + 1].strip())
         chunk = lines[start + 2 : end]
+        extracted = _extract_media_urls(chunk)
         if n == 0:
-            post_media_urls = _extract_media_urls(chunk)
+            post_media_urls = extracted
         else:
+            comment_media_urls[n] = extracted
             first_non_empty = next((ln.strip() for ln in chunk if ln.strip()), "")
             tm = REPLY_TARGET.match(first_non_empty)
             if tm:
@@ -268,6 +272,7 @@ def parse_threads_text(raw: str) -> ParseResult:
                 parent=replies.get(i),
                 likes=likes,
                 replies=reply_cnt,
+                media_urls=comment_media_urls.get(i, []),
             )
         )
     if not comments:

@@ -415,20 +415,24 @@ def test_step_pick_accumulates_to_target_seconds():
         for i in range(1, 10)
     ]
 
-    # Target 30s: Post (6.4s) + 3 comments (~10s mỗi cmt) = ~36s -> chọn 3 bình luận
+    from hbt.postv.timeline import compute_time_budget
+
+    # Target 30s: Post (~8.2s) + comments (~11s mỗi cmt theo 3.2 từ/s + 0.4s) -> đạt >= 30s
     proj30 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 30")
     proj30.post.text = post_text
     proj30.comments = [c.model_copy() for c in comments]
 
     jm = MagicMock()
     jm.storage.load_any.return_value = proj30
+    jm.library_dir = None
     job30 = Job("job-30", slug, False, 60, True, False, kind="postv_quick")
 
     _step_pick(jm, job30, {"target_seconds": 30}, MagicMock())
     picked30 = [c for c in proj30.comments if c.picked]
-    assert len(picked30) == 3
+    assert len(picked30) >= 2
+    assert compute_time_budget(post_text, picked30, [], 30).total_seconds >= 30
 
-    # Target 60s: Post (6.4s) + 6 comments (~10s mỗi cmt) = ~66s -> chọn 6 bình luận
+    # Target 60s: gom thêm bình luận cho tới khi >= 60s
     proj60 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 60")
     proj60.post.text = post_text
     proj60.comments = [c.model_copy() for c in comments]
@@ -437,7 +441,8 @@ def test_step_pick_accumulates_to_target_seconds():
 
     _step_pick(jm, job60, {"target_seconds": 60}, MagicMock())
     picked60 = [c for c in proj60.comments if c.picked]
-    assert len(picked60) == 6
+    assert len(picked60) > len(picked30)
+    assert compute_time_budget(post_text, picked60, [], 60).total_seconds >= 60
 
 
 def test_inspect_comment_filter_and_min_length_constant():
@@ -796,32 +801,100 @@ def test_postv_audio_resolves_library_picks_default_and_attaches(tmp_path):
     assert resolve_project_music_src(saved, pdir, lib) is not None
 
 
-def test_comment_count_syncs_with_1m_2m_3m_targets():
+def test_time_budgeting_replaces_fixed_limits_for_1m_2m_3m():
     from hbt.jobs import Job
     from hbt.postv.auto import _step_pick
+    from hbt.postv.timeline import compute_time_budget, estimate_tts_seconds
 
-    def run_pick_for(target_sec: float) -> int:
-        proj = PostvProject(version=1, kind="postv", slug="sync", title="Sync")
-        proj.post.text = "Bài viết ngắn."
-        proj.comments = [
-            PostvComment(
-                id=f"c{i}",
-                handle=f"u{i}",
-                text=f"Bình luận ngắn hay số {i} đọc khoảng năm giây thôi nha bạn ơi!",
-                likes=100 - i,
+    assert estimate_tts_seconds("Một hai ba bốn năm sáu bảy tám.") == pytest.approx(
+        8 / 3.2 + 0.4, abs=0.05
+    )
+
+    def run_budget_for(target_sec: float) -> tuple[int, float]:
+        proj = PostvProject(version=1, kind="postv", slug="budget", title="Budget")
+        proj.post.text = "Bài viết mở đầu ngắn gọn đọc nhanh trong ba giây thôi."
+        # Tạo kho 65 bình luận ngắn + reply con (~4.5s mỗi mục), không bị kẹp limit 10/15/30
+        comments = []
+        for i in range(1, 56):
+            comments.append(
+                PostvComment(
+                    id=f"c{i}",
+                    handle=f"u{i}",
+                    text=f"Bình luận ngắn số {i} cực thú vị luôn nha bạn!",
+                    likes=200 - i,
+                )
             )
-            for i in range(1, 36)
-        ]
+            if i % 5 == 0:
+                comments.append(
+                    PostvComment(
+                        id=f"r{i}",
+                        handle=f"rep{i}",
+                        text=f"Reply con nổi bật bám theo bình luận {i} nè!",
+                        parent=f"c{i}",
+                        likes=80,
+                    )
+                )
+        proj.comments = comments
         jm = MagicMock()
         jm.storage.load_any.return_value = proj
+        jm.library_dir = None
         jm.postv_words = None
-        job = Job("j", "sync", False, 60, True, False, kind="postv_quick")
+        job = Job("j", "budget", False, 60, True, False, kind="postv_quick")
         _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": target_sec}, MagicMock())
-        return len([c for c in proj.comments if c.picked])
+        picked = [c for c in proj.comments if c.picked]
+        summary = compute_time_budget(proj.post.text, picked, [], target_seconds=target_sec)
+        return len(picked), summary.total_seconds
 
-    n_1m = run_pick_for(60)
-    n_2m = run_pick_for(120)
-    n_3m = run_pick_for(180)
-    assert 10 <= n_1m <= 12
-    assert 18 <= n_2m <= 20
-    assert 25 <= n_3m <= 30
+    n_1m, sec_1m = run_budget_for(60)
+    n_2m, sec_2m = run_budget_for(120)
+    n_3m, sec_3m = run_budget_for(180)
+    # Tuyệt đối không ngắn hơn mục tiêu và vượt khỏi mọi kẹp cứng 30 thẻ ở mốc 3m
+    assert sec_1m >= 60 and sec_1m <= 66
+    assert sec_2m >= 120 and sec_2m <= 126
+    assert sec_3m >= 180 and sec_3m <= 186
+    assert n_3m > 30
+
+
+def test_meme_cutin_pause_never_overlaps_tts_or_early_card_scroll(tmp_path):
+    from hbt.postv.models import PostvSegment
+    from hbt.postv.timeline import (
+        estimate_meme_pause_slots,
+        plan_meme_cutin_and_card_starts,
+    )
+    from hbt.postv.voice import join_wavs, wav_seconds
+    from tests.helpers import write_wav
+
+    p1 = tmp_path / "p1.wav"
+    p2 = tmp_path / "p2.wav"
+    p3 = tmp_path / "p3.wav"
+    write_wav(p1, [("tone", 1.5, 0.3)], freq=200)
+    write_wav(p2, [("tone", 1.5, 0.3)], freq=300)
+    write_wav(p3, [("tone", 1.5, 0.3)], freq=400)
+
+    segs = [
+        PostvSegment(role="post", card="post", voice="Post", speaker="post"),
+        PostvSegment(role="comment", card="comment", voice="C1", ref="c1", meme_id="cat.mp4"),
+        PostvSegment(role="comment", card="comment", voice="C2", ref="c2"),
+    ]
+    gaps = estimate_meme_pause_slots(segs, None)
+    assert gaps[0] == 0.25 and 2.8 <= gaps[1] <= 4.0
+
+    joined = tmp_path / "voice.wav"
+    spans = join_wavs([p1, p2, p3], joined, post_gaps=gaps)
+    # Đoạn 2 (index 1) có meme cut-in: khoảng trống giữa hết đọc p2 và đầu đọc p3 phải >= 3.0s
+    assert spans[2][0] - spans[1][1] >= 3.0
+    assert wav_seconds(joined) >= 7.5
+
+    first_start = [s[0] for s in spans]
+    last_end = [s[1] for s in spans]
+    offsets = [(last_end[k - 1] + first_start[k]) / 2 - 0.2 for k in range(1, 3)]
+    base_starts = [0.0, *(o + 0.2 for o in offsets)]
+    starts, windows = plan_meme_cutin_and_card_starts(
+        segs, offsets, first_start, last_end, base_starts, {1: 3.0}, wav_seconds(joined) + 1.0
+    )
+    assert starts[0] == 0.0
+    win = windows[1]
+    # Meme chạy sau khi hết đọc đoạn 1 (TTS dừng hoàn toàn) và thẻ tiếp theo chỉ cuộn sau meme
+    assert win.start >= last_end[1]
+    assert win.end <= first_start[2]
+    assert starts[2] >= win.end

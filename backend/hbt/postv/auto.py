@@ -20,7 +20,6 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from hbt.models import Music
 from hbt.pipeline.cancel import RenderCancelled
 from hbt.pipeline.render import RenderOptions
 from hbt.postv.audio import pick_default_bgm
@@ -28,12 +27,16 @@ from hbt.postv.auto_script import clean_voice_text
 from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.models import PostvComment, PostvPost, PostvProject, PostvSegment
 from hbt.postv.parse import parse_threads_text
-from hbt.postv.script import estimate_seconds, voice_chars
 from hbt.postv.threads import (
     ThreadsFetchError,
     download_post_media,
     extract_threads_post,
     is_threads_url,
+)
+from hbt.postv.timeline import (
+    DEFAULT_MEME_CUTIN_SEC,
+    estimate_meme_pause_slots,
+    estimate_tts_seconds,
 )
 from hbt.postv.voice import VoiceUnavailable, build_plan, synthesize_plan
 from hbt.storage import Storage
@@ -276,12 +279,13 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
     pdir = job_manager.storage.project_dir(job.slug)
+    media_dir = pdir / "media"
     raw_media_urls = list(
         getattr(parsed, "media_urls", []) or getattr(parsed.post, "media_urls", []) or []
     )
     saved_media_rel: list[str] = []
     if raw_media_urls:
-        saved_files = download_post_media(raw_media_urls, pdir / "media", timeout=15.0)
+        saved_files = download_post_media(raw_media_urls, media_dir, timeout=15.0, prefix="post")
         saved_media_rel = [f"media/{p.name}" for p in saved_files]
 
     project.source.url = parsed.source_url or (clean_input if is_threads_url(clean_input) else "")
@@ -292,19 +296,28 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
         media=saved_media_rel,
         media_urls=raw_media_urls,
     )
-    project.comments = [
-        PostvComment(
-            id=c.id,
-            handle=c.handle,
-            age=c.age,
-            text=c.text,
-            parent=c.parent,
-            picked=True,
-            likes=getattr(c, "likes", None),
-            replies=getattr(c, "replies", None),
+    built_comments: list[PostvComment] = []
+    for c in parsed.comments:
+        c_urls = list(getattr(c, "media_urls", []) or [])
+        c_media: list[str] = []
+        if c_urls:
+            c_files = download_post_media(c_urls, media_dir, timeout=15.0, prefix=c.id)
+            c_media = [f"media/{p.name}" for p in c_files]
+        built_comments.append(
+            PostvComment(
+                id=c.id,
+                handle=c.handle,
+                age=c.age,
+                text=c.text,
+                parent=c.parent,
+                picked=True,
+                likes=getattr(c, "likes", None),
+                replies=getattr(c, "replies", None),
+                media=c_media,
+                media_urls=c_urls,
+            )
         )
-        for c in parsed.comments
-    ]
+    project.comments = built_comments
     job_manager.storage.save_any(job.slug, project)
 
     fetch_msg = f"Đã tải bài viết của @{project.post.handle}"
@@ -327,7 +340,7 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
 
 
 MIN_COMMENT_LENGTH = 8
-MAX_AUTO_COMMENTS = 30
+MAX_AUTO_COMMENTS = 200
 SPAM_COMMENT_RE = re.compile(
     r"(?:^|\b)(?:check\s+bio|link\s+(?:ở|trong|dưới)?\s*bio|ib\s+zalo|"
     r"tương\s+tác\s+chéo|follow\s+chéo|fl\s+chéo|mua\s+ngay\s+tại|shopee\.vn|lazada\.vn)(?:\b|$)"
@@ -407,17 +420,15 @@ def _filter_comments(
     return valid
 
 
-def target_comment_budget(target_seconds: float) -> tuple[int, int]:
-    """Khung số lượng bình luận mục tiêu khớp với Dropdown thời lượng (1m..3m)."""
-    if target_seconds <= 65:
-        return (10, 12)
-    if target_seconds <= 95:
-        return (14, 16)
-    if target_seconds <= 125:
-        return (18, 20)
-    if target_seconds <= 155:
-        return (22, 24)
-    return (25, 30)
+def _has_meme_library(library_dir: Path | str | None) -> bool:
+    if not isinstance(library_dir, (str, Path)):
+        return False
+    try:
+        from hbt.chatting.stickers import load_memes_metadata
+
+        return bool(load_memes_metadata(Path(library_dir)))
+    except Exception:
+        return False
 
 
 def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logging.Logger) -> None:
@@ -451,9 +462,9 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     # Lọc bình luận theo quy tắc
     valid_comments = _filter_comments(project.comments, matchers)
 
-    # Ước tính thời lượng bằng bộ ước lượng chuẩn (script/check), bắt đầu trực tiếp từ bài gốc
-    current_chars = voice_chars(project.post.text)
-    current_sec = estimate_seconds(current_chars)
+    # Thuật toán Ngân sách thời gian: T_post + Sum(T_comments+T_replies) + Sum(T_memes)
+    current_sec = estimate_tts_seconds(project.post.text)
+    has_memes = _has_meme_library(getattr(job_manager, "library_dir", None))
 
     # Nhóm cấu trúc Threaded Tree: cha ở trên, reply con nổi bật bám ngay dưới cha
     valid_ids = {c.id for c in valid_comments}
@@ -476,12 +487,16 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     picked_ordered: list[PostvComment] = []
     picked_ids: set[str] = set()
     explicit_max = options.get("max_comments")
-    _, max_cards = target_comment_budget(target_seconds)
-    max_pick = (
-        max(1, min(int(explicit_max), MAX_AUTO_COMMENTS))
-        if explicit_max is not None
-        else max_cards
-    )
+    max_pick = int(explicit_max) if explicit_max is not None else MAX_AUTO_COMMENTS
+
+    def _add_with_budget(item: PostvComment) -> None:
+        nonlocal current_sec
+        picked_ids.add(item.id)
+        picked_ordered.append(item)
+        current_sec += estimate_tts_seconds(item.text)
+        # Ước tính phần cut-in meme (~3.0s) cho bình luận cao trào khi kho meme sẵn sàng
+        if has_memes and item.parent is None and len(picked_ordered) % 3 == 1:
+            current_sec += DEFAULT_MEME_CUTIN_SEC
 
     def _should_stop() -> bool:
         return len(picked_ids) >= max_pick or current_sec >= target_seconds
@@ -489,19 +504,15 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     for root in sorted_roots:
         if _should_stop():
             break
-        picked_ids.add(root.id)
-        picked_ordered.append(root)
-        current_chars += voice_chars(root.text)
-        current_sec = estimate_seconds(current_chars)
+        _add_with_budget(root)
 
-        # Sổ tối đa 2 reply con nổi bật ngay dưới comment cha để hiển thị cây Thread
+        # BẮT BUỘC bóc theo tối đa 2 reply con nổi bật lồng bên dưới comment cha đã chọn
         for kid in children_by_parent.get(root.id, [])[:2]:
-            if _should_stop():
+            if len(picked_ids) >= max_pick:
                 break
-            picked_ids.add(kid.id)
-            picked_ordered.append(kid)
-            current_chars += voice_chars(kid.text)
-            current_sec = estimate_seconds(current_chars)
+            _add_with_budget(kid)
+            if current_sec >= target_seconds + 5.0:
+                break
 
     pick_mode = options.get("pick_mode", "auto")
     if pick_mode == "auto" and picked_ordered:
@@ -642,7 +653,7 @@ def _assign_climax_memes(
                 chosen_path = pick_sticker(library_dir, tag, used_memes=used_memes)
         if chosen_path is not None and chosen_path.is_file():
             seg.meme_id = chosen_path.name
-            seg.meme_pos = "bottom_right" if len(assigned_indices) % 2 == 0 else "bottom_center"
+            seg.meme_pos = "center"
             assigned_indices.add(seg_idx)
 
 
@@ -814,7 +825,11 @@ def _step_voice(
             logger=logger,
         )
 
-    synthesize_plan(plan, pdir, job_manager.voice, cast, on_voice_progress)
+    post_gaps = estimate_meme_pause_slots(
+        [s for s in project.segments if s.voice.strip()],
+        getattr(job_manager, "library_dir", None),
+    )
+    synthesize_plan(plan, pdir, job_manager.voice, cast, on_voice_progress, post_gaps=post_gaps)
 
     latest = job_manager.storage.load_any(job.slug)
     latest.voice = latest.voice.model_copy(

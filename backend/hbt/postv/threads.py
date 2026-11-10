@@ -203,9 +203,49 @@ def _best_candidate_url(image_versions2: Any) -> str | None:
     return best_url
 
 
+def _node_media_urls(node: dict[str, Any]) -> list[str]:
+    """Trích xuất ảnh đính kèm trực tiếp trên 1 node bài viết / bình luận Threads."""
+    urls: list[str] = []
+
+    def _add(u: str | None) -> None:
+        if not u or not isinstance(u, str):
+            return
+        clean = u.replace("\\/", "/").strip()
+        if clean.startswith("http") and not _is_avatar_url(clean) and clean not in urls:
+            urls.append(clean)
+
+    carousel = node.get("carousel_media")
+    if isinstance(carousel, list) and carousel:
+        for item in carousel:
+            if isinstance(item, dict):
+                _add(_best_candidate_url(item.get("image_versions2")))
+                if isinstance(item.get("display_url"), str):
+                    _add(item.get("display_url"))
+    if "image_versions2" in node:
+        _add(_best_candidate_url(node.get("image_versions2")))
+    if isinstance(node.get("display_url"), str):
+        _add(node.get("display_url"))
+    return urls
+
+
 def _extract_post_media_urls(raw_html: str, og_img: str | None = None) -> list[str]:
     """Bóc tách toàn bộ mảng URL ảnh đính kèm của bài viết gốc từ JSON nhúng & OpenGraph."""
     urls: list[str] = []
+    skip_subtree = frozenset(
+        {
+            "user",
+            "owner",
+            "profile_pic_url",
+            "hd_profile_pic_url_info",
+            "reply_threads",
+            "direct_replies",
+            "reply_posts",
+            "replies",
+            "sub_replies",
+            "child_comments",
+            "edge_threaded_comments",
+        }
+    )
 
     def _add(u: str | None) -> None:
         if not u or not isinstance(u, str):
@@ -216,20 +256,12 @@ def _extract_post_media_urls(raw_html: str, og_img: str | None = None) -> list[s
 
     def _walk_media(node: Any) -> None:
         if isinstance(node, dict):
-            carousel = node.get("carousel_media")
-            if isinstance(carousel, list) and carousel:
-                for item in carousel:
-                    if isinstance(item, dict):
-                        _add(_best_candidate_url(item.get("image_versions2")))
-                        if isinstance(item.get("display_url"), str):
-                            _add(item.get("display_url"))
+            for u in _node_media_urls(node):
+                _add(u)
+            if node.get("carousel_media"):
                 return
-
-            if "image_versions2" in node:
-                _add(_best_candidate_url(node.get("image_versions2")))
-
             for k, v in node.items():
-                if k in ("user", "owner", "profile_pic_url", "hd_profile_pic_url_info"):
+                if k in skip_subtree:
                     continue
                 if isinstance(v, (dict, list)):
                     _walk_media(v)
@@ -254,7 +286,6 @@ def _extract_post_media_urls(raw_html: str, og_img: str | None = None) -> list[s
     if not urls and og_img:
         _add(og_img)
     elif og_img and not _is_avatar_url(og_img):
-        # Đưa og:image vào đầu nếu hợp lệ mà chưa có ảnh trùng
         if og_img not in urls and "640x640" not in og_img:
             urls.insert(0, og_img)
 
@@ -266,8 +297,9 @@ def download_post_media(
     media_dir: Path,
     timeout: float = 15.0,
     max_items: int = 30,
+    prefix: str = "img",
 ) -> list[Path]:
-    """Tải danh sách ảnh đính kèm bài gốc về `media_dir` và xác thực bằng Pillow."""
+    """Tải danh sách ảnh đính kèm về `media_dir` đầy đủ đuôi mở rộng, xác thực bằng Pillow."""
     if not urls:
         return []
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -277,19 +309,22 @@ def download_post_media(
     try:
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=BOT_HEADERS) as client:
             for idx, url in enumerate(urls[:max_items], 1):
+                clean_u = (url or "").strip()
+                if not clean_u.startswith(("http://", "https://")):
+                    continue
                 try:
-                    resp = client.get(url)
+                    resp = client.get(clean_u)
                     if resp.status_code != 200 or not resp.content:
                         continue
                     with Image.open(io.BytesIO(resp.content)) as im:
                         im.verify()
                     with Image.open(io.BytesIO(resp.content)) as im2:
                         ext = fmt_ext.get((im2.format or "").upper(), ".jpg")
-                    target = media_dir / f"img_{idx:02d}{ext}"
+                    target = media_dir / f"{prefix}_{idx:02d}{ext}"
                     target.write_bytes(resp.content)
                     saved.append(target)
                 except Exception as exc:
-                    log.debug("Không tải được ảnh bài viết (%s): %s", url, exc)
+                    log.debug("Không tải được ảnh bài viết (%s): %s", clean_u, exc)
                     continue
     except Exception as exc:
         log.warning("Lỗi tải media bài viết: %s", exc)
@@ -348,6 +383,7 @@ def _extract_comments_from_html(
         likes: int,
         replies: int,
         parent_id: str | None = None,
+        c_media: list[str] | None = None,
     ) -> str | None:
         norm_text = clean_text.casefold()
         if norm_text in seen_texts:
@@ -365,6 +401,7 @@ def _extract_comments_from_html(
                 parent=parent_id,
                 same_author=(clean_user.casefold() == main_handle.lstrip("@").casefold()),
                 picked=False,
+                media_urls=list(c_media or []),
             )
         )
         return cid
@@ -372,10 +409,21 @@ def _extract_comments_from_html(
     def _walk(node: Any, current_parent: str | None = None) -> None:
         if isinstance(node, dict):
             fields = _extract_post_node_fields(node)
+            media_src = node
+            if fields is None and isinstance(node.get("post"), dict):
+                media_src = node["post"]
+                fields = _extract_post_node_fields(media_src)
             added_id = None
             if fields:
                 clean_user, clean_text, likes, replies = fields
-                added_id = _add_comment(clean_user, clean_text, likes, replies, current_parent)
+                added_id = _add_comment(
+                    clean_user,
+                    clean_text,
+                    likes,
+                    replies,
+                    current_parent,
+                    _node_media_urls(media_src),
+                )
 
             # Kiểm tra toàn bộ nhánh reply con lồng bên trong bình luận cha
             nested_keys = (
@@ -409,6 +457,7 @@ def _extract_comments_from_html(
                                 f2[2],
                                 f2[3],
                                 parent_id=item_parent,
+                                c_media=_node_media_urls(post_obj),
                             )
                             if idx == 0 and cid:
                                 first_parent = cid
@@ -431,7 +480,18 @@ def _extract_comments_from_html(
     for script in re.findall(
         r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', raw_html, re.DOTALL
     ):
-        if any(k in script for k in ("reply", "caption", "like_count", "direct_replies", "text")):
+        if any(
+            k in script
+            for k in (
+                "reply",
+                "caption",
+                "like_count",
+                "direct_replies",
+                "text",
+                "edges",
+                "thread_items",
+            )
+        ):
             try:
                 data = json.loads(script)
                 _walk(data)

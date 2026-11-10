@@ -185,20 +185,23 @@ def compose_postv(
         )
         prev, index = f"b{k + 1}", index + 1
 
-    # Chèn các meme phông xanh (chroma keying) kèm mốc cao trào
+    # Chèn các meme phông xanh (chroma keying) chạy độc lập trong khoảng dừng TTS
     for m_idx, m_item in enumerate(memes or []):
         m_path, m_start, m_dur, m_pos = m_item[0], m_item[1], m_item[2], m_item[3]
         ss_start = float(m_item[4]) if len(m_item) >= 5 else 0.0
+        loop_tail = ["-stream_loop", "-1"] if len(m_item) >= 6 and m_item[5] else []
         if ss_start > 0:
-            inputs += ["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", m_path]
+            inputs += [*loop_tail, "-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", m_path]
         else:
-            inputs += ["-t", f"{m_dur:.2f}", "-i", m_path]
-        m_w = round(420 * scale)
+            inputs += [*loop_tail, "-t", f"{m_dur:.2f}", "-i", m_path]
         if m_pos == "center":
+            m_w = round(720 * scale)
             pos_expr = "x=(W-w)/2:y=(H-h)/2"
         elif m_pos == "bottom_center":
+            m_w = round(420 * scale)
             pos_expr = f"x=(W-w)/2:y=H-h-{round(220 * scale)}"
         else:  # bottom_right
+            m_w = round(420 * scale)
             pos_expr = f"x=W-w-{round(36 * scale)}:y=H-h-{round(220 * scale)}"
 
         graph.append(
@@ -430,12 +433,49 @@ def _render_postv(
         sfx = censorfx.bleep_sfx(windows, build)
         rep.say(f"Che {len(windows)} khoảng: " + ", ".join(sorted({w.word for w in windows})))
 
-    # ---- 4. Mốc đổi thẻ (25)
+    # ---- 4. Mốc đổi thẻ & Cửa sổ Meme Cut-in Pause độc lập (25)
     rep.at(25, "Mốc đổi thẻ")
+    from hbt.chatting.stickers import extract_meme_audio, get_meme_metadata, get_memes_dir
+    from hbt.postv.timeline import plan_meme_cutin_and_card_starts, resolve_meme_cutin_duration
+
     offsets = scene_offsets(times, scene_of, n_scenes)
     if n_scenes > 1 and not offsets_valid(offsets):
         raise RenderError("Mốc chuyển đoạn không hợp lệ: có đoạn quá ngắn so với lời đọc")
-    starts = cardfx.segment_starts(offsets, n_scenes, X)
+    first_start, last_end = [0.0] * n_scenes, [0.0] * n_scenes
+    for si in range(n_scenes):
+        idx = [i for i, s in enumerate(scene_of) if s == si]
+        first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
+
+    meme_lib_dir = get_memes_dir(library_dir)
+    resolved_memes: dict[int, tuple[Path, float, float, str, bool]] = {}
+    meme_durations: dict[int, float] = {}
+    for k, seg in enumerate(segs):
+        m_id = getattr(seg, "meme_id", None)
+        if not m_id:
+            continue
+        m_file = meme_lib_dir / m_id
+        if not m_file.is_file():
+            m_file = meme_lib_dir / f"{m_id}.mp4"
+        if not m_file.is_file():
+            continue
+        meta = get_meme_metadata(library_dir, m_file.name)
+        ss_start = float(meta.get("start_time", 0.0))
+        cutin_dur = resolve_meme_cutin_duration(library_dir, m_file.name)
+        try:
+            m_info = probe(m_file)
+            m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
+        except Exception:
+            m_file_dur = 3.0
+        avail_file = max(0.5, m_file_dur - ss_start) if m_file_dur > ss_start else m_file_dur
+        needs_loop = avail_file + 0.05 < cutin_dur
+        m_pos = getattr(seg, "meme_pos", "center")
+        resolved_memes[k] = (m_file, cutin_dur, ss_start, m_pos, needs_loop)
+        meme_durations[k] = cutin_dur
+
+    base_starts = cardfx.segment_starts(offsets, n_scenes, X)
+    starts, meme_windows = plan_meme_cutin_and_card_starts(
+        segs, offsets, first_start, last_end, base_starts, meme_durations, total
+    )
     partial = (
         opts.preview_seconds if opts.preview_seconds and opts.preview_seconds < total else None
     )
@@ -482,35 +522,14 @@ def _render_postv(
         rep.tick(45 + 5 * (k + 1) / len(spans))
     rep.say(f"{len(cards)} thẻ")
 
-    # ---- 6b. Memes & Stickers phông xanh (kèm mốc cao trào và âm thanh gốc)
-    from hbt.chatting.stickers import extract_meme_audio, get_meme_metadata, get_memes_dir
-
-    meme_items: list[tuple[Path, float, float, str, float]] = []
-    meme_lib_dir = get_memes_dir(library_dir)
-    for k, seg in enumerate(segs):
-        m_id = getattr(seg, "meme_id", None)
-        if not m_id:
+    # ---- 6b. Memes & Stickers phông xanh (Cut-in Pause chạy độc lập, âm thanh gốc)
+    meme_items: list[tuple[Path, float, float, str, float, bool]] = []
+    for k, (m_file, _cutin_dur, ss_start, m_pos, needs_loop) in resolved_memes.items():
+        win = meme_windows.get(k)
+        if win is None:
             continue
-        m_file = meme_lib_dir / m_id
-        if not m_file.is_file():
-            m_file = meme_lib_dir / f"{m_id}.mp4"
-        if not m_file.is_file():
-            continue
-        m_start = starts[k] if k < len(starts) else 0.0
-        m_next = starts[k + 1] if k + 1 < len(starts) else total
-        m_seg_dur = max(0.5, m_next - m_start)
-        meta = get_meme_metadata(library_dir, m_file.name)
-        ss_start = float(meta.get("start_time", 0.0))
-        meta_dur = float(meta.get("duration", 3.5))
-        try:
-            m_info = probe(m_file)
-            m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
-        except Exception:
-            m_file_dur = 3.0
-        avail_file = max(0.5, m_file_dur - ss_start) if m_file_dur > ss_start else m_file_dur
-        m_dur = min(meta_dur, avail_file, m_seg_dur)
-        m_pos = getattr(seg, "meme_pos", "bottom_right")
-        meme_items.append((m_file, m_start, m_dur, m_pos, ss_start))
+        m_start, m_dur = win.start, win.duration
+        meme_items.append((m_file, m_start, m_dur, m_pos, ss_start, needs_loop))
 
         m_audio = build / "memes" / f"m_{k}_{m_file.stem}.wav"
         if not (m_audio.is_file() and m_audio.stat().st_size > 1000):
@@ -518,7 +537,7 @@ def _render_postv(
         if m_audio.is_file() and m_audio.stat().st_size > 1000:
             sfx.append((m_audio, m_start, 0.85))
     if meme_items:
-        rep.say(f"{len(meme_items)} meme phông xanh")
+        rep.say(f"{len(meme_items)} meme cut-in pause (không đè TTS)")
 
     # ---- 7. Âm thanh (50–55)
     rep.at(50, "Âm thanh")

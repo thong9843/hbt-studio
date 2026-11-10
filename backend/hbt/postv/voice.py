@@ -422,10 +422,13 @@ def wav_seconds(path: Path) -> float:
 
 
 def join_wavs(
-    parts: Sequence[Path], out: Path, gap: float = GAP_SECONDS
+    parts: Sequence[Path],
+    out: Path,
+    gap: float = GAP_SECONDS,
+    post_gaps: Sequence[float] | None = None,
 ) -> list[tuple[float, float]]:
-    """Nối các WAV cùng định dạng, giữa hai đoạn chèn `gap` giây im lặng. Trả (bắt đầu, kết thúc)
-    của từng đoạn (giây) trong file nối; mốc lấy từ độ dài từng file nên không cần căn chữ."""
+    """Nối các WAV cùng định dạng, giữa hai đoạn chèn khoảng lặng (`post_gaps` cho meme cut-in).
+    Trả (bắt đầu, kết thúc) của từng đoạn (giây) trong file nối."""
     spans: list[tuple[float, float]] = []
     tmp = out.with_name(out.name + ".tmp")
     with wave.open(str(tmp), "wb") as dst:
@@ -439,14 +442,24 @@ def join_wavs(
                 ):  # fmt: skip
                     raise VoiceError("Các đoạn giọng khác định dạng, không nối được")
                 if i > 0:
-                    pad = int(gap * dst.getframerate())
-                    dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
-                    t += pad / dst.getframerate()
+                    seg_gap = (
+                        float(post_gaps[i - 1]) if post_gaps and i - 1 < len(post_gaps) else gap
+                    )
+                    pad = max(0, int(seg_gap * dst.getframerate()))
+                    if pad:
+                        dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
+                        t += pad / dst.getframerate()
                 frames = src.readframes(src.getnframes())
                 dst.writeframes(frames)
                 dur = src.getnframes() / src.getframerate()
             spans.append((round(t, 3), round(t + dur, 3)))
             t += dur
+        if parts and post_gaps and len(post_gaps) >= len(parts):
+            tail_gap = float(post_gaps[len(parts) - 1])
+            if tail_gap > gap:
+                pad = int(tail_gap * dst.getframerate())
+                if pad > 0:
+                    dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
     os.replace(tmp, out)
     return spans
 
@@ -487,6 +500,7 @@ def synthesize_plan(
     provider: VoiceProvider,
     cast: dict[str, str],
     progress: Progress | None = None,
+    post_gaps: Sequence[float] | None = None,
 ) -> VoiceResult:
     """Sinh (bỏ qua đoạn đã có trong cache) rồi nối thành `voice.wav` ở thư mục dự án.
 
@@ -521,7 +535,7 @@ def synthesize_plan(
     for old in folder.glob("voice.*"):  # bản cũ khác đuôi (mp3…) không còn đúng
         if old.is_file() and old.name != "voice.wav":
             old.unlink()
-    spans = join_wavs(paths, out)
+    spans = join_wavs(paths, out, post_gaps=post_gaps)
     segments = [
         {"index": p.index, "speaker": p.speaker, "voice_id": p.voice_id, "start": a, "end": b}
         for p, (a, b) in zip(plan, spans, strict=True)

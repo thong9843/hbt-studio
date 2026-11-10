@@ -224,8 +224,12 @@ def _load_media_images(paths: Sequence[Path | str] | None, limit: int = 4) -> li
 
 
 def _build_media_block(images: list[Image.Image], max_w: int, max_h: int) -> Image.Image | None:
-    """Tạo khối ảnh đính kèm (căn giữa, bo góc, tỷ lệ chuẩn) bên dưới chữ bài viết."""
-    if not images or max_w < 80 or max_h < 80:
+    """Tạo khối ảnh đính kèm (căn giữa, bo góc 16px, max 840x550, giữ nguyên aspect ratio)."""
+    if not images:
+        return None
+    max_w = min(max_w, 840)
+    max_h = min(max_h, 550)
+    if max_w < 80 or max_h < 80:
         return None
     if len(images) == 1:
         im = images[0]
@@ -233,7 +237,7 @@ def _build_media_block(images: list[Image.Image], max_w: int, max_h: int) -> Ima
         tw = max(int(round(im.width * scale)), 2)
         th = max(int(round(im.height * scale)), 2)
         resized = im.resize((tw, th), Image.LANCZOS)
-        return _round_image(resized, (tw, th), radius=20)
+        return _round_image(resized, (tw, th), radius=16)
 
     gap = 12
     cols = 2
@@ -360,7 +364,7 @@ def render_card(
     stats_h = (st["icon"] if stat_items else 0) + (
         int(st["size"] * 1.4) if views is not None else 0
     )
-    safe_bottom = 1230  # chừa khoảng an toàn trên dải phụ đề karaoke
+    safe_bottom = 1280  # chừa khoảng an toàn trên dải phụ đề karaoke
     media_images = _load_media_images(media_paths)
     line_cap = (
         (max_lines if max_lines is not None else 24)
@@ -377,7 +381,7 @@ def render_card(
         lh = int(body_size * b["line_height"])
         gaps = (b["gap"] if lines else 0) + (st["top_gap"] if stats_h else 0)
         base_h = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
-        min_needed_media = 180 if media_images else 0
+        min_needed_media = 200 if media_images else 0
         if not fit_full_post or body_size <= 30 or (top + base_h + min_needed_media) <= safe_bottom:
             break
         body_size -= 4
@@ -385,8 +389,8 @@ def render_card(
     media_block: Image.Image | None = None
     media_gap = 20
     if media_images:
-        avail_media_h = max(180, min(460, safe_bottom - (top + base_h + media_gap)))
-        media_block = _build_media_block(media_images, inner, avail_media_h)
+        avail_media_h = max(200, min(550, safe_bottom - (top + base_h + media_gap)))
+        media_block = _build_media_block(media_images, min(inner, 840), avail_media_h)
 
     media_extra = (media_gap + media_block.height) if media_block is not None else 0
     height = base_h + media_extra
@@ -454,6 +458,16 @@ def _scaled(value: int | None, k: float) -> int | None:
     return None if value is None else int(round(value * k))
 
 
+def _resolve_media_paths(src, project_dir: Path | None) -> list[Path] | None:
+    raw_media = getattr(src, "media", None) or []
+    if not raw_media:
+        return None
+    return [
+        (project_dir / m if project_dir and not Path(m).is_absolute() else Path(m))
+        for m in raw_media
+    ]
+
+
 def render_thread_card(
     parent,
     reply_comment,
@@ -462,6 +476,7 @@ def render_thread_card(
     censor: list[CensorMatcher] | None = None,
     censor_mode: CensorMode = "blur",
     count_scale: float = 1.0,
+    project_dir: Path | None = None,
 ) -> tuple[Image.Image, int]:
     """Vẽ cây Thread (bình luận gốc ở trên + đường kẻ nối nhánh + thẻ reply sổ xuống dưới)."""
     tpl = tpl or load_template()
@@ -500,6 +515,7 @@ def render_thread_card(
         censor_mode=censor_mode,
         top=reply_top,
         reply=True,
+        media_paths=_resolve_media_paths(reply_comment, project_dir),
         max_lines=4,
         canvas=img,
         draw_reply_bar=False,
@@ -529,24 +545,19 @@ def render_project_card(
     bình luận, đăng lại, chia sẻ (hiệu ứng số chạy tăng); lượt xem giữ nguyên.
     `ref` không có trong dự án thì ném `LookupError`."""
     reply = False
-    media_paths: list[Path] | None = None
     if kind == "hook":
         text = project.hook.text.strip() or hook_text_from_post(project.post.text)
         return render_hook(text, project.hook.accent, tpl, censor, censor_mode)[0]
     if kind == "post":
         src, text = project.post, project.post.card_text or project.post.text
-        raw_media = getattr(src, "media", None) or []
-        if raw_media:
-            media_paths = [
-                (project_dir / m if project_dir and not Path(m).is_absolute() else Path(m))
-                for m in raw_media
-            ]
+        media_paths = _resolve_media_paths(src, project_dir)
     else:
         src = next((c for c in project.comments if c.id == ref), None)
         if src is None:
             raise LookupError(ref)
         text = src.text
         reply = src.parent is not None
+        media_paths = _resolve_media_paths(src, project_dir)
         if reply:
             parent_comment = next((c for c in project.comments if c.id == src.parent), None)
             if parent_comment is not None:
@@ -557,6 +568,7 @@ def render_project_card(
                     censor=censor,
                     censor_mode=censor_mode,
                     count_scale=count_scale,
+                    project_dir=project_dir,
                 )[0]
     image, _ = render_card(
         src.handle, src.age, text, likes=_scaled(src.likes, count_scale),
