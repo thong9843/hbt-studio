@@ -94,17 +94,31 @@ export function PostvQuickPage() {
     queryFn: api.getVoicePreference,
     staleTime: 60_000,
   });
+  const { data: musicList } = useQuery({
+    queryKey: ['music'],
+    queryFn: api.listMusic,
+    staleTime: 60_000,
+  });
 
   // Trạng thái nhập liệu & tuỳ chọn
   const [input, setInput] = useState('');
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null);
   const [duration, setDuration] = useState<number>(90);
   const [music, setMusic] = useState<'auto' | 'none'>('auto');
+  const [selectedMusicId, setSelectedMusicId] = useState<string>('');
   const [fps, setFps] = useState<30 | 60>(60);
   const [outro, setOutro] = useState<boolean>(true);
   const [pickMode, setPickMode] = useState<'auto' | 'manual'>(() => {
     return (localStorage.getItem('hbt_postv_pick_mode') as 'auto' | 'manual') || 'auto';
   });
+
+  // Tự động chọn ngẫu nhiên 1 bài BGM mặc định khi mở trang nếu người dùng chưa chọn thủ công
+  useEffect(() => {
+    if (music !== 'none' && !selectedMusicId && musicList && musicList.length > 0) {
+      const idx = Math.floor(Math.random() * musicList.length);
+      setSelectedMusicId(musicList[idx].id);
+    }
+  }, [music, selectedMusicId, musicList]);
 
   // Trạng thái nghe thử giọng
   const [isPlayingSample, setIsPlayingSample] = useState(false);
@@ -394,6 +408,10 @@ export function PostvQuickPage() {
       voice_id: selectedVoice,
       target_seconds: duration,
       music,
+      music_id:
+        music !== 'none' && selectedMusicId && selectedMusicId !== 'auto'
+          ? selectedMusicId
+          : undefined,
       fps,
       outro,
       pick_mode: pickMode,
@@ -892,13 +910,37 @@ export function PostvQuickPage() {
                     </Select>
                   </div>
 
-                  {/* Nhạc */}
-                  <Chip
-                    selected={music === 'auto'}
-                    onClick={() => setMusic((m) => (m === 'auto' ? 'none' : 'auto'))}
-                  >
-                    {music === 'auto' ? T.options.musicAuto : T.options.musicNone}
-                  </Chip>
+                  {/* Nhạc nền BGM (mặc định tự chọn 1 bài từ library/music/ + Playlist acrossfade) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">🎵 {T.options.musicLabel}:</span>
+                    <Select
+                      aria-label={T.options.musicLabel}
+                      variant="compact"
+                      autoWidth
+                      value={music === 'none' ? 'none' : selectedMusicId || 'auto'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'none') {
+                          setMusic('none');
+                        } else {
+                          setMusic('auto');
+                          setSelectedMusicId(val);
+                        }
+                      }}
+                      className="border-0 bg-transparent min-h-[28px] max-w-[150px] truncate"
+                    >
+                      {musicList && musicList.length > 0 ? (
+                        musicList.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="auto">{T.options.musicAuto}</option>
+                      )}
+                      <option value="none">{T.options.musicNone}</option>
+                    </Select>
+                  </div>
 
                   {/* 60 fps */}
                   <Chip selected={fps === 60} onClick={() => setFps((f) => (f === 60 ? 30 : 60))}>

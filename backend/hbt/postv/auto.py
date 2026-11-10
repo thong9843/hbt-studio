@@ -20,10 +20,11 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from hbt.library import MusicLibrary
 from hbt.models import Music
 from hbt.pipeline.cancel import RenderCancelled
 from hbt.pipeline.render import RenderOptions
+from hbt.postv.audio import pick_default_bgm
+from hbt.postv.auto_script import clean_voice_text
 from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.models import PostvComment, PostvPost, PostvProject, PostvSegment
 from hbt.postv.parse import parse_threads_text
@@ -406,6 +407,19 @@ def _filter_comments(
     return valid
 
 
+def target_comment_budget(target_seconds: float) -> tuple[int, int]:
+    """Khung số lượng bình luận mục tiêu khớp với Dropdown thời lượng (1m..3m)."""
+    if target_seconds <= 65:
+        return (10, 12)
+    if target_seconds <= 95:
+        return (14, 16)
+    if target_seconds <= 125:
+        return (18, 20)
+    if target_seconds <= 155:
+        return (22, 24)
+    return (25, 30)
+
+
 def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logging.Logger) -> None:
     emit_stage_event(
         job,
@@ -461,20 +475,28 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
 
     picked_ordered: list[PostvComment] = []
     picked_ids: set[str] = set()
-    max_pick = int(options.get("max_comments") or MAX_AUTO_COMMENTS)
-    max_pick = max(1, min(max_pick, MAX_AUTO_COMMENTS))
+    explicit_max = options.get("max_comments")
+    _, max_cards = target_comment_budget(target_seconds)
+    max_pick = (
+        max(1, min(int(explicit_max), MAX_AUTO_COMMENTS))
+        if explicit_max is not None
+        else max_cards
+    )
+
+    def _should_stop() -> bool:
+        return len(picked_ids) >= max_pick or current_sec >= target_seconds
 
     for root in sorted_roots:
-        if current_sec >= target_seconds or len(picked_ids) >= max_pick:
+        if _should_stop():
             break
         picked_ids.add(root.id)
         picked_ordered.append(root)
         current_chars += voice_chars(root.text)
         current_sec = estimate_seconds(current_chars)
 
-        # Sổ tối đa 2 reply con nổi bật ngay dưới comment cha nếu vẫn trong quỹ thời lượng
+        # Sổ tối đa 2 reply con nổi bật ngay dưới comment cha để hiển thị cây Thread
         for kid in children_by_parent.get(root.id, [])[:2]:
-            if current_sec >= target_seconds or len(picked_ids) >= max_pick:
+            if _should_stop():
                 break
             picked_ids.add(kid.id)
             picked_ordered.append(kid)
@@ -642,17 +664,19 @@ def _step_script(
 
     hook_text = get_hook_text(project.post.text, max_len=160)
     project.publish.hook = hook_text
-    project.hook.text = ""  # Bỏ hẳn thẻ hook ở Quick
+    project.hook.text = ""  # Không dùng màn hình Tiêu đề rời
 
-    # Video bắt đầu bằng bài gốc (role=post, card=post), không có segment hook
+    # Mở đầu video là Thẻ Bài Gốc hoàn chỉnh & TTS đọc thẳng nội dung bài gốc ngay từ giây 0
+    post_voice = clean_voice_text(project.post.text) or project.post.text
     segments: list[PostvSegment] = [
-        PostvSegment(role="post", card="post", voice=project.post.text, speaker="post"),
+        PostvSegment(role="post", card="post", voice=post_voice, speaker="post"),
     ]
 
     picked_comments = [c for c in project.comments if c.picked]
     for c in picked_comments:
+        c_voice = clean_voice_text(c.text) or c.text
         segments.append(
-            PostvSegment(role="comment", card="comment", voice=c.text, ref=c.id, speaker=c.id)
+            PostvSegment(role="comment", card="comment", voice=c_voice, ref=c.id, speaker=c.id)
         )
 
     comments_by_id = {c.id: c for c in picked_comments}
@@ -713,16 +737,30 @@ def _step_script(
             random.shuffle(ids)
             project.background.clip_ids = ids[: min(3, len(ids))]
 
-    # Nhạc nền: auto | none
+    # Nhạc nền BGM: luôn ưu tiên quét từ library/music/ và chọn mặc định nếu chưa chọn tay
     music_opt = options.get("music", "auto")
+    preferred_music = options.get("music_id")
     if music_opt == "none":
         project.music = None
-    elif music_opt == "auto" and project.music is None:
-        music_lib = MusicLibrary(job_manager.library_dir)
-        musics = music_lib.list()
-        if musics:
-            picked_m = random.choice(musics)
-            project.music = Music(id=picked_m.id, file=picked_m.file, title=picked_m.title)
+    elif project.music is None or preferred_music:
+        track = pick_default_bgm(
+            getattr(job_manager, "library_dir", None),
+            preferred_id=preferred_music if isinstance(preferred_music, str) else None,
+        )
+        if track and track.path.is_file():
+            # Chép file BGM đầu vào thư mục project nếu có, giữ nguyên credit
+            attached_file = track.file
+            try:
+                pdir = job_manager.storage.project_dir(job.slug)
+                if pdir.is_dir():
+                    import shutil
+
+                    dst_name = f"music{track.path.suffix.lower()}"
+                    shutil.copyfile(track.path, pdir / dst_name)
+                    attached_file = dst_name
+            except Exception:
+                pass
+            project.music = track.to_music(file_override=attached_file)
 
     # FPS và outro
     fps_val = options.get("fps", 60)

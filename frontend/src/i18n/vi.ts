@@ -1092,6 +1092,7 @@ export const vi = {
       duration120: '2m',
       duration150: '2m30s',
       duration180: '3m',
+      musicLabel: 'Nhạc nền',
       musicAuto: 'Nhạc: Tự chọn',
       musicNone: 'Nhạc: Không',
       fps60: '60 fps',

@@ -446,11 +446,11 @@ def postv_preview_png(
     )
     tpl = load_template(project.template)
 
-    # Chọn loại thẻ
+    # Chọn loại thẻ: mặc định mở đầu thẳng bằng thẻ Bài Gốc (chỉ hiện hook nếu đoạn đầu là hook)
     actual_kind: Literal["hook", "post", "comment"]
     if kind is not None:
         actual_kind = kind
-    elif project.hook.text.strip():
+    elif project.segments and project.segments[0].role == "hook" and project.hook.text.strip():
         actual_kind = "hook"
     else:
         actual_kind = "post"

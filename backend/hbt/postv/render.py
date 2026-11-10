@@ -49,6 +49,7 @@ from hbt.pipeline.render import (
 from hbt.pipeline.text import parse_voice
 from hbt.pipeline.thumbnail import LOGO_FILE, render_cover, save_covers
 from hbt.pipeline.whisper import WhisperConfig
+from hbt.postv import audio as _postv_audio
 from hbt.postv import bgbuild, captions, cardfx, censorfx, publish
 from hbt.postv import card as _card
 from hbt.postv import censor as _censor
@@ -277,7 +278,7 @@ def _render_postv(
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     settings = load_settings()
-    library_dir = opts.library_dir or settings.library_dir
+    library_dir = _postv_audio.resolve_library_dir(opts.library_dir or settings.library_dir)
     brand_dir = opts.brand_dir or BRAND_DIR
     whisper_cfg = WhisperConfig(
         model=_whisper.effective_model(opts.whisper_model or "auto", settings.whisper_model),
@@ -318,8 +319,10 @@ def _render_postv(
     entries = library.list()
     chosen = [e for e in entries if e.id in project.background.clip_ids] or entries
     voice_src = project_dir / (project.voice.file or "")
-    music_src = project_dir / project.music.file if project.music and project.music.file else None
-    missing = [str(p) for p in (voice_src, music_src) if p is not None and not p.is_file()]
+    music_src = _postv_audio.resolve_project_music_src(project, project_dir, library_dir)
+    missing = [str(voice_src)] if not voice_src.is_file() else []
+    if project.music and project.music.file and music_src is None:
+        missing.append(str(project_dir / project.music.file))
     if missing:
         raise RenderError("Thiếu file:\n  " + "\n  ".join(missing))
     tokens, scene_of, n_scenes = voiced_tokens(project)
@@ -519,41 +522,50 @@ def _render_postv(
 
     # ---- 7. Âm thanh (50–55)
     rep.at(50, "Âm thanh")
-    from hbt.chatting.audio import build_bgm_playlist, render_bgm_playlist_wav
-
     music_start = 0.0
     music_start_source = None
     effective_music_src = music_src
     music_playlist_names: list[str] = []
     if music_src is not None:
-        playlist = build_bgm_playlist(library_dir, music_src.name, total, crossfade_s=2.0)
-        if playlist:
-            bgm_wav = build / "bgm_playlist.wav"
-            bgm_key = cache.digest(
-                "pv-bgm-playlist",
-                [(str(p), round(d, 2)) for p, d in playlist],
-                round(total, 3),
-                POSTV_VERSION,
-            )
-            if not cache.is_fresh(bgm_wav, bgm_key):
-                render_bgm_playlist_wav(
-                    playlist, total, bgm_wav, crossfade_s=2.0, fade_out_s=2.0, volume_db=None
-                )
-                cache.mark(bgm_wav, bgm_key)
+        bgm_wav = build / "bgm_playlist.wav"
+        avail_tracks = _postv_audio.list_available_bgm(library_dir)
+        bgm_key = cache.digest(
+            "pv-bgm-playlist",
+            [(str(t.path), t.path.stat().st_mtime) for t in avail_tracks],
+            music_src.name,
+            round(total, 3),
+            POSTV_VERSION,
+        )
+        if avail_tracks and cache.is_fresh(bgm_wav, bgm_key):
             effective_music_src = bgm_wav
             music_start = 0.0
             music_start_source = "playlist"
-            music_playlist_names = [p.name for p, _ in playlist]
-            rep.say(f"Playlist BGM nối {len(playlist)} bài (acrossfade=2s)")
+            music_playlist_names = [t.path.name for t in avail_tracks]
+            rep.say("Playlist BGM: dùng bản đã nối sẵn")
         else:
-            if project.music.start is not None:
-                music_start, music_start_source = project.music.start, "manual"
+            playlist = _postv_audio.build_postv_bgm_playlist_wav(
+                library_dir,
+                music_src.name,
+                total,
+                bgm_wav,
+                crossfade_s=2.0,
+            )
+            if playlist:
+                cache.mark(bgm_wav, bgm_key)
+                effective_music_src = bgm_wav
+                music_start = 0.0
+                music_start_source = "playlist"
+                music_playlist_names = [p.name for p, _ in playlist]
+                rep.say(f"Playlist BGM nối {len(playlist)} bài (acrossfade=2s)")
             else:
-                music_start = audio.pick_music_start(music_src, total)
-                music_start_source = "auto"
-            rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s ({music_start_source})")
-            if music_start + total > media_duration(music_src):
-                warn("Nhạc ngắn hơn video")
+                if project.music.start is not None:
+                    music_start, music_start_source = project.music.start, "manual"
+                else:
+                    music_start = audio.pick_music_start(music_src, total)
+                    music_start_source = "auto"
+                rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s ({music_start_source})")
+                if music_start + total > media_duration(music_src):
+                    warn("Nhạc ngắn hơn video")
     mix = build / "mix.wav"
     key = cache.digest(
         "mix", voice_mix, effective_music_src, music_start, round(total, 3),

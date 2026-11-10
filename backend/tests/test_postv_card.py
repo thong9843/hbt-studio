@@ -324,3 +324,21 @@ def test_post_card_renders_attached_media_below_text(tmp_path):
     assert diff(no_media, with_media) is not None
     # Góc bo tròn trên khối ảnh phải ăn khớp mịn màng với nền thẻ (không phải khung vuông thô)
     assert bbox(with_media)[0] == 72 and bbox(with_media)[2] == 72 + 936
+
+
+def test_full_post_card_does_not_truncate_long_post_at_6_lines():
+    from hbt.postv.card import render_project_card
+    from hbt.postv.models import PostvProject
+
+    long_lines = " ".join([f"Câu chuyện dài số {i} rất đáng đọc." for i in range(1, 22)])
+    proj = PostvProject.model_validate(
+        {
+            "slug": "full-post",
+            "title": "Full",
+            "post": {"handle": "tacgia_vip", "age": "2h", "text": long_lines, "likes": 999},
+        }
+    )
+    img_6lines, low_6 = render_card("tacgia_vip", "2h", long_lines, likes=999)
+    img_full = render_project_card(proj, "post", None, TPL, None, "blur")
+    assert bbox(img_full)[3] > low_6 + 40
+    assert diff(img_6lines, img_full) is not None

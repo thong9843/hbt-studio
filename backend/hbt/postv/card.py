@@ -335,6 +335,7 @@ def render_card(
     reply: bool = False,
     media_paths: Sequence[Path | str] | None = None,
     max_lines: int | None = None,
+    fit_full_post: bool = False,
     canvas: Image.Image | None = None,
     indent_override: int | None = None,
     draw_reply_bar: bool = True,
@@ -345,20 +346,11 @@ def render_card(
     c, hd, b, st = tpl["card"], tpl["header"], tpl["body"], tpl["stats"]
     top = c["top"] if top is None else top
     text = _normalise(text)
-    font = _font(b["font"], b["size"])
     rp = tpl["reply"] if reply else None
     indent = indent_override if indent_override is not None else (rp["indent"] if rp else 0)
     cx, cw = c["x"] + indent, c["w"] - indent
     inner = cw - 2 * c["pad"]
-    words = _words(text)
-    _mark(words, _censor_spans(text, censor), "censored")
-    lines = _ellipsize(
-        _wrap(words, font, inner),
-        max_lines if max_lines is not None else b["max_lines"],
-        font,
-        inner,
-    )
-    lh = int(b["size"] * b["line_height"])
+    censor_spans = _censor_spans(text, censor)
 
     stat_items = [
         (k, v)
@@ -368,14 +360,31 @@ def render_card(
     stats_h = (st["icon"] if stat_items else 0) + (
         int(st["size"] * 1.4) if views is not None else 0
     )
-    gaps = (b["gap"] if lines else 0) + (st["top_gap"] if stats_h else 0)
-    base_h = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
-
+    safe_bottom = 1230  # chừa khoảng an toàn trên dải phụ đề karaoke
     media_images = _load_media_images(media_paths)
+    line_cap = (
+        (max_lines if max_lines is not None else 24)
+        if fit_full_post
+        else (max_lines if max_lines is not None else b["max_lines"])
+    )
+
+    body_size = b["size"]
+    while True:
+        font = _font(b["font"], body_size)
+        words = _words(text)
+        _mark(words, censor_spans, "censored")
+        lines = _ellipsize(_wrap(words, font, inner), line_cap, font, inner)
+        lh = int(body_size * b["line_height"])
+        gaps = (b["gap"] if lines else 0) + (st["top_gap"] if stats_h else 0)
+        base_h = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
+        min_needed_media = 180 if media_images else 0
+        if not fit_full_post or body_size <= 30 or (top + base_h + min_needed_media) <= safe_bottom:
+            break
+        body_size -= 4
+
     media_block: Image.Image | None = None
     media_gap = 20
     if media_images:
-        safe_bottom = 1230  # chừa khoảng an toàn trên dải phụ đề karaoke
         avail_media_h = max(180, min(460, safe_bottom - (top + base_h + media_gap)))
         media_block = _build_media_block(media_images, inner, avail_media_h)
 
@@ -554,6 +563,7 @@ def render_project_card(
         replies=_scaled(src.replies, count_scale), reposts=_scaled(src.reposts, count_scale),
         shares=_scaled(src.shares, count_scale), views=src.views, tpl=tpl, censor=censor,
         censor_mode=censor_mode, reply=reply, media_paths=media_paths,
+        fit_full_post=(kind == "post"),
     )  # fmt: skip
     return image
 

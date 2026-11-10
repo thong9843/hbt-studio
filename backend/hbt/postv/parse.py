@@ -27,6 +27,7 @@ EMBED_BLOCK = re.compile(r"<blockquote\b.*?</blockquote>", re.IGNORECASE | re.DO
 EMBED_SCRIPT = re.compile(r"<script\b.*?</script>", re.IGNORECASE | re.DOTALL)
 REPLY_TO = re.compile(r"^(reply to|trả lời)\b.*", re.IGNORECASE)
 REPLY_TARGET = re.compile(r"^(?:reply to|trả lời)\s+@?([A-Za-z0-9._]{1,30})$", re.IGNORECASE)
+MENTION_REPLY = re.compile(r"^@([A-Za-z0-9._]{1,30})(?:\s|$)")
 IMAGE_URL_RE = re.compile(
     r"(?:!\[[^\]]*\]\((https?://[^\s)]+)\)"
     r"|<img[^>]+src=[\"'](https?://[^\"']+)[\"']"
@@ -242,6 +243,10 @@ def parse_threads_text(raw: str) -> ParseResult:
             tm = REPLY_TARGET.match(first_non_empty)
             if tm:
                 reply_targets[n] = tm.group(1)
+            else:
+                mm = MENTION_REPLY.match(first_non_empty)
+                if mm:
+                    reply_targets[n] = mm.group(1)
         body = _clean_body(chunk, n, hints)
         blocks.append(ParsedPost(handle=handle, age=age, text=body))
 

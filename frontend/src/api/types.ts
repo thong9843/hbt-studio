@@ -634,6 +634,7 @@ export interface PostvQuickOptions {
   outro?: boolean;
   background?: 'auto' | 'manual';
   music?: 'auto' | 'none';
+  music_id?: string | null;
   max_comments?: number;
   target_seconds?: number;
   pick_mode?: 'auto' | 'manual';

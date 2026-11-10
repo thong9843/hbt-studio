@@ -742,3 +742,86 @@ def test_climax_meme_assignment_non_repeating_and_playlist_bgm(tmp_path):
     write_wav(music_dir / "track2.wav", [("tone", 2.0, 0.3)], freq=330)
     playlist = build_bgm_playlist(lib, "track1.wav", 5.0, crossfade_s=0.5)
     assert len(playlist) >= 2
+
+
+def test_postv_audio_resolves_library_picks_default_and_attaches(tmp_path):
+    from hbt.jobs import Job, JobManager
+    from hbt.postv.audio import (
+        list_available_bgm,
+        pick_default_bgm,
+        resolve_music_dir,
+        resolve_project_music_src,
+    )
+    from hbt.postv.auto import _step_script
+    from hbt.storage import Storage
+    from tests.helpers import write_wav
+
+    lib = tmp_path / "library"
+    music_dir = lib / "music"
+    music_dir.mkdir(parents=True)
+    write_wav(music_dir / "quirky.wav", [("tone", 1.5, 0.2)], freq=250)
+    (music_dir / "index.json").write_text("[]", encoding="utf-8")
+
+    assert resolve_music_dir(lib).is_absolute()
+    avail = list_available_bgm(lib)
+    assert len(avail) == 1
+    track = pick_default_bgm(lib)
+    assert track is not None and track.path.is_file()
+
+    # Kiểm tra _step_script tự chọn và chép file nhạc vào thư mục dự án, không mở đầu bằng hook
+    storage = Storage(tmp_path / "workspace")
+    jm = JobManager(storage, lib)
+    proj = storage.create_postv("BGM & No Hook Test")
+    proj.post.text = "Bài gốc mở đầu ngay tại giây 0 https://example.com 😂"
+    proj.comments = [
+        PostvComment(
+            id="c1",
+            handle="u1",
+            text="Bình luận một khá dài và rất hay!",
+            likes=50,
+            picked=True,
+        )
+    ]
+    storage.save_any(proj.slug, proj)
+
+    job = Job("job-bgm", proj.slug, False, 60, True, False, kind="postv_quick")
+    _step_script(jm, job, {"music": "auto"}, MagicMock())
+
+    saved = storage.load_any(proj.slug)
+    assert saved.segments[0].role == "post" and saved.segments[0].card == "post"
+    assert "https://" not in saved.segments[0].voice
+    assert saved.music is not None
+    pdir = storage.project_dir(proj.slug)
+    assert (pdir / saved.music.file).is_file()
+    assert resolve_project_music_src(saved, pdir, lib) is not None
+
+
+def test_comment_count_syncs_with_1m_2m_3m_targets():
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+
+    def run_pick_for(target_sec: float) -> int:
+        proj = PostvProject(version=1, kind="postv", slug="sync", title="Sync")
+        proj.post.text = "Bài viết ngắn."
+        proj.comments = [
+            PostvComment(
+                id=f"c{i}",
+                handle=f"u{i}",
+                text=f"Bình luận ngắn hay số {i} đọc khoảng năm giây thôi nha bạn ơi!",
+                likes=100 - i,
+            )
+            for i in range(1, 36)
+        ]
+        jm = MagicMock()
+        jm.storage.load_any.return_value = proj
+        jm.postv_words = None
+        job = Job("j", "sync", False, 60, True, False, kind="postv_quick")
+        _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": target_sec}, MagicMock())
+        return len([c for c in proj.comments if c.picked])
+
+    n_1m = run_pick_for(60)
+    n_2m = run_pick_for(120)
+    n_3m = run_pick_for(180)
+    assert 10 <= n_1m <= 12
+    assert 18 <= n_2m <= 20
+    assert 25 <= n_3m <= 30

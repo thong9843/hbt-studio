@@ -278,3 +278,39 @@ def test_extract_threads_carousel_media_and_threaded_replies(tmp_path):
 
     assert len(saved) == 2
     assert saved[0].is_file() and saved[0].suffix == ".png"
+
+
+def test_extract_threads_nested_replies_key():
+    nested_html = """
+    <html><head>
+      <meta property="og:title" content="TacGia (@tacgia) on Threads" />
+      <meta property="og:description" content="Bài viết chính thu hút tranh luận." />
+    </head><body><script type="application/json">
+    {
+      "thread_items": [
+        {
+          "post": {
+            "user": {"username": "parent_vip"},
+            "caption": {"text": "Comment cha siêu chất lượng mọi người ơi."},
+            "like_count": 200
+          },
+          "replies": [
+            {
+              "user": {"username": "nested_child"},
+              "caption": {"text": "Reply con nằm lồng trong mảng replies nè!"},
+              "like_count": 35
+            }
+          ]
+        }
+      ]
+    }
+    </script></body></html>
+    """
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = nested_html
+    with patch("httpx.Client.get", return_value=mock_resp):
+        res = extract_threads_post("https://www.threads.net/@tacgia/post/XYZ999")
+    assert len(res.comments) == 2
+    assert res.comments[0].id == "c1" and res.comments[0].parent is None
+    assert res.comments[1].id == "c2" and res.comments[1].parent == "c1"

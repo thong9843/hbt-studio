@@ -265,7 +265,7 @@ def download_post_media(
     urls: Sequence[str],
     media_dir: Path,
     timeout: float = 15.0,
-    max_items: int = 8,
+    max_items: int = 30,
 ) -> list[Path]:
     """Tải danh sách ảnh đính kèm bài gốc về `media_dir` và xác thực bằng Pillow."""
     if not urls:
@@ -377,12 +377,20 @@ def _extract_comments_from_html(
                 clean_user, clean_text, likes, replies = fields
                 added_id = _add_comment(clean_user, clean_text, likes, replies, current_parent)
 
-            # Kiểm tra các chuỗi lồng (thread_items / direct_replies)
+            # Kiểm tra toàn bộ nhánh reply con lồng bên trong bình luận cha
+            nested_keys = (
+                "direct_replies",
+                "reply_posts",
+                "replies",
+                "sub_replies",
+                "child_comments",
+                "edge_threaded_comments",
+            )
             nested_parent = added_id or current_parent
             for key, v in node.items():
                 if not isinstance(v, (dict, list)):
                     continue
-                if key in ("direct_replies", "reply_posts") and nested_parent:
+                if key in nested_keys and nested_parent:
                     _walk(v, current_parent=nested_parent)
                 elif key == "thread_items" and isinstance(v, list) and v:
                     # Trong thread_items: phần tử đầu là cha, phần tử sau là reply nối tiếp
@@ -392,18 +400,27 @@ def _extract_comments_from_html(
                             continue
                         post_obj = item.get("post") if isinstance(item.get("post"), dict) else item
                         f2 = _extract_post_node_fields(post_obj)
+                        item_parent = first_parent if idx > 0 else current_parent
+                        cid = None
                         if f2:
                             cid = _add_comment(
                                 f2[0],
                                 f2[1],
                                 f2[2],
                                 f2[3],
-                                parent_id=first_parent if idx > 0 else current_parent,
+                                parent_id=item_parent,
                             )
                             if idx == 0 and cid:
                                 first_parent = cid
-                        else:
-                            _walk(item, current_parent=first_parent if idx > 0 else current_parent)
+                        # Tiếp tục quét reply lồng bên trong item nếu có
+                        sub_parent = cid or item_parent
+                        for ik, iv in item.items():
+                            if ik == "post" or not isinstance(iv, (dict, list)):
+                                continue
+                            if ik in nested_keys and sub_parent:
+                                _walk(iv, current_parent=sub_parent)
+                            else:
+                                _walk(iv, current_parent=item_parent)
                 else:
                     _walk(v, current_parent=current_parent)
         elif isinstance(node, list):
