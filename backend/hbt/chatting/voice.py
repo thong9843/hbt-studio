@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import wave
 from pathlib import Path
 
@@ -20,6 +21,35 @@ DEFAULT_CHAR_VOICES = {
     "left_2": "Thiện Minh",
     "left_3": "Mai Anh",
 }
+
+TIME_PATTERNS = [
+    re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b"),
+    re.compile(r"\b\d{1,2}h(?:\d{2})?\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*giờ(?:\s*\d{1,2}\s*phút)?\b", re.IGNORECASE),
+]
+
+META_PATTERNS = [
+    re.compile(r"\[(?:sticker|ảnh|video|voice|audio|image|gif)[^\]]*\]", re.IGNORECASE),
+    re.compile(r"\((?:sticker|ảnh|video|cười|khóc|ha ha|huhu|ôm|tym)[^\)]*\)", re.IGNORECASE),
+    re.compile(r"\b(?:đã xem|đã gửi|đã nhận|seen|active\s*\d+\w*\s*ago)\b", re.IGNORECASE),
+]
+
+
+def clean_spoken_text(text: str) -> str:
+    """Tách sạch lời thoại để TTS VieNeu chỉ đọc câu nói của nhân vật,
+    bỏ mốc giờ ('20:15', '20h15'), trạng thái ('đã xem'), và mô tả sticker.
+    """
+    s = text.strip()
+    for p in TIME_PATTERNS:
+        s = p.sub("", s)
+    for p in META_PATTERNS:
+        s = p.sub("", s)
+    # Dọn dẹp khoảng trắng dư thừa
+    s = re.sub(r"\s+", " ", s).strip()
+    # Nếu chỉ còn dấu câu lẻ loi (vd: '-', ':', '·', '—') thì coi như rỗng
+    if re.fullmatch(r"[-—:.,;~·\s]*", s):
+        return ""
+    return s
 
 
 def get_voice_cache_dir(project_dir: Path) -> Path:
@@ -90,13 +120,24 @@ def synthesize_chat_voices(
     for idx, msg in enumerate(doc.messages):
         char = char_map.get(msg.from_)
         voice_id = char.voice if char and char.voice else DEFAULT_CHAR_VOICES.get("me", "Adam bựa")
-        h = text_hash(voice_id, msg.text)
+        spoken = clean_spoken_text(msg.text)
+
+        # Nếu sau khi lọc lời thoại mà rỗng (vd: tin chỉ chứa sticker / mốc giờ / [ảnh])
+        if not spoken:
+            h = text_hash(voice_id, f"empty_{idx}")
+            out_file = cache_dir / f"silent_{h}.wav"
+            if not (out_file.is_file() and out_file.stat().st_size > 44):
+                create_placeholder_wav(out_file, 1.0)
+            results.append((idx, out_file, 1.0))
+            continue
+
+        h = text_hash(voice_id, spoken)
         out_file = cache_dir / f"{h}.wav"
 
         if out_file.is_file() and out_file.stat().st_size > 44:
             results.append((idx, out_file, get_wav_duration(out_file)))
         else:
-            items_to_synth.append((idx, SynthItem(text=msg.text, voice_id=voice_id, out=out_file)))
+            items_to_synth.append((idx, SynthItem(text=spoken, voice_id=voice_id, out=out_file)))
 
     if items_to_synth:
         if tts_ready:
