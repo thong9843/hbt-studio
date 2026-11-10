@@ -113,17 +113,13 @@ def test_sanitize_chat_raw_excess_stickers():
 
     clean = sanitize_chat_raw(raw)
     stickers = [m["sticker"] for m in clean["messages"] if m["sticker"] is not None]
-    # Tối đa ceil(10/3) = 4 sticker
-    assert len(stickers) <= 4
-
-    # Kiểm tra cảnh báo bỏ sticker dư
-    assert any("sticker dư" in w for w in clean["warnings"])
+    # Giữ nguyên toàn bộ 10 sticker hợp lệ theo kịch bản (không giới hạn cứng)
+    assert len(stickers) == 10
 
     # Và ChatDoc validate thành công mà không bị quăng lỗi
     doc = ChatDoc.model_validate(clean)
     assert doc.title == "Chuyện vui"
     assert len(doc.messages) == 10
-    assert len(doc.warnings) > 0
 
 
 def test_sanitize_chat_raw_cut_messages_keeps_first_and_last_two():

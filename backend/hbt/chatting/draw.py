@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from hbt.chatting.models import Character, Message
+from hbt.chatting.sources import format_scene_transition, is_scene_transition
 from hbt.chatting.themes.base import ChatTheme
 
 FONTS_DIR = Path(__file__).resolve().parents[1] / "fonts"
@@ -286,8 +287,11 @@ class ChatFrameRenderer:
         for idx, msg in enumerate(visible_messages):
             if num_msgs >= 8 and idx == num_msgs // 2:
                 cur_y += 36
-            _, bubble_h, _ = self.measure_message(msg)
-            cur_y += bubble_h + 16
+            if is_scene_transition(msg.text):
+                cur_y += 36 + 20
+            else:
+                _, bubble_h, _ = self.measure_message(msg)
+                cur_y += bubble_h + 16
 
         if show_typing:
             cur_y += 64 + 16
@@ -317,6 +321,7 @@ class ChatFrameRenderer:
         scale_last_msg: float = 1.0,
         show_seen: bool = True,
         scroll_offset_override: int | None = None,
+        is_meme_cutin: bool = False,
     ) -> Image.Image:
         """Dựng một khung hình 1080x1920 hoàn chỉnh (trong suốt bên ngoài khung chat)."""
         canvas = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
@@ -368,6 +373,32 @@ class ChatFrameRenderer:
                     font=self.font_seen,
                 )
                 cur_y += 36
+
+            # Xử lý đoạn chuyển cảnh ngoặc đơn "(5 phút sau)", "(10 phút sau tại nhà vệ sinh)"...
+            if is_scene_transition(msg.text):
+                clean_title = format_scene_transition(msg.text)
+                tbox = self.font_seen.getbbox(clean_title)
+                tw = tbox[2] - tbox[0]
+                th = tbox[3] - tbox[1]
+                pill_w = max(180, tw + 40)
+                pill_h = 36
+                px = (frame_w - pill_w) // 2
+                py = cur_y + 4
+                content_draw.rounded_rectangle(
+                    [(px, py), (px + pill_w, py + pill_h)],
+                    radius=18,
+                    fill="#2A2B2E",
+                    outline="#3A3B3C",
+                    width=1,
+                )
+                content_draw.text(
+                    (px + (pill_w - tw) // 2, py + (pill_h - th) // 2 - tbox[1]),
+                    clean_title,
+                    fill="#E4E6EB",
+                    font=self.font_seen,
+                )
+                cur_y += pill_h + 20
+                continue
 
             is_last = (idx == num_msgs - 1) and not show_typing
             scale = scale_last_msg if is_last else 1.0
@@ -448,8 +479,8 @@ class ChatFrameRenderer:
             content_img.paste(typing_b, (24 + av_size + 14, cur_y), typing_b)
             cur_y += typing_b.height + 16
 
-        # Nếu có sticker hiện
-        if active_sticker_img is not None:
+        # Nếu có sticker hiện thông thường
+        if active_sticker_img is not None and not is_meme_cutin:
             sw, sh = active_sticker_img.size
             if sw > 360 or sh > 360:
                 scale_stk = 360.0 / max(sw, sh)
@@ -505,5 +536,23 @@ class ChatFrameRenderer:
         # Bo góc toàn bộ khung chat
         mask = draw_rounded_mask((frame_w, frame_max_h), self.theme.corner_radius)
         canvas.paste(frame_surface, (frame_x, top_y), mask)
+
+        # Nếu là Meme Cut-in: Phóng to meme giữa toàn bộ khung hình 1080x1920
+        if active_sticker_img is not None and is_meme_cutin:
+            # Lớp phủ mờ nền đen 40% tạo kịch tính
+            dim_overlay = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 110))
+            canvas.paste(dim_overlay, (0, 0), dim_overlay)
+
+            # Phóng to meme tối đa 720x720
+            sw, sh = active_sticker_img.size
+            max_dim = 720.0
+            scale_factor = min(max_dim / sw, max_dim / sh)
+            mw = max(10, int(sw * scale_factor))
+            mh = max(10, int(sh * scale_factor))
+            cutin_img = active_sticker_img.resize((mw, mh), Image.Resampling.LANCZOS)
+
+            cx = (CANVAS_WIDTH - mw) // 2
+            cy = (CANVAS_HEIGHT - mh) // 2
+            canvas.paste(cutin_img, (cx, cy), cutin_img)
 
         return canvas

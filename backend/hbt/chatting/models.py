@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -98,14 +97,5 @@ class ChatDoc(BaseModel):
                     f"Tin nhắn thứ {i + 1} có người gửi '{m.from_}' "
                     "không tồn tại trong danh sách nhân vật"
                 )
-
-        # 5. Tần suất sticker <= 1 sticker / 3 tin
-        sticker_count = sum(1 for m in self.messages if m.sticker is not None)
-        max_allowed_stickers = math.ceil(len(self.messages) / 3)
-        if sticker_count > max_allowed_stickers:
-            raise ValueError(
-                f"Quá nhiều sticker ({sticker_count} sticker cho {len(self.messages)} tin). "
-                f"Tối đa cho phép: {max_allowed_stickers} (tối đa 1 sticker mỗi 3 tin)"
-            )
 
         return self

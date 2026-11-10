@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hbt.chatting.models import ChatDoc
+from hbt.chatting.sources import is_scene_transition
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class TimelineState:
     active_sticker: str | None = None
     sticker_from_right: bool = False
     show_seen: bool = True
+    is_meme_cutin: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,37 @@ def build_timeline(
         is_right = (char.side == "right") if char else False
         wav_path, wav_dur = dur_map.get(idx, (Path(""), 1.0))
 
-        # Nếu tin bên trái: hiện "đang nhập" 0.6s
+        # 1. Trường hợp chuyển cảnh ngoặc đơn (5 phút sau), (10 phút sau tại nhà vệ sinh)...
+        if is_scene_transition(msg.text):
+            trans_dur = 1.2
+            states.append(
+                TimelineState(
+                    start_time=cur_time,
+                    duration=trans_dur,
+                    visible_count=idx + 1,
+                    show_typing=False,
+                    scale_last_msg=1.0,
+                    show_seen=False,
+                    is_meme_cutin=False,
+                )
+            )
+            cur_time += trans_dur
+
+            # Khoảng nghỉ kịch tính 0.3s
+            states.append(
+                TimelineState(
+                    start_time=cur_time,
+                    duration=0.3,
+                    visible_count=idx + 1,
+                    show_typing=False,
+                    show_seen=False,
+                    is_meme_cutin=False,
+                )
+            )
+            cur_time += 0.3
+            continue
+
+        # 2. Nếu tin bên trái: hiện "đang nhập" 0.6s
         if not is_right:
             states.append(
                 TimelineState(
@@ -109,24 +141,26 @@ def build_timeline(
                 duration=wav_dur,
                 visible_count=idx + 1,
                 scale_last_msg=1.0,
-                show_seen=(idx == len(doc.messages) - 1),
+                show_seen=(idx == len(doc.messages) - 1 and not msg.sticker),
             )
         )
         cur_time += wav_dur
 
-        # Nếu có sticker: hiện sticker 0.8s
+        # Nếu có sticker/meme: Meme Cut-in Pause 3.5s phóng to giữa khung hình
         if msg.sticker:
+            meme_dur = 3.5
             states.append(
                 TimelineState(
                     start_time=cur_time,
-                    duration=0.8,
+                    duration=meme_dur,
                     visible_count=idx + 1,
                     active_sticker=msg.sticker,
                     sticker_from_right=is_right,
                     show_seen=True,
+                    is_meme_cutin=True,
                 )
             )
-            cur_time += 0.8
+            cur_time += meme_dur
 
         # Nghỉ giữa tin 0.25s (trừ tin cuối cùng)
         if idx < len(doc.messages) - 1:

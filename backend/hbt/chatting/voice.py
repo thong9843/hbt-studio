@@ -9,6 +9,7 @@ import wave
 from pathlib import Path
 
 from hbt.chatting.models import ChatDoc
+from hbt.chatting.sources import is_scene_transition
 from hbt.pipeline.ffutil import media_duration
 from hbt.postv.censor import CensorStore, compile_censor, find_censor_hits
 from hbt.postv.voice import SynthItem, VoiceProvider
@@ -37,8 +38,12 @@ META_PATTERNS = [
 
 def clean_spoken_text(text: str) -> str:
     """Tách sạch lời thoại để TTS VieNeu chỉ đọc câu nói của nhân vật,
-    bỏ mốc giờ ('20:15', '20h15'), trạng thái ('đã xem'), và mô tả sticker.
+    bỏ mốc giờ ('20:15', '20h15'), trạng thái ('đã xem'), mô tả sticker,
+    và các đoạn chuyển cảnh ngoặc đơn '(5 phút sau)', '(ở nhà Nam)'...
     """
+    if is_scene_transition(text):
+        return ""
+
     s = text.strip()
     for p in TIME_PATTERNS:
         s = p.sub("", s)
@@ -122,13 +127,15 @@ def synthesize_chat_voices(
         voice_id = char.voice if char and char.voice else DEFAULT_CHAR_VOICES.get("me", "Adam bựa")
         spoken = clean_spoken_text(msg.text)
 
-        # Nếu sau khi lọc lời thoại mà rỗng (vd: tin chỉ chứa sticker / mốc giờ / [ảnh])
-        if not spoken:
-            h = text_hash(voice_id, f"empty_{idx}")
+        # Nếu là chuyển cảnh ngoặc đơn hoặc sau khi lọc lời thoại mà rỗng
+        is_trans = is_scene_transition(msg.text)
+        if is_trans or not spoken:
+            dur = 1.2 if is_trans else 1.0
+            h = text_hash(voice_id, f"transition_{idx}" if is_trans else f"empty_{idx}")
             out_file = cache_dir / f"silent_{h}.wav"
             if not (out_file.is_file() and out_file.stat().st_size > 44):
-                create_placeholder_wav(out_file, 1.0)
-            results.append((idx, out_file, 1.0))
+                create_placeholder_wav(out_file, dur)
+            results.append((idx, out_file, dur))
             continue
 
         h = text_hash(voice_id, spoken)

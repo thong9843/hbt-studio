@@ -73,3 +73,84 @@ def test_pick_meme_from_library(tmp_path: Path):
     picked = pick_sticker(library, "soc", seed=0)
     assert picked is not None
     assert picked.name == "shocked_cat.mp4"
+
+
+def test_parse_direct_script_scene_transition_and_meme_tag():
+    text = """
+    Minh: Ê nay rảnh không đi cafe?
+    Linh: [meme: soc] Gì bất ngờ vậy!
+    (5 phút sau tại nhà vệ sinh)
+    Minh: Tới chưa bạn ê?
+    Linh: Haha đang kẹt xe nè
+    """
+    res = parse_direct_script(text)
+    assert len(res["messages"]) == 5
+    # Tin 2: [meme: soc] -> sticker="soc"
+    assert res["messages"][1]["sticker"] == "soc"
+    # Tin 3: Chuyển cảnh ngoặc đơn
+    assert res["messages"][2]["text"] == "(5 phút sau tại nhà vệ sinh)"
+    assert res["messages"][2]["sticker"] is None
+    # Tin 5: Từ khóa "haha" tự động nhận diện sticker="cuoi"
+    assert res["messages"][4]["sticker"] == "cuoi"
+
+
+def test_chatdoc_unlimited_stickers():
+    from hbt.chatting.models import Character, ChatDoc, Message
+
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="c1", name="Hoa", side="left"),
+    ]
+    # Tạo 10 tin nhắn và cả 10 tin đều có sticker hợp lệ (không bị giới hạn 1/3 tin)
+    msgs = [
+        Message(from_="me" if i % 2 == 0 else "c1", text=f"Tin nhắn số {i}", sticker="soc")
+        for i in range(10)
+    ]
+    doc = ChatDoc(
+        hbt_chat=1,
+        title="Đoạn chat thử nghiệm nhiều sticker",
+        characters=chars,
+        messages=msgs,
+    )
+    assert len(doc.messages) == 10
+    assert sum(1 for m in doc.messages if m.sticker is not None) == 10
+
+
+def test_timeline_meme_cutin_pause_and_scene_transition():
+    from hbt.chatting.models import Character, ChatDoc, Message
+    from hbt.chatting.timeline import build_timeline
+
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="c1", name="Hoa", side="left"),
+    ]
+    msgs = [
+        Message(from_="c1", text="Chào bạn", sticker="soc"),
+        Message(from_="c1", text="(10 phút sau tại quán cafe)"),
+        Message(from_="me", text="Mình tới rồi nè"),
+        Message(from_="c1", text="Đợi xíu nha"),
+        Message(from_="me", text="Oke bạn"),
+        Message(from_="c1", text="Mình đang gửi xe"),
+        Message(from_="me", text="Tầng 2 nha"),
+        Message(from_="c1", text="Ok thấy rồi"),
+    ]
+    doc = ChatDoc(
+        hbt_chat=1,
+        title="Test timeline",
+        characters=chars,
+        messages=msgs,
+    )
+    # Giả lập wav_dur = 1.0s cho mỗi tin
+    voice_durations = [(i, Path("fake.wav"), 1.0) for i in range(len(msgs))]
+    timeline = build_timeline(doc, voice_durations)
+
+    # Tìm state meme cut-in (duration 3.5s)
+    cutin_states = [s for s in timeline.states if s.is_meme_cutin]
+    assert len(cutin_states) == 1
+    assert cutin_states[0].duration == 3.5
+    assert cutin_states[0].active_sticker == "soc"
+
+    # Tìm state chuyển cảnh (duration 1.2s, show_typing=False)
+    transition_states = [s for s in timeline.states if s.duration == 1.2 and s.visible_count == 2]
+    assert len(transition_states) == 1
+    assert transition_states[0].show_typing is False

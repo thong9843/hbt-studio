@@ -75,6 +75,40 @@ def pick_sticker(library_dir: Path, tag: str, seed: int = 0) -> Path | None:
     return None
 
 
+def extract_meme_audio(meme_file: Path, out_wav: Path, max_duration: float = 3.5) -> bool:
+    """Trích xuất âm thanh gốc từ clip meme (mp4/mov/webm). Trả về True nếu có âm thanh."""
+    if not meme_file.is_file():
+        return False
+    if meme_file.suffix.lower() not in SUPPORTED_VIDEO_EXTS:
+        return False
+
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        run_ffmpeg(
+            [
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                str(meme_file),
+                "-t",
+                str(max_duration),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "24000",
+                "-c:a",
+                "pcm_s16le",
+                str(out_wav),
+            ]
+        )
+        return out_wav.is_file() and out_wav.stat().st_size > 1000
+    except Exception as e:
+        logger.warning("Không trích được audio từ meme %s: %s", meme_file, e)
+        return False
+
+
 def remove_green_screen(img: Image.Image) -> Image.Image:
     """Tách phông xanh lá (colorkey #00FF00) sang nền trong suốt qua bytearray."""
     rgba = img.convert("RGBA")

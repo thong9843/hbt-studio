@@ -139,14 +139,14 @@ def test_invalid_sticker_tag():
         Message(from_="me", text="Chào", sticker="tag_la_lung")
 
 
-def test_too_many_stickers():
-    # 8 tin nhắn mà 4 sticker (> ceil(8/3) = 3) -> lỗi
-    with pytest.raises(ValidationError, match="Quá nhiều sticker"):
-        ChatDoc(
-            title="Lỗi",
-            characters=[
-                Character(id="me", name="Tôi", side="right"),
-                Character(id="a", name="Linh", side="left"),
-            ],
-            messages=make_valid_messages(8, with_stickers=4),
-        )
+def test_multiple_stickers_allowed():
+    # 8 tin nhắn mà 4 sticker -> được phép linh hoạt theo kịch bản (không giới hạn cứng)
+    doc = ChatDoc(
+        title="Nhiều sticker",
+        characters=[
+            Character(id="me", name="Tôi", side="right"),
+            Character(id="a", name="Linh", side="left"),
+        ],
+        messages=make_valid_messages(8, with_stickers=4),
+    )
+    assert sum(1 for m in doc.messages if m.sticker is not None) == 4

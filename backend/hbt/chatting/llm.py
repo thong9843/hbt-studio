@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import time
 from typing import Any
@@ -207,31 +206,17 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Lọc sticker: tối đa 1 sticker mỗi 3 tin và cách nhau ít nhất 2 tin (khoảng cách index >= 3)
-    max_stickers = math.ceil(len(clean_msgs) / 3)
-    kept_stickers = 0
-    last_sticker_idx = -99
-
-    for idx, m in enumerate(clean_msgs):
+    # 3. Giữ nguyên mọi sticker/meme hợp lệ của kịch bản (không giới hạn cứng)
+    for m in clean_msgs:
         if m.get("sticker") is not None:
-            if kept_stickers < max_stickers and (idx - last_sticker_idx >= 3):
-                kept_stickers += 1
-                last_sticker_idx = idx
-            else:
-                m["sticker"] = None
-
-    dropped_stickers_count = max(0, raw_sticker_count - kept_stickers)
+            st = str(m.get("sticker")).strip().lower()
+            m["sticker"] = st if st in VALID_STICKER_TAGS else None
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
         warnings.append(
             f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
             "để kịch bản không vượt quá 900 ký tự."
-        )
-    if dropped_stickers_count > 0:
-        warnings.append(
-            f"Đã bỏ {dropped_stickers_count} sticker dư thừa "
-            "để đảm bảo tối đa 1 sticker mỗi 3 tin nhắn."
         )
 
     data["messages"] = clean_msgs

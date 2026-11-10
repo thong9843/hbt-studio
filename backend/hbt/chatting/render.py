@@ -20,7 +20,8 @@ from PIL import Image
 
 from hbt.chatting.draw import ChatFrameRenderer
 from hbt.chatting.models import ChatDoc, Message
-from hbt.chatting.stickers import load_sticker_or_meme_image, pick_sticker
+from hbt.chatting.sources import is_scene_transition
+from hbt.chatting.stickers import extract_meme_audio, load_sticker_or_meme_image, pick_sticker
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
@@ -240,6 +241,7 @@ def render_chat_video(
         scale_msg: float = 1.0,
         s_seen: bool = True,
         s_scroll: int | None = None,
+        is_cutin: bool = False,
         dur: float = 0.05,
     ) -> None:
         nonlocal frame_counter
@@ -253,6 +255,7 @@ def render_chat_video(
             scale_last_msg=scale_msg,
             show_seen=s_seen,
             scroll_offset_override=s_scroll,
+            is_meme_cutin=is_cutin,
         )
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
@@ -389,6 +392,7 @@ def render_chat_video(
                 scale_msg=state.scale_last_msg,
                 s_seen=state.show_seen,
                 s_scroll=current_scroll_y,
+                is_cutin=state.is_meme_cutin,
                 dur=frame_dur,
             )
 
@@ -419,9 +423,23 @@ def render_chat_video(
         if state.show_typing and sfx_typing:
             event_tuples.append((state.start_time, sfx_typing, 0.4))
         elif state.scale_last_msg < 1.0 and sfx_pop:
-            event_tuples.append((state.start_time, sfx_pop, 0.3))
-        elif state.active_sticker and sfx_ding:
-            event_tuples.append((state.start_time, sfx_ding, 0.5))
+            if state.visible_count > 0:
+                last_m = doc.messages[state.visible_count - 1]
+                if not is_scene_transition(last_m.text):
+                    event_tuples.append((state.start_time, sfx_pop, 0.3))
+        elif state.active_sticker:
+            meme_audio_played = False
+            if state.is_meme_cutin:
+                stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+                if stk_file and stk_file.is_file():
+                    meme_wav = build_dir / f"meme_{stk_file.stem}.wav"
+                    if not (meme_wav.is_file() and meme_wav.stat().st_size > 1000):
+                        extract_meme_audio(stk_file, meme_wav, max_duration=state.duration)
+                    if meme_wav.is_file() and meme_wav.stat().st_size > 1000:
+                        event_tuples.append((state.start_time, meme_wav, state.duration))
+                        meme_audio_played = True
+            if not meme_audio_played and sfx_ding:
+                event_tuples.append((state.start_time, sfx_ding, 0.5))
 
     assemble_voice_track(event_tuples, target_duration, voice_mix_wav)
 

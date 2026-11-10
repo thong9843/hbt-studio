@@ -16,6 +16,75 @@ THREADS_DOMAINS = {"www.threads.net", "threads.net", "www.threads.com", "threads
 USER_AGENT = "hbt-studio/0.1.0 (local)"
 MAX_INPUT_CHARS = 6000
 
+SCENE_TRANSITION_RE = re.compile(
+    r"^\s*[\(\[]\s*(?P<inner>[^\)\]]+)\s*[\)\]]\s*$",
+    re.UNICODE,
+)
+
+SCENE_TRANSITION_KEYWORDS = (
+    "phút",
+    "tiếng",
+    "giờ",
+    "ngày",
+    "lúc",
+    "sau",
+    "tại",
+    "ở",
+    "hôm",
+    "sáng",
+    "trưa",
+    "chiều",
+    "tối",
+    "đêm",
+    "tuần",
+    "tháng",
+    "năm",
+)
+
+EMOTION_KEYWORDS_MAP: list[tuple[str, list[str]]] = [
+    ("cuoi", ["haha", "hihi", "hehe", "hài", "cười", "buồn cười", "lmao", "lol", "kaka", "bựa"]),
+    ("khoc", ["huhu", "khóc", "rớt nước mắt", "tủi thân", "đau lòng"]),
+    ("gian", ["tức", "cay", "giận", "điên", "bực", "cút", "chửi", "mẹ kiếp"]),
+    ("soc", ["sốc", "bất ngờ", "không thể tin", "trời ơi", "vãi", "omg", "u là trời", "kinh ngạc"]),
+    ("ngai", ["quê", "ngại", "ngượng", "xấu hổ", "đỏ mặt"]),
+    ("yeu", ["yêu", "thương", "crush", "nhớ em", "nhớ anh", "tym"]),
+    ("nghi", ["nghi ngờ", "thắc mắc", "thật không", "ảo"]),
+    ("can", ["cạn lời", "sa mạc lời", "hết nói nổi", "chán"]),
+    ("bat_luc", ["bất lực", "bó tay", "bó chiếu", "chịu chết", "toang", "hết cứu"]),
+    ("ok", ["ok", "oke", "đồng ý", "nhất trí", "chuẩn"]),
+]
+
+
+def is_scene_transition(text: str) -> bool:
+    """Kiểm tra xem câu văn có phải dòng chuyển cảnh ngoặc đơn thời gian/địa điểm không."""
+    if not text:
+        return False
+    m = SCENE_TRANSITION_RE.match(text.strip())
+    if not m:
+        return False
+    inner = m.group("inner").strip().lower()
+    if inner.startswith(("meme", "sticker", "nhãn dán")):
+        return False
+    return any(k in inner for k in SCENE_TRANSITION_KEYWORDS)
+
+
+def format_scene_transition(text: str) -> str:
+    """Trích xuất chuỗi sạch hiển thị trên divider chuyển cảnh."""
+    m = SCENE_TRANSITION_RE.match(text.strip())
+    if m:
+        return m.group("inner").strip()
+    return text.strip("()[] ")
+
+
+def detect_emotion_tag(text: str) -> str | None:
+    """Phân tích từ khóa cảm xúc trong câu thoại để tự động gán meme phù hợp."""
+    t = text.lower()
+    for tag, keywords in EMOTION_KEYWORDS_MAP:
+        for kw in keywords:
+            if re.search(r"\b" + re.escape(kw) + r"\b", t):
+                return tag
+    return None
+
 
 def parse_link(raw_input: str) -> tuple[str, str | None]:
     """Phân loại đầu vào thành: ('reddit', url), ('threads', url), hoặc ('pasted', None)."""
@@ -160,8 +229,12 @@ def parse_direct_script(text: str) -> dict[str, Any]:
     dialogue_pattern = re.compile(
         r"^(?:\[(?P<b_name>[^\]]{1,24})\]|(?P<p_name>[^:\-–—]{1,24}))\s*[:\-–—]\s*(?P<speech>.*)$"
     )
-    sticker_bracket_pat = re.compile(r"\[(?:sticker:\s*|nhãn dán:\s*)?([^\]]+)\]", re.IGNORECASE)
-    sticker_paren_pat = re.compile(r"\(([^)]+)\)$", re.IGNORECASE)
+    sticker_bracket_pat = re.compile(
+        r"\[(?:meme:\s*|sticker:\s*|nhãn dán:\s*)?([^\]]+)\]", re.IGNORECASE
+    )
+    sticker_paren_pat = re.compile(
+        r"\((?:meme:\s*|sticker:\s*|nhãn dán:\s*)?([^)]+)\)$", re.IGNORECASE
+    )
 
     tag_map = {
         "cuoi": "cuoi",
@@ -195,6 +268,12 @@ def parse_direct_script(text: str) -> dict[str, Any]:
     last_speaker = "Người 1"
 
     for line in lines:
+        # 1. Kiểm tra dòng chuyển cảnh ngoặc đơn (5 phút sau), (10 phút sau tại nhà vệ sinh)...
+        if is_scene_transition(line):
+            speaker = last_speaker
+            raw_dialogues.append((speaker, line, None))
+            continue
+
         m = dialogue_pattern.match(line)
         if m:
             speaker = (m.group("b_name") or m.group("p_name") or "").strip()
@@ -207,7 +286,12 @@ def parse_direct_script(text: str) -> dict[str, Any]:
         if speaker not in char_names:
             char_names.append(speaker)
 
-        # Kiểm tra sticker
+        # 2. Kiểm tra dòng thoại có phải chuyển cảnh bên trong thoại không
+        if is_scene_transition(speech):
+            raw_dialogues.append((speaker, speech, None))
+            continue
+
+        # 3. Kiểm tra sticker / meme từ cú pháp [meme: <tag>] hoặc [sticker: <tag>]
         sticker: str | None = None
         sm = sticker_bracket_pat.search(speech)
         if sm:
@@ -225,8 +309,14 @@ def parse_direct_script(text: str) -> dict[str, Any]:
                     sticker = normalized_tag
                     speech = sticker_paren_pat.sub("", speech).strip()
 
+        # 4. Phân tích cảm xúc từ khóa nếu chưa có tag rõ ràng
+        if not sticker and speech:
+            detected = detect_emotion_tag(speech)
+            if detected and detected in VALID_STICKER_TAGS:
+                sticker = detected
+
         if speech or sticker:
-            raw_dialogues.append((speaker, speech, sticker))
+            raw_dialogues.append((speaker, speech or "...", sticker))
 
     if not raw_dialogues:
         raise ValueError("Không tìm thấy câu thoại nào hợp lệ trong kịch bản")
