@@ -71,6 +71,7 @@ export const api = {
     platform: string;
     background: string;
     direct_script?: boolean;
+    target_duration_s?: number | null;
   }) => apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
   getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
   getChattingJob: (slug: string) => apiGet<ChattingJobInfo>(`/chatting/${enc(slug)}/job`),

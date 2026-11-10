@@ -126,12 +126,12 @@ def test_sanitize_chat_raw_cut_messages_keeps_first_and_last_two():
     from hbt.chatting.llm import sanitize_chat_raw
     from hbt.chatting.models import ChatDoc
 
-    # 35 tin nhắn, tổng ký tự > 1500
+    # 85 tin nhắn, tổng ký tự > 6000
     msgs = [{"from": "me", "text": "Tin đầu tiên số 0", "sticker": None}]
-    for i in range(1, 33):
-        msgs.append({"from": "a" if i % 2 == 1 else "me", "text": f"Tin nhắn giữa số {i} " * 5})
-    msgs.append({"from": "a", "text": "Tin áp chót số 33", "sticker": None})
-    msgs.append({"from": "me", "text": "Tin kết thúc số 34", "sticker": None})
+    for i in range(1, 83):
+        msgs.append({"from": "a" if i % 2 == 1 else "me", "text": f"Tin nhắn giữa số {i} " * 4})
+    msgs.append({"from": "a", "text": "Tin áp chót số 83", "sticker": None})
+    msgs.append({"from": "me", "text": "Tin kết thúc số 84", "sticker": None})
 
     raw = {
         "title": "Hội thoại dài",
@@ -145,14 +145,14 @@ def test_sanitize_chat_raw_cut_messages_keeps_first_and_last_two():
     clean = sanitize_chat_raw(raw)
     doc = ChatDoc.model_validate(clean)
 
-    # Đảm bảo tổng tin 8-30 và tổng ký tự <= 900
-    assert 8 <= len(doc.messages) <= 30
-    assert sum(len(m.text) for m in doc.messages) <= 900
+    # Đảm bảo tổng tin 8-80 và tổng ký tự <= 5000
+    assert 8 <= len(doc.messages) <= 80
+    assert sum(len(m.text) for m in doc.messages) <= 5000
 
     # Ưu tiên giữ tin đầu và 2 tin cuối
     assert doc.messages[0].text == "Tin đầu tiên số 0"
-    assert doc.messages[-2].text == "Tin áp chót số 33"
-    assert doc.messages[-1].text == "Tin kết thúc số 34"
+    assert doc.messages[-2].text == "Tin áp chót số 83"
+    assert doc.messages[-1].text == "Tin kết thúc số 84"
 
     # Có cảnh báo cắt tin
     assert any("cắt bớt" in w for w in doc.warnings)
@@ -178,7 +178,7 @@ def test_sanitize_chat_raw_edge_cases():
 
     clean = sanitize_chat_raw(raw)
     doc = ChatDoc.model_validate(clean)
-    assert 8 <= len(doc.messages) <= 30
+    assert 8 <= len(doc.messages) <= 80
     assert sum(1 for c in doc.characters if c.side == "right") == 1
     char_ids = {c.id for c in doc.characters}
     for m in doc.messages:

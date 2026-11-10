@@ -14,7 +14,7 @@ REDDIT_SHORT_PATTERN = re.compile(r"^/([a-z0-9]+)$", re.IGNORECASE)
 THREADS_DOMAINS = {"www.threads.net", "threads.net", "www.threads.com", "threads.com"}
 
 USER_AGENT = "hbt-studio/0.1.0 (local)"
-MAX_INPUT_CHARS = 6000
+MAX_INPUT_CHARS = 15000
 
 SCENE_TRANSITION_RE = re.compile(
     r"^\s*[\(\[]\s*(?P<inner>[^\)\]]+)\s*[\)\]]\s*$",
@@ -336,12 +336,12 @@ def parse_direct_script(text: str) -> dict[str, Any]:
     if not raw_dialogues:
         raise ValueError("Không tìm thấy câu thoại nào hợp lệ trong kịch bản")
 
-    # Phân vai: người đầu tiên bên phải ("me"), những người sau bên trái
+    # Phân vai: người đầu tiên bên phải ("me"), những người sau bên trái (hỗ trợ tới 10 người)
     default_voices = ["Adam bựa", "Trúc Ly", "Thiện Minh", "Mai Anh", "Hải Đăng"]
     characters: list[dict[str, Any]] = []
     char_id_map: dict[str, str] = {}
 
-    for idx, name in enumerate(char_names):
+    for idx, name in enumerate(char_names[:10]):
         cid = f"c{idx + 1}" if idx > 0 else "me"
         side = "right" if idx == 0 else "left"
         voice = default_voices[idx % len(default_voices)]
@@ -371,8 +371,10 @@ def parse_direct_script(text: str) -> dict[str, Any]:
 
     messages: list[dict[str, Any]] = []
     for speaker, speech, sticker in raw_dialogues:
-        cid = char_id_map.get(speaker, "me")
-        display_txt = speech or "..."
+        cid = char_id_map.get(speaker, char_id_map.get(char_names[0], "me") if char_names else "me")
+        display_txt = (speech or "...").strip()
+        if len(display_txt) > 300:
+            display_txt = display_txt[:297] + "..."
         spoken_txt = clean_spoken_text(display_txt)
         messages.append(
             {

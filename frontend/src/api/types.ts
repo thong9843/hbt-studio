@@ -713,6 +713,7 @@ export interface ChatDoc {
   slug?: string;
   title: string;
   platform: 'messenger' | 'zalo';
+  target_duration_s?: number | null;
   characters: ChatCharacter[];
   messages: ChatMessage[];
   warnings?: string[];

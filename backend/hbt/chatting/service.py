@@ -41,6 +41,7 @@ def run_chatting_auto_job(
     background_name: str = "minecraft4-1080p60",
     slug_override: str | None = None,
     direct_script: bool = False,
+    target_duration_s: float | None = None,
     emit_event: ProgressEmit | None = None,
 ) -> tuple[str, Path]:
     """Chạy toàn bộ quy trình 4 pha của Chatting:
@@ -167,19 +168,26 @@ def run_chatting_auto_job(
             body=source_data["body"],
             comments=source_data.get("comments"),
             platform=platform,
+            target_duration_s=target_duration_s,
         )
         timings.update(llm_timings)
         chat_raw = sanitize_chat_raw(chat_raw)
 
-    # Khởi tạo ChatDoc
+    # Khởi tạo ChatDoc (phân giọng khác nhau cho từng nhân vật trong Group Chat)
+    default_voices = ["Adam bựa", "Trúc Ly", "Thiện Minh", "Mai Anh", "Hải Đăng"]
     characters: list[Character] = []
-    for c in chat_raw.get("characters", []):
+    for idx, c in enumerate(chat_raw.get("characters", [])):
+        default_v = (
+            "Adam bựa"
+            if c["side"] == "right"
+            else default_voices[(idx + 1) % len(default_voices)]
+        )
         characters.append(
             Character(
                 id=c["id"],
                 name=c["name"],
                 side=c["side"],
-                voice="Adam bựa" if c["side"] == "right" else "Trúc Ly",
+                voice=c.get("voice") or default_v,
                 avatar=None,
             )
         )
@@ -190,6 +198,8 @@ def run_chatting_auto_job(
             Message(
                 from_=m["from"],
                 text=m["text"],
+                display_text=m.get("display_text"),
+                spoken_text=m.get("spoken_text"),
                 sticker=m.get("sticker"),
             )
         )
@@ -200,6 +210,7 @@ def run_chatting_auto_job(
         platform=platform,
         source={"kind": kind, "url": link_url},
         background={"name": background_name, "seed": 7},
+        target_duration_s=target_duration_s,
         characters=characters,
         messages=messages,
         warnings=chat_raw.get("warnings", []),

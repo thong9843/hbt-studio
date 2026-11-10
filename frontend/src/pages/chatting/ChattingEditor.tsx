@@ -6,7 +6,19 @@ import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
+import { Select } from '../../components/ui/Select';
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from '../../components/icons';
+
+const DURATION_OPTIONS = [
+  { id: '', label: 'Tự động (tối đa 5p)' },
+  { id: '60', label: '1 phút (60s)' },
+  { id: '90', label: '1 phút 30s (90s)' },
+  { id: '120', label: '2 phút (120s)' },
+  { id: '150', label: '2 phút 30s (150s)' },
+  { id: '180', label: '3 phút (180s)' },
+  { id: '240', label: '4 phút (240s)' },
+  { id: '300', label: '5 phút (300s)' },
+];
 
 const STICKER_TAGS = [
   'soc',
@@ -395,7 +407,9 @@ export function ChattingEditor() {
                   <p className="truncate text-tiny font-bold text-text">
                     {char.name} ({char.side === 'right' ? 'Phải/Tôi' : 'Trái'})
                   </p>
-                  <select
+                  <Select
+                    aria-label={`Giọng của ${char.name}`}
+                    variant="compact"
                     value={char.voice_id || 'Adam bựa'}
                     onChange={(e) => {
                       const newChars = doc.characters.map((c: ChatCharacter) =>
@@ -403,14 +417,14 @@ export function ChattingEditor() {
                       );
                       saveDoc({ ...doc, characters: newChars });
                     }}
-                    className="mt-0.5 w-full rounded border border-line bg-card py-0.5 text-[11px] font-medium outline-none"
+                    className="mt-1"
                   >
                     {VOICE_OPTIONS.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -463,15 +477,32 @@ export function ChattingEditor() {
 
       {/* CỘT GIỮA: Sửa tin đang chọn */}
       <main className="flex flex-1 flex-col p-6 overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-line pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
           <div>
             <h1 className="text-xl font-bold">{doc.title}</h1>
             <p className="text-tiny text-muted">
-              {vi.chatting.platform}: {doc.platform} · {doc.messages.length} tin nhắn
+              {vi.chatting.platform}: {doc.platform} · {doc.messages.length} tin nhắn ·{' '}
+              {doc.characters.length > 2 ? `Nhóm ${doc.characters.length} người` : '2 người'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {isSaving && <span className="text-tiny text-muted">{vi.chatting.saving}</span>}
+            <Select
+              aria-label="Trần thời lượng video"
+              variant="pill"
+              autoWidth
+              value={doc.target_duration_s ? String(doc.target_duration_s) : ''}
+              onChange={(e) => {
+                const v = e.target.value ? Number(e.target.value) : null;
+                saveDoc({ ...doc, target_duration_s: v });
+              }}
+            >
+              {DURATION_OPTIONS.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </Select>
             <Button tone="soft" size="sm" onClick={handleRegenAI}>
               {vi.chatting.regenBtn}
             </Button>
@@ -537,17 +568,17 @@ export function ChattingEditor() {
               <label className="text-tiny font-semibold text-muted">Lời nhắn:</label>
               <span
                 className={`text-tiny font-bold tabular-nums ${
-                  activeMsg.text.length > 120 ? 'text-danger' : 'text-muted'
+                  activeMsg.text.length > 300 ? 'text-danger' : 'text-muted'
                 }`}
               >
-                {activeMsg.text.length}/120
+                {activeMsg.text.length}/300
               </span>
             </div>
             <textarea
               value={activeMsg.text}
               onChange={(e) => handleTextChange(e.target.value)}
               rows={3}
-              maxLength={120}
+              maxLength={300}
               className="mt-1.5 w-full resize-none rounded-xl border border-line bg-soft-2 p-3 text-body font-medium outline-none focus:border-text focus:ring-2 focus:ring-accent"
             />
           </div>

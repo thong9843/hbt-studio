@@ -276,3 +276,56 @@ def test_safe_fallback_missing_meme(tmp_path: Path):
     # Không tạo state cut-in nếu thiếu file meme
     cutin_states = [s for s in timeline.states if s.is_meme_cutin]
     assert len(cutin_states) == 0
+
+
+def test_group_chat_multi_characters_render():
+    from hbt.chatting.draw import ChatFrameRenderer
+    from hbt.chatting.models import Character, Message
+    from hbt.chatting.themes import get_theme
+
+    # Kịch bản nhóm 4 nhân vật (Nam phải, 3 người khác trái)
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="k", name="Khánh", side="left"),
+        Character(id="t", name="Thầy Chủ Nhiệm", side="left"),
+        Character(id="m", name="Mẹ của Nam", side="left"),
+    ]
+    msgs = [
+        Message(from_="k", text="Nay cúp tiết đi net không Nam?"),
+        Message(from_="t", text="Em Khánh vừa nhắn gì trong nhóm lớp thế?"),
+        Message(from_="m", text="Nam ơi mẹ mới gọi điện hỏi thầy đấy nhé!"),
+        Message(from_="me", text="Ối dồi ôi toang thật rồi 👁️👄👁️"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars)
+    assert renderer.is_group is True
+    assert renderer.get_char_color("k")[0] != renderer.get_char_color("t")[0]
+
+    frame = renderer.render_chat_view(msgs)
+    assert frame.size == (1080, 1920)
+    frame.close()
+
+
+def test_long_timeline_up_to_300s():
+    from hbt.chatting.models import Character, ChatDoc, Message
+    from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
+
+    assert MAX_VIDEO_DURATION_S == 300.0
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="c1", name="Khánh", side="left"),
+    ]
+    # 55 tin nhắn mỗi tin 3.0s audio -> tổng thời lượng > 160s (> 90s cũ, <= 300s mới)
+    msgs = [
+        Message(from_="me" if i % 2 == 0 else "c1", text=f"Lời thoại số {i}") for i in range(55)
+    ]
+    doc = ChatDoc(
+        hbt_chat=1,
+        title="Kịch bản dài 3 phút",
+        target_duration_s=300.0,
+        characters=chars,
+        messages=msgs,
+    )
+    voice_durations = [(i, Path("fake.wav"), 3.0) for i in range(55)]
+    timeline = build_timeline(doc, voice_durations)
+    assert timeline.total_duration > 150.0
+    assert timeline.total_duration <= 300.0

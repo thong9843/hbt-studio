@@ -32,7 +32,7 @@ class Message(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     from_: str = Field(alias="from", min_length=1, max_length=32)
-    text: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1, max_length=300)
     display_text: str | None = None
     spoken_text: str | None = None
     sticker: str | None = None
@@ -73,15 +73,16 @@ class ChatDoc(BaseModel):
     source: SourceInfo = Field(default_factory=SourceInfo)
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
     music: str | None = "chill_02"
+    target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     characters: list[Character]
     messages: list[Message]
     warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_rules(self) -> ChatDoc:
-        # 1. characters: 2-4
-        if not (2 <= len(self.characters) <= 4):
-            raise ValueError(f"Số lượng nhân vật phải từ 2 đến 4, nhận {len(self.characters)}")
+        # 1. characters: 2-10 (hỗ trợ nhóm chat nhiều nhân vật)
+        if not (2 <= len(self.characters) <= 10):
+            raise ValueError(f"Số lượng nhân vật phải từ 2 đến 10, nhận {len(self.characters)}")
 
         # Kiểm tra đúng 1 nhân vật side right
         rights = [c for c in self.characters if c.side == "right"]
@@ -93,14 +94,14 @@ class ChatDoc(BaseModel):
         if len(char_ids) != len(self.characters):
             raise ValueError("ID nhân vật không được trùng nhau")
 
-        # 2. messages: 8-30 tin
-        if not (8 <= len(self.messages) <= 30):
-            raise ValueError(f"Số lượng tin nhắn phải từ 8 đến 30, nhận {len(self.messages)}")
+        # 2. messages: 8-80 tin (hỗ trợ kịch bản dài 2-5 phút)
+        if not (8 <= len(self.messages) <= 80):
+            raise ValueError(f"Số lượng tin nhắn phải từ 8 đến 80, nhận {len(self.messages)}")
 
-        # 3. Tổng ký tự <= 900
+        # 3. Tổng ký tự <= 5000
         total_chars = sum(len(m.text) for m in self.messages)
-        if total_chars > 900:
-            raise ValueError(f"Tổng số ký tự tin nhắn tối đa 900, hiện tại là {total_chars}")
+        if total_chars > 5000:
+            raise ValueError(f"Tổng số ký tự tin nhắn tối đa 5000, hiện tại là {total_chars}")
 
         # 4. Người gửi phải tồn tại trong characters
         for i, m in enumerate(self.messages):

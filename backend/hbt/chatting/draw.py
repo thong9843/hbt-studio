@@ -185,8 +185,23 @@ def draw_asymmetric_rounded_rect(
     img.paste(color_layer, (x0, y0), mask)
 
 
-def make_circular_avatar(avatar_img: Image.Image | None, char: Character, size: int) -> Image.Image:
-    """Tạo avatar hình tròn. Nếu không có ảnh, vẽ vòng tròn kèm chữ cái đầu."""
+GROUP_CHAR_COLORS: list[tuple[str, tuple[int, int, int, int]]] = [
+    ("#0084FF", (0, 132, 255, 255)),  # Xanh dương
+    ("#E67E22", (230, 126, 34, 255)),  # Cam
+    ("#22A55B", (34, 165, 91, 255)),  # Xanh lá
+    ("#D946EF", (217, 70, 239, 255)),  # Tím hồng
+    ("#E11D48", (225, 29, 72, 255)),  # Đỏ hồng
+    ("#0EA5E9", (14, 165, 233, 255)),  # Xanh ngọc
+]
+
+
+def make_circular_avatar(
+    avatar_img: Image.Image | None,
+    char: Character,
+    size: int,
+    bg_color_override: tuple[int, int, int, int] | None = None,
+) -> Image.Image:
+    """Tạo avatar hình tròn. Nếu không có ảnh, vẽ vòng tròn màu phân biệt kèm chữ cái đầu."""
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
@@ -197,15 +212,11 @@ def make_circular_avatar(avatar_img: Image.Image | None, char: Character, size: 
         mask_draw.ellipse((0, 0, size, size), fill=255)
         canvas.paste(resized, (0, 0), mask)
     else:
-        # Vẽ vòng tròn màu theo tên
-        color_hash = sum(ord(c) for c in char.name) % 4
-        colors = [
-            (0, 132, 255, 255),  # xanh dương
-            (244, 182, 48, 255),  # vàng
-            (34, 165, 91, 255),  # xanh lá
-            (178, 34, 40, 255),  # đỏ HBT
-        ]
-        bg_col = colors[color_hash]
+        if bg_color_override is not None:
+            bg_col = bg_color_override
+        else:
+            color_hash = sum(ord(c) for c in char.name) % len(GROUP_CHAR_COLORS)
+            bg_col = GROUP_CHAR_COLORS[color_hash][1]
         draw.ellipse((0, 0, size - 1, size - 1), fill=bg_col)
         initial = (char.name[0] if char.name else "U").upper()
         font = get_font(int(size * 0.5), bold=True)
@@ -237,6 +248,19 @@ class ChatFrameRenderer:
         self.font_header_title = get_font(34, bold=True)
         self.font_header_status = get_font(24)
         self.font_seen = get_font(22)
+        self.font_sender_name = get_font(22, bold=True)
+
+        # Gán màu phân biệt cho từng thành viên trong Group Chat
+        self.left_chars = [c for c in characters if c.side == "left"]
+        self.is_group = len(self.left_chars) > 1
+        self.char_colors: dict[str, tuple[str, tuple[int, int, int, int]]] = {}
+        for idx, c in enumerate(self.left_chars):
+            self.char_colors[c.id] = GROUP_CHAR_COLORS[idx % len(GROUP_CHAR_COLORS)]
+
+    def get_char_color(self, char_id: str) -> tuple[str, tuple[int, int, int, int]]:
+        if char_id in self.char_colors:
+            return self.char_colors[char_id]
+        return GROUP_CHAR_COLORS[0]
 
     def measure_message(self, msg: Message) -> tuple[int, int, list[str]]:
         """Tính (chiều rộng bubble, chiều cao bubble, các dòng chữ) hỗ trợ đầy đủ emoji."""
@@ -256,19 +280,34 @@ class ChatFrameRenderer:
         return bubble_w, bubble_h, lines
 
     def draw_header(self, other_char: Character) -> Image.Image:
-        """Vẽ header 120px của khung chat kiểu Messenger chuẩn."""
+        """Vẽ header 120px của khung chat kiểu Messenger chuẩn (hỗ trợ cả chat nhóm)."""
         w = self.theme.frame_width
         h = self.theme.header_height
         header = Image.new("RGBA", (w, h), self.theme.header_bg)
         draw = ImageDraw.Draw(header)
 
-        # Avatar
         av_size = self.theme.header_avatar_size
-        av_img = self.avatar_images.get(other_char.id)
-        av = make_circular_avatar(av_img, other_char, av_size)
         av_x = 28
         av_y = (h - av_size) // 2
-        header.paste(av, (av_x, av_y), av)
+
+        if self.is_group and len(self.left_chars) >= 2:
+            # Header nhóm: vẽ 2 avatar chồng nhau chuẩn Messenger Group
+            mini_size = int(av_size * 0.72)
+            c1, c2 = self.left_chars[0], self.left_chars[1]
+            _, col1 = self.get_char_color(c1.id)
+            _, col2 = self.get_char_color(c2.id)
+            av2 = make_circular_avatar(self.avatar_images.get(c2.id), c2, mini_size, col2)
+            av1 = make_circular_avatar(self.avatar_images.get(c1.id), c1, mini_size, col1)
+            header.paste(av2, (av_x + av_size - mini_size, av_y), av2)
+            header.paste(av1, (av_x, av_y + av_size - mini_size), av1)
+            av2.close()
+            av1.close()
+        else:
+            av_img = self.avatar_images.get(other_char.id)
+            _, col = self.get_char_color(other_char.id)
+            av = make_circular_avatar(av_img, other_char, av_size, col)
+            header.paste(av, (av_x, av_y), av)
+            av.close()
 
         # Chấm xanh Active trực tiếp trên góc dưới avatar (chuẩn Messenger)
         dot_r = 7
@@ -285,7 +324,21 @@ class ChatFrameRenderer:
 
         # Text info
         tx = av_x + av_size + 20
-        title = other_char.name
+        if self.is_group:
+            names = ", ".join(c.name for c in self.left_chars[:3])
+            if len(self.left_chars) > 3:
+                names += "..."
+            title = names
+            status_text = f"{len(self.characters)} thành viên · Đang hoạt động"
+        else:
+            title = other_char.name
+            status_text = self.theme.header_status_text
+
+        # Cắt tiêu đề nếu quá dài chạm icon bên phải
+        max_title_w = w - tx - 210
+        while title and self.font_header_title.getbbox(title)[2] > max_title_w and len(title) > 5:
+            title = title[:-4].rstrip() + "..."
+
         draw.text(
             (tx, av_y + 4),
             title,
@@ -296,7 +349,7 @@ class ChatFrameRenderer:
         status_y = av_y + 44
         draw.text(
             (tx, status_y),
-            self.theme.header_status_text,
+            status_text,
             fill=self.theme.header_status_color,
             font=self.font_header_status,
         )
@@ -370,9 +423,21 @@ class ChatFrameRenderer:
         for idx, msg in enumerate(visible_messages):
             if num_msgs >= 8 and idx == num_msgs // 2:
                 cur_y += 36
-            if is_scene_transition(msg.text):
+            disp_text = getattr(msg, "display_text", None) or msg.text
+            if is_scene_transition(disp_text):
                 cur_y += 36 + 20
             else:
+                char = self.characters.get(msg.from_)
+                is_right = (char.side == "right") if char else False
+                prev_is_trans = idx > 0 and is_scene_transition(
+                    getattr(visible_messages[idx - 1], "display_text", None)
+                    or visible_messages[idx - 1].text
+                )
+                same_prev = (
+                    idx > 0 and visible_messages[idx - 1].from_ == msg.from_ and not prev_is_trans
+                )
+                if self.is_group and not is_right and not same_prev:
+                    cur_y += 26
                 _, bubble_h, _ = self.measure_message(msg)
                 cur_y += bubble_h + 16
 
@@ -406,7 +471,7 @@ class ChatFrameRenderer:
         scroll_offset_override: int | None = None,
         is_meme_cutin: bool = False,
     ) -> Image.Image:
-        """Dựng một khung hình 1080x1920 hoàn chỉnh (trong suốt bên ngoài khung chat)."""
+        """Dựng một khung hình 1080x1920 hoàn chỉnh (tối ưu RAM cho kịch bản dài tới 5 phút)."""
         canvas = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
 
         frame_w = self.theme.frame_width
@@ -415,72 +480,95 @@ class ChatFrameRenderer:
         frame_x = (CANVAS_WIDTH - frame_w) // 2
 
         # Xác định đối phương để vẽ header
-        other_chars = [c for c in self.characters.values() if c.side == "left"]
         other_char = (
-            other_chars[0] if other_chars else Character(id="other", name="Bạn bè", side="left")
+            self.left_chars[0]
+            if self.left_chars
+            else Character(id="other", name="Bạn bè", side="left")
         )
 
         header_img = self.draw_header(other_char)
         content_area_h = frame_max_h - self.theme.header_height
 
-        # Tạo dải tin nhắn trong content area
-        content_img = Image.new("RGBA", (frame_w, 4000), (0, 0, 0, 0))
-        content_draw = ImageDraw.Draw(content_img)
+        # Tính tổng chiều cao nội dung và độ cuộn trước (tránh cấp phát ảnh khổng lồ tốn RAM)
+        sticker_for_layout = active_sticker_img if not is_meme_cutin else None
+        total_content_h = self.get_content_height(
+            visible_messages,
+            show_typing=show_typing,
+            active_sticker_img=sticker_for_layout,
+            show_seen=show_seen,
+        )
+        if scroll_offset_override is not None:
+            scroll_offset = max(0, scroll_offset_override)
+        elif total_content_h > content_area_h:
+            scroll_offset = total_content_h - content_area_h
+        else:
+            scroll_offset = 0
+
+        # Chỉ cấp phát canvas vùng nhìn thấy (viewport) để tiết kiệm RAM tối đa
+        visible_content = Image.new("RGBA", (frame_w, content_area_h), (0, 0, 0, 0))
+        content_draw = ImageDraw.Draw(visible_content)
+
+        def in_viewport(y_top: int, item_h: int) -> bool:
+            vy = y_top - scroll_offset
+            return (vy + item_h) >= -40 and vy <= content_area_h + 40
 
         cur_y = 20
         num_msgs = len(visible_messages)
 
         # 1. Vẽ mốc giờ đầu đoạn hội thoại ở giữa (không đọc TTS)
         if num_msgs > 0:
-            time_str = "Hôm nay 20:15"
-            tbox = self.font_seen.getbbox(time_str)
-            tw = tbox[2] - tbox[0]
-            content_draw.text(
-                ((frame_w - tw) // 2, cur_y),
-                time_str,
-                fill="#8A8D91",
-                font=self.font_seen,
-            )
+            if in_viewport(cur_y, 36):
+                time_str = "Hôm nay 20:15"
+                tbox = self.font_seen.getbbox(time_str)
+                tw = tbox[2] - tbox[0]
+                content_draw.text(
+                    ((frame_w - tw) // 2, cur_y - scroll_offset),
+                    time_str,
+                    fill="#8A8D91",
+                    font=self.font_seen,
+                )
             cur_y += 36
 
         for idx, msg in enumerate(visible_messages):
             # Mốc giờ chia giữa cuộc hội thoại dài
             if num_msgs >= 8 and idx == num_msgs // 2:
-                mid_time_str = "20:18"
-                mtbox = self.font_seen.getbbox(mid_time_str)
-                mtw = mtbox[2] - mtbox[0]
-                content_draw.text(
-                    ((frame_w - mtw) // 2, cur_y),
-                    mid_time_str,
-                    fill="#8A8D91",
-                    font=self.font_seen,
-                )
+                if in_viewport(cur_y, 36):
+                    mid_time_str = "20:18"
+                    mtbox = self.font_seen.getbbox(mid_time_str)
+                    mtw = mtbox[2] - mtbox[0]
+                    content_draw.text(
+                        ((frame_w - mtw) // 2, cur_y - scroll_offset),
+                        mid_time_str,
+                        fill="#8A8D91",
+                        font=self.font_seen,
+                    )
                 cur_y += 36
 
             # Xử lý đoạn chuyển cảnh ngoặc đơn "(5 phút sau)", "(10 phút sau tại nhà vệ sinh)"...
             disp_text = getattr(msg, "display_text", None) or msg.text
             if is_scene_transition(disp_text):
-                clean_title = format_scene_transition(disp_text)
-                tbox = self.font_seen.getbbox(clean_title)
-                tw = tbox[2] - tbox[0]
-                th = tbox[3] - tbox[1]
-                pill_w = max(180, tw + 40)
                 pill_h = 36
-                px = (frame_w - pill_w) // 2
-                py = cur_y + 4
-                content_draw.rounded_rectangle(
-                    [(px, py), (px + pill_w, py + pill_h)],
-                    radius=18,
-                    fill="#2A2B2E",
-                    outline="#3A3B3C",
-                    width=1,
-                )
-                content_draw.text(
-                    (px + (pill_w - tw) // 2, py + (pill_h - th) // 2 - tbox[1]),
-                    clean_title,
-                    fill="#E4E6EB",
-                    font=self.font_seen,
-                )
+                if in_viewport(cur_y, pill_h + 20):
+                    clean_title = format_scene_transition(disp_text)
+                    tbox = self.font_seen.getbbox(clean_title)
+                    tw = tbox[2] - tbox[0]
+                    th = tbox[3] - tbox[1]
+                    pill_w = max(180, tw + 40)
+                    px = (frame_w - pill_w) // 2
+                    py = cur_y - scroll_offset + 4
+                    content_draw.rounded_rectangle(
+                        [(px, py), (px + pill_w, py + pill_h)],
+                        radius=18,
+                        fill="#2A2B2E",
+                        outline="#3A3B3C",
+                        width=1,
+                    )
+                    content_draw.text(
+                        (px + (pill_w - tw) // 2, py + (pill_h - th) // 2 - tbox[1]),
+                        clean_title,
+                        fill="#E4E6EB",
+                        font=self.font_seen,
+                    )
                 cur_y += pill_h + 20
                 continue
 
@@ -490,9 +578,44 @@ class ChatFrameRenderer:
             char = self.characters.get(msg.from_)
             is_right = (char.side == "right") if char else False
 
-            # Tính bo góc grouped bubble chuẩn Messenger
-            same_prev = idx > 0 and visible_messages[idx - 1].from_ == msg.from_
-            same_next = idx < num_msgs - 1 and visible_messages[idx + 1].from_ == msg.from_
+            prev_is_trans = idx > 0 and is_scene_transition(
+                getattr(visible_messages[idx - 1], "display_text", None)
+                or visible_messages[idx - 1].text
+            )
+            next_is_trans = idx < num_msgs - 1 and is_scene_transition(
+                getattr(visible_messages[idx + 1], "display_text", None)
+                or visible_messages[idx + 1].text
+            )
+            same_prev = (
+                idx > 0 and visible_messages[idx - 1].from_ == msg.from_ and not prev_is_trans
+            )
+            same_next = (
+                idx < num_msgs - 1
+                and visible_messages[idx + 1].from_ == msg.from_
+                and not next_is_trans
+            )
+
+            # Group Chat: hiện tên nhân vật phía trên bubble bên trái nếu > 1 người đối thoại
+            show_sender_name = self.is_group and not is_right and not same_prev
+            name_h = 26 if show_sender_name else 0
+
+            bubble_w, bubble_h, lines = self.measure_message(msg)
+
+            # Bỏ qua việc vẽ bubble nằm hoàn toàn ngoài khung nhìn (tiết kiệm CPU & RAM)
+            if not in_viewport(cur_y, name_h + bubble_h + 16):
+                cur_y += name_h + bubble_h + 16
+                continue
+
+            if show_sender_name and char:
+                char_hex, _ = self.get_char_color(char.id)
+                av_size = self.theme.bubble_left_avatar_size
+                content_draw.text(
+                    (24 + av_size + 18, cur_y - scroll_offset),
+                    char.name,
+                    fill=char_hex,
+                    font=self.font_sender_name,
+                )
+                cur_y += 26
 
             radius_normal = (
                 self.theme.bubble_right_radius if is_right else self.theme.bubble_left_radius
@@ -507,8 +630,6 @@ class ChatFrameRenderer:
                 r_tl = radius_small if same_prev else radius_normal
                 r_bl = radius_small if same_next else radius_normal
                 radii = (r_tl, radius_normal, radius_normal, r_bl)
-
-            bubble_w, bubble_h, lines = self.measure_message(msg)
 
             # Tạo ảnh bubble riêng để có thể scale nếu cần
             b_img = Image.new("RGBA", (bubble_w, bubble_h), (0, 0, 0, 0))
@@ -535,39 +656,47 @@ class ChatFrameRenderer:
             if scale != 1.0 and scale > 0.1:
                 sw = max(10, int(bubble_w * scale))
                 sh = max(10, int(bubble_h * scale))
-                b_img = b_img.resize((sw, sh), Image.Resampling.LANCZOS)
+                scaled_img = b_img.resize((sw, sh), Image.Resampling.LANCZOS)
+                b_img.close()
+                b_img = scaled_img
                 bubble_w, bubble_h = sw, sh
 
-            # Định vị trí x, y trên content_img và kẹp toạ độ an toàn
+            draw_y = cur_y - scroll_offset
+            # Định vị trí x, y trên visible_content và kẹp toạ độ ngang an toàn
             if is_right:
                 bx = frame_w - 28 - bubble_w
             else:
-                # Bên trái: chỉ tin cuối trong nhóm cùng người gửi mới hiện avatar
                 av_size = self.theme.bubble_left_avatar_size
                 if not same_next:
                     av_img = self.avatar_images.get(msg.from_)
                     fallback_char = Character(id="?", name="?", side="left")
-                    av = make_circular_avatar(av_img, char or fallback_char, av_size)
-                    av_y = max(0, cur_y + bubble_h - av_size)
-                    content_img.paste(av, (24, av_y), av)
+                    _, char_rgba = self.get_char_color(msg.from_)
+                    av = make_circular_avatar(av_img, char or fallback_char, av_size, char_rgba)
+                    av_y = draw_y + bubble_h - av_size
+                    visible_content.paste(av, (24, av_y), av)
+                    av.close()
                 bx = 24 + av_size + 14
 
-            # Kẹp toạ độ (clamping) không âm hoặc tràn khung
             bx = max(0, min(frame_w - bubble_w, bx))
-            by = max(0, cur_y)
-            content_img.paste(b_img, (bx, by), b_img)
+            visible_content.paste(b_img, (bx, draw_y), b_img)
+            b_img.close()
             cur_y += bubble_h + 16
 
         # Nếu có typing indicator
         if show_typing:
             typing_b = self.draw_typing_bubble(pulse_step=typing_pulse_step)
-            av_size = self.theme.bubble_left_avatar_size
-            char = self.characters.get(typing_char_id or "left") or other_char
-            av_img = self.avatar_images.get(char.id)
-            av = make_circular_avatar(av_img, char, av_size)
-            content_img.paste(av, (24, cur_y + typing_b.height - av_size), av)
-            content_img.paste(typing_b, (24 + av_size + 14, cur_y), typing_b)
-            cur_y += typing_b.height + 16
+            if in_viewport(cur_y, typing_b.height + 16):
+                av_size = self.theme.bubble_left_avatar_size
+                char = self.characters.get(typing_char_id or "left") or other_char
+                av_img = self.avatar_images.get(char.id)
+                _, char_rgba = self.get_char_color(char.id)
+                av = make_circular_avatar(av_img, char, av_size, char_rgba)
+                vy = cur_y - scroll_offset
+                visible_content.paste(av, (24, vy + typing_b.height - av_size), av)
+                visible_content.paste(typing_b, (24 + av_size + 14, vy), typing_b)
+                av.close()
+            typing_b.close()
+            cur_y += 64 + 16
 
         # Nếu có sticker hiện thông thường
         if active_sticker_img is not None and not is_meme_cutin:
@@ -580,43 +709,37 @@ class ChatFrameRenderer:
             else:
                 stk_resized = active_sticker_img
 
-            sx = (frame_w - 28 - stk_resized.width) if sticker_from_right else (24 + 48 + 14)
-            content_img.paste(stk_resized, (sx, cur_y), stk_resized)
-            cur_y += stk_resized.height + 16
+            if in_viewport(cur_y, stk_resized.height + 16):
+                sx = (frame_w - 28 - stk_resized.width) if sticker_from_right else (24 + 48 + 14)
+                visible_content.paste(stk_resized, (sx, cur_y - scroll_offset), stk_resized)
+            if stk_resized is not active_sticker_img:
+                stk_resized.close()
+            cur_y += (int(sh * (360.0 / max(sw, sh))) if (sw > 360 or sh > 360) else sh) + 16
 
         # Nếu có chỉ báo "Đã xem" dưới tin cuối của 'me'
         if show_seen and num_msgs > 0 and not show_typing:
             last_msg = visible_messages[-1]
             last_char = self.characters.get(last_msg.from_)
             if last_char and last_char.side == "right":
-                if self.theme.seen_style == "mini_avatar":
-                    av_mini_size = self.theme.seen_mini_avatar_size
-                    mini_av = make_circular_avatar(None, other_char, av_mini_size)
-                    content_img.paste(mini_av, (frame_w - 28 - av_mini_size, cur_y - 8), mini_av)
-                    cur_y += av_mini_size
-                else:
-                    bbox = self.font_seen.getbbox(self.theme.seen_text)
-                    tw = bbox[2] - bbox[0]
-                    content_draw.text(
-                        (frame_w - 28 - tw, cur_y - 8),
-                        self.theme.seen_text,
-                        fill="#8E8E93",
-                        font=self.font_seen,
-                    )
-                    cur_y += 24
-
-        # Tính toán cuộn (áp dụng override nếu có animation cuộn mượt)
-        total_content_h = cur_y + 20
-        if scroll_offset_override is not None:
-            scroll_offset = max(0, scroll_offset_override)
-        elif total_content_h > content_area_h:
-            scroll_offset = total_content_h - content_area_h
-        else:
-            scroll_offset = 0
-
-        # Cắt phần hiển thị từ content_img
-        box = (0, scroll_offset, frame_w, scroll_offset + content_area_h)
-        visible_content = content_img.crop(box)
+                if in_viewport(cur_y - 8, 28):
+                    vy = cur_y - scroll_offset
+                    if self.theme.seen_style == "mini_avatar":
+                        av_mini_size = self.theme.seen_mini_avatar_size
+                        _, col = self.get_char_color(other_char.id)
+                        mini_av = make_circular_avatar(None, other_char, av_mini_size, col)
+                        visible_content.paste(
+                            mini_av, (frame_w - 28 - av_mini_size, vy - 8), mini_av
+                        )
+                        mini_av.close()
+                    else:
+                        bbox = self.font_seen.getbbox(self.theme.seen_text)
+                        tw = bbox[2] - bbox[0]
+                        content_draw.text(
+                            (frame_w - 28 - tw, vy - 8),
+                            self.theme.seen_text,
+                            fill="#8E8E93",
+                            font=self.font_seen,
+                        )
 
         # Tạo khung hoàn chỉnh
         frame_surface = Image.new("RGBA", (frame_w, frame_max_h), self.theme.bg_color)
@@ -626,5 +749,11 @@ class ChatFrameRenderer:
         # Bo góc toàn bộ khung chat
         mask = draw_rounded_mask((frame_w, frame_max_h), self.theme.corner_radius)
         canvas.paste(frame_surface, (frame_x, top_y), mask)
+
+        # Giải phóng tài nguyên ảnh tạm ngay lập tức
+        header_img.close()
+        visible_content.close()
+        frame_surface.close()
+        mask.close()
 
         return canvas

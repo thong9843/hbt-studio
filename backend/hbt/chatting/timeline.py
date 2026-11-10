@@ -37,12 +37,16 @@ class ChatTimeline:
     audio_events: list[AudioEvent]
 
 
+MAX_VIDEO_DURATION_S = 300.0  # Trần thời lượng tối đa 5 phút
+
+
 def build_timeline(
     doc: ChatDoc,
     voice_durations: list[tuple[int, Path, float]],
     library_dir: Path | None = None,
+    max_duration: float | None = None,
 ) -> ChatTimeline:
-    """Tạo timeline chi tiết cho video chat:
+    """Tạo timeline chi tiết cho video chat (tối đa 300.0s = 5 phút):
     - 0.4s mở đầu (khung chat trống)
     - Mỗi tin:
       - Nếu chuyển cảnh: 1.3s divider + 0.3s dừng kịch tính
@@ -55,6 +59,10 @@ def build_timeline(
     """
     char_map = {c.id: c for c in doc.characters}
     dur_map = {idx: (path, dur) for idx, path, dur in voice_durations}
+    ceiling = min(
+        MAX_VIDEO_DURATION_S,
+        float(max_duration or getattr(doc, "target_duration_s", None) or MAX_VIDEO_DURATION_S),
+    )
 
     states: list[TimelineState] = []
     audio_events: list[AudioEvent] = []
@@ -71,7 +79,12 @@ def build_timeline(
     )
     cur_time += 0.4
 
+    last_visible = 0
     for idx, msg in enumerate(doc.messages):
+        # Dừng thêm tin nếu đã chạm trần thời lượng (chừa 1.5s cuối)
+        if cur_time >= max(2.0, ceiling - 1.5):
+            break
+        last_visible = idx + 1
         char = char_map.get(msg.from_)
         is_right = (char.side == "right") if char else False
         wav_path, wav_dur = dur_map.get(idx, (Path(""), 1.0))
@@ -190,14 +203,14 @@ def build_timeline(
         TimelineState(
             start_time=cur_time,
             duration=1.5,
-            visible_count=len(doc.messages),
+            visible_count=last_visible or len(doc.messages),
             show_seen=True,
         )
     )
     cur_time += 1.5
 
     return ChatTimeline(
-        total_duration=round(cur_time, 3),
+        total_duration=round(min(ceiling, cur_time), 3),
         states=states,
         audio_events=audio_events,
     )

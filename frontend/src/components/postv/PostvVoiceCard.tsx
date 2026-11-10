@@ -15,6 +15,7 @@ import { Card } from '../ui/Card';
 import { Chip } from '../ui/Chip';
 import { Input } from '../ui/Field';
 import { Progress } from '../ui/Progress';
+import { Select } from '../ui/Select';
 
 const T = vi.postv.voice;
 const A = vi.audio.voice;
@@ -51,9 +52,10 @@ function SpeakerRow({
   return (
     <li className="ui-inner flex flex-wrap items-center gap-3 p-3">
       <span className="min-w-0 flex-1 truncate text-small font-bold">{name}</span>
-      <select
+      <Select
         aria-label={T.voiceOf(name)}
-        className="ui-input w-auto max-w-full"
+        autoWidth
+        className="max-w-full"
         value={manual ? voiceId : ''}
         onChange={(e) => onPick(e.target.value || null)}
       >
@@ -63,7 +65,7 @@ function SpeakerRow({
             {v.label}
           </option>
         ))}
-      </select>
+      </Select>
     </li>
   );
 }

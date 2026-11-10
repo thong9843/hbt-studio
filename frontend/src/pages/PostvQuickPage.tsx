@@ -28,6 +28,7 @@ import { Chip } from '../components/ui/Chip';
 import { Dialog } from '../components/ui/Dialog';
 import { Menu } from '../components/ui/Menu';
 import { Progress } from '../components/ui/Progress';
+import { Select } from '../components/ui/Select';
 import { cx } from '../components/ui/cx';
 import { vi } from '../i18n/vi';
 
@@ -829,12 +830,15 @@ export function PostvQuickPage() {
                   </Chip>
 
                   {/* Dropdown Giọng (VieNeu) & Nút ▶ nghe thử */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-1 text-tiny text-ink shadow-sm">
-                    <span>🎙️ {T.voice.label}:</span>
-                    <select
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">🎙️ {T.voice.label}:</span>
+                    <Select
+                      aria-label={T.voice.label}
+                      variant="compact"
+                      autoWidth
                       value={selectedVoice || ''}
                       onChange={(e) => handleVoiceChange(e.target.value)}
-                      className="bg-transparent text-tiny font-semibold text-ink outline-none cursor-pointer max-w-[130px] truncate"
+                      className="border-0 bg-transparent min-h-[28px] max-w-[140px] truncate"
                     >
                       {voiceList?.voices && voiceList.voices.length > 0 ? (
                         voiceList.voices.map((v) => (
@@ -845,7 +849,7 @@ export function PostvQuickPage() {
                       ) : (
                         <option value="">{T.voice.defaultOption}</option>
                       )}
-                    </select>
+                    </Select>
                     {selectedVoice && (
                       <button
                         type="button"

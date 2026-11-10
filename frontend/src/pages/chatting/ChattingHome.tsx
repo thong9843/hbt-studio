@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
+import { Select } from '../../components/ui/Select';
 import { FilmIcon, MessagesSquareIcon, TrashIcon } from '../../components/icons';
 
 const BACKGROUND_OPTIONS = [
@@ -13,11 +14,23 @@ const BACKGROUND_OPTIONS = [
   { id: 'minecraft12-1080p60', label: 'Minecraft Parkour 4' },
 ];
 
+const DURATION_OPTIONS = [
+  { id: '', label: 'Tự động (tối đa 5p)' },
+  { id: '60', label: '1 phút (60s)' },
+  { id: '90', label: '1 phút 30s (90s)' },
+  { id: '120', label: '2 phút (120s)' },
+  { id: '150', label: '2 phút 30s (150s)' },
+  { id: '180', label: '3 phút (180s)' },
+  { id: '240', label: '4 phút (240s)' },
+  { id: '300', label: '5 phút (300s)' },
+];
+
 export function ChattingHome() {
   const navigate = useNavigate();
   const [inputText, setInputText] = useState('');
   const [platform, setPlatform] = useState<'messenger' | 'zalo'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
+  const [targetDuration, setTargetDuration] = useState('');
   const [isDirectScript, setIsDirectScript] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -46,6 +59,7 @@ export function ChattingHome() {
         platform,
         background,
         direct_script: isDirectScript,
+        target_duration_s: targetDuration ? Number(targetDuration) : null,
       });
       // Điều hướng ngay sang trang chi tiết để theo dõi tiến trình
       navigate(`/chatting/${res.slug}`);
@@ -169,17 +183,34 @@ export function ChattingHome() {
             <span className="ml-4 text-tiny font-semibold text-muted">
               {vi.chatting.background}:
             </span>
-            <select
+            <Select
+              aria-label={vi.chatting.background}
+              variant="pill"
+              autoWidth
               value={background}
               onChange={(e) => setBackground(e.target.value)}
-              className="rounded-full border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-text outline-none"
             >
               {BACKGROUND_OPTIONS.map((bg) => (
                 <option key={bg.id} value={bg.id}>
                   {bg.label}
                 </option>
               ))}
-            </select>
+            </Select>
+
+            <span className="ml-3 text-tiny font-semibold text-muted">Thời lượng:</span>
+            <Select
+              aria-label="Thời lượng video"
+              variant="pill"
+              autoWidth
+              value={targetDuration}
+              onChange={(e) => setTargetDuration(e.target.value)}
+            >
+              {DURATION_OPTIONS.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </Select>
           </div>
 
           <Button

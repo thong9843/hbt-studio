@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import shutil
@@ -28,10 +29,10 @@ from hbt.chatting.stickers import (
     pick_sticker,
 )
 from hbt.chatting.themes import get_theme
-from hbt.chatting.timeline import build_timeline
+from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
 from hbt.pipeline import audio
-from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
 
 logger = logging.getLogger(__name__)
@@ -203,18 +204,30 @@ def render_chat_video(
     voice_durations = synthesize_chat_voices(workspace_dir, slug, doc, voice_provider)
     tick(30, "Đã sinh giọng")
 
-    # 2. Xây dựng timeline (30-35%)
+    # 2. Xây dựng timeline (30-35%), hỗ trợ tối đa 300.0s (5 phút)
     tick(32, "Lập mốc thời gian")
-    timeline = build_timeline(doc, voice_durations, library_dir=library_dir)
+    max_dur_cap = float(getattr(doc, "target_duration_s", None) or MAX_VIDEO_DURATION_S)
+    timeline = build_timeline(
+        doc,
+        voice_durations,
+        library_dir=library_dir,
+        max_duration=min(MAX_VIDEO_DURATION_S, max_dur_cap),
+    )
 
-    target_duration = min(10.0, timeline.total_duration) if preview else timeline.total_duration
+    target_duration = (
+        min(10.0, timeline.total_duration)
+        if preview
+        else min(MAX_VIDEO_DURATION_S, timeline.total_duration)
+    )
     fps = 30 if preview else 60
     width = 540 if preview else 1080
     height = 960 if preview else 1920
 
-    # 3. Vẽ các khung hình Pillow (35-60%)
-    tick(35, "Vẽ giao diện chat")
+    # 3. Vẽ các khung hình Pillow theo từng phân đoạn (Chunked Concat) để tối ưu RAM (35-60%)
+    tick(35, "Vẽ giao diện chat theo phân đoạn")
     theme = get_theme(doc.platform)
+    bg_file = pick_background_clip(library_dir, doc.background.name)
+    bg_dur = media_duration(bg_file) if (bg_file and bg_file.is_file()) else None
 
     # Nạp ảnh avatar nếu có
     avatar_images: dict[str, Image.Image] = {}
@@ -230,11 +243,16 @@ def render_chat_video(
     renderer = ChatFrameRenderer(theme, doc.characters, avatar_images)
     content_area_h = renderer.theme.frame_max_height - renderer.theme.header_height
 
-    # Tạo danh sách frame png + ffconcat
-    concat_lines = ["ffconcat version 1.0\n"]
-    total_states = len(timeline.states)
+    active_states = [s for s in timeline.states if s.start_time < target_duration]
+    total_states = max(1, len(active_states))
+    chunk_size = 15  # Xử lý tối đa 15 state mỗi chunk để giữ RAM ổn định trên 16GB
+    chunk_files: list[Path] = []
     frame_counter = 0
     current_scroll_y = 0
+
+    chunk_concat_lines: list[str] = []
+    chunk_pngs: list[Path] = []
+    last_chunk_fname = ""
 
     def save_subframe(
         v_msgs: list[Message],
@@ -249,7 +267,7 @@ def render_chat_video(
         is_cutin: bool = False,
         dur: float = 0.05,
     ) -> None:
-        nonlocal frame_counter
+        nonlocal frame_counter, last_chunk_fname
         img = renderer.render_chat_view(
             visible_messages=v_msgs,
             show_typing=s_typing,
@@ -264,112 +282,139 @@ def render_chat_video(
         )
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
-        img.save(fpath, format="PNG")
-        concat_lines.append(f"file '{fname}'\n")
-        concat_lines.append(f"duration {dur:.3f}\n")
+        img.save(fpath, format="PNG", compress_level=1)
+        img.close()
+        chunk_pngs.append(fpath)
+        chunk_concat_lines.append(f"file '{fname}'\n")
+        chunk_concat_lines.append(f"duration {dur:.3f}\n")
+        last_chunk_fname = fname
         frame_counter += 1
 
-    for i, state in enumerate(timeline.states):
-        if state.start_time >= target_duration:
-            break
+    for chunk_idx in range(0, len(active_states), chunk_size):
+        chunk_states = active_states[chunk_idx : chunk_idx + chunk_size]
+        chunk_concat_lines.clear()
+        chunk_concat_lines.append("ffconcat version 1.0\n")
+        chunk_pngs.clear()
+        last_chunk_fname = ""
+        chunk_start_time = chunk_states[0].start_time
+        chunk_total_dur = 0.0
 
-        stk_img = None
-        # Chỉ nạp ảnh sticker cho sticker tĩnh trong dòng chat (không phải video meme cut-in)
-        if state.active_sticker and not state.is_meme_cutin:
-            stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
-            if stk_file and stk_file.is_file():
-                try:
-                    stk_img = load_sticker_or_meme_image(stk_file)
-                except Exception:
-                    pass
+        for local_i, state in enumerate(chunk_states):
+            global_i = chunk_idx + local_i
+            stk_img = None
+            if state.active_sticker and not state.is_meme_cutin:
+                stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+                if stk_file and stk_file.is_file():
+                    try:
+                        stk_img = load_sticker_or_meme_image(stk_file)
+                    except Exception:
+                        pass
 
-        visible_msgs = doc.messages[: state.visible_count]
-        frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
+            visible_msgs = doc.messages[: state.visible_count]
+            frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
+            chunk_total_dur += frame_dur
 
-        # Tính toán độ cuộn mong muốn
-        total_content_h = renderer.get_content_height(
-            visible_msgs,
-            show_typing=state.show_typing,
-            active_sticker_img=stk_img,
-            show_seen=state.show_seen,
-        )
-        target_scroll_y = max(0, total_content_h - content_area_h)
+            total_content_h = renderer.get_content_height(
+                visible_msgs,
+                show_typing=state.show_typing,
+                active_sticker_img=stk_img,
+                show_seen=state.show_seen,
+            )
+            target_scroll_y = max(0, total_content_h - content_area_h)
 
-        # 1. Trường hợp typing: 12 sub-frames tạo sóng sin nhấp nhô mượt
-        if state.show_typing:
-            num_sub = 12
-            sub_dur = frame_dur / num_sub
-            for k in range(num_sub):
-                if target_scroll_y > current_scroll_y:
-                    t = min(1.0, (k + 1) / 6.0)
-                    ease = 1.0 - (1.0 - t) ** 2
-                    scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
-                else:
-                    scroll_k = target_scroll_y
-                save_subframe(
-                    v_msgs=visible_msgs,
-                    s_typing=True,
-                    t_char_id=state.typing_char_id,
-                    t_pulse=k,
-                    s_img=stk_img,
-                    s_right=state.sticker_from_right,
-                    scale_msg=1.0,
-                    s_seen=state.show_seen,
-                    s_scroll=scroll_k,
-                    dur=sub_dur,
-                )
-            current_scroll_y = target_scroll_y
+            if state.show_typing:
+                num_sub = 12
+                sub_dur = frame_dur / num_sub
+                for k in range(num_sub):
+                    if target_scroll_y > current_scroll_y:
+                        t = min(1.0, (k + 1) / 6.0)
+                        ease = 1.0 - (1.0 - t) ** 2
+                        scroll_k = int(
+                            current_scroll_y + (target_scroll_y - current_scroll_y) * ease
+                        )
+                    else:
+                        scroll_k = target_scroll_y
+                    save_subframe(
+                        v_msgs=visible_msgs,
+                        s_typing=True,
+                        t_char_id=state.typing_char_id,
+                        t_pulse=k,
+                        s_img=stk_img,
+                        s_right=state.sticker_from_right,
+                        scale_msg=1.0,
+                        s_seen=state.show_seen,
+                        s_scroll=scroll_k,
+                        dur=sub_dur,
+                    )
+                current_scroll_y = target_scroll_y
 
-        # 2. Trường hợp popup tin nhắn: 6 sub-frames tạo scale ease-out và cuộn trượt
-        elif state.scale_last_msg < 1.0:
-            scales = [0.72, 0.84, 0.94, 1.02, 1.01, 1.0]
-            num_sub = len(scales)
-            sub_dur = frame_dur / num_sub
-            for k, scale in enumerate(scales):
-                if target_scroll_y > current_scroll_y:
+            elif state.scale_last_msg < 1.0:
+                scales = [0.72, 0.84, 0.94, 1.02, 1.01, 1.0]
+                num_sub = len(scales)
+                sub_dur = frame_dur / num_sub
+                for k, scale in enumerate(scales):
+                    if target_scroll_y > current_scroll_y:
+                        t = (k + 1) / float(num_sub)
+                        ease = 1.0 - (1.0 - t) ** 2
+                        scroll_k = int(
+                            current_scroll_y + (target_scroll_y - current_scroll_y) * ease
+                        )
+                    else:
+                        scroll_k = target_scroll_y
+                    save_subframe(
+                        v_msgs=visible_msgs,
+                        s_typing=False,
+                        t_char_id=None,
+                        t_pulse=0,
+                        s_img=stk_img,
+                        s_right=state.sticker_from_right,
+                        scale_msg=scale,
+                        s_seen=state.show_seen,
+                        s_scroll=scroll_k,
+                        dur=sub_dur,
+                    )
+                current_scroll_y = target_scroll_y
+
+            elif target_scroll_y > current_scroll_y and frame_dur >= 0.2:
+                scroll_dur = min(0.18, frame_dur * 0.5)
+                num_sub = 6
+                sub_dur = scroll_dur / num_sub
+                for k in range(num_sub):
                     t = (k + 1) / float(num_sub)
                     ease = 1.0 - (1.0 - t) ** 2
-                    scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
-                else:
-                    scroll_k = target_scroll_y
-                save_subframe(
-                    v_msgs=visible_msgs,
-                    s_typing=False,
-                    t_char_id=None,
-                    t_pulse=0,
-                    s_img=stk_img,
-                    s_right=state.sticker_from_right,
-                    scale_msg=scale,
-                    s_seen=state.show_seen,
-                    s_scroll=scroll_k,
-                    dur=sub_dur,
-                )
-            current_scroll_y = target_scroll_y
+                    scroll_k = int(
+                        current_scroll_y + (target_scroll_y - current_scroll_y) * ease
+                    )
+                    save_subframe(
+                        v_msgs=visible_msgs,
+                        s_typing=False,
+                        t_char_id=None,
+                        t_pulse=0,
+                        s_img=stk_img,
+                        s_right=state.sticker_from_right,
+                        scale_msg=state.scale_last_msg,
+                        s_seen=state.show_seen,
+                        s_scroll=scroll_k,
+                        dur=sub_dur,
+                    )
+                current_scroll_y = target_scroll_y
+                remain_dur = frame_dur - scroll_dur
+                if remain_dur > 0.005:
+                    save_subframe(
+                        v_msgs=visible_msgs,
+                        s_typing=False,
+                        t_char_id=None,
+                        t_pulse=0,
+                        s_img=stk_img,
+                        s_right=state.sticker_from_right,
+                        scale_msg=state.scale_last_msg,
+                        s_seen=state.show_seen,
+                        s_scroll=current_scroll_y,
+                        dur=remain_dur,
+                    )
 
-        # 3. Trường hợp cuộn mượt khi xuất hiện nội dung dài vượt trang
-        elif target_scroll_y > current_scroll_y and frame_dur >= 0.2:
-            scroll_dur = min(0.18, frame_dur * 0.5)
-            num_sub = 6
-            sub_dur = scroll_dur / num_sub
-            for k in range(num_sub):
-                t = (k + 1) / float(num_sub)
-                ease = 1.0 - (1.0 - t) ** 2
-                scroll_k = int(current_scroll_y + (target_scroll_y - current_scroll_y) * ease)
-                save_subframe(
-                    v_msgs=visible_msgs,
-                    s_typing=False,
-                    t_char_id=None,
-                    t_pulse=0,
-                    s_img=stk_img,
-                    s_right=state.sticker_from_right,
-                    scale_msg=state.scale_last_msg,
-                    s_seen=state.show_seen,
-                    s_scroll=scroll_k,
-                    dur=sub_dur,
-                )
-            current_scroll_y = target_scroll_y
-            remain_dur = frame_dur - scroll_dur
-            if remain_dur > 0.005:
+            else:
+                current_scroll_y = target_scroll_y
                 save_subframe(
                     v_msgs=visible_msgs,
                     s_typing=False,
@@ -380,36 +425,68 @@ def render_chat_video(
                     scale_msg=state.scale_last_msg,
                     s_seen=state.show_seen,
                     s_scroll=current_scroll_y,
-                    dur=remain_dur,
+                    is_cutin=False,
+                    dur=frame_dur,
                 )
 
-        # 4. Giữ frame tĩnh cho các pha thoại và pha nghỉ
+            pct = 35 + int(25 * (global_i + 1) / total_states)
+            tick(pct, f"Vẽ & nén phân đoạn {global_i + 1}/{total_states}")
+
+        # Kết thúc chunk concat
+        if last_chunk_fname:
+            chunk_concat_lines.append(f"file '{last_chunk_fname}'\n")
+        chunk_concat_file = frames_dir / f"chunk_{chunk_idx // chunk_size:03d}.ffconcat"
+        chunk_concat_file.write_text("".join(chunk_concat_lines), encoding="utf-8")
+
+        chunk_mp4 = frames_dir / f"chunk_{chunk_idx // chunk_size:03d}.mp4"
+        chunk_cmd: list[str] = ["-y", "-v", "error"]
+        if bg_file and bg_file.is_file():
+            bg_offset = (chunk_start_time % bg_dur) if (bg_dur and bg_dur > 0) else 0.0
+            chunk_cmd.extend(["-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-i", str(bg_file)])
         else:
-            current_scroll_y = target_scroll_y
-            save_subframe(
-                v_msgs=visible_msgs,
-                s_typing=False,
-                t_char_id=None,
-                t_pulse=0,
-                s_img=stk_img,
-                s_right=state.sticker_from_right,
-                scale_msg=state.scale_last_msg,
-                s_seen=state.show_seen,
-                s_scroll=current_scroll_y,
-                is_cutin=False,
-                dur=frame_dur,
-            )
+            chunk_cmd.extend(["-f", "lavfi", "-i", f"color=c=#1A1A24:s={width}x{height}:r={fps}"])
 
-        pct = 35 + int(25 * (i + 1) / total_states)
-        tick(pct, f"Vẽ trạng thái {i + 1}/{total_states}")
+        chunk_cmd.extend(["-f", "concat", "-safe", "0", "-i", str(chunk_concat_file)])
+        chunk_filter = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1,fps={fps}[bg];"
+            f"[1:v]scale={width}:{height}[fg];"
+            "[bg][fg]overlay=0:0[v]"
+        )
+        chunk_cmd.extend(
+            [
+                "-filter_complex",
+                chunk_filter,
+                "-map",
+                "[v]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                "-t",
+                f"{chunk_total_dur:.3f}",
+                str(chunk_mp4),
+            ]
+        )
+        run_ffmpeg(chunk_cmd)
+        chunk_files.append(chunk_mp4)
 
-    # File cuối của ffconcat
-    if frame_counter > 0:
-        last_file_name = f"frame_{frame_counter - 1:05d}.png"
-        concat_lines.append(f"file '{last_file_name}'\n")
+        # Dọn dẹp ngay toàn bộ sub-frame PNG tạm thời và ffconcat của chunk vừa xử lý
+        for p in chunk_pngs:
+            p.unlink(missing_ok=True)
+        chunk_concat_file.unlink(missing_ok=True)
+        gc.collect()
 
-    concat_file = frames_dir / "frames.ffconcat"
-    concat_file.write_text("".join(concat_lines), encoding="utf-8")
+    chunks_concat = frames_dir / "chunks.ffconcat"
+    chunks_concat.write_text(
+        "ffconcat version 1.0\n" + "".join(f"file '{c.name}'\n" for c in chunk_files),
+        encoding="utf-8",
+    )
 
     # 4. Trộn âm thanh và SFX (60-75%)
     tick(60, "Trộn âm thanh và nhạc nền")
@@ -469,10 +546,8 @@ def render_chat_video(
     else:
         shutil.copyfile(voice_mix_wav, final_audio)
 
-    # 5. Dựng video cuối bằng một lệnh FFmpeg (75-95%)
-    tick(75, "Dựng video FFmpeg")
-    bg_file = pick_background_clip(library_dir, doc.background.name)
-
+    # 5. Ghép các phân đoạn video + Colorkey Meme Overlay + Audio (75-95%)
+    tick(75, "Ghép video FFmpeg theo phân đoạn")
     render_id = int(time.time())
     out_mp4 = renders_dir / f"render_{render_id}.mp4"
 
@@ -497,77 +572,93 @@ def render_chat_video(
         "-y",
         "-v",
         "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(chunks_concat),
+        "-i",
+        str(final_audio),
     ]
 
-    # Input 0: Background
-    if bg_file and bg_file.is_file():
-        cmd.extend(["-stream_loop", "-1", "-i", str(bg_file)])
+    if meme_clips:
+        meme_input_start = 2
+        for m_path, _m_start, m_dur, ss_start in meme_clips:
+            cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
+
+        filter_parts: list[str] = ["[0:v]null[v_base]"]
+        prev_v = "v_base"
+        m_w = 720 if not preview else 360
+
+        for k, (_m_path, m_start, m_dur, _ss_start) in enumerate(meme_clips):
+            inp_idx = meme_input_start + k
+            filter_parts.append(
+                f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
+                f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+            )
+            next_v = f"v_meme{k}"
+            filter_parts.append(
+                f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
+                f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})':eof_action=pass[{next_v}]"
+            )
+            prev_v = next_v
+
+        filter_complex = ";".join(filter_parts)
+        cmd.extend(
+            [
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                f"[{prev_v}]",
+                "-map",
+                "1:a",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "22",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-t",
+                f"{target_duration:.3f}",
+                str(out_mp4),
+            ]
+        )
     else:
-        # Fallback nền màu tối
-        cmd.extend(["-f", "lavfi", "-i", f"color=c=#1A1A24:s={width}x{height}:r={fps}"])
-
-    # Input 1: Frames concat
-    cmd.extend(["-f", "concat", "-safe", "0", "-i", str(concat_file)])
-
-    # Input 2: Audio
-    cmd.extend(["-i", str(final_audio)])
-
-    # Inputs 3+: Clip meme MP4 (nhảy thẳng vào mốc cao trào)
-    meme_input_start = 3
-    for m_path, _m_start, m_dur, ss_start in meme_clips:
-        cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
-
-    # Filter complex: Background + Chat + Colorkey Meme Overlay chuyển động
-    filter_parts: list[str] = [
-        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},setsar=1,fps={fps}[bg]",
-        f"[1:v]scale={width}:{height}[fg]",
-        "[bg][fg]overlay=0:0[v_base]",
-    ]
-    prev_v = "v_base"
-    m_w = 720 if not preview else 360
-
-    for k, (_m_path, m_start, m_dur, _ss_start) in enumerate(meme_clips):
-        inp_idx = meme_input_start + k
-        filter_parts.append(
-            f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
-            f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+        # Không có meme overlay: nối thẳng stream video (-c:v copy) tiết kiệm tối đa CPU/RAM
+        cmd.extend(
+            [
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-t",
+                f"{target_duration:.3f}",
+                str(out_mp4),
+            ]
         )
-        next_v = f"v_meme{k}"
-        filter_parts.append(
-            f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
-            f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})':eof_action=pass[{next_v}]"
-        )
-        prev_v = next_v
-
-    filter_complex = ";".join(filter_parts)
-    cmd.extend(
-        [
-            "-filter_complex",
-            filter_complex,
-            "-map",
-            f"[{prev_v}]",
-            "-map",
-            "2:a",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "22",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-t",
-            f"{target_duration:.3f}",
-            str(out_mp4),
-        ]
-    )
 
     run_ffmpeg(cmd)
+
+    # Dọn dẹp phân đoạn video tạm và giải phóng tài nguyên
+    for cf in chunk_files:
+        cf.unlink(missing_ok=True)
+    chunks_concat.unlink(missing_ok=True)
+    for av in avatar_images.values():
+        av.close()
+    gc.collect()
 
     # Lưu metadata của lần render
     meta = {

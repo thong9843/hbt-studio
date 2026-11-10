@@ -10,6 +10,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Progress } from '../ui/Progress';
+import { Select } from '../ui/Select';
 
 const T = vi.gd2.voice;
 
@@ -127,25 +128,20 @@ export function VieNeuCard() {
             </p>
           )}
           {voices.data && (
-            <div className="ui-field">
-              <label className="ui-label" htmlFor="hbt-voice-pick">
-                {T.pick}
-              </label>
-              <select
-                id="hbt-voice-pick"
-                className="ui-input"
-                value={picked ?? ''}
-                disabled={running}
-                onChange={(e) => choose(e.target.value)}
-              >
-                <option value="">{T.pickPlaceholder}</option>
-                {voices.data.voices.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Select
+              id="hbt-voice-pick"
+              label={T.pick}
+              value={picked ?? ''}
+              disabled={running}
+              onChange={(e) => choose(e.target.value)}
+            >
+              <option value="">{T.pickPlaceholder}</option>
+              {voices.data.voices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </Select>
           )}
 
           <div className="space-y-2">

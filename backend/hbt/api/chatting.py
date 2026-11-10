@@ -32,10 +32,11 @@ router = APIRouter(tags=["chatting"])
 
 
 class CreateChatBody(BaseModel):
-    input: str = Field(min_length=1, max_length=10000)
+    input: str = Field(min_length=1, max_length=20000)
     platform: Literal["messenger", "zalo"] = "messenger"
     background: str = "minecraft4-1080p60"
     direct_script: bool = False
+    target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
 
 
 class RenderChatBody(BaseModel):
@@ -108,6 +109,7 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
         background_name=body.background,
         slug=slug,
         direct_script=body.direct_script,
+        target_duration_s=body.target_duration_s,
     )
 
     # Cập nhật job_id vào job.json
