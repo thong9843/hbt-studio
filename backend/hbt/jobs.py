@@ -701,6 +701,7 @@ class JobManager:
         platform: str = "messenger",
         background_name: str = "minecraft4-1080p60",
         slug: str | None = None,
+        direct_script: bool = False,
     ) -> Job:
         """Job tự động hoá Chatting 4 pha: Lấy bài -> Viết chat -> Giọng -> Xem nhanh."""
         job_slug = slug or f"chat-{uuid.uuid4().hex[:6]}"
@@ -708,6 +709,7 @@ class JobManager:
         job.chatting_input = raw_input  # type: ignore[attr-defined]
         job.chatting_platform = platform  # type: ignore[attr-defined]
         job.chatting_background = background_name  # type: ignore[attr-defined]
+        job.chatting_direct_script = direct_script  # type: ignore[attr-defined]
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -752,6 +754,7 @@ class JobManager:
                 else os.environ.get("CHATTING_MODEL", "qwen2.5:3b-instruct")
             )
 
+            direct_script = getattr(job, "chatting_direct_script", False)
             slug, video_path = run_chatting_auto_job(
                 workspace_dir=workspace_dir,
                 library_dir=library_dir,
@@ -762,6 +765,7 @@ class JobManager:
                 platform=job.chatting_platform,
                 background_name=job.chatting_background,
                 slug_override=job.slug,
+                direct_script=direct_script,
                 emit_event=on_event,
             )
 
@@ -775,6 +779,19 @@ class JobManager:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job chatting_auto: %s", e)
+            from hbt.chatting.store import save_job
+
+            save_job(
+                workspace_dir,
+                job.slug,
+                {
+                    "slug": job.slug,
+                    "status": "failed",
+                    "percent": 0,
+                    "error": str(e) or e.__class__.__name__,
+                    "updated_at": time.time(),
+                },
+            )
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
     def _run_chatting_render(self, job: Job) -> None:

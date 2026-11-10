@@ -73,6 +73,36 @@ def save_source(workspace_dir: Path, slug: str, data: dict[str, Any]) -> None:
     os.replace(tmp_file, source_file)
 
 
+def save_job(workspace_dir: Path, slug: str, job_data: dict[str, Any]) -> None:
+    """Lưu trạng thái job vào workspace/chatting/<slug>/job.json an toàn trên Windows."""
+    project_dir = get_project_dir(workspace_dir, slug)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    job_file = project_dir / "job.json"
+    content = json.dumps(job_data, ensure_ascii=False, indent=2) + "\n"
+    for attempt in range(5):
+        try:
+            job_file.write_text(content, encoding="utf-8")
+            break
+        except (PermissionError, OSError):
+            if attempt == 4:
+                break
+            time.sleep(0.05)
+
+
+def load_job(workspace_dir: Path, slug: str) -> dict[str, Any] | None:
+    """Đọc trạng thái job từ workspace/chatting/<slug>/job.json an toàn trên Windows."""
+    project_dir = get_project_dir(workspace_dir, slug)
+    job_file = project_dir / "job.json"
+    if not job_file.is_file():
+        return None
+    for _ in range(5):
+        try:
+            return json.loads(job_file.read_text(encoding="utf-8"))
+        except (PermissionError, OSError, json.JSONDecodeError):
+            time.sleep(0.05)
+    return None
+
+
 def save_avatar(workspace_dir: Path, slug: str, char_id: str, image_bytes: bytes) -> str:
     """Cắt vuông và lưu avatar 256x256 px."""
     project_dir = get_project_dir(workspace_dir, slug)
@@ -107,8 +137,26 @@ def list_projects(workspace_dir: Path) -> list[dict[str, Any]]:
         if not d.is_dir():
             continue
         chat_file = d / "chat.json"
+        job_data = load_job(workspace_dir, d.name)
+
         if not chat_file.is_file():
+            # Nếu đang có job chạy ngầm mà chưa xong chat.json
+            if job_data and job_data.get("status") == "running":
+                projects.append(
+                    {
+                        "slug": d.name,
+                        "title": f"Đang tạo ({job_data.get('phase', 'xử lý')}...)",
+                        "platform": "messenger",
+                        "updated_at": datetime.fromtimestamp(d.stat().st_mtime, tz=UTC).isoformat(),
+                        "characters_count": 0,
+                        "messages_count": 0,
+                        "has_render": False,
+                        "timings": job_data.get("timings", {}),
+                        "job": job_data,
+                    }
+                )
             continue
+
         try:
             doc = ChatDoc.model_validate(json.loads(chat_file.read_text(encoding="utf-8")))
             source = load_source(workspace_dir, d.name)
@@ -127,6 +175,7 @@ def list_projects(workspace_dir: Path) -> list[dict[str, Any]]:
                     "messages_count": len(doc.messages),
                     "has_render": has_render,
                     "timings": source.get("timings", {}),
+                    "job": job_data,
                 }
             )
         except Exception:

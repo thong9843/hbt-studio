@@ -5,6 +5,7 @@ import { api } from '../../api/endpoints';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
+import { Progress } from '../../components/ui/Progress';
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from '../../components/icons';
 
 const STICKER_TAGS = [
@@ -29,19 +30,89 @@ export function ChattingEditor() {
   const [isRendering, setIsRendering] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
+  const [autoProgress, setAutoProgress] = useState<{
+    percent: number;
+    phase: string;
+    text: string;
+    llmSeconds?: number;
+  } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const { data, refetch } = useQuery({
+  // 1. Lấy dữ liệu dự án
+  const { data, refetch: refetchProject } = useQuery({
     queryKey: ['chattingProject', slug],
     queryFn: () => (slug ? api.getChattingProject(slug) : null),
     enabled: !!slug,
   });
 
-  const doc = data?.doc;
+  // 2. Lấy trạng thái job từ job.json
+  const { data: jobInfo, refetch: refetchJob } = useQuery({
+    queryKey: ['chattingJob', slug],
+    queryFn: async () => {
+      if (!slug) return null;
+      try {
+        return await api.getChattingJob(slug);
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!slug,
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 2000 : false),
+  });
 
-  // Lắng nghe tiến độ dựng SSE
+  const doc = data?.doc;
+  const activeRunningJob = jobInfo || data?.job;
+
+  // Lắng nghe tiến độ tạo video tự động (nếu có job đang running)
+  useEffect(() => {
+    const jId = activeRunningJob?.job_id;
+    if (!jId || activeRunningJob?.status !== 'running') return;
+    if (typeof EventSource === 'undefined') return;
+
+    const es = new EventSource(`/api/jobs/${jId}/events`);
+
+    es.addEventListener('progress', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        const timings = d.timings;
+        setAutoProgress({
+          percent: d.percent ?? d.progress ?? 0,
+          phase: d.phase ?? d.step ?? '',
+          text: d.text ?? d.message ?? '',
+          llmSeconds: timings?.llm_s,
+        });
+      } catch (err) {
+        console.error('SSE parse error:', err);
+      }
+    });
+
+    es.addEventListener('end', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        es.close();
+        refetchJob();
+        refetchProject();
+        if (d.status === 'failed') {
+          setNotice(`Lỗi tạo video: ${d.error || 'Thất bại'}`);
+        }
+      } catch {
+        es.close();
+      }
+    });
+
+    es.onerror = () => {
+      es.close();
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [activeRunningJob?.job_id, activeRunningJob?.status, refetchJob, refetchProject]);
+
+  // Lắng nghe tiến độ dựng SSE khi render thủ công trong editor
   useEffect(() => {
     if (!renderJobId) return;
+    if (typeof EventSource === 'undefined') return;
     const es = new EventSource(`/api/jobs/${renderJobId}/events`);
 
     es.addEventListener('progress', (e) => {
@@ -61,7 +132,7 @@ export function ChattingEditor() {
         setRenderJobId(null);
         setRenderProgress(null);
         if (d.status === 'done') {
-          refetch();
+          refetchProject();
           setNotice('Dựng video hoàn tất!');
         } else {
           setNotice(`Lỗi dựng video: ${d.error || 'Thất bại'}`);
@@ -79,7 +150,88 @@ export function ChattingEditor() {
     return () => {
       es.close();
     };
-  }, [renderJobId, refetch]);
+  }, [renderJobId, refetchProject]);
+
+  // Nếu đang trong quá trình tạo video tự động (chưa có doc hoặc job đang chạy)
+  if (!doc && (activeRunningJob?.status === 'running' || autoProgress)) {
+    const pct = autoProgress?.percent ?? activeRunningJob?.percent ?? 10;
+    const msg = autoProgress?.text ?? activeRunningJob?.text ?? 'Đang xử lý dự án...';
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-16">
+        <div className="rounded-[28px] border border-line bg-card p-8 text-center shadow-sm">
+          <h2 className="text-2xl font-extrabold text-text">Đang tạo video Chatting...</h2>
+          <p className="mt-2 text-body text-muted">{msg}</p>
+
+          <div className="mt-6">
+            <div className="mb-2 flex items-center justify-between text-tiny font-bold">
+              <span>{msg}</span>
+              <span className="text-accent">{pct}%</span>
+            </div>
+            <Progress value={pct} label={msg} />
+          </div>
+
+          <div className="mt-6 grid grid-cols-4 gap-2 text-center text-tiny font-semibold">
+            <div className={pct >= 20 ? 'font-bold text-text' : 'text-muted'}>
+              1. {vi.chatting.phases.fetch}
+            </div>
+            <div
+              className={
+                pct >= 30 && pct <= 60
+                  ? 'font-bold text-accent'
+                  : pct > 60
+                    ? 'font-bold text-text'
+                    : 'text-muted'
+              }
+            >
+              2. {vi.chatting.phases.llm}{' '}
+              {autoProgress?.llmSeconds ? `(${autoProgress.llmSeconds}s)` : ''}
+            </div>
+            <div
+              className={
+                pct > 60 && pct < 85
+                  ? 'font-bold text-accent'
+                  : pct >= 85
+                    ? 'font-bold text-text'
+                    : 'text-muted'
+              }
+            >
+              3. {vi.chatting.phases.voice}
+            </div>
+            <div className={pct >= 85 ? 'font-bold text-accent' : 'text-muted'}>
+              4. {vi.chatting.phases.preview}
+            </div>
+          </div>
+
+          <div className="mt-8 border-t border-line/60 pt-4 text-tiny text-muted">
+            Tiến trình được lưu tự động. Bạn có thể thoải mái chuyển tab hoặc tải lại trang mà không
+            lo mất.
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Nếu job thất bại
+  if (!doc && activeRunningJob?.status === 'failed') {
+    return (
+      <main className="mx-auto max-w-xl px-4 py-16 text-center">
+        <div className="rounded-2xl border border-danger/40 bg-card p-8 shadow-sm">
+          <h2 className="text-xl font-bold text-danger">Tạo video thất bại</h2>
+          <p className="mt-2 text-body text-muted">
+            {activeRunningJob?.error || 'Đã xảy ra lỗi trong quá trình xử lý.'}
+          </p>
+          <div className="mt-6">
+            <Link
+              to="/chatting"
+              className="inline-flex rounded-full bg-soft px-6 py-2 text-tiny font-bold text-text hover:bg-soft/80"
+            >
+              Quay về trang chủ Chatting
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (!doc) {
     return (
@@ -94,7 +246,7 @@ export function ChattingEditor() {
     setIsSaving(true);
     try {
       await api.updateChattingProject(slug, updatedDoc);
-      refetch();
+      refetchProject();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Lỗi lưu: ${msg}`);
@@ -150,7 +302,7 @@ export function ChattingEditor() {
     setIsSaving(true);
     try {
       const res = await api.regenChattingProject(slug);
-      refetch();
+      refetchProject();
       if (res.doc?.warnings && res.doc.warnings.length > 0) {
         setNotice(`Đã viết lại kịch bản! (Có ${res.doc.warnings.length} lưu ý)`);
       } else {
@@ -188,7 +340,7 @@ export function ChattingEditor() {
         body: formData,
       });
       if (res.ok) {
-        refetch();
+        refetchProject();
       } else {
         alert('Tải ảnh đại diện thất bại');
       }

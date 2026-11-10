@@ -725,12 +725,29 @@ export interface ChatDoc {
   };
 }
 
+export interface ChattingJobInfo {
+  job_id?: string;
+  slug: string;
+  status: 'running' | 'done' | 'failed';
+  phase?: string;
+  percent: number;
+  text?: string;
+  error?: string;
+  video?: string;
+  timings?: {
+    llm_s?: number;
+    fetch_s?: number;
+    llm_tokens?: number;
+  };
+}
+
 export interface ChatProjectDetail {
   slug: string;
-  doc: ChatDoc;
+  doc: ChatDoc | null;
   source: Record<string, unknown> | null;
   renders: Array<Record<string, unknown>>;
   preview_url: string | null;
+  job?: ChattingJobInfo | null;
 }
 
 export interface ChatProjectSummary {
@@ -746,4 +763,5 @@ export interface ChatProjectSummary {
     fetch_s?: number;
     llm_tokens?: number;
   };
+  job?: ChattingJobInfo | null;
 }
