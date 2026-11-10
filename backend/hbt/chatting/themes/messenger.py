@@ -1,4 +1,4 @@
-"""Theme kiểu Messenger (§7)."""
+"""Theme kiểu Messenger (§7, CH5)."""
 
 from __future__ import annotations
 
@@ -13,16 +13,16 @@ MESSENGER_THEME = ChatTheme(
     bg_color="#FFFFFF",
     header_height=120,
     header_bg="#FFFFFF",
-    header_title_color="#111111",
-    header_status_color="#6E6A72",
+    header_title_color="#050505",
+    header_status_color="#65676B",
     header_status_text="Đang hoạt động",
-    status_dot_color="#22A55B",
+    status_dot_color="#31A24C",
     header_avatar_size=72,
     bubble_right_bg="#0084FF",
     bubble_right_text_color="#FFFFFF",
     bubble_right_radius=36,
-    bubble_left_bg="#F0F0F0",
-    bubble_left_text_color="#111111",
+    bubble_left_bg="#E4E6EB",
+    bubble_left_text_color="#050505",
     bubble_left_radius=36,
     bubble_left_avatar_size=48,
     font_size=40,
