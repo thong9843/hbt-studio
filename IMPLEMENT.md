@@ -1339,3 +1339,19 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
     - Cột trái: Quản lý nhân vật (tên, avatar, giọng VieNeu, vị trí trái/phải) và danh sách tin nhắn thu nhỏ.
     - Cột giữa: Trình soạn thảo chi tiết từng tin nhắn, đổi người gửi, chọn sticker cảm xúc từ thư viện trực quan.
     - Cột phải: Khung xem trước video 9:16 thời gian thực, các tuỳ chọn xuất video (Xem nhanh / Xuất bản đẹp), trình phát video kết quả và nút tải về.
+
+### 15.11 Cải tiến Chatting CH5 (Mốc v1.18.1)
+
+- **Tách sạch lời thoại TTS (`clean_spoken_text`):**
+  - VieNeu TTS chỉ đọc lời thoại thuần tuý, tuyệt đối không đọc mốc giờ hoặc mô tả cảm xúc/trạng thái.
+  - Tự động bóc tách và loại bỏ các định dạng mốc giờ (`20:15`, `20h15`, `9 giờ 30`), trạng thái (`đã xem`, `seen`), mô tả sticker (`[sticker: ...]`, `(cười)`).
+  - Mốc thời gian được đưa vào metadata hiển thị bằng divider chữ mờ (`#8A8D91`) căn giữa màn hình (`Hôm nay 20:15`, `20:18`).
+- **Hybrid Sub-frames Animation 60 fps:**
+  - Typing indicator: Sinh 12 sub-frames (mỗi sub-frame 0.05 s) với 3 chấm nảy sóng sin `math.sin(pulse_step * 0.45 + i * 1.05) * 6` mượt mà.
+  - Pop-up tin nhắn: Sinh 6 sub-frames nảy đàn hồi (scale `0.72` $\to$ `1.02` $\to$ `1.0`) kết hợp cuộn trượt màn hình mượt trong 0.15 s.
+  - Cuộn màn hình (Scroll easing): Nội suy quadratic ease-out `1.0 - (1.0 - t)^2` qua 6 sub-frames khi tin nhắn mới đẩy dải chat vượt quá chiều cao hiển thị.
+  - Pha thoại tĩnh: Giữ duy nhất 1 frame kéo dài toàn bộ `wav_dur`, tối ưu hóa hiệu năng render trên máy cũ CPU i5-10400.
+- **Thiết kế lại giao diện Messenger chuẩn:**
+  - Header: Thanh đỉnh 120 px với avatar đối phương, chấm xanh Active `#31A24C`, trạng thái "Đang hoạt động", cùng bộ icon gọi thoại, gọi video và xem thông tin chuẩn màu `#0084FF`.
+  - Grouped bubble: Bo góc bất đối xứng (các tin nhắn liền kề cùng người gửi thu hẹp bán kính góc tiếp giáp về 8 px). Nền tin nhắn đối phương xám `#E4E6EB`, nền tin nhắn gửi đi xanh Messenger `#0084FF`. Avatar bên trái chỉ hiển thị ở tin nhắn cuối cùng trong nhóm.
+
