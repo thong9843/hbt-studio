@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -33,8 +32,20 @@ class Message(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     from_: str = Field(alias="from", min_length=1, max_length=32)
-    text: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1, max_length=300)
+    display_text: str | None = None
+    spoken_text: str | None = None
     sticker: str | None = None
+
+    @model_validator(mode="after")
+    def populate_display_and_spoken(self) -> Message:
+        if self.display_text is None:
+            self.display_text = self.text
+        if self.spoken_text is None:
+            from hbt.chatting.voice import clean_spoken_text
+
+            self.spoken_text = clean_spoken_text(self.text)
+        return self
 
     @field_validator("sticker")
     @classmethod
@@ -62,15 +73,16 @@ class ChatDoc(BaseModel):
     source: SourceInfo = Field(default_factory=SourceInfo)
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
     music: str | None = "chill_02"
+    target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     characters: list[Character]
     messages: list[Message]
     warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_rules(self) -> ChatDoc:
-        # 1. characters: 2-4
-        if not (2 <= len(self.characters) <= 4):
-            raise ValueError(f"Số lượng nhân vật phải từ 2 đến 4, nhận {len(self.characters)}")
+        # 1. characters: 2-10 (hỗ trợ nhóm chat nhiều nhân vật)
+        if not (2 <= len(self.characters) <= 10):
+            raise ValueError(f"Số lượng nhân vật phải từ 2 đến 10, nhận {len(self.characters)}")
 
         # Kiểm tra đúng 1 nhân vật side right
         rights = [c for c in self.characters if c.side == "right"]
@@ -82,14 +94,14 @@ class ChatDoc(BaseModel):
         if len(char_ids) != len(self.characters):
             raise ValueError("ID nhân vật không được trùng nhau")
 
-        # 2. messages: 8-30 tin
-        if not (8 <= len(self.messages) <= 30):
-            raise ValueError(f"Số lượng tin nhắn phải từ 8 đến 30, nhận {len(self.messages)}")
+        # 2. messages: 8-80 tin (hỗ trợ kịch bản dài 2-5 phút)
+        if not (8 <= len(self.messages) <= 80):
+            raise ValueError(f"Số lượng tin nhắn phải từ 8 đến 80, nhận {len(self.messages)}")
 
-        # 3. Tổng ký tự <= 900
+        # 3. Tổng ký tự <= 5000
         total_chars = sum(len(m.text) for m in self.messages)
-        if total_chars > 900:
-            raise ValueError(f"Tổng số ký tự tin nhắn tối đa 900, hiện tại là {total_chars}")
+        if total_chars > 5000:
+            raise ValueError(f"Tổng số ký tự tin nhắn tối đa 5000, hiện tại là {total_chars}")
 
         # 4. Người gửi phải tồn tại trong characters
         for i, m in enumerate(self.messages):
@@ -98,14 +110,5 @@ class ChatDoc(BaseModel):
                     f"Tin nhắn thứ {i + 1} có người gửi '{m.from_}' "
                     "không tồn tại trong danh sách nhân vật"
                 )
-
-        # 5. Tần suất sticker <= 1 sticker / 3 tin
-        sticker_count = sum(1 for m in self.messages if m.sticker is not None)
-        max_allowed_stickers = math.ceil(len(self.messages) / 3)
-        if sticker_count > max_allowed_stickers:
-            raise ValueError(
-                f"Quá nhiều sticker ({sticker_count} sticker cho {len(self.messages)} tin). "
-                f"Tối đa cho phép: {max_allowed_stickers} (tối đa 1 sticker mỗi 3 tin)"
-            )
 
         return self

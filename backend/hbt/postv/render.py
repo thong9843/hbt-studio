@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from hbt.config import ALLOWED_FPS, BRAND_DIR, load_settings
 from hbt.pipeline import audio, cache, cancel
@@ -48,6 +49,7 @@ from hbt.pipeline.render import (
 from hbt.pipeline.text import parse_voice
 from hbt.pipeline.thumbnail import LOGO_FILE, render_cover, save_covers
 from hbt.pipeline.whisper import WhisperConfig
+from hbt.postv import audio as _postv_audio
 from hbt.postv import bgbuild, captions, cardfx, censorfx, publish
 from hbt.postv import card as _card
 from hbt.postv import censor as _censor
@@ -65,7 +67,7 @@ POSTV_VERSION = hashlib.sha1(
     ).encode()
 ).hexdigest()[:12]
 ALIGN_START, ALIGN_END = 10.0, 25.0  # khung tiến độ của bước 3 (Căn chữ)
-LONG_SECONDS = 120.0
+LONG_SECONDS = 185.0
 MAX_PREVIEW_SECONDS = 60
 CROSSFADE = audio.OUTRO_CROSSFADE
 
@@ -169,7 +171,7 @@ def compose_postv(
     audio_bitrate: str,
     out: Path,
     on_frac,
-    memes: list[tuple[Path, float, float, str]] | None = None,
+    memes: list[tuple[Any, ...]] | None = None,
 ) -> None:
     """Một lệnh ffmpeg: nền + thẻ + meme + phụ đề → thân; xfade 0,5 s với outro."""
     scale = width / 1080
@@ -183,15 +185,23 @@ def compose_postv(
         )
         prev, index = f"b{k + 1}", index + 1
 
-    # Chèn các meme phông xanh (chroma keying)
-    for m_idx, (m_path, m_start, m_dur, m_pos) in enumerate(memes or []):
-        inputs += ["-i", m_path]
-        m_w = round(420 * scale)
+    # Chèn các meme phông xanh (chroma keying) chạy độc lập trong khoảng dừng TTS
+    for m_idx, m_item in enumerate(memes or []):
+        m_path, m_start, m_dur, m_pos = m_item[0], m_item[1], m_item[2], m_item[3]
+        ss_start = float(m_item[4]) if len(m_item) >= 5 else 0.0
+        loop_tail = ["-stream_loop", "-1"] if len(m_item) >= 6 and m_item[5] else []
+        if ss_start > 0:
+            inputs += [*loop_tail, "-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", m_path]
+        else:
+            inputs += [*loop_tail, "-t", f"{m_dur:.2f}", "-i", m_path]
         if m_pos == "center":
+            m_w = round(720 * scale)
             pos_expr = "x=(W-w)/2:y=(H-h)/2"
         elif m_pos == "bottom_center":
+            m_w = round(420 * scale)
             pos_expr = f"x=(W-w)/2:y=H-h-{round(220 * scale)}"
         else:  # bottom_right
+            m_w = round(420 * scale)
             pos_expr = f"x=W-w-{round(36 * scale)}:y=H-h-{round(220 * scale)}"
 
         graph.append(
@@ -271,7 +281,7 @@ def _render_postv(
     t_start = time.time()
     project_dir = Path(project_dir).resolve()
     settings = load_settings()
-    library_dir = opts.library_dir or settings.library_dir
+    library_dir = _postv_audio.resolve_library_dir(opts.library_dir or settings.library_dir)
     brand_dir = opts.brand_dir or BRAND_DIR
     whisper_cfg = WhisperConfig(
         model=_whisper.effective_model(opts.whisper_model or "auto", settings.whisper_model),
@@ -312,8 +322,10 @@ def _render_postv(
     entries = library.list()
     chosen = [e for e in entries if e.id in project.background.clip_ids] or entries
     voice_src = project_dir / (project.voice.file or "")
-    music_src = project_dir / project.music.file if project.music and project.music.file else None
-    missing = [str(p) for p in (voice_src, music_src) if p is not None and not p.is_file()]
+    music_src = _postv_audio.resolve_project_music_src(project, project_dir, library_dir)
+    missing = [str(voice_src)] if not voice_src.is_file() else []
+    if project.music and project.music.file and music_src is None:
+        missing.append(str(project_dir / project.music.file))
     if missing:
         raise RenderError("Thiếu file:\n  " + "\n  ".join(missing))
     tokens, scene_of, n_scenes = voiced_tokens(project)
@@ -401,7 +413,7 @@ def _render_postv(
     total = media_duration(voice_align)
     rep.say(f"Phần có lời dài {total:.2f} giây")
     if total >= LONG_SECONDS:
-        warn(f"Video dài {total:.0f} s, nên dưới {LONG_SECONDS:.0f} s (2 phút)")
+        warn(f"Video dài {total:.0f} s, nên dưới {LONG_SECONDS:.0f} s (3 phút)")
 
     # ---- 3b. Che từ nhạy cảm (25)
     rep.at(25, "Che từ nhạy cảm")
@@ -421,12 +433,49 @@ def _render_postv(
         sfx = censorfx.bleep_sfx(windows, build)
         rep.say(f"Che {len(windows)} khoảng: " + ", ".join(sorted({w.word for w in windows})))
 
-    # ---- 4. Mốc đổi thẻ (25)
+    # ---- 4. Mốc đổi thẻ & Cửa sổ Meme Cut-in Pause độc lập (25)
     rep.at(25, "Mốc đổi thẻ")
+    from hbt.chatting.stickers import extract_meme_audio, get_meme_metadata, get_memes_dir
+    from hbt.postv.timeline import plan_meme_cutin_and_card_starts, resolve_meme_cutin_duration
+
     offsets = scene_offsets(times, scene_of, n_scenes)
     if n_scenes > 1 and not offsets_valid(offsets):
         raise RenderError("Mốc chuyển đoạn không hợp lệ: có đoạn quá ngắn so với lời đọc")
-    starts = cardfx.segment_starts(offsets, n_scenes, X)
+    first_start, last_end = [0.0] * n_scenes, [0.0] * n_scenes
+    for si in range(n_scenes):
+        idx = [i for i, s in enumerate(scene_of) if s == si]
+        first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
+
+    meme_lib_dir = get_memes_dir(library_dir)
+    resolved_memes: dict[int, tuple[Path, float, float, str, bool]] = {}
+    meme_durations: dict[int, float] = {}
+    for k, seg in enumerate(segs):
+        m_id = getattr(seg, "meme_id", None)
+        if not m_id:
+            continue
+        m_file = meme_lib_dir / m_id
+        if not m_file.is_file():
+            m_file = meme_lib_dir / f"{m_id}.mp4"
+        if not m_file.is_file():
+            continue
+        meta = get_meme_metadata(library_dir, m_file.name)
+        ss_start = float(meta.get("start_time", 0.0))
+        cutin_dur = resolve_meme_cutin_duration(library_dir, m_file.name)
+        try:
+            m_info = probe(m_file)
+            m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
+        except Exception:
+            m_file_dur = 3.0
+        avail_file = max(0.5, m_file_dur - ss_start) if m_file_dur > ss_start else m_file_dur
+        needs_loop = avail_file + 0.05 < cutin_dur
+        m_pos = getattr(seg, "meme_pos", "center")
+        resolved_memes[k] = (m_file, cutin_dur, ss_start, m_pos, needs_loop)
+        meme_durations[k] = cutin_dur
+
+    base_starts = cardfx.segment_starts(offsets, n_scenes, X)
+    starts, meme_windows = plan_meme_cutin_and_card_starts(
+        segs, offsets, first_start, last_end, base_starts, meme_durations, total
+    )
     partial = (
         opts.preview_seconds if opts.preview_seconds and opts.preview_seconds < total else None
     )
@@ -465,7 +514,7 @@ def _render_postv(
         timing = cardfx.card_timing(span, tpl, project.settings.card_animation, total)
         asset = cardfx.build_asset(
             project, span, tpl, card_censor, censor_cfg.text, project.settings.count_up,
-            build / "cards", timing["bounce"],
+            build / "cards", timing["bounce"], project_dir=project_dir,
         )  # fmt: skip
         concat = build / "cards" / f"c{k}.ffconcat"
         cardfx.write_card_concat(asset, timing["seconds"], concat)
@@ -473,81 +522,76 @@ def _render_postv(
         rep.tick(45 + 5 * (k + 1) / len(spans))
     rep.say(f"{len(cards)} thẻ")
 
-    # ---- 6b. Memes & Stickers phông xanh
-    meme_items: list[tuple[Path, float, float, str]] = []
-    meme_lib_dir = library_dir / "memes"
-    for k, seg in enumerate(segs):
-        m_id = getattr(seg, "meme_id", None)
-        if m_id:
-            m_file = meme_lib_dir / f"{m_id}.mp4"
-            if m_file.is_file():
-                m_start = starts[k] if k < len(starts) else 0.0
-                m_next = starts[k + 1] if k + 1 < len(starts) else total
-                m_seg_dur = max(0.5, m_next - m_start)
-                m_info = {}
-                try:
-                    m_info = probe(m_file)
-                    m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
-                except Exception:
-                    m_file_dur = 3.0
-                m_dur = min(m_file_dur, m_seg_dur)
-                m_pos = getattr(seg, "meme_pos", "bottom_right")
-                meme_items.append((m_file, m_start, m_dur, m_pos))
+    # ---- 6b. Memes & Stickers phông xanh (Cut-in Pause chạy độc lập, âm thanh gốc)
+    meme_items: list[tuple[Path, float, float, str, float, bool]] = []
+    for k, (m_file, _cutin_dur, ss_start, m_pos, needs_loop) in resolved_memes.items():
+        win = meme_windows.get(k)
+        if win is None:
+            continue
+        m_start, m_dur = win.start, win.duration
+        meme_items.append((m_file, m_start, m_dur, m_pos, ss_start, needs_loop))
 
-                try:
-                    streams = m_info.get("streams", [])
-                    if any(s.get("codec_type") == "audio" for s in streams):
-                        m_audio = build / "memes" / f"m_{k}.wav"
-                        m_audio.parent.mkdir(parents=True, exist_ok=True)
-                        if not m_audio.is_file():
-                            subprocess.run(
-                                [
-                                    ffmpeg_exe(),
-                                    "-v",
-                                    "error",
-                                    "-y",
-                                    "-i",
-                                    str(m_file),
-                                    "-vn",
-                                    "-c:a",
-                                    "pcm_s16le",
-                                    "-ar",
-                                    "44100",
-                                    "-ac",
-                                    "1",
-                                    "-t",
-                                    f"{m_dur:.3f}",
-                                    str(m_audio),
-                                ],
-                                check=False,
-                            )
-                        if m_audio.is_file():
-                            sfx.append((m_audio, m_start, 0.85))
-                except Exception:
-                    pass
+        m_audio = build / "memes" / f"m_{k}_{m_file.stem}.wav"
+        if not (m_audio.is_file() and m_audio.stat().st_size > 1000):
+            extract_meme_audio(m_file, m_audio, start_time=ss_start, max_duration=m_dur)
+        if m_audio.is_file() and m_audio.stat().st_size > 1000:
+            sfx.append((m_audio, m_start, 0.85))
     if meme_items:
-        rep.say(f"{len(meme_items)} meme phông xanh")
+        rep.say(f"{len(meme_items)} meme cut-in pause (không đè TTS)")
 
     # ---- 7. Âm thanh (50–55)
     rep.at(50, "Âm thanh")
     music_start = 0.0
     music_start_source = None
+    effective_music_src = music_src
+    music_playlist_names: list[str] = []
     if music_src is not None:
-        if project.music.start is not None:
-            music_start, music_start_source = project.music.start, "manual"
+        bgm_wav = build / "bgm_playlist.wav"
+        avail_tracks = _postv_audio.list_available_bgm(library_dir)
+        bgm_key = cache.digest(
+            "pv-bgm-playlist",
+            [(str(t.path), t.path.stat().st_mtime) for t in avail_tracks],
+            music_src.name,
+            round(total, 3),
+            POSTV_VERSION,
+        )
+        if avail_tracks and cache.is_fresh(bgm_wav, bgm_key):
+            effective_music_src = bgm_wav
+            music_start = 0.0
+            music_start_source = "playlist"
+            music_playlist_names = [t.path.name for t in avail_tracks]
+            rep.say("Playlist BGM: dùng bản đã nối sẵn")
         else:
-            music_start = audio.pick_music_start(music_src, total)
-            music_start_source = "auto"
-        rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s ({music_start_source})")
-        if music_start + total > media_duration(music_src):
-            warn("Nhạc ngắn hơn video")
+            playlist = _postv_audio.build_postv_bgm_playlist_wav(
+                library_dir,
+                music_src.name,
+                total,
+                bgm_wav,
+                crossfade_s=2.0,
+            )
+            if playlist:
+                cache.mark(bgm_wav, bgm_key)
+                effective_music_src = bgm_wav
+                music_start = 0.0
+                music_start_source = "playlist"
+                music_playlist_names = [p.name for p, _ in playlist]
+                rep.say(f"Playlist BGM nối {len(playlist)} bài (acrossfade=2s)")
+            else:
+                if project.music.start is not None:
+                    music_start, music_start_source = project.music.start, "manual"
+                else:
+                    music_start = audio.pick_music_start(music_src, total)
+                    music_start_source = "auto"
+                rep.say(f"Nhạc bắt đầu từ {music_start:.1f} s ({music_start_source})")
+                if music_start + total > media_duration(music_src):
+                    warn("Nhạc ngắn hơn video")
     mix = build / "mix.wav"
     key = cache.digest(
-        "mix", voice_mix, music_src, music_start, round(total, 3),
+        "mix", voice_mix, effective_music_src, music_start, round(total, 3),
         [(round(at, 3), vol) for _, at, vol in sfx], PIPELINE_VERSION,
     )  # fmt: skip
     if not cache.is_fresh(mix, key):
-        audio.mix_audio(voice_mix, music_src, music_start, total, mix, build, sfx)
+        audio.mix_audio(voice_mix, effective_music_src, music_start, total, mix, build, sfx)
         cache.mark(mix, key)
     final_audio, out_total, outro_clip = mix, total, None
     if partial:
@@ -647,6 +691,7 @@ def _render_postv(
         "trimmed_tail_seconds": None,
         "music_start": round(music_start, 3) if music_src is not None else None,
         "music_start_source": music_start_source,
+        "music_playlist": music_playlist_names,
         "preview_seconds": partial,
         "cover_9x16": cover.name if cover else None,
         "youtube_3x2": youtube_cover.name if youtube_cover else None,

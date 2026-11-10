@@ -43,6 +43,7 @@ import type {
   ChatDoc,
   ChatProjectDetail,
   ChatProjectSummary,
+  ChattingJobInfo,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -65,9 +66,15 @@ export const api = {
       total_stickers: number;
     }>('/chatting/status'),
   listChattingProjects: () => apiGet<ChatProjectSummary[]>('/chatting/projects'),
-  createChattingProject: (input: { input: string; platform: string; background: string }) =>
-    apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
+  createChattingProject: (input: {
+    input: string;
+    platform: string;
+    background: string;
+    direct_script?: boolean;
+    target_duration_s?: number | null;
+  }) => apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
   getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
+  getChattingJob: (slug: string) => apiGet<ChattingJobInfo>(`/chatting/${enc(slug)}/job`),
   updateChattingProject: (slug: string, doc: ChatDoc) =>
     apiRequest<{ ok: boolean; doc: ChatDoc }>('PUT', `/chatting/${enc(slug)}`, { json: doc }),
   regenChattingProject: (slug: string) =>

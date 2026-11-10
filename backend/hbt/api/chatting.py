@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -19,9 +20,11 @@ from hbt.chatting.store import (
     get_project_dir,
     list_projects,
     load_chat,
+    load_job,
     load_source,
     save_avatar,
     save_chat,
+    save_job,
     save_source,
 )
 
@@ -29,9 +32,11 @@ router = APIRouter(tags=["chatting"])
 
 
 class CreateChatBody(BaseModel):
-    input: str = Field(min_length=1, max_length=10000)
+    input: str = Field(min_length=1, max_length=20000)
     platform: Literal["messenger", "zalo"] = "messenger"
     background: str = "minecraft4-1080p60"
+    direct_script: bool = False
+    target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
 
 
 class RenderChatBody(BaseModel):
@@ -67,44 +72,105 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
     """Tạo dự án Chatting và khởi động job chatting_auto 4 pha."""
     raw_input = body.input.strip()
 
-    # 1. Kiểm tra Ollama
-    default_m = "qwen2.5:3b-instruct"
-    model_name = os.environ.get(
-        "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
-    )
-    client = OllamaClient(model=model_name)
-    status = client.check_status()
-
-    is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
-    if not is_fake_llm and not status["ollama_running"]:
-        raise HTTPException(
-            status_code=503,
-            detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.",
+    # 1. Kiểm tra Ollama nếu dùng chế độ viết AI
+    if not body.direct_script:
+        default_m = "qwen2.5:3b-instruct"
+        model_name = os.environ.get(
+            "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
         )
+        client = OllamaClient(model=model_name)
+        status = client.check_status()
+
+        is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
+        if not is_fake_llm and not status["ollama_running"]:
+            raise HTTPException(
+                status_code=503,
+                detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.",
+            )
+
+    # 2. Khởi tạo slug và ghi job.json ban đầu
+    slug = f"chat-{uuid.uuid4().hex[:6]}"
+    save_job(
+        state.settings.workspace_dir,
+        slug,
+        {
+            "slug": slug,
+            "status": "running",
+            "phase": "fetch",
+            "percent": 5,
+            "text": "Bắt đầu khởi tạo dự án...",
+        },
+    )
 
     # 3. Gửi job vào hàng đợi
     job = state.jobs.submit_chatting_auto(
         raw_input=raw_input,
         platform=body.platform,
         background_name=body.background,
+        slug=slug,
+        direct_script=body.direct_script,
+        target_duration_s=body.target_duration_s,
+    )
+
+    # Cập nhật job_id vào job.json
+    save_job(
+        state.settings.workspace_dir,
+        slug,
+        {
+            "job_id": job.id,
+            "slug": slug,
+            "status": "running",
+            "phase": "fetch",
+            "percent": 5,
+            "text": "Bắt đầu khởi tạo dự án...",
+        },
     )
 
     return {
-        "slug": job.slug,
+        "slug": slug,
         "job_id": job.id,
     }
+
+
+@router.get("/chatting/{slug}/job")
+def get_chatting_project_job(slug: str, state: State) -> dict[str, Any]:
+    """Lấy trạng thái tiến trình từ workspace/chatting/<slug>/job.json."""
+    job_data = load_job(state.settings.workspace_dir, slug)
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Không có job nào cho dự án này")
+    return job_data
 
 
 @router.get("/chatting/{slug}")
 def get_chatting_project(slug: str, state: State) -> dict[str, Any]:
     """Lấy dữ liệu chat.json, source.json và danh sách renders của dự án."""
     project_dir = get_project_dir(state.settings.workspace_dir, slug)
+    job_data = load_job(state.settings.workspace_dir, slug)
+
     if not project_dir.is_dir():
+        if job_data and job_data.get("status") == "running":
+            return {
+                "slug": slug,
+                "doc": None,
+                "source": None,
+                "renders": [],
+                "preview_url": None,
+                "job": job_data,
+            }
         raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
 
     try:
         doc = load_chat(state.settings.workspace_dir, slug)
     except FileNotFoundError as err:
+        if job_data and job_data.get("status") == "running":
+            return {
+                "slug": slug,
+                "doc": None,
+                "source": None,
+                "renders": [],
+                "preview_url": None,
+                "job": job_data,
+            }
         raise HTTPException(
             status_code=404, detail=f"Không tìm thấy chat.json trong {slug}"
         ) from err

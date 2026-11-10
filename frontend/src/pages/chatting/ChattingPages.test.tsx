@@ -126,4 +126,43 @@ describe('Chatting Pages (Vitest)', () => {
     expect(screen.getByText(/Đã cắt bớt 2 tin nhắn/)).toBeInTheDocument();
     expect(screen.getByText(/Đã bỏ 3 sticker dư thừa/)).toBeInTheDocument();
   });
+
+  it('ChattingEditor: hiển thị màn hình tiến trình khi job đang running', async () => {
+    stubFetch({
+      'GET /api/chatting/running-slug': {
+        slug: 'running-slug',
+        doc: null,
+        source: null,
+        renders: [],
+        preview_url: null,
+        job: {
+          job_id: 'job-123',
+          slug: 'running-slug',
+          status: 'running',
+          phase: 'llm',
+          percent: 45,
+          text: 'Ollama đang viết kịch bản chat...',
+        },
+      },
+      'GET /api/chatting/running-slug/job': {
+        job_id: 'job-123',
+        slug: 'running-slug',
+        status: 'running',
+        phase: 'llm',
+        percent: 45,
+        text: 'Ollama đang viết kịch bản chat...',
+      },
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/chatting/:slug" element={<ChattingEditor />} />
+      </Routes>,
+      '/chatting/running-slug',
+    );
+
+    expect(await screen.findByText('Đang tạo video Chatting...')).toBeInTheDocument();
+    expect(screen.getAllByText('Ollama đang viết kịch bản chat...').length).toBeGreaterThan(0);
+    expect(screen.getByText('45%')).toBeInTheDocument();
+  });
 });

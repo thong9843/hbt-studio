@@ -28,12 +28,21 @@ import { Chip } from '../components/ui/Chip';
 import { Dialog } from '../components/ui/Dialog';
 import { Menu } from '../components/ui/Menu';
 import { Progress } from '../components/ui/Progress';
+import { Select } from '../components/ui/Select';
 import { cx } from '../components/ui/cx';
 import { vi } from '../i18n/vi';
 
 const T = vi.postvQuick;
 
 const STAGE_ORDER: PostvStage[] = ['fetch', 'pick', 'script', 'voice', 'render', 'done'];
+
+const DURATION_CHOICES = [
+  { value: 60, label: T.options.duration60 },
+  { value: 90, label: T.options.duration90 },
+  { value: 120, label: T.options.duration120 },
+  { value: 150, label: T.options.duration150 },
+  { value: 180, label: T.options.duration180 },
+] as const;
 
 interface PickSnippetData {
   handle?: string;
@@ -85,17 +94,31 @@ export function PostvQuickPage() {
     queryFn: api.getVoicePreference,
     staleTime: 60_000,
   });
+  const { data: musicList } = useQuery({
+    queryKey: ['music'],
+    queryFn: api.listMusic,
+    staleTime: 60_000,
+  });
 
   // Trạng thái nhập liệu & tuỳ chọn
   const [input, setInput] = useState('');
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null);
-  const [duration, setDuration] = useState<number>(75);
+  const [duration, setDuration] = useState<number>(90);
   const [music, setMusic] = useState<'auto' | 'none'>('auto');
+  const [selectedMusicId, setSelectedMusicId] = useState<string>('');
   const [fps, setFps] = useState<30 | 60>(60);
   const [outro, setOutro] = useState<boolean>(true);
   const [pickMode, setPickMode] = useState<'auto' | 'manual'>(() => {
     return (localStorage.getItem('hbt_postv_pick_mode') as 'auto' | 'manual') || 'auto';
   });
+
+  // Tự động chọn ngẫu nhiên 1 bài BGM mặc định khi mở trang nếu người dùng chưa chọn thủ công
+  useEffect(() => {
+    if (music !== 'none' && !selectedMusicId && musicList && musicList.length > 0) {
+      const idx = Math.floor(Math.random() * musicList.length);
+      setSelectedMusicId(musicList[idx].id);
+    }
+  }, [music, selectedMusicId, musicList]);
 
   // Trạng thái nghe thử giọng
   const [isPlayingSample, setIsPlayingSample] = useState(false);
@@ -385,6 +408,10 @@ export function PostvQuickPage() {
       voice_id: selectedVoice,
       target_seconds: duration,
       music,
+      music_id:
+        music !== 'none' && selectedMusicId && selectedMusicId !== 'auto'
+          ? selectedMusicId
+          : undefined,
       fps,
       outro,
       pick_mode: pickMode,
@@ -829,12 +856,15 @@ export function PostvQuickPage() {
                   </Chip>
 
                   {/* Dropdown Giọng (VieNeu) & Nút ▶ nghe thử */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-1 text-tiny text-ink shadow-sm">
-                    <span>🎙️ {T.voice.label}:</span>
-                    <select
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">🎙️ {T.voice.label}:</span>
+                    <Select
+                      aria-label={T.voice.label}
+                      variant="compact"
+                      autoWidth
                       value={selectedVoice || ''}
                       onChange={(e) => handleVoiceChange(e.target.value)}
-                      className="bg-transparent text-tiny font-semibold text-ink outline-none cursor-pointer max-w-[130px] truncate"
+                      className="border-0 bg-transparent min-h-[28px] max-w-[140px] truncate"
                     >
                       {voiceList?.voices && voiceList.voices.length > 0 ? (
                         voiceList.voices.map((v) => (
@@ -845,7 +875,7 @@ export function PostvQuickPage() {
                       ) : (
                         <option value="">{T.voice.defaultOption}</option>
                       )}
-                    </select>
+                    </Select>
                     {selectedVoice && (
                       <button
                         type="button"
@@ -861,32 +891,56 @@ export function PostvQuickPage() {
                     )}
                   </div>
 
-                  {/* Độ dài */}
-                  <div className="flex items-center gap-1 rounded-full bg-subtle p-0.5">
-                    {[60, 75, 90].map((sec) => (
-                      <button
-                        key={sec}
-                        type="button"
-                        onClick={() => setDuration(sec)}
-                        className={cx(
-                          'rounded-full px-2.5 py-0.5 text-tiny font-semibold transition-all',
-                          duration === sec
-                            ? 'bg-card text-ink shadow-sm'
-                            : 'text-muted hover:text-ink',
-                        )}
-                      >
-                        {sec} s
-                      </button>
-                    ))}
+                  {/* Dropdown Thời lượng (1m - 3m) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">⏱️ {T.options.duration}:</span>
+                    <Select
+                      aria-label={T.options.duration}
+                      variant="compact"
+                      autoWidth
+                      value={String(duration)}
+                      onChange={(e) => setDuration(Number(e.target.value))}
+                      className="border-0 bg-transparent min-h-[28px]"
+                    >
+                      {DURATION_CHOICES.map((opt) => (
+                        <option key={opt.value} value={String(opt.value)}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
 
-                  {/* Nhạc */}
-                  <Chip
-                    selected={music === 'auto'}
-                    onClick={() => setMusic((m) => (m === 'auto' ? 'none' : 'auto'))}
-                  >
-                    {music === 'auto' ? T.options.musicAuto : T.options.musicNone}
-                  </Chip>
+                  {/* Nhạc nền BGM (mặc định tự chọn 1 bài từ library/music/ + Playlist acrossfade) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">🎵 {T.options.musicLabel}:</span>
+                    <Select
+                      aria-label={T.options.musicLabel}
+                      variant="compact"
+                      autoWidth
+                      value={music === 'none' ? 'none' : selectedMusicId || 'auto'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'none') {
+                          setMusic('none');
+                        } else {
+                          setMusic('auto');
+                          setSelectedMusicId(val);
+                        }
+                      }}
+                      className="border-0 bg-transparent min-h-[28px] max-w-[150px] truncate"
+                    >
+                      {musicList && musicList.length > 0 ? (
+                        musicList.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="auto">{T.options.musicAuto}</option>
+                      )}
+                      <option value="none">{T.options.musicNone}</option>
+                    </Select>
+                  </div>
 
                   {/* 60 fps */}
                   <Chip selected={fps === 60} onClick={() => setFps((f) => (f === 60 ? 30 : 60))}>
@@ -980,6 +1034,7 @@ export function PostvQuickPage() {
                       onDrop={(e) => handleDrop(e, index)}
                       className={cx(
                         'group flex items-start gap-3 rounded-xl border p-3 transition-all',
+                        c.parent && 'ml-6 border-l-2 border-l-brand/50',
                         isChecked ? 'border-line bg-card' : 'border-line/60 bg-card/50',
                         hasReason && 'opacity-60 bg-subtle/30 border-dashed',
                       )}
@@ -1021,6 +1076,7 @@ export function PostvQuickPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-small text-ink">@{c.handle}</span>
+                          {c.parent && <Badge tone="neutral">{T.manualPick.replyBadge}</Badge>}
                           {c.likes != null && c.likes > 0 && (
                             <span className="text-tiny text-muted">
                               ❤️ {T.manualPick.likes(c.likes)}

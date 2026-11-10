@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import time
 from typing import Any
@@ -75,11 +74,10 @@ MOCK_CHAT_RESPONSE = {
 def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     """Làm sạch và chuẩn hoá dữ liệu từ LLM để luôn thoả mãn mô hình ChatDoc:
     - Tiêu đề: cắt ngắn tối đa 200 ký tự.
-    - Nhân vật: 2-4 nhân vật, đúng 1 nhân vật bên phải (side: right).
-    - Tin nhắn: 8-30 tin, mỗi tin tối đa 120 ký tự, tổng ký tự tối đa 900.
-    - Cắt tin để tổng <= 900 ký tự (ưu tiên giữ tin đầu + 2 tin cuối).
-    - Lọc sticker: tần suất tối đa 1 sticker mỗi 3 tin (cách nhau ít nhất 2 tin).
-    - Cảnh báo: trả danh sách warnings (số tin cắt, số sticker bỏ) để hiển thị trên UI.
+    - Nhân vật: 2-10 nhân vật (hỗ trợ group chat), đúng 1 nhân vật bên phải (side: right).
+    - Tin nhắn: 8-80 tin, mỗi tin tối đa 300 ký tự, tổng ký tự tối đa 5000.
+    - Cắt tin để tổng <= 5000 ký tự (ưu tiên giữ tin đầu + 2 tin cuối).
+    - Cảnh báo: trả danh sách warnings để hiển thị trên UI.
     """
     from hbt.chatting.models import VALID_STICKER_TAGS
 
@@ -88,7 +86,7 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     title = str(data.get("title") or "Đoạn chat vui").strip()[:200]
     data["title"] = title or "Đoạn chat vui"
 
-    # 1. Nhân vật
+    # 1. Nhân vật (tối đa 10 nhân vật cho Group Chat)
     raw_chars = data.get("characters")
     if not isinstance(raw_chars, list) or len(raw_chars) < 2:
         chars = [
@@ -98,7 +96,7 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     else:
         chars = []
         seen_ids: set[str] = set()
-        for idx, c in enumerate(raw_chars[:4]):
+        for idx, c in enumerate(raw_chars[:10]):
             if not isinstance(c, dict):
                 continue
             cid = str(c.get("id") or f"user_{idx}").strip()[:32]
@@ -109,7 +107,10 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             side = c.get("side")
             if side not in ("left", "right"):
                 side = "left"
-            chars.append({"id": cid, "name": name, "side": side})
+            char_entry: dict[str, Any] = {"id": cid, "name": name, "side": side}
+            if c.get("voice"):
+                char_entry["voice"] = str(c["voice"])
+            chars.append(char_entry)
 
         if len(chars) < 2:
             chars.append({"id": "other", "name": "Bạn", "side": "left"})
@@ -145,8 +146,8 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
         text = str(m.get("text") or "").strip()
         if not text:
             text = "..."
-        if len(text) > 120:
-            text = text[:117] + "..."
+        if len(text) > 300:
+            text = text[:297] + "..."
 
         st = m.get("sticker")
         if st is not None:
@@ -155,13 +156,16 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             if st not in VALID_STICKER_TAGS:
                 st = None
 
-        clean_msgs.append(
-            {
-                "from": sender,
-                "text": text,
-                "sticker": st,
-            }
-        )
+        msg_entry: dict[str, Any] = {
+            "from": sender,
+            "text": text,
+            "sticker": st,
+        }
+        if m.get("display_text"):
+            msg_entry["display_text"] = str(m["display_text"])
+        if m.get("spoken_text") is not None:
+            msg_entry["spoken_text"] = str(m["spoken_text"])
+        clean_msgs.append(msg_entry)
 
     cut_msgs_count = 0
 
@@ -178,14 +182,12 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     else:
-        # Nếu > 30 tin hoặc tổng ký tự > 900:
+        # Nếu > 80 tin hoặc tổng ký tự > 5000:
         # Cắt bớt tin từ phần giữa, ưu tiên giữ tin đầu (index 0) và 2 tin cuối (len-2, len-1)
         # Giữ tối thiểu 8 tin
         while len(clean_msgs) > 8 and (
-            len(clean_msgs) > 30 or sum(len(m["text"]) for m in clean_msgs) > 900
+            len(clean_msgs) > 80 or sum(len(m["text"]) for m in clean_msgs) > 5000
         ):
-            # Cắt 1 tin ở giữa (từ index 1 đến len(clean_msgs) - 3)
-            # Chọn tin dài nhất ở phần giữa để giảm tổng ký tự nhanh nhất
             mid_indices = list(range(1, len(clean_msgs) - 2))
             if not mid_indices:
                 break
@@ -193,45 +195,31 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             clean_msgs.pop(best_idx)
             cut_msgs_count += 1
 
-        # Nếu sau khi cắt tin còn 8 tin mà tổng ký tự vẫn > 900:
-        # Rút ngắn các tin ở giữa để tổng <= 900
+        # Nếu sau khi cắt tin còn 8 tin mà tổng ký tự vẫn > 5000:
+        # Rút ngắn các tin ở giữa để tổng <= 5000
         total_chars = sum(len(m["text"]) for m in clean_msgs)
-        if total_chars > 900:
+        if total_chars > 5000:
             for idx in range(1, len(clean_msgs) - 2):
-                if total_chars <= 880:
+                if total_chars <= 4950:
                     break
-                excess = total_chars - 880
+                excess = total_chars - 4950
                 cur_len = len(clean_msgs[idx]["text"])
                 cut = min(excess, max(0, cur_len - 30))
                 if cut > 0:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Lọc sticker: tối đa 1 sticker mỗi 3 tin và cách nhau ít nhất 2 tin (khoảng cách index >= 3)
-    max_stickers = math.ceil(len(clean_msgs) / 3)
-    kept_stickers = 0
-    last_sticker_idx = -99
-
-    for idx, m in enumerate(clean_msgs):
+    # 3. Giữ nguyên mọi sticker/meme hợp lệ của kịch bản (không giới hạn cứng)
+    for m in clean_msgs:
         if m.get("sticker") is not None:
-            if kept_stickers < max_stickers and (idx - last_sticker_idx >= 3):
-                kept_stickers += 1
-                last_sticker_idx = idx
-            else:
-                m["sticker"] = None
-
-    dropped_stickers_count = max(0, raw_sticker_count - kept_stickers)
+            st = str(m.get("sticker")).strip().lower()
+            m["sticker"] = st if st in VALID_STICKER_TAGS else None
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
         warnings.append(
             f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
-            "để kịch bản không vượt quá 900 ký tự."
-        )
-    if dropped_stickers_count > 0:
-        warnings.append(
-            f"Đã bỏ {dropped_stickers_count} sticker dư thừa "
-            "để đảm bảo tối đa 1 sticker mỗi 3 tin nhắn."
+            "để kịch bản không vượt quá 5.000 ký tự."
         )
 
     data["messages"] = clean_msgs
@@ -285,6 +273,7 @@ class OllamaClient:
         body: str,
         comments: list[str] | None = None,
         platform: str = "messenger",
+        target_duration_s: float | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Sinh đoạn chat từ nội dung đầu vào.
         Trả về: (chat_data, timings_dict)
@@ -302,7 +291,9 @@ class OllamaClient:
             }
             return mock, timings
 
-        user_content = build_user_prompt(title, body, comments, platform)
+        user_content = build_user_prompt(
+            title, body, comments, platform, target_duration_s=target_duration_s
+        )
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},

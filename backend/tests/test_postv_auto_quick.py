@@ -415,20 +415,24 @@ def test_step_pick_accumulates_to_target_seconds():
         for i in range(1, 10)
     ]
 
-    # Target 30s: Post (6.4s) + 3 comments (~10s mỗi cmt) = ~36s -> chọn 3 bình luận
+    from hbt.postv.timeline import compute_time_budget
+
+    # Target 30s: Post (~8.2s) + comments (~11s mỗi cmt theo 3.2 từ/s + 0.4s) -> đạt >= 30s
     proj30 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 30")
     proj30.post.text = post_text
     proj30.comments = [c.model_copy() for c in comments]
 
     jm = MagicMock()
     jm.storage.load_any.return_value = proj30
+    jm.library_dir = None
     job30 = Job("job-30", slug, False, 60, True, False, kind="postv_quick")
 
     _step_pick(jm, job30, {"target_seconds": 30}, MagicMock())
     picked30 = [c for c in proj30.comments if c.picked]
-    assert len(picked30) == 3
+    assert len(picked30) >= 2
+    assert compute_time_budget(post_text, picked30, [], 30).total_seconds >= 30
 
-    # Target 60s: Post (6.4s) + 6 comments (~10s mỗi cmt) = ~66s -> chọn 6 bình luận
+    # Target 60s: gom thêm bình luận cho tới khi >= 60s
     proj60 = PostvProject(version=1, kind="postv", slug=slug, title="Duration 60")
     proj60.post.text = post_text
     proj60.comments = [c.model_copy() for c in comments]
@@ -437,7 +441,8 @@ def test_step_pick_accumulates_to_target_seconds():
 
     _step_pick(jm, job60, {"target_seconds": 60}, MagicMock())
     picked60 = [c for c in proj60.comments if c.picked]
-    assert len(picked60) == 6
+    assert len(picked60) > len(picked30)
+    assert compute_time_budget(post_text, picked60, [], 60).total_seconds >= 60
 
 
 def test_inspect_comment_filter_and_min_length_constant():
@@ -626,3 +631,270 @@ def test_api_postv_pick_endpoints(client):
     updated_proj = hbt_state.storage.load_any(slug)
     assert updated_proj.comments[0].id == "c2" and updated_proj.comments[0].picked is True
     assert updated_proj.comments[1].id == "c1" and updated_proj.comments[1].picked is True
+
+
+def test_smart_comment_ranking_up_to_30_and_spam_filter(tmp_path):
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick, inspect_comment_filter
+
+    # Lọc spam / rác
+    seen = set()
+    spam = PostvComment(id="s1", handle="bot", text="Inbox check bio zalo 09123", age="1m")
+    assert inspect_comment_filter(spam, seen) == "rác"
+
+    # Tạo 25 bình luận + reply để thử bóc tách vượt ngưỡng 7-8 cũ cho mục tiêu 180s
+    proj = PostvProject(version=1, kind="postv", slug="long-thread", title="Long Thread")
+    proj.post.text = "Bài viết gốc ngắn mở màn câu chuyện."
+    comments = []
+    for i in range(1, 22):
+        comments.append(
+            PostvComment(
+                id=f"c{i}",
+                handle=f"user{i}",
+                text=f"Bình luận thứ {i} chia sẻ câu chuyện rất dài và thú vị haha! 😂 " * 2,
+                likes=500 if i == 21 else i * 15,
+                replies=5 if i == 21 else (3 if i % 4 == 0 else 0),
+            )
+        )
+    # Reply con cho c21 (comment có like cao nhất)
+    comments.append(
+        PostvComment(
+            id="r1",
+            handle="replier1",
+            text="Đồng quan điểm luôn á trời ơi, đọc tới đây mà cười xỉu haha 😂",
+            parent="c21",
+            likes=80,
+        )
+    )
+    proj.comments = comments
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    jm.postv_words = None
+    job = Job("job-30", "long-thread", False, 60, True, False, kind="postv_quick")
+
+    _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": 180}, MagicMock())
+    picked = [c for c in proj.comments if c.picked]
+    assert len(picked) >= 15
+    # c21 (nhiều like nhất) ở đầu, và r1 (reply của c21) bám ngay dưới nó
+    assert picked[0].id == "c21"
+    assert picked[1].id == "r1"
+
+
+def test_climax_meme_assignment_non_repeating_and_playlist_bgm(tmp_path):
+    import json
+
+    from hbt.chatting.audio import build_bgm_playlist
+    from hbt.postv.auto import _assign_climax_memes
+    from hbt.postv.models import PostvSegment
+    from tests.helpers import write_wav
+
+    lib = tmp_path / "library"
+    memes_dir = lib / "memes"
+    music_dir = lib / "music"
+    memes_dir.mkdir(parents=True)
+    music_dir.mkdir(parents=True)
+
+    (memes_dir / "cat1.mp4").write_bytes(b"mp4-1")
+    (memes_dir / "cat2.mp4").write_bytes(b"mp4-2")
+    (memes_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "memes": [
+                    {
+                        "file": "cat1.mp4",
+                        "tags": ["cuoi"],
+                        "emojis": ["😂"],
+                        "start_time": 0.5,
+                        "duration": 3.0,
+                    },
+                    {
+                        "file": "cat2.mp4",
+                        "tags": ["cuoi"],
+                        "emojis": ["😂"],
+                        "start_time": 0.0,
+                        "duration": 2.5,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    comments = [
+        PostvComment(
+            id=f"c{i}",
+            handle=f"u{i}",
+            text=f"Bình luận hài hước quá trời 😂 số {i}",
+            likes=100 - i,
+        )
+        for i in range(1, 7)
+    ]
+    by_id = {c.id: c for c in comments}
+    segs = [PostvSegment(role="post", card="post", voice="Post gốc", speaker="post")]
+    for c in comments:
+        segs.append(
+            PostvSegment(role="comment", card="comment", voice=c.text, ref=c.id, speaker=c.id)
+        )
+
+    _assign_climax_memes(segs, by_id, lib)
+    assigned_memes = [s.meme_id for s in segs if s.meme_id]
+    assert len(assigned_memes) == 2
+    assert len(set(assigned_memes)) == 2  # Xoay vòng không lặp lại
+
+    # Kiểm tra Playlist BGM tạo đủ độ dài phủ kín 150s từ các bài ngắn hơn
+    write_wav(music_dir / "track1.wav", [("tone", 2.0, 0.3)], freq=220)
+    write_wav(music_dir / "track2.wav", [("tone", 2.0, 0.3)], freq=330)
+    playlist = build_bgm_playlist(lib, "track1.wav", 5.0, crossfade_s=0.5)
+    assert len(playlist) >= 2
+
+
+def test_postv_audio_resolves_library_picks_default_and_attaches(tmp_path):
+    from hbt.jobs import Job, JobManager
+    from hbt.postv.audio import (
+        list_available_bgm,
+        pick_default_bgm,
+        resolve_music_dir,
+        resolve_project_music_src,
+    )
+    from hbt.postv.auto import _step_script
+    from hbt.storage import Storage
+    from tests.helpers import write_wav
+
+    lib = tmp_path / "library"
+    music_dir = lib / "music"
+    music_dir.mkdir(parents=True)
+    write_wav(music_dir / "quirky.wav", [("tone", 1.5, 0.2)], freq=250)
+    (music_dir / "index.json").write_text("[]", encoding="utf-8")
+
+    assert resolve_music_dir(lib).is_absolute()
+    avail = list_available_bgm(lib)
+    assert len(avail) == 1
+    track = pick_default_bgm(lib)
+    assert track is not None and track.path.is_file()
+
+    # Kiểm tra _step_script tự chọn và chép file nhạc vào thư mục dự án, không mở đầu bằng hook
+    storage = Storage(tmp_path / "workspace")
+    jm = JobManager(storage, lib)
+    proj = storage.create_postv("BGM & No Hook Test")
+    proj.post.text = "Bài gốc mở đầu ngay tại giây 0 https://example.com 😂"
+    proj.comments = [
+        PostvComment(
+            id="c1",
+            handle="u1",
+            text="Bình luận một khá dài và rất hay!",
+            likes=50,
+            picked=True,
+        )
+    ]
+    storage.save_any(proj.slug, proj)
+
+    job = Job("job-bgm", proj.slug, False, 60, True, False, kind="postv_quick")
+    _step_script(jm, job, {"music": "auto"}, MagicMock())
+
+    saved = storage.load_any(proj.slug)
+    assert saved.segments[0].role == "post" and saved.segments[0].card == "post"
+    assert "https://" not in saved.segments[0].voice
+    assert saved.music is not None
+    pdir = storage.project_dir(proj.slug)
+    assert (pdir / saved.music.file).is_file()
+    assert resolve_project_music_src(saved, pdir, lib) is not None
+
+
+def test_time_budgeting_replaces_fixed_limits_for_1m_2m_3m():
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+    from hbt.postv.timeline import compute_time_budget, estimate_tts_seconds
+
+    assert estimate_tts_seconds("Một hai ba bốn năm sáu bảy tám.") == pytest.approx(
+        8 / 3.2 + 0.4, abs=0.05
+    )
+
+    def run_budget_for(target_sec: float) -> tuple[int, float]:
+        proj = PostvProject(version=1, kind="postv", slug="budget", title="Budget")
+        proj.post.text = "Bài viết mở đầu ngắn gọn đọc nhanh trong ba giây thôi."
+        # Tạo kho 65 bình luận ngắn + reply con (~4.5s mỗi mục), không bị kẹp limit 10/15/30
+        comments = []
+        for i in range(1, 56):
+            comments.append(
+                PostvComment(
+                    id=f"c{i}",
+                    handle=f"u{i}",
+                    text=f"Bình luận ngắn số {i} cực thú vị luôn nha bạn!",
+                    likes=200 - i,
+                )
+            )
+            if i % 5 == 0:
+                comments.append(
+                    PostvComment(
+                        id=f"r{i}",
+                        handle=f"rep{i}",
+                        text=f"Reply con nổi bật bám theo bình luận {i} nè!",
+                        parent=f"c{i}",
+                        likes=80,
+                    )
+                )
+        proj.comments = comments
+        jm = MagicMock()
+        jm.storage.load_any.return_value = proj
+        jm.library_dir = None
+        jm.postv_words = None
+        job = Job("j", "budget", False, 60, True, False, kind="postv_quick")
+        _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": target_sec}, MagicMock())
+        picked = [c for c in proj.comments if c.picked]
+        summary = compute_time_budget(proj.post.text, picked, [], target_seconds=target_sec)
+        return len(picked), summary.total_seconds
+
+    n_1m, sec_1m = run_budget_for(60)
+    n_2m, sec_2m = run_budget_for(120)
+    n_3m, sec_3m = run_budget_for(180)
+    # Tuyệt đối không ngắn hơn mục tiêu và vượt khỏi mọi kẹp cứng 30 thẻ ở mốc 3m
+    assert sec_1m >= 60 and sec_1m <= 66
+    assert sec_2m >= 120 and sec_2m <= 126
+    assert sec_3m >= 180 and sec_3m <= 186
+    assert n_3m > 30
+
+
+def test_meme_cutin_pause_never_overlaps_tts_or_early_card_scroll(tmp_path):
+    from hbt.postv.models import PostvSegment
+    from hbt.postv.timeline import (
+        estimate_meme_pause_slots,
+        plan_meme_cutin_and_card_starts,
+    )
+    from hbt.postv.voice import join_wavs, wav_seconds
+    from tests.helpers import write_wav
+
+    p1 = tmp_path / "p1.wav"
+    p2 = tmp_path / "p2.wav"
+    p3 = tmp_path / "p3.wav"
+    write_wav(p1, [("tone", 1.5, 0.3)], freq=200)
+    write_wav(p2, [("tone", 1.5, 0.3)], freq=300)
+    write_wav(p3, [("tone", 1.5, 0.3)], freq=400)
+
+    segs = [
+        PostvSegment(role="post", card="post", voice="Post", speaker="post"),
+        PostvSegment(role="comment", card="comment", voice="C1", ref="c1", meme_id="cat.mp4"),
+        PostvSegment(role="comment", card="comment", voice="C2", ref="c2"),
+    ]
+    gaps = estimate_meme_pause_slots(segs, None)
+    assert gaps[0] == 0.25 and 2.8 <= gaps[1] <= 4.0
+
+    joined = tmp_path / "voice.wav"
+    spans = join_wavs([p1, p2, p3], joined, post_gaps=gaps)
+    # Đoạn 2 (index 1) có meme cut-in: khoảng trống giữa hết đọc p2 và đầu đọc p3 phải >= 3.0s
+    assert spans[2][0] - spans[1][1] >= 3.0
+    assert wav_seconds(joined) >= 7.5
+
+    first_start = [s[0] for s in spans]
+    last_end = [s[1] for s in spans]
+    offsets = [(last_end[k - 1] + first_start[k]) / 2 - 0.2 for k in range(1, 3)]
+    base_starts = [0.0, *(o + 0.2 for o in offsets)]
+    starts, windows = plan_meme_cutin_and_card_starts(
+        segs, offsets, first_start, last_end, base_starts, {1: 3.0}, wav_seconds(joined) + 1.0
+    )
+    assert starts[0] == 0.0
+    win = windows[1]
+    # Meme chạy sau khi hết đọc đoạn 1 (TTS dừng hoàn toàn) và thẻ tiếp theo chỉ cuộn sau meme
+    assert win.start >= last_end[1]
+    assert win.end <= first_start[2]
+    assert starts[2] >= win.end

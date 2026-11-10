@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import wave
 from pathlib import Path
 
 from hbt.chatting.models import ChatDoc
+from hbt.chatting.sources import is_scene_transition
 from hbt.pipeline.ffutil import media_duration
 from hbt.postv.censor import CensorStore, compile_censor, find_censor_hits
 from hbt.postv.voice import SynthItem, VoiceProvider
@@ -20,6 +22,50 @@ DEFAULT_CHAR_VOICES = {
     "left_2": "Thiện Minh",
     "left_3": "Mai Anh",
 }
+
+TIME_PATTERNS = [
+    re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b"),
+    re.compile(r"\b\d{1,2}h(?:\d{2})?\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*giờ(?:\s*\d{1,2}\s*phút)?\b", re.IGNORECASE),
+]
+
+META_PATTERNS = [
+    re.compile(r"\[(?:sticker|meme|ảnh|video|voice|audio|image|gif)[^\]]*\]", re.IGNORECASE),
+    re.compile(r"\b(?:đã xem|đã gửi|đã nhận|seen|active\s*\d+\w*\s*ago)\b", re.IGNORECASE),
+]
+
+PAREN_ACTION_PATTERN = re.compile(r"\(.*?\)", re.DOTALL)
+BRACKET_META_PATTERN = re.compile(r"\[.*?\]", re.DOTALL)
+
+EMOJI_REGEX = re.compile(
+    r"(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])"
+    r"(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF]|\u200d(?:\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF])?)*",
+    re.UNICODE,
+)
+
+
+def clean_spoken_text(text: str) -> str:
+    """Tách sạch lời thoại để TTS VieNeu chỉ đọc câu nói thuần túy của nhân vật:
+    lọc sạch toàn bộ emoji, mốc thời gian, ký tự hành động trong ngoặc đơn (...),
+    và các trạng thái [seen], [sticker]...
+    """
+    if is_scene_transition(text):
+        return ""
+
+    s = text.strip()
+    for p in TIME_PATTERNS:
+        s = p.sub("", s)
+    for p in META_PATTERNS:
+        s = p.sub("", s)
+    s = PAREN_ACTION_PATTERN.sub("", s)
+    s = BRACKET_META_PATTERN.sub("", s)
+    s = EMOJI_REGEX.sub("", s)
+    # Dọn dẹp khoảng trắng dư thừa
+    s = re.sub(r"\s+", " ", s).strip()
+    # Nếu chỉ còn dấu câu lẻ loi (vd: '-', ':', '·', '—') thì coi như rỗng
+    if re.fullmatch(r"[-—:.,;~·!?\s]*", s):
+        return ""
+    return s
 
 
 def get_voice_cache_dir(project_dir: Path) -> Path:
@@ -90,13 +136,30 @@ def synthesize_chat_voices(
     for idx, msg in enumerate(doc.messages):
         char = char_map.get(msg.from_)
         voice_id = char.voice if char and char.voice else DEFAULT_CHAR_VOICES.get("me", "Adam bựa")
-        h = text_hash(voice_id, msg.text)
+        spoken = (
+            msg.spoken_text
+            if getattr(msg, "spoken_text", None) is not None
+            else clean_spoken_text(msg.text)
+        )
+
+        # Nếu là chuyển cảnh ngoặc đơn hoặc sau khi lọc lời thoại mà rỗng
+        is_trans = is_scene_transition(msg.text)
+        if is_trans or not spoken:
+            dur = 1.2 if is_trans else 1.0
+            h = text_hash(voice_id, f"transition_{idx}" if is_trans else f"empty_{idx}")
+            out_file = cache_dir / f"silent_{h}.wav"
+            if not (out_file.is_file() and out_file.stat().st_size > 44):
+                create_placeholder_wav(out_file, dur)
+            results.append((idx, out_file, dur))
+            continue
+
+        h = text_hash(voice_id, spoken)
         out_file = cache_dir / f"{h}.wav"
 
         if out_file.is_file() and out_file.stat().st_size > 44:
             results.append((idx, out_file, get_wav_duration(out_file)))
         else:
-            items_to_synth.append((idx, SynthItem(text=msg.text, voice_id=voice_id, out=out_file)))
+            items_to_synth.append((idx, SynthItem(text=spoken, voice_id=voice_id, out=out_file)))
 
     if items_to_synth:
         if tts_ready:

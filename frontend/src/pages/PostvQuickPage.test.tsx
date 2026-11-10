@@ -37,6 +37,21 @@ const defaultVoices = {
   ],
 };
 
+const defaultMusic = [
+  {
+    id: 'lo-fi-chill',
+    file: 'kulakovka-lo-fi-chill-620585.mp3',
+    title: 'Lo-Fi Chill',
+    artist: 'Kulakovka',
+    source: 'Pixabay',
+    url: '',
+    license: 'Pixabay Content License',
+    moods: ['lofi', 'chill'],
+    bpm: null,
+    credit: 'Lo-Fi Chill – Kulakovka (Pixabay)',
+  },
+];
+
 function page() {
   return renderWithProviders(
     <Routes>
@@ -53,6 +68,7 @@ describe('PostvQuickPage', () => {
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
@@ -71,12 +87,20 @@ describe('PostvQuickPage', () => {
 
     // Hàng chip tuỳ chọn
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByLabelText('Giọng');
+      expect(voiceSelect).toHaveValue('adam-bua');
+      const bgmSelect = screen.getByLabelText('Nhạc nền');
+      expect(bgmSelect).toHaveValue('lo-fi-chill');
     });
+    const durationSelect = screen.getByLabelText('Thời lượng');
+    expect(durationSelect).toHaveValue('90');
+    expect(screen.getByRole('option', { name: '1m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '1m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '3m' })).toBeInTheDocument();
+
     expect(screen.getByText(/Bình luận: Tự động/)).toBeInTheDocument();
-    expect(screen.getByText('75 s')).toBeInTheDocument();
-    expect(screen.getByText('Nhạc: Tự chọn')).toBeInTheDocument();
     expect(screen.getByText('60 fps')).toBeInTheDocument();
     expect(screen.getByText('Outro: Bật')).toBeInTheDocument();
 
@@ -89,13 +113,14 @@ describe('PostvQuickPage', () => {
     const sent = {
       body: null as {
         url?: string;
-        options?: { fps?: number; target_seconds?: number; pick_mode?: string };
+        options?: { fps?: number; target_seconds?: number; pick_mode?: string; music_id?: string };
       } | null,
     };
 
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
@@ -114,6 +139,14 @@ describe('PostvQuickPage', () => {
     const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
     const submitBtn = screen.getByRole('button', { name: 'Tạo video' });
 
+    await waitFor(() => {
+      expect(screen.getByLabelText('Nhạc nền')).toHaveValue('lo-fi-chill');
+    });
+
+    // Đổi thời lượng sang 3m (180s)
+    const durationSelect = screen.getByLabelText('Thời lượng');
+    await user.selectOptions(durationSelect, '180');
+
     // Gõ link vào
     await user.type(textarea, 'https://www.threads.net/@user/post/xyz');
     expect(submitBtn).toBeEnabled();
@@ -126,8 +159,9 @@ describe('PostvQuickPage', () => {
     });
     expect(sent.body?.url).toBe('https://www.threads.net/@user/post/xyz');
     expect(sent.body?.options?.fps).toBe(60);
-    expect(sent.body?.options?.target_seconds).toBe(75);
+    expect(sent.body?.options?.target_seconds).toBe(180);
     expect(sent.body?.options?.pick_mode).toBe('auto');
+    expect(sent.body?.options?.music_id).toBe('lo-fi-chill');
   });
 
   it('detects existing link and shows duplicate dialog, with open existing or force new', async () => {
@@ -421,10 +455,10 @@ describe('PostvQuickPage', () => {
     page();
 
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByLabelText('Giọng');
+      expect(voiceSelect).toHaveValue('adam-bua');
     });
-    const voiceSelect = screen.getByRole('combobox');
+    const voiceSelect = screen.getByLabelText('Giọng');
 
     // Đổi giọng sang Mai Anh
     await user.selectOptions(voiceSelect, 'mai-anh');

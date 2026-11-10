@@ -33,26 +33,34 @@ def test_valid_chat_doc():
 
 def test_invalid_characters_count():
     # Chỉ 1 nhân vật -> lỗi
-    with pytest.raises(ValidationError, match="Số lượng nhân vật phải từ 2 đến 4"):
+    with pytest.raises(ValidationError, match="Số lượng nhân vật phải từ 2 đến 10"):
         ChatDoc(
             title="Lỗi",
             characters=[Character(id="me", name="Tôi", side="right")],
             messages=make_valid_messages(8),
         )
 
-    # 5 nhân vật -> lỗi
-    with pytest.raises(ValidationError, match="Số lượng nhân vật phải từ 2 đến 4"):
+    # 11 nhân vật -> lỗi (> 10)
+    with pytest.raises(ValidationError, match="Số lượng nhân vật phải từ 2 đến 10"):
         ChatDoc(
             title="Lỗi",
-            characters=[
-                Character(id="me", name="Tôi", side="right"),
-                Character(id="a", name="A", side="left"),
-                Character(id="b", name="B", side="left"),
-                Character(id="c", name="C", side="left"),
-                Character(id="d", name="D", side="left"),
-            ],
+            characters=[Character(id="me", name="Tôi", side="right")]
+            + [Character(id=f"c{i}", name=f"P{i}", side="left") for i in range(10)],
             messages=make_valid_messages(8),
         )
+
+    # 4-5 nhân vật (Group Chat) -> hợp lệ
+    doc_group = ChatDoc(
+        title="Nhóm lớp",
+        characters=[
+            Character(id="me", name="Nam", side="right"),
+            Character(id="a", name="Khánh", side="left"),
+            Character(id="b", name="Thầy Chủ Nhiệm", side="left"),
+            Character(id="c", name="Mẹ của Nam", side="left"),
+        ],
+        messages=make_valid_messages(8),
+    )
+    assert len(doc_group.characters) == 4
 
 
 def test_must_have_exactly_one_right_character():
@@ -93,7 +101,7 @@ def test_duplicate_character_ids():
 
 def test_invalid_messages_count():
     # 7 tin nhắn (< 8) -> lỗi
-    with pytest.raises(ValidationError, match="Số lượng tin nhắn phải từ 8 đến 30"):
+    with pytest.raises(ValidationError, match="Số lượng tin nhắn phải từ 8 đến 80"):
         ChatDoc(
             title="Lỗi",
             characters=[
@@ -105,11 +113,24 @@ def test_invalid_messages_count():
 
 
 def test_max_total_chars():
-    # Tin nhắn dài vượt quá 900 ký tự -> lỗi
+    # 50 tin nhắn dài (~4500 ký tự) -> hợp lệ dưới 5000
+    doc_long = ChatDoc(
+        title="Hội thoại dài",
+        characters=[
+            Character(id="me", name="Tôi", side="right"),
+            Character(id="a", name="Linh", side="left"),
+        ],
+        messages=[
+            Message(from_="me" if i % 2 == 0 else "a", text="A" * 90) for i in range(50)
+        ],  # 50 * 90 = 4500 <= 5000
+    )
+    assert len(doc_long.messages) == 50
+
+    # Tin nhắn dài vượt quá 5000 ký tự -> lỗi
     msgs = [
-        Message(from_="me" if i % 2 == 0 else "a", text="A" * 115) for i in range(8)
-    ]  # 8 * 115 = 920 > 900
-    with pytest.raises(ValidationError, match="Tổng số ký tự tin nhắn tối đa 900"):
+        Message(from_="me" if i % 2 == 0 else "a", text="A" * 260) for i in range(20)
+    ]  # 20 * 260 = 5200 > 5000
+    with pytest.raises(ValidationError, match="Tổng số ký tự tin nhắn tối đa 5000"):
         ChatDoc(
             title="Lỗi",
             characters=[
@@ -139,14 +160,14 @@ def test_invalid_sticker_tag():
         Message(from_="me", text="Chào", sticker="tag_la_lung")
 
 
-def test_too_many_stickers():
-    # 8 tin nhắn mà 4 sticker (> ceil(8/3) = 3) -> lỗi
-    with pytest.raises(ValidationError, match="Quá nhiều sticker"):
-        ChatDoc(
-            title="Lỗi",
-            characters=[
-                Character(id="me", name="Tôi", side="right"),
-                Character(id="a", name="Linh", side="left"),
-            ],
-            messages=make_valid_messages(8, with_stickers=4),
-        )
+def test_multiple_stickers_allowed():
+    # 8 tin nhắn mà 4 sticker -> được phép linh hoạt theo kịch bản (không giới hạn cứng)
+    doc = ChatDoc(
+        title="Nhiều sticker",
+        characters=[
+            Character(id="me", name="Tôi", side="right"),
+            Character(id="a", name="Linh", side="left"),
+        ],
+        messages=make_valid_messages(8, with_stickers=4),
+    )
+    assert sum(1 for m in doc.messages if m.sticker is not None) == 4

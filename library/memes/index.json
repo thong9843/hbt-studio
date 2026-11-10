@@ -1,1 +1,186 @@
-[]
+{
+  "memes": [
+    {
+      "file": "2-Cats-Angry-at-Each-Other-meme-Green-Screen.mp4",
+      "tags": ["gian"],
+      "emojis": ["🤬", "😡", "😾"],
+      "start_time": 1.0,
+      "duration": 3.5
+    },
+    {
+      "file": "Angry-cat-Meme-Green-Screen.mp4",
+      "tags": ["gian"],
+      "emojis": ["🤬", "🔨", "🔥", "💢"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Angry-Cat-staring-green-screen.mp4",
+      "tags": ["gian"],
+      "emojis": ["😡", "👿", "😤"],
+      "start_time": 1.0,
+      "duration": 3.5
+    },
+    {
+      "file": "Angry-Looks-Meme-Green-Screen.mp4",
+      "tags": ["gian"],
+      "emojis": ["😠", "😒", "😤"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Angry-Trump-Meme-Green-Screen.mp4",
+      "tags": ["gian"],
+      "emojis": ["🤬", "🗣️", "🔥"],
+      "start_time": 1.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Cat-Godzilla-laughing-Green-Screen.mp4",
+      "tags": ["cuoi"],
+      "emojis": ["🤣", "😂", "😹"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Cat-laughing-Green-Screen-Meme.mp4",
+      "tags": ["cuoi"],
+      "emojis": ["🤣", "😆", "😸"],
+      "start_time": 0.2,
+      "duration": 3.5
+    },
+    {
+      "file": "Laughing-hyena-Green-Screen-Meme.mp4",
+      "tags": ["cuoi"],
+      "emojis": ["🤣🤣🤣", "😂", "🤪"],
+      "start_time": 0.2,
+      "duration": 3.5
+    },
+    {
+      "file": "Cat-cryingwith-a-phone-meme-Green-Screen-1.mov",
+      "tags": ["khoc"],
+      "emojis": ["😭", "📱", "😿"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Ronaldo-Crying-After-Being-Eliminated-by-Spain-Green-Screen.mov",
+      "tags": ["khoc"],
+      "emojis": ["😭", "😢", "💔"],
+      "start_time": 1.0,
+      "duration": 3.5
+    },
+    {
+      "file": "Sad-cat-crying-meme-Green-Screen.mp4",
+      "tags": ["khoc"],
+      "emojis": ["😿", "🥺", "😭"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Why-You-Crying-Green-Screen.mp4",
+      "tags": ["khoc"],
+      "emojis": ["😭", "😢", "🥺"],
+      "start_time": 0.2,
+      "duration": 3.5
+    },
+    {
+      "file": "Awkward-cat-meme-green-screen.mp4",
+      "tags": ["ngai"],
+      "emojis": ["😬", "😳", "🌚"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Dog-giving-awkward-side-eye-Green-Screen-Meme.mp4",
+      "tags": ["can", "ngai"],
+      "emojis": ["👀", "😒", "😐", "😑"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Confused-Nick-Young-Green-Screen.mp4",
+      "tags": ["nghi"],
+      "emojis": ["❓", "🤔", "🤨"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Tai-Lung-Confused-Green-Screen-Meme.mp4",
+      "tags": ["nghi"],
+      "emojis": ["🧐", "🤔", "⁉️"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "disappointed-cat-green-screen.mp4",
+      "tags": ["bat_luc"],
+      "emojis": ["🤦", "😮‍💨", "💀"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Nice-Green-Screen-Effect.mp4",
+      "tags": ["ok"],
+      "emojis": ["👍", "👌", "✅"],
+      "start_time": 0.2,
+      "duration": 3.0
+    },
+    {
+      "file": "Thats-Why-He-s-the-GOAT-Green-Screen.mp4",
+      "tags": ["ok"],
+      "emojis": ["🐐", "🔥", "💯", "🏆"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Cat-shocked-meme-Green-Screen-.mp4",
+      "tags": ["soc"],
+      "emojis": ["🙀", "😱", "😳"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Ishowspeed-shocked.mp4",
+      "tags": ["soc"],
+      "emojis": ["😱", "🤯", "🗣️"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Kai-Cenat-Shocked-Green-Screen-Meme.mp4",
+      "tags": ["soc"],
+      "emojis": ["😱", "💥", "😳"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Shocked-Cat-Meme-Green-Screen.mov",
+      "tags": ["soc"],
+      "emojis": ["🙀", "👀", "😳"],
+      "start_time": 0.2,
+      "duration": 3.5
+    },
+    {
+      "file": "Shocked-cat-with-big-eyes-Green-Screen.mp4",
+      "tags": ["soc"],
+      "emojis": ["👁️👄👁️", "😳", "🙀"],
+      "start_time": 0.5,
+      "duration": 3.5
+    },
+    {
+      "file": "Bird-in-love-meme-green-screen.mp4",
+      "tags": ["yeu"],
+      "emojis": ["❤️", "🥰", "😍"],
+      "start_time": 0.2,
+      "duration": 3.5
+    },
+    {
+      "file": "Repo-I-love-Meme-Green-Screen.mp4",
+      "tags": ["yeu"],
+      "emojis": ["💖", "💕", "😘"],
+      "start_time": 0.5,
+      "duration": 3.5
+    }
+  ]
+}

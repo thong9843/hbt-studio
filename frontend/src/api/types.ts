@@ -634,6 +634,7 @@ export interface PostvQuickOptions {
   outro?: boolean;
   background?: 'auto' | 'manual';
   music?: 'auto' | 'none';
+  music_id?: string | null;
   max_comments?: number;
   target_seconds?: number;
   pick_mode?: 'auto' | 'manual';
@@ -645,8 +646,10 @@ export interface PostvPickComment {
   age?: string | null;
   text: string;
   likes?: number | null;
+  replies?: number | null;
+  parent?: string | null;
   picked?: boolean;
-  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | null;
+  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | 'rác' | null;
 }
 
 export interface PostvPickData {
@@ -713,6 +716,7 @@ export interface ChatDoc {
   slug?: string;
   title: string;
   platform: 'messenger' | 'zalo';
+  target_duration_s?: number | null;
   characters: ChatCharacter[];
   messages: ChatMessage[];
   warnings?: string[];
@@ -725,12 +729,29 @@ export interface ChatDoc {
   };
 }
 
+export interface ChattingJobInfo {
+  job_id?: string;
+  slug: string;
+  status: 'running' | 'done' | 'failed';
+  phase?: string;
+  percent: number;
+  text?: string;
+  error?: string;
+  video?: string;
+  timings?: {
+    llm_s?: number;
+    fetch_s?: number;
+    llm_tokens?: number;
+  };
+}
+
 export interface ChatProjectDetail {
   slug: string;
-  doc: ChatDoc;
+  doc: ChatDoc | null;
   source: Record<string, unknown> | null;
   renders: Array<Record<string, unknown>>;
   preview_url: string | null;
+  job?: ChattingJobInfo | null;
 }
 
 export interface ChatProjectSummary {
@@ -746,4 +767,5 @@ export interface ChatProjectSummary {
     fetch_s?: number;
     llm_tokens?: number;
   };
+  job?: ChattingJobInfo | null;
 }

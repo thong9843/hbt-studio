@@ -109,7 +109,13 @@ def _source(project: PostvProject, span: CardSpan) -> dict:
     if span.kind == "post":
         return project.post.model_dump()
     if span.kind == "comment":
-        return next(c.model_dump() for c in project.comments if c.id == span.ref)
+        comment = next(c for c in project.comments if c.id == span.ref)
+        data = comment.model_dump()
+        if comment.parent:
+            parent = next((c for c in project.comments if c.id == comment.parent), None)
+            if parent is not None:
+                data["_parent_card"] = parent.model_dump()
+        return data
     return {"hook": project.hook.model_dump(), "post": project.post.text}
 
 
@@ -138,6 +144,7 @@ def build_asset(
     count_up: bool,
     out_dir: Path,
     bounce: bool = False,
+    project_dir: Path | None = None,
 ) -> CardAsset:
     """Vẽ (hoặc dùng lại) các trạng thái PNG của thẻ; cache theo nội dung, không theo thời gian.
 
@@ -145,6 +152,8 @@ def build_asset(
     giữa một khung trong suốt cỡ cố định, vì ffmpeg không đổi cỡ khung giữa dòng được qua `fade`
     và `overlay`; mọi trạng thái cùng cỡ nên ghép bằng vị trí cố định."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    if project_dir is None and (out_dir.parent.parent / "project.json").is_file():
+        project_dir = out_dir.parent.parent
     source = _source(project, span)
     stats = [source.get(k) for k in ("likes", "replies", "reposts", "shares")]
     counting = count_up and span.kind != "hook" and any(stats)
@@ -164,7 +173,9 @@ def build_asset(
         data = json.loads(meta_path.read_text(encoding="utf-8"))
         if all((out_dir / n).is_file() for n, _ in data["states"]):
             return CardAsset([(out_dir / n, t) for n, t in data["states"]], *data["box"])
-    final = render_project_card(project, span.kind, span.ref, tpl, censor, censor_mode, 1.0)
+    final = render_project_card(
+        project, span.kind, span.ref, tpl, censor, censor_mode, 1.0, project_dir=project_dir
+    )
     box = final.getchannel("A").getbbox()
     if box is None:
         raise ValueError("Thẻ trống")
@@ -180,7 +191,14 @@ def build_asset(
             image = final
             if k_count < 1.0:
                 image = render_project_card(
-                    project, span.kind, span.ref, tpl, censor, censor_mode, k_count
+                    project,
+                    span.kind,
+                    span.ref,
+                    tpl,
+                    censor,
+                    censor_mode,
+                    k_count,
+                    project_dir=project_dir,
                 )
             by_scale[k_count] = image.crop(box)
         crop = by_scale[k_count]
