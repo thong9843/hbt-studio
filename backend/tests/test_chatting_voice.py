@@ -21,7 +21,7 @@ def test_clean_spoken_text_seen_and_status():
 def test_clean_spoken_text_sticker_and_meta():
     # Mô tả sticker trong ngoặc
     assert clean_spoken_text("Haha vui quá (cười)") == "Haha vui quá"
-    assert clean_spoken_text("[sticker: soc] Thật không thể tin được!") == "Thật không thể tin được!"
+    assert clean_spoken_text("[sticker: soc] Thật không tin được!") == "Thật không tin được!"
     assert clean_spoken_text("[ảnh]") == ""
     assert clean_spoken_text("(khóc) buồn ghê") == "buồn ghê"
 
