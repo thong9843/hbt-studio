@@ -26,6 +26,14 @@ EMBED_URL = re.compile(r'data-text-post-permalink="([^"]+)"')
 EMBED_BLOCK = re.compile(r"<blockquote\b.*?</blockquote>", re.IGNORECASE | re.DOTALL)
 EMBED_SCRIPT = re.compile(r"<script\b.*?</script>", re.IGNORECASE | re.DOTALL)
 REPLY_TO = re.compile(r"^(reply to|trả lời)\b.*", re.IGNORECASE)
+REPLY_TARGET = re.compile(r"^(?:reply to|trả lời)\s+@?([A-Za-z0-9._]{1,30})$", re.IGNORECASE)
+IMAGE_URL_RE = re.compile(
+    r"(?:!\[[^\]]*\]\((https?://[^\s)]+)\)"
+    r"|<img[^>]+src=[\"'](https?://[^\"']+)[\"']"
+    r"|(https?://\S+\.(?:jpg|jpeg|png|webp)(?:\?\S*)?)"
+    r"|(https?://[^\s\"'<>]*(?:cdninstagram|fbcdn)[^\s\"'<>]+))",
+    re.IGNORECASE,
+)
 NOISE = {"translate", "dịch", "top", "view activity", "xem hoạt động", "pinned", "đã ghim"}
 AGE_UNIT = {"s": "giây", "m": "phút", "h": "giờ", "d": "ngày", "w": "tuần"}
 
@@ -42,6 +50,7 @@ class ParsedComment(ParsedPost):
     picked: bool = False
     parent: str | None = None  # id bình luận được trả lời (dòng đầu bắt đầu bằng ">"), tối đa 1 cấp
     likes: int = 0
+    replies: int = 0
 
 
 class StatHint(BaseModel):
@@ -55,6 +64,7 @@ class ParseResult(BaseModel):
     source_url: str | None = None
     post: ParsedPost | None = None
     comments: list[ParsedComment] = []
+    media_urls: list[str] = []
     hints: list[StatHint] = []
     warnings: list[str] = []
 
@@ -101,11 +111,24 @@ def _is_noise(line: str) -> bool:
     return s.casefold() in NOISE or bool(REPLY_TO.match(s))
 
 
+def _extract_media_urls(raw_lines: list[str]) -> list[str]:
+    """Trích xuất URL ảnh đính kèm trong các dòng của khối bài viết."""
+    urls: list[str] = []
+    for line in raw_lines:
+        for m in IMAGE_URL_RE.finditer(line):
+            url = next((g for g in m.groups() if g), "")
+            if url and "profile" not in url.lower() and url not in urls:
+                urls.append(url.rstrip(".,)\"'>"))
+    return urls
+
+
 def _clean_body(lines: list[str], block: int, hints: list[StatHint]) -> str:
     kept: list[str] = []
     for raw in lines:
         s = raw.strip()
         if _is_noise(s):
+            continue
+        if block == 0 and re.fullmatch(r"!\[[^\]]*\]\(https?://[^\s)]+\)", s):
             continue
         kept.append(s)
     # dòng chỉ gồm số/số kèm K, M: có thể là số liệu → báo, bỏ khỏi chữ (trừ khi là cả thân)
@@ -125,25 +148,39 @@ def _strip_reply_mark(block: ParsedPost) -> bool:
     """Dòng đầu của thân bắt đầu bằng `>` thì bỏ dấu đó (và khoảng trắng sau nó), trả True."""
     if not block.text.startswith(">"):
         return False
-    block.text = block.text[1:].lstrip(" 	")
+    block.text = block.text[1:].lstrip(" \t")
     return True
 
 
-def _reply_parents(blocks: list[ParsedPost], warnings: list[str]) -> dict[int, str]:
+def _reply_parents(
+    blocks: list[ParsedPost],
+    warnings: list[str],
+    reply_targets: dict[int, str] | None = None,
+) -> dict[int, str]:
     """`{chỉ số bình luận: id bình luận mẹ}`. Dấu `>` trả lời bình luận phẳng ngay trước; ở khối
-    đầu hoặc khi bình luận trước đã là một trả lời (quá 1 cấp) thì coi là phẳng và cảnh báo."""
+    đầu hoặc khi bình luận trước đã là một trả lời (quá 1 cấp) thì coi là phẳng và cảnh báo.
+    Cũng nhận diện dòng `Reply to @handle` / `Trả lời @handle` để nối với bình luận cha."""
     parents: dict[int, str] = {}
     for i, block in enumerate(blocks):
-        if not _strip_reply_mark(block):
+        if _strip_reply_mark(block):
+            if i == 0:
+                warnings.append(
+                    "Dấu '>' ở bài gốc không có nghĩa trả lời: đã bỏ dấu và coi là phẳng."
+                )
+            elif i == 1:
+                warnings.append("Bình luận 1 có dấu '>' nhưng ngay trước là bài gốc: coi là phẳng.")
+            elif (i - 1) in parents:
+                warnings.append(f"Bình luận {i} trả lời một trả lời (quá 1 cấp): coi là phẳng.")
+            else:
+                parents[i] = f"c{i - 1}"
             continue
-        if i == 0:
-            warnings.append("Dấu '>' ở bài gốc không có nghĩa trả lời: đã bỏ dấu và coi là phẳng.")
-        elif i == 1:
-            warnings.append("Bình luận 1 có dấu '>' nhưng ngay trước là bài gốc: coi là phẳng.")
-        elif (i - 1) in parents:
-            warnings.append(f"Bình luận {i} trả lời một trả lời (quá 1 cấp): coi là phẳng.")
-        else:
-            parents[i] = f"c{i - 1}"
+
+        if reply_targets and i in reply_targets and i >= 2:
+            target = reply_targets[i].casefold()
+            for j in range(i - 1, 0, -1):
+                if j not in parents and blocks[j].handle.lstrip("@").casefold() == target:
+                    parents[i] = f"c{j}"
+                    break
     return parents
 
 
@@ -191,19 +228,30 @@ def parse_threads_text(raw: str) -> ParseResult:
 
     hints: list[StatHint] = []
     blocks: list[ParsedPost] = []
+    reply_targets: dict[int, str] = {}
+    post_media_urls: list[str] = []
     for n, start in enumerate(headers):
         end = headers[n + 1] if n + 1 < len(headers) else len(lines)
         handle = lines[start].strip().lstrip("@")
         age = age_label(lines[start + 1].strip())
-        body = _clean_body(lines[start + 2 : end], n, hints)
+        chunk = lines[start + 2 : end]
+        if n == 0:
+            post_media_urls = _extract_media_urls(chunk)
+        else:
+            first_non_empty = next((ln.strip() for ln in chunk if ln.strip()), "")
+            tm = REPLY_TARGET.match(first_non_empty)
+            if tm:
+                reply_targets[n] = tm.group(1)
+        body = _clean_body(chunk, n, hints)
         blocks.append(ParsedPost(handle=handle, age=age, text=body))
 
     post = blocks[0]
-    replies = _reply_parents(blocks, warnings)
+    replies = _reply_parents(blocks, warnings, reply_targets)
     comments = []
     for i, b in enumerate(blocks[1:], 1):
-        block_likes = [h.value for h in hints if h.block == i and h.value is not None]
-        likes = block_likes[0] if block_likes else 0
+        block_stats = [h.value for h in hints if h.block == i and h.value is not None]
+        likes = block_stats[0] if block_stats else 0
+        reply_cnt = block_stats[1] if len(block_stats) > 1 else 0
         comments.append(
             ParsedComment(
                 id=f"c{i}",
@@ -214,6 +262,7 @@ def parse_threads_text(raw: str) -> ParseResult:
                 picked=i <= DEFAULT_PICKED,
                 parent=replies.get(i),
                 likes=likes,
+                replies=reply_cnt,
             )
         )
     if not comments:
@@ -227,6 +276,7 @@ def parse_threads_text(raw: str) -> ParseResult:
         source_url=source_url,
         post=post,
         comments=comments,
+        media_urls=post_media_urls,
         hints=hints,
         warnings=warnings,
     )

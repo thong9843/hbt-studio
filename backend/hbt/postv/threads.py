@@ -7,13 +7,22 @@ không tốn RAM, không cần mở trình duyệt và không cần token API ch
 from __future__ import annotations
 
 import html
+import io
+import json
+import logging
 import re
 import unicodedata
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from PIL import Image
 
 from hbt.postv.parse import ParsedComment, ParsedPost, ParseResult
+
+log = logging.getLogger(__name__)
 
 BOT_HEADERS = {
     "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
@@ -111,21 +120,8 @@ def extract_threads_post(url: str, timeout: float = 15.0) -> ParseResult:
     if not caption:
         warnings.append("Bài viết không có chữ hoặc chỉ chứa hình ảnh.")
 
-    # 4. Trích xuất ảnh gốc từ CDN
-    media_urls: list[str] = []
-    og_img = og.get("og:image")
-    if og_img:
-        media_urls.append(og_img)
-
-    cdn_pattern = re.compile(r'https://[^"\',\s\\]+(?:cdninstagram|fbcdn)[^"\',\s\\]+')
-    for script in re.findall(
-        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', raw_html, re.DOTALL
-    ):
-        if "carousel_media" in script or "image_versions2" in script:
-            for img_m in cdn_pattern.finditer(script):
-                u = img_m.group(0).replace("\\/", "/")
-                if u not in media_urls and "640x640" not in u and "profile" not in u:
-                    media_urls.append(u)
+    # 4. Trích xuất toàn bộ mảng ảnh/media đính kèm từ bài gốc Threads
+    media_urls = _extract_post_media_urls(raw_html, og.get("og:image"))
 
     post = ParsedPost(
         handle=handle,
@@ -133,7 +129,7 @@ def extract_threads_post(url: str, timeout: float = 15.0) -> ParseResult:
         text=caption,
     )
 
-    # 5. Trích xuất bình luận từ dữ liệu JSON nhúng trong HTML của Threads
+    # 5. Trích xuất bình luận (kèm cấu trúc reply) từ JSON nhúng trong HTML Threads
     comments = _extract_comments_from_html(raw_html, handle, caption)
 
     # Nếu không có bình luận qua JSON, kiểm tra bài đối thoại (Chồng: / Vợ: ...)
@@ -173,75 +169,247 @@ def extract_threads_post(url: str, timeout: float = 15.0) -> ParseResult:
         source_url=clean_url,
         post=post,
         comments=comments,
+        media_urls=media_urls,
         hints=[],
         warnings=warnings,
     )
 
 
+def _is_avatar_url(url: str) -> bool:
+    low = url.lower()
+    return "profile" in low or "t51.2885-19" in low or "s150x150" in low or "150x150" in low
+
+
+def _best_candidate_url(image_versions2: Any) -> str | None:
+    if not isinstance(image_versions2, dict):
+        return None
+    cands = image_versions2.get("candidates")
+    if not isinstance(cands, list) or not cands:
+        return None
+    best_url: str | None = None
+    best_area = -1
+    for item in cands:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.startswith("http") or _is_avatar_url(url):
+            continue
+        w = int(item.get("width") or 0)
+        h = int(item.get("height") or 0)
+        area = w * h
+        if area > best_area or best_url is None:
+            best_area = area
+            best_url = url.replace("\\/", "/")
+    return best_url
+
+
+def _extract_post_media_urls(raw_html: str, og_img: str | None = None) -> list[str]:
+    """Bóc tách toàn bộ mảng URL ảnh đính kèm của bài viết gốc từ JSON nhúng & OpenGraph."""
+    urls: list[str] = []
+
+    def _add(u: str | None) -> None:
+        if not u or not isinstance(u, str):
+            return
+        clean = u.replace("\\/", "/").strip()
+        if clean.startswith("http") and not _is_avatar_url(clean) and clean not in urls:
+            urls.append(clean)
+
+    def _walk_media(node: Any) -> None:
+        if isinstance(node, dict):
+            carousel = node.get("carousel_media")
+            if isinstance(carousel, list) and carousel:
+                for item in carousel:
+                    if isinstance(item, dict):
+                        _add(_best_candidate_url(item.get("image_versions2")))
+                        if isinstance(item.get("display_url"), str):
+                            _add(item.get("display_url"))
+                return
+
+            if "image_versions2" in node:
+                _add(_best_candidate_url(node.get("image_versions2")))
+
+            for k, v in node.items():
+                if k in ("user", "owner", "profile_pic_url", "hd_profile_pic_url_info"):
+                    continue
+                if isinstance(v, (dict, list)):
+                    _walk_media(v)
+        elif isinstance(node, list):
+            for item in node:
+                if isinstance(item, (dict, list)):
+                    _walk_media(item)
+
+    cdn_pattern = re.compile(r'https://[^"\',\s\\]+(?:cdninstagram|fbcdn)[^"\',\s\\]+')
+    for script in re.findall(
+        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', raw_html, re.DOTALL
+    ):
+        if any(k in script for k in ("carousel_media", "image_versions2", "display_url")):
+            try:
+                _walk_media(json.loads(script))
+            except Exception:
+                for img_m in cdn_pattern.finditer(script):
+                    u = img_m.group(0).replace("\\/", "/")
+                    if "640x640" not in u:
+                        _add(u)
+
+    if not urls and og_img:
+        _add(og_img)
+    elif og_img and not _is_avatar_url(og_img):
+        # Đưa og:image vào đầu nếu hợp lệ mà chưa có ảnh trùng
+        if og_img not in urls and "640x640" not in og_img:
+            urls.insert(0, og_img)
+
+    return urls
+
+
+def download_post_media(
+    urls: Sequence[str],
+    media_dir: Path,
+    timeout: float = 15.0,
+    max_items: int = 8,
+) -> list[Path]:
+    """Tải danh sách ảnh đính kèm bài gốc về `media_dir` và xác thực bằng Pillow."""
+    if not urls:
+        return []
+    media_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+    fmt_ext = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+
+    try:
+        with httpx.Client(follow_redirects=True, timeout=timeout, headers=BOT_HEADERS) as client:
+            for idx, url in enumerate(urls[:max_items], 1):
+                try:
+                    resp = client.get(url)
+                    if resp.status_code != 200 or not resp.content:
+                        continue
+                    with Image.open(io.BytesIO(resp.content)) as im:
+                        im.verify()
+                    with Image.open(io.BytesIO(resp.content)) as im2:
+                        ext = fmt_ext.get((im2.format or "").upper(), ".jpg")
+                    target = media_dir / f"img_{idx:02d}{ext}"
+                    target.write_bytes(resp.content)
+                    saved.append(target)
+                except Exception as exc:
+                    log.debug("Không tải được ảnh bài viết (%s): %s", url, exc)
+                    continue
+    except Exception as exc:
+        log.warning("Lỗi tải media bài viết: %s", exc)
+    return saved
+
+
+def _extract_post_node_fields(node: dict[str, Any]) -> tuple[str, str, int, int] | None:
+    """Trích xuất (username, clean_text, likes, reply_count) từ 1 node JSON của Threads."""
+    user = node.get("user")
+    caption = node.get("caption")
+    username = None
+    text = None
+
+    if isinstance(user, dict):
+        username = user.get("username")
+    elif isinstance(node.get("username"), str):
+        username = node.get("username")
+
+    if isinstance(caption, dict):
+        text = caption.get("text")
+    elif isinstance(caption, str):
+        text = caption
+    elif isinstance(node.get("text"), str) and username:
+        text = node.get("text")
+
+    if not username or not isinstance(text, str):
+        return None
+    clean_text = unicodedata.normalize("NFC", text).strip()
+    if not clean_text:
+        return None
+
+    likes = int(node.get("like_count") or 0) if isinstance(node.get("like_count"), int) else 0
+    rep_info = node.get("text_post_app_info") or {}
+    replies = 0
+    if isinstance(rep_info, dict) and isinstance(rep_info.get("direct_reply_count"), int):
+        replies = rep_info["direct_reply_count"]
+    elif isinstance(node.get("reply_count"), int):
+        replies = node["reply_count"]
+
+    return str(username).lstrip("@"), clean_text, likes, replies
+
+
 def _extract_comments_from_html(
     raw_html: str, main_handle: str, main_text: str
 ) -> list[ParsedComment]:
-    """Trích xuất bình luận công khai từ các thẻ script application/json trong HTML của Threads."""
-    import json
-    from typing import Any
-
+    """Trích xuất bình luận công khai (kèm cây reply 1 cấp) từ thẻ script application/json."""
     comments: list[ParsedComment] = []
     seen_texts: set[str] = set()
     norm_main = unicodedata.normalize("NFC", main_text).strip().casefold()
     if norm_main:
         seen_texts.add(norm_main)
 
-    def _walk(node: Any) -> None:
+    def _add_comment(
+        clean_user: str,
+        clean_text: str,
+        likes: int,
+        replies: int,
+        parent_id: str | None = None,
+    ) -> str | None:
+        norm_text = clean_text.casefold()
+        if norm_text in seen_texts:
+            return None
+        seen_texts.add(norm_text)
+        cid = f"c{len(comments) + 1}"
+        comments.append(
+            ParsedComment(
+                id=cid,
+                handle=clean_user,
+                age="vừa xong",
+                text=clean_text,
+                likes=likes,
+                replies=replies,
+                parent=parent_id,
+                same_author=(clean_user.casefold() == main_handle.lstrip("@").casefold()),
+                picked=False,
+            )
+        )
+        return cid
+
+    def _walk(node: Any, current_parent: str | None = None) -> None:
         if isinstance(node, dict):
-            user = node.get("user")
-            caption = node.get("caption")
-            username = None
-            text = None
-            likes = 0
+            fields = _extract_post_node_fields(node)
+            added_id = None
+            if fields:
+                clean_user, clean_text, likes, replies = fields
+                added_id = _add_comment(clean_user, clean_text, likes, replies, current_parent)
 
-            if isinstance(user, dict):
-                username = user.get("username")
-            elif isinstance(node.get("username"), str):
-                username = node.get("username")
-
-            if isinstance(caption, dict):
-                text = caption.get("text")
-            elif isinstance(caption, str):
-                text = caption
-            elif isinstance(node.get("text"), str) and username:
-                text = node.get("text")
-
-            if isinstance(node.get("like_count"), int):
-                likes = node.get("like_count")
-
-            if username and text and isinstance(text, str):
-                clean_text = unicodedata.normalize("NFC", text).strip()
-                norm_text = clean_text.casefold()
-                if clean_text and norm_text not in seen_texts:
-                    seen_texts.add(norm_text)
-                    cid = f"c{len(comments) + 1}"
-                    clean_user = str(username).lstrip("@")
-                    comments.append(
-                        ParsedComment(
-                            id=cid,
-                            handle=clean_user,
-                            age="vừa xong",
-                            text=clean_text,
-                            likes=likes,
-                            same_author=(
-                                clean_user.casefold() == main_handle.lstrip("@").casefold()
-                            ),
-                            picked=False,
-                        )
-                    )
-
-            for v in node.values():
-                if isinstance(v, (dict, list)):
-                    _walk(v)
+            # Kiểm tra các chuỗi lồng (thread_items / direct_replies)
+            nested_parent = added_id or current_parent
+            for key, v in node.items():
+                if not isinstance(v, (dict, list)):
+                    continue
+                if key in ("direct_replies", "reply_posts") and nested_parent:
+                    _walk(v, current_parent=nested_parent)
+                elif key == "thread_items" and isinstance(v, list) and v:
+                    # Trong thread_items: phần tử đầu là cha, phần tử sau là reply nối tiếp
+                    first_parent: str | None = current_parent
+                    for idx, item in enumerate(v):
+                        if not isinstance(item, dict):
+                            continue
+                        post_obj = item.get("post") if isinstance(item.get("post"), dict) else item
+                        f2 = _extract_post_node_fields(post_obj)
+                        if f2:
+                            cid = _add_comment(
+                                f2[0],
+                                f2[1],
+                                f2[2],
+                                f2[3],
+                                parent_id=first_parent if idx > 0 else current_parent,
+                            )
+                            if idx == 0 and cid:
+                                first_parent = cid
+                        else:
+                            _walk(item, current_parent=first_parent if idx > 0 else current_parent)
+                else:
+                    _walk(v, current_parent=current_parent)
         elif isinstance(node, list):
             for item in node:
                 if isinstance(item, (dict, list)):
-                    _walk(item)
+                    _walk(item, current_parent=current_parent)
 
     for script in re.findall(
         r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', raw_html, re.DOTALL

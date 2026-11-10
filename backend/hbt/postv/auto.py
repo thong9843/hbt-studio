@@ -12,6 +12,7 @@ Chuỗi 6 bước tự động:
 from __future__ import annotations
 
 import logging
+import math
 import random
 import re
 import threading
@@ -27,7 +28,12 @@ from hbt.postv.backgrounds import BackgroundLibrary
 from hbt.postv.models import PostvComment, PostvPost, PostvProject, PostvSegment
 from hbt.postv.parse import parse_threads_text
 from hbt.postv.script import estimate_seconds, voice_chars
-from hbt.postv.threads import ThreadsFetchError, extract_threads_post, is_threads_url
+from hbt.postv.threads import (
+    ThreadsFetchError,
+    download_post_media,
+    extract_threads_post,
+    is_threads_url,
+)
 from hbt.postv.voice import VoiceUnavailable, build_plan, synthesize_plan
 from hbt.storage import Storage
 
@@ -268,11 +274,22 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
     if not isinstance(project, PostvProject):
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
+    pdir = job_manager.storage.project_dir(job.slug)
+    raw_media_urls = list(
+        getattr(parsed, "media_urls", []) or getattr(parsed.post, "media_urls", []) or []
+    )
+    saved_media_rel: list[str] = []
+    if raw_media_urls:
+        saved_files = download_post_media(raw_media_urls, pdir / "media", timeout=15.0)
+        saved_media_rel = [f"media/{p.name}" for p in saved_files]
+
     project.source.url = parsed.source_url or (clean_input if is_threads_url(clean_input) else "")
     project.post = PostvPost(
         handle=parsed.post.handle,
         age=parsed.post.age,
         text=parsed.post.text,
+        media=saved_media_rel,
+        media_urls=raw_media_urls,
     )
     project.comments = [
         PostvComment(
@@ -283,6 +300,7 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
             parent=c.parent,
             picked=True,
             likes=getattr(c, "likes", None),
+            replies=getattr(c, "replies", None),
         )
         for c in parsed.comments
     ]
@@ -308,6 +326,40 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
 
 
 MIN_COMMENT_LENGTH = 8
+MAX_AUTO_COMMENTS = 30
+SPAM_COMMENT_RE = re.compile(
+    r"(?:^|\b)(?:check\s+bio|link\s+(?:ở|trong|dưới)?\s*bio|ib\s+zalo|"
+    r"tương\s+tác\s+chéo|follow\s+chéo|fl\s+chéo|mua\s+ngay\s+tại|shopee\.vn|lazada\.vn)(?:\b|$)"
+    r"|^https?://\S+$"
+    r"|^(?:@[A-Za-z0-9._]+\s*)+$",
+    re.IGNORECASE,
+)
+HUMOR_CUE_RE = re.compile(
+    r"(?:haha|hihi|kaka|huhu|cười|chết\s*cười|vãi|vcl|vl|ảo\s*thật|lú\s*luôn|"
+    r"ét\s*ô\s*ét|chịu\s*luôn|toang|😂|🤣|💀|😭|🤡|🤯|🤬|😡|😱)",
+    re.IGNORECASE,
+)
+
+
+def _is_spam_comment(text: str) -> bool:
+    return bool(SPAM_COMMENT_RE.search(text.strip()))
+
+
+def score_comment(comment: PostvComment, child_count: int = 0) -> float:
+    """Chấm điểm bình luận theo tương tác (like/reply), độ dài có nghĩa và độ hài hước/cao trào."""
+    likes = float(comment.likes or 0)
+    replies = float(comment.replies or 0) + float(child_count)
+    text = comment.text.strip()
+    clean_len = len(re.sub(r"\s+", " ", text))
+
+    # Tương tác cao luôn là tín hiệu hàng đầu nhưng không áp đảo hoàn toàn comment dài/hài hước
+    like_score = math.log1p(max(likes, 0.0)) * 12.0 + min(likes, 5000.0) * 0.02
+    reply_score = replies * 8.0
+    length_bonus = min(max(clean_len - 12, 0), 220) * 0.08
+    humor_hits = len(HUMOR_CUE_RE.findall(text))
+    humor_bonus = min(humor_hits, 3) * 6.0
+    punct_bonus = 2.0 if ("!" in text or "?" in text) else 0.0
+    return like_score + reply_score + length_bonus + humor_bonus + punct_bonus
 
 
 def inspect_comment_filter(
@@ -315,10 +367,12 @@ def inspect_comment_filter(
     seen: set[str],
     censor_matchers: list[Any] | None = None,
 ) -> str | None:
-    """Trả về lý do không đạt ('ngắn', 'trùng', 'từ nhạy cảm'), None nếu hợp lệ."""
+    """Trả về lý do không đạt ('ngắn', 'trùng', 'từ nhạy cảm', 'rác'), None nếu hợp lệ."""
     raw = comment.text.strip()
     if len(raw) < MIN_COMMENT_LENGTH or not any(ch.isalnum() for ch in raw):
         return "ngắn"
+    if _is_spam_comment(raw):
+        return "rác"
     norm = re.sub(r"\s+", " ", unicodedata.normalize("NFC", raw).casefold()).strip()
     if norm in seen:
         return "trùng"
@@ -366,7 +420,7 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     if not isinstance(project, PostvProject):
         raise RuntimeError(f"'{job.slug}' không phải dự án PostV")
 
-    target_seconds = float(options.get("target_seconds", 75))
+    target_seconds = float(options.get("target_seconds", 90))
 
     # Chuẩn bị bộ lọc từ mức chặn nếu có
     matchers = None
@@ -387,19 +441,50 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     current_chars = voice_chars(project.post.text)
     current_sec = estimate_seconds(current_chars)
 
-    # Sắp xếp bình luận hợp lệ: nhiều like nhất, không có like thì theo thứ tự ban đầu
-    sorted_comments = sorted(
-        valid_comments,
-        key=lambda c: (-(c.likes if c.likes is not None else -1), c.id),
+    # Nhóm cấu trúc Threaded Tree: cha ở trên, reply con nổi bật bám ngay dưới cha
+    valid_ids = {c.id for c in valid_comments}
+    children_by_parent: dict[str, list[PostvComment]] = {}
+    top_level: list[PostvComment] = []
+    for c in valid_comments:
+        if c.parent and c.parent in valid_ids:
+            children_by_parent.setdefault(c.parent, []).append(c)
+        else:
+            top_level.append(c)
+
+    for pid, kids in children_by_parent.items():
+        children_by_parent[pid] = sorted(kids, key=lambda k: score_comment(k), reverse=True)
+
+    sorted_roots = sorted(
+        top_level,
+        key=lambda c: (-score_comment(c, len(children_by_parent.get(c.id, []))), c.id),
     )
 
+    picked_ordered: list[PostvComment] = []
     picked_ids: set[str] = set()
-    for comment in sorted_comments:
-        if current_sec >= target_seconds:
+    max_pick = int(options.get("max_comments") or MAX_AUTO_COMMENTS)
+    max_pick = max(1, min(max_pick, MAX_AUTO_COMMENTS))
+
+    for root in sorted_roots:
+        if current_sec >= target_seconds or len(picked_ids) >= max_pick:
             break
-        picked_ids.add(comment.id)
-        current_chars += voice_chars(comment.text)
+        picked_ids.add(root.id)
+        picked_ordered.append(root)
+        current_chars += voice_chars(root.text)
         current_sec = estimate_seconds(current_chars)
+
+        # Sổ tối đa 2 reply con nổi bật ngay dưới comment cha nếu vẫn trong quỹ thời lượng
+        for kid in children_by_parent.get(root.id, [])[:2]:
+            if current_sec >= target_seconds or len(picked_ids) >= max_pick:
+                break
+            picked_ids.add(kid.id)
+            picked_ordered.append(kid)
+            current_chars += voice_chars(kid.text)
+            current_sec = estimate_seconds(current_chars)
+
+    pick_mode = options.get("pick_mode", "auto")
+    if pick_mode == "auto" and picked_ordered:
+        rest = [c for c in project.comments if c.id not in picked_ids]
+        project.comments = picked_ordered + rest
 
     # Kiểm tra lý do lọc cho từng bình luận để UI hiển thị
     filter_seen: set[str] = set()
@@ -414,6 +499,8 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
                 "age": c.age,
                 "text": c.text,
                 "likes": c.likes if c.likes is not None else 0,
+                "replies": c.replies if c.replies is not None else 0,
+                "parent": c.parent,
                 "picked": c.picked,
                 "filter_reason": reason,
             }
@@ -432,7 +519,6 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         "estimated_seconds": current_sec,
     }
 
-    pick_mode = options.get("pick_mode", "auto")
     if pick_mode == "manual":
         job._pick_event = threading.Event()
         job._waiting_pick_data = data
@@ -471,6 +557,73 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         )
 
 
+def _infer_meme_tag(text: str) -> str | None:
+    low = text.lower()
+    if any(k in low for k in ("haha", "hihi", "cười", "chết cười", "hài", "vãi", "vl", "vcl")):
+        return "cuoi"
+    if any(k in low for k in ("sốc", "ảo", "lú", "wtf", "ủa", "trời ơi", "thật sự", "!")):
+        return "soc"
+    if any(k in low for k in ("tức", "bực", "điên", "ghét", "cay", "phẫn nộ")):
+        return "gian"
+    if any(k in low for k in ("khóc", "huhu", "buồn", "thương", "tội")):
+        return "khoc"
+    if any(k in low for k in ("bất lực", "chịu", "toang", "hết cứu", "bó tay")):
+        return "bat_luc"
+    return None
+
+
+def _assign_climax_memes(
+    segments: list[PostvSegment],
+    comments_by_id: dict[str, PostvComment],
+    library_dir: Path | None,
+) -> None:
+    """Gắn meme phông xanh từ library/memes/ cho các comment cao trào, xoay vòng không lặp lại."""
+    if not library_dir:
+        return
+    try:
+        from hbt.chatting.stickers import find_meme_by_emojis, load_memes_metadata, pick_sticker
+    except Exception:
+        return
+
+    meta_list = load_memes_metadata(library_dir)
+    if not meta_list:
+        return
+
+    used_memes: set[str] = set()
+    comment_segs = [(i, s) for i, s in enumerate(segments) if s.role == "comment" and s.ref]
+    if not comment_segs:
+        return
+
+    # Ưu tiên các bình luận điểm cao hoặc có emoji/từ cảm xúc cao trào, cách nhau ít nhất 1 đoạn
+    ranked = sorted(
+        comment_segs,
+        key=lambda pair: (
+            score_comment(comments_by_id[pair[1].ref]) if pair[1].ref in comments_by_id else 0.0
+        ),
+        reverse=True,
+    )
+    max_memes = max(1, min(6, (len(comment_segs) + 2) // 3))
+    assigned_indices: set[int] = set()
+
+    for seg_idx, seg in ranked:
+        if len(assigned_indices) >= max_memes:
+            break
+        # Tránh gắn 2 meme liền kề nhau liên tiếp
+        if (seg_idx - 1) in assigned_indices or (seg_idx + 1) in assigned_indices:
+            continue
+        comment = comments_by_id.get(seg.ref or "")
+        text = comment.text if comment else seg.voice
+        chosen_path = find_meme_by_emojis(library_dir, text, used_memes=used_memes)
+        if chosen_path is None:
+            tag = _infer_meme_tag(text)
+            if tag:
+                chosen_path = pick_sticker(library_dir, tag, used_memes=used_memes)
+        if chosen_path is not None and chosen_path.is_file():
+            seg.meme_id = chosen_path.name
+            seg.meme_pos = "bottom_right" if len(assigned_indices) % 2 == 0 else "bottom_center"
+            assigned_indices.add(seg_idx)
+
+
 def _step_script(
     job_manager: Any, job: Any, options: dict[str, Any], logger: logging.Logger
 ) -> None:
@@ -501,6 +654,9 @@ def _step_script(
         segments.append(
             PostvSegment(role="comment", card="comment", voice=c.text, ref=c.id, speaker=c.id)
         )
+
+    comments_by_id = {c.id: c for c in picked_comments}
+    _assign_climax_memes(segments, comments_by_id, getattr(job_manager, "library_dir", None))
 
     project.segments = segments
 
@@ -687,7 +843,7 @@ def _step_render(
 
     picked_cnt = len([c for c in project.comments if c.picked])
     total_cnt = len(project.comments)
-    target_sec = float(options.get("target_seconds", 75))
+    target_sec = float(options.get("target_seconds", 90))
     duration_rounded = round(res.duration, 1)
 
     warning_msg = None

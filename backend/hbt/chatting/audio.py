@@ -86,14 +86,16 @@ def render_bgm_playlist_wav(
     out_wav: Path,
     crossfade_s: float = 2.0,
     fade_out_s: float = 2.0,
+    volume_db: float | None = -20.0,
 ) -> Path:
-    """Nối các bài nhạc trong playlist bằng FFmpeg acrossfade=d=2.0, fade-out cuối & chuẩn -20dB."""
+    """Nối các bài nhạc trong playlist bằng FFmpeg acrossfade=d=2.0 & chuẩn âm lượng."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     if not playlist:
         raise ValueError("Playlist BGM trống")
 
     actual_fade_out = min(fade_out_s, max(0.2, total_duration * 0.4))
     fade_start = max(0.0, total_duration - actual_fade_out)
+    vol_suffix = f",volume={volume_db:g}dB" if volume_db is not None else ""
 
     cmd: list[str] = ["-y", "-v", "error"]
     if len(playlist) == 1:
@@ -105,7 +107,7 @@ def render_bgm_playlist_wav(
             f"[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS,"
             f"afade=t=in:d=0.8,afade=t=out:st={fade_start:.3f}:d={actual_fade_out:.3f},"
-            f"loudnorm=I=-14:TP=-2:LRA=11,volume=-20dB[bgm]"
+            f"loudnorm=I=-14:TP=-2:LRA=11{vol_suffix}[bgm]"
         )
     else:
         filter_parts: list[str] = []
@@ -131,7 +133,7 @@ def render_bgm_playlist_wav(
         filter_parts.append(
             f"[{prev_label}]atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS,"
             f"afade=t=in:d=0.8,afade=t=out:st={fade_start:.3f}:d={actual_fade_out:.3f},"
-            f"loudnorm=I=-14:TP=-2:LRA=11,volume=-20dB[bgm]"
+            f"loudnorm=I=-14:TP=-2:LRA=11{vol_suffix}[bgm]"
         )
         af = ";".join(filter_parts)
 

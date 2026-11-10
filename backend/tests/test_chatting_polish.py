@@ -108,4 +108,3 @@ def test_60fps_spring_and_cubic_ease_out_and_float_scroll():
     img = renderer.render_chat_view(msgs, scroll_offset_override=45.67)
     assert img.size == (1080, 1920)
     img.close()
-

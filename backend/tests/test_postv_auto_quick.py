@@ -626,3 +626,119 @@ def test_api_postv_pick_endpoints(client):
     updated_proj = hbt_state.storage.load_any(slug)
     assert updated_proj.comments[0].id == "c2" and updated_proj.comments[0].picked is True
     assert updated_proj.comments[1].id == "c1" and updated_proj.comments[1].picked is True
+
+
+def test_smart_comment_ranking_up_to_30_and_spam_filter(tmp_path):
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick, inspect_comment_filter
+
+    # Lọc spam / rác
+    seen = set()
+    spam = PostvComment(id="s1", handle="bot", text="Inbox check bio zalo 09123", age="1m")
+    assert inspect_comment_filter(spam, seen) == "rác"
+
+    # Tạo 25 bình luận + reply để thử bóc tách vượt ngưỡng 7-8 cũ cho mục tiêu 180s
+    proj = PostvProject(version=1, kind="postv", slug="long-thread", title="Long Thread")
+    proj.post.text = "Bài viết gốc ngắn mở màn câu chuyện."
+    comments = []
+    for i in range(1, 22):
+        comments.append(
+            PostvComment(
+                id=f"c{i}",
+                handle=f"user{i}",
+                text=f"Bình luận thứ {i} chia sẻ câu chuyện rất dài và thú vị haha! 😂 " * 2,
+                likes=500 if i == 21 else i * 15,
+                replies=5 if i == 21 else (3 if i % 4 == 0 else 0),
+            )
+        )
+    # Reply con cho c21 (comment có like cao nhất)
+    comments.append(
+        PostvComment(
+            id="r1",
+            handle="replier1",
+            text="Đồng quan điểm luôn á trời ơi, đọc tới đây mà cười xỉu haha 😂",
+            parent="c21",
+            likes=80,
+        )
+    )
+    proj.comments = comments
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    jm.postv_words = None
+    job = Job("job-30", "long-thread", False, 60, True, False, kind="postv_quick")
+
+    _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": 180}, MagicMock())
+    picked = [c for c in proj.comments if c.picked]
+    assert len(picked) >= 15
+    # c21 (nhiều like nhất) ở đầu, và r1 (reply của c21) bám ngay dưới nó
+    assert picked[0].id == "c21"
+    assert picked[1].id == "r1"
+
+
+def test_climax_meme_assignment_non_repeating_and_playlist_bgm(tmp_path):
+    import json
+
+    from hbt.chatting.audio import build_bgm_playlist
+    from hbt.postv.auto import _assign_climax_memes
+    from hbt.postv.models import PostvSegment
+    from tests.helpers import write_wav
+
+    lib = tmp_path / "library"
+    memes_dir = lib / "memes"
+    music_dir = lib / "music"
+    memes_dir.mkdir(parents=True)
+    music_dir.mkdir(parents=True)
+
+    (memes_dir / "cat1.mp4").write_bytes(b"mp4-1")
+    (memes_dir / "cat2.mp4").write_bytes(b"mp4-2")
+    (memes_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "memes": [
+                    {
+                        "file": "cat1.mp4",
+                        "tags": ["cuoi"],
+                        "emojis": ["😂"],
+                        "start_time": 0.5,
+                        "duration": 3.0,
+                    },
+                    {
+                        "file": "cat2.mp4",
+                        "tags": ["cuoi"],
+                        "emojis": ["😂"],
+                        "start_time": 0.0,
+                        "duration": 2.5,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    comments = [
+        PostvComment(
+            id=f"c{i}",
+            handle=f"u{i}",
+            text=f"Bình luận hài hước quá trời 😂 số {i}",
+            likes=100 - i,
+        )
+        for i in range(1, 7)
+    ]
+    by_id = {c.id: c for c in comments}
+    segs = [PostvSegment(role="post", card="post", voice="Post gốc", speaker="post")]
+    for c in comments:
+        segs.append(
+            PostvSegment(role="comment", card="comment", voice=c.text, ref=c.id, speaker=c.id)
+        )
+
+    _assign_climax_memes(segs, by_id, lib)
+    assigned_memes = [s.meme_id for s in segs if s.meme_id]
+    assert len(assigned_memes) == 2
+    assert len(set(assigned_memes)) == 2  # Xoay vòng không lặp lại
+
+    # Kiểm tra Playlist BGM tạo đủ độ dài phủ kín 150s từ các bài ngắn hơn
+    write_wav(music_dir / "track1.wav", [("tone", 2.0, 0.3)], freq=220)
+    write_wav(music_dir / "track2.wav", [("tone", 2.0, 0.3)], freq=330)
+    playlist = build_bgm_playlist(lib, "track1.wav", 5.0, crossfade_s=0.5)
+    assert len(playlist) >= 2

@@ -645,8 +645,10 @@ export interface PostvPickComment {
   age?: string | null;
   text: string;
   likes?: number | null;
+  replies?: number | null;
+  parent?: string | null;
   picked?: boolean;
-  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | null;
+  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | 'rác' | null;
 }
 
 export interface PostvPickData {

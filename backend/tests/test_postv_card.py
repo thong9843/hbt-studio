@@ -301,6 +301,26 @@ def test_api_card_follows_the_template_and_draws_replies_indented(client, pv):  
         == load_template("fixed_card")["card"]["top"]
     )
     reply = png(client, kind="comment", ref="c2", layer="true")
-    assert bbox(reply)[0] == 72 + TPL["reply"]["line_x"]  # có đường kẻ dọc
     flat = png(client, kind="comment", ref="c1", layer="true")
+    # Cây Thread gộp thẻ cha ở trên + đường kẻ chỉ nhánh + thẻ reply sổ xuống dưới
     assert bbox(flat)[0] == 72
+    assert bbox(reply)[0] == 72
+    assert bbox(reply)[3] > bbox(flat)[3] + 80
+    # Đường kẻ dọc nối xuống thẻ reply có màu line_color tại x_line
+    x_line = 72 + TPL["reply"]["line_x"] + TPL["reply"]["line_w"] // 2
+    y_conn = bbox(flat)[3] + 10
+    assert reply.getpixel((x_line, y_conn))[3] > 0
+
+
+def test_post_card_renders_attached_media_below_text(tmp_path):
+    media_img = tmp_path / "photo.png"
+    Image.new("RGB", (800, 600), (240, 100, 50)).save(media_img)
+
+    no_media, low_no_media = render_card("user_a", "1h", "Bài viết có ảnh đính kèm.")
+    with_media, low_with_media = render_card(
+        "user_a", "1h", "Bài viết có ảnh đính kèm.", media_paths=[media_img]
+    )
+    assert low_with_media > low_no_media + 150
+    assert diff(no_media, with_media) is not None
+    # Góc bo tròn trên khối ảnh phải ăn khớp mịn màng với nền thẻ (không phải khung vuông thô)
+    assert bbox(with_media)[0] == 72 and bbox(with_media)[2] == 72 + 936

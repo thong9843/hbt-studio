@@ -71,11 +71,18 @@ describe('PostvQuickPage', () => {
 
     // Hàng chip tuỳ chọn
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByLabelText('Giọng');
+      expect(voiceSelect).toHaveValue('adam-bua');
     });
+    const durationSelect = screen.getByLabelText('Thời lượng');
+    expect(durationSelect).toHaveValue('90');
+    expect(screen.getByRole('option', { name: '1m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '1m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '3m' })).toBeInTheDocument();
+
     expect(screen.getByText(/Bình luận: Tự động/)).toBeInTheDocument();
-    expect(screen.getByText('75 s')).toBeInTheDocument();
     expect(screen.getByText('Nhạc: Tự chọn')).toBeInTheDocument();
     expect(screen.getByText('60 fps')).toBeInTheDocument();
     expect(screen.getByText('Outro: Bật')).toBeInTheDocument();
@@ -114,6 +121,10 @@ describe('PostvQuickPage', () => {
     const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
     const submitBtn = screen.getByRole('button', { name: 'Tạo video' });
 
+    // Đổi thời lượng sang 3m (180s)
+    const durationSelect = screen.getByLabelText('Thời lượng');
+    await user.selectOptions(durationSelect, '180');
+
     // Gõ link vào
     await user.type(textarea, 'https://www.threads.net/@user/post/xyz');
     expect(submitBtn).toBeEnabled();
@@ -126,7 +137,7 @@ describe('PostvQuickPage', () => {
     });
     expect(sent.body?.url).toBe('https://www.threads.net/@user/post/xyz');
     expect(sent.body?.options?.fps).toBe(60);
-    expect(sent.body?.options?.target_seconds).toBe(75);
+    expect(sent.body?.options?.target_seconds).toBe(180);
     expect(sent.body?.options?.pick_mode).toBe('auto');
   });
 
@@ -421,10 +432,10 @@ describe('PostvQuickPage', () => {
     page();
 
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByLabelText('Giọng');
+      expect(voiceSelect).toHaveValue('adam-bua');
     });
-    const voiceSelect = screen.getByRole('combobox');
+    const voiceSelect = screen.getByLabelText('Giọng');
 
     // Đổi giọng sang Mai Anh
     await user.selectOptions(voiceSelect, 'mai-anh');

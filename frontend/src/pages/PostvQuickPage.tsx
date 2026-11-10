@@ -36,6 +36,14 @@ const T = vi.postvQuick;
 
 const STAGE_ORDER: PostvStage[] = ['fetch', 'pick', 'script', 'voice', 'render', 'done'];
 
+const DURATION_CHOICES = [
+  { value: 60, label: T.options.duration60 },
+  { value: 90, label: T.options.duration90 },
+  { value: 120, label: T.options.duration120 },
+  { value: 150, label: T.options.duration150 },
+  { value: 180, label: T.options.duration180 },
+] as const;
+
 interface PickSnippetData {
   handle?: string;
   snippet?: string;
@@ -90,7 +98,7 @@ export function PostvQuickPage() {
   // Trạng thái nhập liệu & tuỳ chọn
   const [input, setInput] = useState('');
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null);
-  const [duration, setDuration] = useState<number>(75);
+  const [duration, setDuration] = useState<number>(90);
   const [music, setMusic] = useState<'auto' | 'none'>('auto');
   const [fps, setFps] = useState<30 | 60>(60);
   const [outro, setOutro] = useState<boolean>(true);
@@ -865,23 +873,23 @@ export function PostvQuickPage() {
                     )}
                   </div>
 
-                  {/* Độ dài */}
-                  <div className="flex items-center gap-1 rounded-full bg-subtle p-0.5">
-                    {[60, 75, 90].map((sec) => (
-                      <button
-                        key={sec}
-                        type="button"
-                        onClick={() => setDuration(sec)}
-                        className={cx(
-                          'rounded-full px-2.5 py-0.5 text-tiny font-semibold transition-all',
-                          duration === sec
-                            ? 'bg-card text-ink shadow-sm'
-                            : 'text-muted hover:text-ink',
-                        )}
-                      >
-                        {sec} s
-                      </button>
-                    ))}
+                  {/* Dropdown Thời lượng (1m - 3m) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                    <span className="shrink-0">⏱️ {T.options.duration}:</span>
+                    <Select
+                      aria-label={T.options.duration}
+                      variant="compact"
+                      autoWidth
+                      value={String(duration)}
+                      onChange={(e) => setDuration(Number(e.target.value))}
+                      className="border-0 bg-transparent min-h-[28px]"
+                    >
+                      {DURATION_CHOICES.map((opt) => (
+                        <option key={opt.value} value={String(opt.value)}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
 
                   {/* Nhạc */}
@@ -984,6 +992,7 @@ export function PostvQuickPage() {
                       onDrop={(e) => handleDrop(e, index)}
                       className={cx(
                         'group flex items-start gap-3 rounded-xl border p-3 transition-all',
+                        c.parent && 'ml-6 border-l-2 border-l-brand/50',
                         isChecked ? 'border-line bg-card' : 'border-line/60 bg-card/50',
                         hasReason && 'opacity-60 bg-subtle/30 border-dashed',
                       )}
@@ -1025,6 +1034,7 @@ export function PostvQuickPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-small text-ink">@{c.handle}</span>
+                          {c.parent && <Badge tone="neutral">{T.manualPick.replyBadge}</Badge>}
                           {c.likes != null && c.likes > 0 && (
                             <span className="text-tiny text-muted">
                               ❤️ {T.manualPick.likes(c.likes)}
