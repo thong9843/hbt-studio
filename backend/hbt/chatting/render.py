@@ -274,22 +274,14 @@ def render_chat_video(
             break
 
         stk_img = None
-        is_cutin_state = state.is_meme_cutin
-        if state.active_sticker:
+        # Chỉ nạp ảnh sticker cho sticker tĩnh trong dòng chat (không phải video meme cut-in)
+        if state.active_sticker and not state.is_meme_cutin:
             stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
             if stk_file and stk_file.is_file():
-                meta = get_meme_metadata(library_dir, stk_file.name)
-                start_time = float(meta.get("start_time", 0.0))
                 try:
-                    stk_img = load_sticker_or_meme_image(
-                        stk_file, cache_dir=build_dir / "memes_cache", start_time=start_time
-                    )
+                    stk_img = load_sticker_or_meme_image(stk_file)
                 except Exception:
                     pass
-            # Fallback an toàn: nếu không có file meme hợp lệ,
-            # tắt cutin để không gián đoạn hoặc lỗi khung hình
-            if stk_img is None:
-                is_cutin_state = False
 
         visible_msgs = doc.messages[: state.visible_count]
         frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
@@ -404,7 +396,7 @@ def render_chat_video(
                 scale_msg=state.scale_last_msg,
                 s_seen=state.show_seen,
                 s_scroll=current_scroll_y,
-                is_cutin=is_cutin_state,
+                is_cutin=False,
                 dur=frame_dur,
             )
 
@@ -484,6 +476,23 @@ def render_chat_video(
     render_id = int(time.time())
     out_mp4 = renders_dir / f"render_{render_id}.mp4"
 
+    # Thu thập danh sách meme video chuyển động cần chèn bằng colorkey
+    meme_clips: list[tuple[Path, float, float, float]] = []
+    for state in timeline.states:
+        if state.start_time >= target_duration:
+            break
+        if state.is_meme_cutin and state.active_sticker:
+            stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
+            if (
+                stk_file
+                and stk_file.is_file()
+                and stk_file.suffix.lower() in (".mp4", ".mov", ".webm")
+            ):
+                meta = get_meme_metadata(library_dir, stk_file.name)
+                ss_start = float(meta.get("start_time", 0.0))
+                m_dur = min(state.duration, max(0.5, target_duration - state.start_time))
+                meme_clips.append((stk_file, state.start_time, m_dur, ss_start))
+
     cmd: list[str] = [
         "-y",
         "-v",
@@ -503,18 +512,41 @@ def render_chat_video(
     # Input 2: Audio
     cmd.extend(["-i", str(final_audio)])
 
-    # Filter complex
-    filter_complex = (
-        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}[bg];"
-        f"[1:v]scale={width}:{height}[fg];"
-        f"[bg][fg]overlay=0:0[v]"
-    )
+    # Inputs 3+: Clip meme MP4 (nhảy thẳng vào mốc cao trào)
+    meme_input_start = 3
+    for m_path, _m_start, m_dur, ss_start in meme_clips:
+        cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
+
+    # Filter complex: Background + Chat + Colorkey Meme Overlay chuyển động
+    filter_parts: list[str] = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1,fps={fps}[bg]",
+        f"[1:v]scale={width}:{height}[fg]",
+        "[bg][fg]overlay=0:0[v_base]",
+    ]
+    prev_v = "v_base"
+    m_w = 720 if not preview else 360
+
+    for k, (_m_path, m_start, m_dur, _ss_start) in enumerate(meme_clips):
+        inp_idx = meme_input_start + k
+        filter_parts.append(
+            f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
+            f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+        )
+        next_v = f"v_meme{k}"
+        filter_parts.append(
+            f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
+            f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})':eof_action=pass[{next_v}]"
+        )
+        prev_v = next_v
+
+    filter_complex = ";".join(filter_parts)
     cmd.extend(
         [
             "-filter_complex",
             filter_complex,
             "-map",
-            "[v]",
+            f"[{prev_v}]",
             "-map",
             "2:a",
             "-c:v",

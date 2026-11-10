@@ -154,43 +154,32 @@ def draw_asymmetric_rounded_rect(
     radii: tuple[int, int, int, int],  # (r_top_left, r_top_right, r_bottom_right, r_bottom_left)
     fill: str | tuple[int, ...],
 ) -> None:
-    """Vẽ hình chữ nhật với 4 góc bo bất đối xứng cho grouped bubble."""
+    """Vẽ hình chữ nhật với 4 góc bo bất đối xứng cho grouped bubble không bị khuyết góc."""
     x0, y0, x1, y1 = box
-    w, h = x1 - x0, y1 - y0
+    w, h = max(1, x1 - x0), max(1, y1 - y0)
     r_tl, r_tr, r_br, r_bl = radii
     max_r = min(w // 2, h // 2)
-    r_tl = min(r_tl, max_r)
-    r_tr = min(r_tr, max_r)
-    r_br = min(r_br, max_r)
-    r_bl = min(r_bl, max_r)
+    r_tl = max(0, min(r_tl, max_r))
+    r_tr = max(0, min(r_tr, max_r))
+    r_br = max(0, min(r_br, max_r))
+    r_bl = max(0, min(r_bl, max_r))
 
-    mask = Image.new("L", (w, h), 0)
+    mask = Image.new("L", (w, h), 255)
     md = ImageDraw.Draw(mask)
 
-    # Vùng trung tâm
-    md.rectangle([max(r_tl, r_bl), 0, w - max(r_tr, r_br), h], fill=255)
-    md.rectangle([0, max(r_tl, r_tr), w, h - max(r_bl, r_br)], fill=255)
-
-    # 4 góc
+    # Độc lập từng góc: xóa ô vuông góc rồi vẽ pieslice chuẩn xác
     if r_tl > 0:
+        md.rectangle([0, 0, r_tl, r_tl], fill=0)
         md.pieslice([0, 0, r_tl * 2, r_tl * 2], 180, 270, fill=255)
-    else:
-        md.rectangle([0, 0, max_r, max_r], fill=255)
-
     if r_tr > 0:
+        md.rectangle([w - r_tr, 0, w, r_tr], fill=0)
         md.pieslice([w - r_tr * 2, 0, w, r_tr * 2], 270, 360, fill=255)
-    else:
-        md.rectangle([w - max_r, 0, w, max_r], fill=255)
-
     if r_br > 0:
+        md.rectangle([w - r_br, h - r_br, w, h], fill=0)
         md.pieslice([w - r_br * 2, h - r_br * 2, w, h], 0, 90, fill=255)
-    else:
-        md.rectangle([w - max_r, h - max_r, w, h], fill=255)
-
     if r_bl > 0:
+        md.rectangle([0, h - r_bl, r_bl, h], fill=0)
         md.pieslice([0, h - r_bl * 2, r_bl * 2, h], 90, 180, fill=255)
-    else:
-        md.rectangle([0, h - max_r, max_r, h], fill=255)
 
     color_layer = Image.new("RGBA", (w, h), fill)
     img.paste(color_layer, (x0, y0), mask)
@@ -549,7 +538,7 @@ class ChatFrameRenderer:
                 b_img = b_img.resize((sw, sh), Image.Resampling.LANCZOS)
                 bubble_w, bubble_h = sw, sh
 
-            # Định vị trí x, y trên content_img
+            # Định vị trí x, y trên content_img và kẹp toạ độ an toàn
             if is_right:
                 bx = frame_w - 28 - bubble_w
             else:
@@ -559,10 +548,14 @@ class ChatFrameRenderer:
                     av_img = self.avatar_images.get(msg.from_)
                     fallback_char = Character(id="?", name="?", side="left")
                     av = make_circular_avatar(av_img, char or fallback_char, av_size)
-                    content_img.paste(av, (24, cur_y + bubble_h - av_size), av)
+                    av_y = max(0, cur_y + bubble_h - av_size)
+                    content_img.paste(av, (24, av_y), av)
                 bx = 24 + av_size + 14
 
-            content_img.paste(b_img, (bx, cur_y), b_img)
+            # Kẹp toạ độ (clamping) không âm hoặc tràn khung
+            bx = max(0, min(frame_w - bubble_w, bx))
+            by = max(0, cur_y)
+            content_img.paste(b_img, (bx, by), b_img)
             cur_y += bubble_h + 16
 
         # Nếu có typing indicator
@@ -633,23 +626,5 @@ class ChatFrameRenderer:
         # Bo góc toàn bộ khung chat
         mask = draw_rounded_mask((frame_w, frame_max_h), self.theme.corner_radius)
         canvas.paste(frame_surface, (frame_x, top_y), mask)
-
-        # Nếu là Meme Cut-in: Phóng to meme giữa toàn bộ khung hình 1080x1920
-        if active_sticker_img is not None and is_meme_cutin:
-            # Lớp phủ mờ nền đen 40% tạo kịch tính
-            dim_overlay = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 110))
-            canvas.paste(dim_overlay, (0, 0), dim_overlay)
-
-            # Phóng to meme tối đa 720x720
-            sw, sh = active_sticker_img.size
-            max_dim = 720.0
-            scale_factor = min(max_dim / sw, max_dim / sh)
-            mw = max(10, int(sw * scale_factor))
-            mh = max(10, int(sh * scale_factor))
-            cutin_img = active_sticker_img.resize((mw, mh), Image.Resampling.LANCZOS)
-
-            cx = (CANVAS_WIDTH - mw) // 2
-            cy = (CANVAS_HEIGHT - mh) // 2
-            canvas.paste(cutin_img, (cx, cy), cutin_img)
 
         return canvas

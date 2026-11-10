@@ -196,5 +196,6 @@ def delete_project(workspace_dir: Path, slug: str) -> None:
             return
         except OSError:
             if attempt == 14:
-                raise
-            time.sleep(0.2)
+                shutil.rmtree(project_dir, ignore_errors=True)
+                return
+            time.sleep(0.3)
