@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -145,3 +146,126 @@ def fetch_threads(url: str, timeout: float = 15.0) -> dict[str, str | list[str]]
         }
     except Exception as e:
         raise ValueError(f"Không lấy được bài Threads: {e}") from e
+
+
+def parse_direct_script(text: str) -> dict[str, Any]:
+    """Bóc tách kịch bản dán trực tiếp (Bypass LLM) thành danh sách nhân vật và lời thoại."""
+    from hbt.chatting.models import VALID_STICKER_TAGS
+
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("Văn bản kịch bản trống")
+
+    # Mẫu nhận diện: "Tên: Lời thoại", "[Tên]: Lời thoại", hoặc "Tên - Lời thoại"
+    dialogue_pattern = re.compile(
+        r"^(?:\[(?P<b_name>[^\]]{1,24})\]|(?P<p_name>[^:\-–—]{1,24}))\s*[:\-–—]\s*(?P<speech>.*)$"
+    )
+    sticker_bracket_pat = re.compile(r"\[(?:sticker:\s*|nhãn dán:\s*)?([^\]]+)\]", re.IGNORECASE)
+    sticker_paren_pat = re.compile(r"\(([^)]+)\)$", re.IGNORECASE)
+
+    tag_map = {
+        "cuoi": "cuoi",
+        "cười": "cuoi",
+        "haha": "cuoi",
+        "khoc": "khoc",
+        "khóc": "khoc",
+        "gian": "gian",
+        "giận": "gian",
+        "ngai": "ngai",
+        "ngại": "ngai",
+        "yeu": "yeu",
+        "yêu": "yeu",
+        "tim": "yeu",
+        "soc": "soc",
+        "sốc": "soc",
+        "nghi": "nghi",
+        "nghĩ": "nghi",
+        "can": "can",
+        "cạn": "can",
+        "cang": "can",
+        "bat_luc": "bat_luc",
+        "bất lực": "bat_luc",
+        "batluc": "bat_luc",
+        "ok": "ok",
+    }
+
+    raw_dialogues: list[tuple[str, str, str | None]] = []
+    char_names: list[str] = []
+
+    last_speaker = "Người 1"
+
+    for line in lines:
+        m = dialogue_pattern.match(line)
+        if m:
+            speaker = (m.group("b_name") or m.group("p_name") or "").strip()
+            speech = (m.group("speech") or "").strip()
+        else:
+            speaker = last_speaker
+            speech = line
+
+        last_speaker = speaker
+        if speaker not in char_names:
+            char_names.append(speaker)
+
+        # Kiểm tra sticker
+        sticker: str | None = None
+        sm = sticker_bracket_pat.search(speech)
+        if sm:
+            raw_tag = sm.group(1).strip().lower()
+            normalized_tag = tag_map.get(raw_tag)
+            if normalized_tag and normalized_tag in VALID_STICKER_TAGS:
+                sticker = normalized_tag
+                speech = sticker_bracket_pat.sub("", speech).strip()
+        if not sticker:
+            spm = sticker_paren_pat.search(speech)
+            if spm:
+                raw_tag = spm.group(1).strip().lower()
+                normalized_tag = tag_map.get(raw_tag)
+                if normalized_tag and normalized_tag in VALID_STICKER_TAGS:
+                    sticker = normalized_tag
+                    speech = sticker_paren_pat.sub("", speech).strip()
+
+        if speech or sticker:
+            raw_dialogues.append((speaker, speech, sticker))
+
+    if not raw_dialogues:
+        raise ValueError("Không tìm thấy câu thoại nào hợp lệ trong kịch bản")
+
+    # Phân vai: người đầu tiên bên phải ("me"), những người sau bên trái
+    default_voices = ["Adam bựa", "Trúc Ly", "Thiện Minh", "Mai Anh", "Hải Đăng"]
+    characters: list[dict[str, Any]] = []
+    char_id_map: dict[str, str] = {}
+
+    for idx, name in enumerate(char_names):
+        cid = f"c{idx + 1}" if idx > 0 else "me"
+        side = "right" if idx == 0 else "left"
+        voice = default_voices[idx % len(default_voices)]
+        char_id_map[name] = cid
+        characters.append(
+            {
+                "id": cid,
+                "name": name,
+                "side": side,
+                "voice": voice,
+                "avatar": None,
+            }
+        )
+
+    messages: list[dict[str, Any]] = []
+    for speaker, speech, sticker in raw_dialogues:
+        cid = char_id_map.get(speaker, "me")
+        messages.append(
+            {
+                "from": cid,
+                "text": speech or "...",
+                "sticker": sticker,
+            }
+        )
+
+    title = f"Đoạn chat của {char_names[0]}" if char_names else "Kịch bản trực tiếp"
+    return {
+        "title": title,
+        "characters": characters,
+        "messages": messages,
+        "warnings": [],
+    }

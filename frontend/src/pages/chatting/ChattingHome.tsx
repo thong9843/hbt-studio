@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
-import { Progress } from '../../components/ui/Progress';
 import { FilmIcon, MessagesSquareIcon, TrashIcon } from '../../components/icons';
 
 const BACKGROUND_OPTIONS = [
@@ -19,13 +18,8 @@ export function ChattingHome() {
   const [inputText, setInputText] = useState('');
   const [platform, setPlatform] = useState<'messenger' | 'zalo'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
-  const [activeJob, setActiveJob] = useState<{ id: string; slug: string } | null>(null);
-  const [jobProgress, setJobProgress] = useState<{
-    percent: number;
-    phase: string;
-    text: string;
-    llmSeconds?: number;
-  } | null>(null);
+  const [isDirectScript, setIsDirectScript] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // 1. Kiểm tra trạng thái Ollama
@@ -39,68 +33,26 @@ export function ChattingHome() {
   const { data: projects, refetch: refetchProjects } = useQuery({
     queryKey: ['chattingProjects'],
     queryFn: api.listChattingProjects,
-    staleTime: 5000,
+    staleTime: 3000,
   });
-
-  // Lắng nghe tiến độ SSE khi có activeJob
-  useEffect(() => {
-    if (!activeJob) return;
-    const es = new EventSource(`/api/jobs/${activeJob.id}/events`);
-
-    es.addEventListener('progress', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const timings = data.timings;
-        setJobProgress({
-          percent: data.percent ?? data.progress ?? 0,
-          phase: data.phase ?? data.step ?? '',
-          text: data.text ?? data.message ?? '',
-          llmSeconds: timings?.llm_s,
-        });
-      } catch (err) {
-        console.error('SSE parse error:', err);
-      }
-    });
-
-    es.addEventListener('end', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        es.close();
-        if (data.status === 'done') {
-          refetchProjects();
-          navigate(`/chatting/${activeJob.slug}`);
-        } else if (data.status === 'failed') {
-          setErrorMsg(data.error || 'Dựng video thất bại');
-          setActiveJob(null);
-        }
-      } catch {
-        es.close();
-      }
-    });
-
-    es.onerror = () => {
-      es.close();
-    };
-
-    return () => {
-      es.close();
-    };
-  }, [activeJob, navigate, refetchProjects]);
 
   const handleCreate = async () => {
     if (!inputText.trim()) return;
     setErrorMsg(null);
+    setIsSubmitting(true);
     try {
       const res = await api.createChattingProject({
         input: inputText.trim(),
         platform,
         background,
+        direct_script: isDirectScript,
       });
-      setActiveJob({ id: res.job_id, slug: res.slug });
-      setJobProgress({ percent: 5, phase: 'fetch', text: 'Bắt đầu xử lý...' });
+      // Điều hướng ngay sang trang chi tiết để theo dõi tiến trình
+      navigate(`/chatting/${res.slug}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg || 'Không thể tạo video Chatting');
+      setIsSubmitting(false);
     }
   };
 
@@ -115,7 +67,7 @@ export function ChattingHome() {
     }
   };
 
-  const isOllamaMissing = !isStatusLoading && status && !status.ollama_running;
+  const isOllamaMissing = !isDirectScript && !isStatusLoading && status && !status.ollama_running;
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
@@ -127,7 +79,7 @@ export function ChattingHome() {
         <p className="mt-2 text-muted">Tạo video dạng tin nhắn Messenger / Zalo nhanh chóng</p>
       </div>
 
-      {/* Màn trống cảnh báo nếu Ollama chưa chạy */}
+      {/* Màn trống cảnh báo nếu Ollama chưa chạy và đang ở chế độ AI */}
       {isOllamaMissing && (
         <div className="mb-6 rounded-2xl border border-line bg-tint-yel p-6 text-center text-text">
           <p className="text-body font-bold">{vi.chatting.noOllama}</p>
@@ -136,19 +88,48 @@ export function ChattingHome() {
             <code className="font-mono font-bold">
               {status?.model_name || 'qwen2.5:3b-instruct'}
             </code>{' '}
-            đã được tải.
+            đã được tải. Hoặc bạn có thể chọn tab <b>Dán kịch bản trực tiếp (Bypass LLM)</b> để tạo
+            video ngay mà không cần Ollama.
           </p>
         </div>
       )}
 
       {/* Ô nhập lớn ở giữa bo 28 */}
       <div className="rounded-[28px] border border-line bg-card p-6 shadow-sm">
+        {/* Tab chọn chế độ: Viết AI vs Kịch bản trực tiếp */}
+        <div className="mb-4 flex items-center gap-2 border-b border-line pb-3">
+          <button
+            type="button"
+            onClick={() => setIsDirectScript(false)}
+            className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
+              !isDirectScript ? 'bg-text text-bg shadow-sm' : 'bg-soft text-muted hover:text-text'
+            }`}
+          >
+            Từ bài viết / Link (AI viết)
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsDirectScript(true)}
+            className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
+              isDirectScript
+                ? 'bg-accent text-white shadow-sm'
+                : 'bg-soft text-muted hover:text-text'
+            }`}
+          >
+            Dán kịch bản trực tiếp (Bypass LLM)
+          </button>
+        </div>
+
         <textarea
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder={vi.chatting.inputPlaceholder}
-          rows={5}
-          disabled={!!activeJob}
+          placeholder={
+            isDirectScript
+              ? 'Dán kịch bản đối thoại trực tiếp không qua AI, ví dụ:\nMinh: Ê tối nay đi ăn lẩu không?\nLinh: Mấy giờ thế? Tao đang bận tí việc (ngại)\nMinh: Tầm 7 rưỡi nhé!\nLinh: Ok chốt luôn [sticker: ok]'
+              : vi.chatting.inputPlaceholder
+          }
+          rows={6}
+          disabled={isSubmitting}
           className="w-full resize-none rounded-2xl border border-line bg-soft-2 p-4 text-body font-medium outline-none focus:border-text focus:ring-2 focus:ring-accent"
         />
 
@@ -205,57 +186,12 @@ export function ChattingHome() {
             tone="brand"
             size="lg"
             onClick={handleCreate}
-            disabled={!inputText.trim() || !!activeJob}
+            disabled={!inputText.trim() || isSubmitting}
             className="rounded-full px-8 font-extrabold shadow-md"
           >
-            {activeJob ? 'Đang tạo…' : vi.chatting.createBtn}
+            {isSubmitting ? 'Đang khởi tạo…' : vi.chatting.createBtn}
           </Button>
         </div>
-
-        {/* Thanh tiến độ 4 pha */}
-        {activeJob && jobProgress && (
-          <div className="mt-6 rounded-2xl border border-line bg-soft-2 p-4">
-            <div className="mb-2 flex items-center justify-between text-tiny">
-              <span className="font-bold text-text">{jobProgress.text}</span>
-              <span className="font-extrabold tabular-nums text-accent">
-                {jobProgress.percent}%
-              </span>
-            </div>
-            <Progress value={jobProgress.percent} label={jobProgress.text || 'Tiến độ'} />
-
-            <div className="mt-3 grid grid-cols-4 gap-2 text-center text-tiny font-semibold">
-              <div className={jobProgress.percent >= 20 ? 'font-bold text-text' : 'text-muted'}>
-                1. {vi.chatting.phases.fetch}
-              </div>
-              <div
-                className={
-                  jobProgress.percent >= 30 && jobProgress.percent <= 60
-                    ? 'font-bold text-accent'
-                    : jobProgress.percent > 60
-                      ? 'font-bold text-text'
-                      : 'text-muted'
-                }
-              >
-                2. {vi.chatting.phases.llm}{' '}
-                {jobProgress.llmSeconds ? `(${jobProgress.llmSeconds}s)` : ''}
-              </div>
-              <div
-                className={
-                  jobProgress.percent > 60 && jobProgress.percent < 85
-                    ? 'font-bold text-accent'
-                    : jobProgress.percent >= 85
-                      ? 'font-bold text-text'
-                      : 'text-muted'
-                }
-              >
-                3. {vi.chatting.phases.voice}
-              </div>
-              <div className={jobProgress.percent >= 85 ? 'font-bold text-accent' : 'text-muted'}>
-                4. {vi.chatting.phases.preview}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Lưới dự án Chatting gần đây */}
@@ -263,44 +199,56 @@ export function ChattingHome() {
         <h2 className="mb-4 text-xl font-bold">{vi.chatting.recentProjects}</h2>
         {projects && projects.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {projects.map((p) => (
-              <div
-                key={p.slug}
-                onClick={() => navigate(`/chatting/${p.slug}`)}
-                className="group relative flex cursor-pointer flex-col justify-between rounded-2xl border border-line bg-card p-4 transition-all hover:-translate-y-1 hover:shadow-md"
-              >
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="rounded-full bg-soft px-2.5 py-0.5 text-tiny font-bold uppercase text-muted">
-                      {p.platform}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDelete(p.slug, e)}
-                      title="Xoá dự án"
-                      className="rounded-full p-1 text-muted opacity-0 hover:bg-soft hover:text-danger group-hover:opacity-100"
-                    >
-                      <TrashIcon size={16} />
-                    </button>
+            {projects.map((p) => {
+              const isJobRunning = p.job && p.job.status === 'running';
+              return (
+                <div
+                  key={p.slug}
+                  onClick={() => navigate(`/chatting/${p.slug}`)}
+                  className="group relative flex cursor-pointer flex-col justify-between rounded-2xl border border-line bg-card p-4 transition-all hover:-translate-y-1 hover:shadow-md"
+                >
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-soft px-2.5 py-0.5 text-tiny font-bold uppercase text-muted">
+                          {p.platform}
+                        </span>
+                        {isJobRunning && (
+                          <span className="animate-pulse rounded-full bg-accent/20 px-2 py-0.5 text-tiny font-bold text-accent">
+                            Đang tạo {p.job?.percent}%
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDelete(p.slug, e)}
+                        title="Xoá dự án"
+                        className="rounded-full p-1 text-muted opacity-0 hover:bg-soft hover:text-danger group-hover:opacity-100"
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </div>
+                    <h3 className="line-clamp-2 text-body font-bold text-text">{p.title}</h3>
+                    <p className="mt-1 text-tiny text-muted">
+                      {p.messages_count} tin nhắn · {p.characters_count} nhân vật
+                    </p>
                   </div>
-                  <h3 className="line-clamp-2 text-body font-bold text-text">{p.title}</h3>
-                  <p className="mt-1 text-tiny text-muted">
-                    {p.messages_count} tin nhắn · {p.characters_count} nhân vật
-                  </p>
-                </div>
 
-                <div className="mt-4 flex items-center justify-between border-t border-line/60 pt-3 text-tiny">
-                  {p.has_render ? (
-                    <span className="flex items-center gap-1 font-semibold text-ok">
-                      <FilmIcon size={14} /> Có video
-                    </span>
-                  ) : (
-                    <span className="text-muted">Bản nháp</span>
-                  )}
-                  {p.timings?.llm_s && <span className="text-muted">LLM: {p.timings.llm_s}s</span>}
+                  <div className="mt-4 flex items-center justify-between border-t border-line/60 pt-3 text-tiny">
+                    {p.has_render ? (
+                      <span className="flex items-center gap-1 font-semibold text-ok">
+                        <FilmIcon size={14} /> Có video
+                      </span>
+                    ) : (
+                      <span className="text-muted">{isJobRunning ? 'Đang xử lý' : 'Bản nháp'}</span>
+                    )}
+                    {p.timings?.llm_s !== undefined && (
+                      <span className="text-muted">LLM: {p.timings.llm_s}s</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-body text-muted">{vi.chatting.noRecent}</p>
