@@ -150,7 +150,129 @@ def test_timeline_meme_cutin_pause_and_scene_transition():
     assert cutin_states[0].duration == 3.5
     assert cutin_states[0].active_sticker == "soc"
 
-    # Tìm state chuyển cảnh (duration 1.2s, show_typing=False)
-    transition_states = [s for s in timeline.states if s.duration == 1.2 and s.visible_count == 2]
+    # Tìm state chuyển cảnh (duration 1.2s - 1.5s, show_typing=False)
+    transition_states = [
+        s for s in timeline.states if 1.2 <= s.duration <= 1.5 and s.visible_count == 2
+    ]
     assert len(transition_states) == 1
     assert transition_states[0].show_typing is False
+
+
+def test_emoji_rendering_and_segmentation():
+    from hbt.chatting.draw import (
+        get_emoji_font,
+        get_font,
+        measure_line_width,
+        segment_text_and_emojis,
+        wrap_text,
+    )
+
+    text = "Mày nói cái gì đấy 🤬🔨🔥 chạy nè 🏃‍♂️💨! 👁️👄👁️"
+    segs = segment_text_and_emojis(text)
+    # Phải bóc tách được các emoji
+    emojis_found = [s for s, is_em in segs if is_em]
+    assert len(emojis_found) >= 4
+
+    font_text = get_font(30)
+    font_emoji = get_emoji_font(30)
+    w = measure_line_width(text, font_text, font_emoji)
+    assert w > 100
+
+    lines = wrap_text(text, font_text, 250, font_emoji)
+    assert len(lines) >= 2
+
+
+def test_message_display_and_spoken_text_separation():
+    from hbt.chatting.models import Message
+    from hbt.chatting.voice import clean_spoken_text
+
+    raw = "Mày nói cái gì đấy 🤬🔨🔥 (cười lớn) 20:15"
+    msg = Message(from_="me", text=raw)
+    assert msg.display_text == raw
+    assert msg.spoken_text == "Mày nói cái gì đấy"
+
+    # Chỉ emoji -> spoken_text rỗng
+    assert clean_spoken_text("🤣🤣🤣") == ""
+    # Chuyển cảnh -> spoken_text rỗng
+    assert clean_spoken_text("(5 phút sau tại nhà vệ sinh)") == ""
+
+
+def test_meme_metadata_and_climax_highlight(tmp_path: Path):
+    from hbt.chatting.stickers import (
+        find_meme_by_emojis,
+        get_meme_metadata,
+        load_memes_metadata,
+    )
+
+    library = tmp_path / "library"
+    memes_dir = library / "memes"
+    memes_dir.mkdir(parents=True)
+
+    data = {
+        "memes": [
+            {
+                "file": "Angry-cat.mp4",
+                "tags": ["gian"],
+                "emojis": ["🤬", "🔨", "🔥"],
+                "start_time": 0.5,
+                "duration": 3.5,
+            },
+            {
+                "file": "Shocked-cat.mp4",
+                "tags": ["soc"],
+                "emojis": ["👁️👄👁️"],
+                "start_time": 1.0,
+                "duration": 3.0,
+            },
+        ]
+    }
+    import json
+
+    (memes_dir / "index.json").write_text(json.dumps(data), encoding="utf-8")
+    (memes_dir / "Angry-cat.mp4").write_bytes(b"fake video")
+    (memes_dir / "Shocked-cat.mp4").write_bytes(b"fake video")
+
+    meta_list = load_memes_metadata(library)
+    assert len(meta_list) == 2
+
+    meta = get_meme_metadata(library, "Angry-cat.mp4")
+    assert meta["start_time"] == 0.5
+    assert meta["duration"] == 3.5
+
+    # Ánh xạ tự động emoji cuối câu
+    matched = find_meme_by_emojis(library, "Mày nói gì đấy 🤬🔨🔥")
+    assert matched is not None
+    assert matched.name == "Angry-cat.mp4"
+
+    matched_soc = find_meme_by_emojis(library, "Ủa gì dạ 👁️👄👁️")
+    assert matched_soc is not None
+    assert matched_soc.name == "Shocked-cat.mp4"
+
+
+def test_safe_fallback_missing_meme(tmp_path: Path):
+    from hbt.chatting.models import Character, ChatDoc, Message
+    from hbt.chatting.timeline import build_timeline
+
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="c1", name="Hoa", side="left"),
+    ]
+    msgs = [
+        Message(from_="c1", text=f"Tin số {i}", sticker="soc" if i == 0 else None) for i in range(8)
+    ]
+    doc = ChatDoc(
+        hbt_chat=1,
+        title="Test fallback",
+        characters=chars,
+        messages=msgs,
+    )
+    voice_durations = [(i, Path("fake.wav"), 1.0) for i in range(8)]
+
+    # Thư viện rỗng (không có file meme)
+    empty_lib = tmp_path / "empty_lib"
+    empty_lib.mkdir(parents=True)
+
+    timeline = build_timeline(doc, voice_durations, library_dir=empty_lib)
+    # Không tạo state cut-in nếu thiếu file meme
+    cutin_states = [s for s in timeline.states if s.is_meme_cutin]
+    assert len(cutin_states) == 0

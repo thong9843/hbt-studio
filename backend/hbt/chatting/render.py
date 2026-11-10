@@ -21,7 +21,12 @@ from PIL import Image
 from hbt.chatting.draw import ChatFrameRenderer
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
-from hbt.chatting.stickers import extract_meme_audio, load_sticker_or_meme_image, pick_sticker
+from hbt.chatting.stickers import (
+    extract_meme_audio,
+    get_meme_metadata,
+    load_sticker_or_meme_image,
+    pick_sticker,
+)
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
@@ -200,7 +205,7 @@ def render_chat_video(
 
     # 2. Xây dựng timeline (30-35%)
     tick(32, "Lập mốc thời gian")
-    timeline = build_timeline(doc, voice_durations)
+    timeline = build_timeline(doc, voice_durations, library_dir=library_dir)
 
     target_duration = min(10.0, timeline.total_duration) if preview else timeline.total_duration
     fps = 30 if preview else 60
@@ -269,15 +274,22 @@ def render_chat_video(
             break
 
         stk_img = None
+        is_cutin_state = state.is_meme_cutin
         if state.active_sticker:
             stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
             if stk_file and stk_file.is_file():
+                meta = get_meme_metadata(library_dir, stk_file.name)
+                start_time = float(meta.get("start_time", 0.0))
                 try:
                     stk_img = load_sticker_or_meme_image(
-                        stk_file, cache_dir=build_dir / "memes_cache"
+                        stk_file, cache_dir=build_dir / "memes_cache", start_time=start_time
                     )
                 except Exception:
                     pass
+            # Fallback an toàn: nếu không có file meme hợp lệ,
+            # tắt cutin để không gián đoạn hoặc lỗi khung hình
+            if stk_img is None:
+                is_cutin_state = False
 
         visible_msgs = doc.messages[: state.visible_count]
         frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
@@ -392,7 +404,7 @@ def render_chat_video(
                 scale_msg=state.scale_last_msg,
                 s_seen=state.show_seen,
                 s_scroll=current_scroll_y,
-                is_cutin=state.is_meme_cutin,
+                is_cutin=is_cutin_state,
                 dur=frame_dur,
             )
 
@@ -432,9 +444,16 @@ def render_chat_video(
             if state.is_meme_cutin:
                 stk_file = pick_sticker(library_dir, state.active_sticker, doc.background.seed)
                 if stk_file and stk_file.is_file():
-                    meme_wav = build_dir / f"meme_{stk_file.stem}.wav"
+                    meta = get_meme_metadata(library_dir, stk_file.name)
+                    st_time = float(meta.get("start_time", 0.0))
+                    meme_wav = build_dir / f"meme_{stk_file.stem}_s{int(st_time * 10)}.wav"
                     if not (meme_wav.is_file() and meme_wav.stat().st_size > 1000):
-                        extract_meme_audio(stk_file, meme_wav, max_duration=state.duration)
+                        extract_meme_audio(
+                            stk_file,
+                            meme_wav,
+                            start_time=st_time,
+                            max_duration=state.duration,
+                        )
                     if meme_wav.is_file() and meme_wav.stat().st_size > 1000:
                         event_tuples.append((state.start_time, meme_wav, state.duration))
                         meme_audio_played = True

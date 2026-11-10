@@ -33,7 +33,19 @@ class Message(BaseModel):
 
     from_: str = Field(alias="from", min_length=1, max_length=32)
     text: str = Field(min_length=1, max_length=120)
+    display_text: str | None = None
+    spoken_text: str | None = None
     sticker: str | None = None
+
+    @model_validator(mode="after")
+    def populate_display_and_spoken(self) -> Message:
+        if self.display_text is None:
+            self.display_text = self.text
+        if self.spoken_text is None:
+            from hbt.chatting.voice import clean_spoken_text
+
+            self.spoken_text = clean_spoken_text(self.text)
+        return self
 
     @field_validator("sticker")
     @classmethod

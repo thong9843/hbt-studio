@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,6 +16,19 @@ from hbt.chatting.themes.base import ChatTheme
 FONTS_DIR = Path(__file__).resolve().parents[1] / "fonts"
 FONT_REGULAR = FONTS_DIR / "BeVietnamPro-Medium.ttf"
 FONT_BOLD = FONTS_DIR / "BeVietnamPro-Bold.ttf"
+
+FONT_EMOJI_CANDIDATES = [
+    Path("C:/Windows/Fonts/seguiemj.ttf"),
+    Path("C:/Windows/Fonts/Segoe UI Emoji.ttf"),
+    Path("/System/Library/Fonts/Apple Color Emoji.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+]
+
+EMOJI_REGEX = re.compile(
+    r"(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])"
+    r"(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF]|\u200d(?:\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF])?)*",
+    re.UNICODE,
+)
 
 CANVAS_WIDTH = 1080
 CANVAS_HEIGHT = 1920
@@ -27,8 +42,57 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
-    """Chia văn bản thành các dòng không vượt quá max_width."""
+def get_emoji_font(size: int) -> ImageFont.FreeTypeFont | None:
+    """Tải font Segoe UI Emoji trên Windows hoặc font emoji hệ thống để vẽ emoji màu sắc nét."""
+    for p in FONT_EMOJI_CANDIDATES:
+        if p.is_file():
+            try:
+                return ImageFont.truetype(str(p), size)
+            except Exception:
+                pass
+    return None
+
+
+def segment_text_and_emojis(text: str) -> list[tuple[str, bool]]:
+    """Tách câu thành các phân đoạn văn bản thường và emoji Unicode."""
+    pos = 0
+    segments = []
+    for m in EMOJI_REGEX.finditer(text):
+        start, end = m.span()
+        if start > pos:
+            segments.append((text[pos:start], False))
+        segments.append((m.group(0), True))
+        pos = end
+    if pos < len(text):
+        segments.append((text[pos:], False))
+    return segments
+
+
+def measure_line_width(
+    text: str,
+    font_text: ImageFont.FreeTypeFont,
+    font_emoji: ImageFont.FreeTypeFont | None = None,
+) -> int:
+    """Đo chính xác chiều rộng dòng chữ có chứa emoji."""
+    total_w = 0
+    for seg, is_emoji in segment_text_and_emojis(text):
+        if is_emoji and font_emoji:
+            bbox = font_emoji.getbbox(seg)
+            w = bbox[2] - bbox[0]
+            total_w += max(w, int(font_emoji.size * 1.05))
+        else:
+            bbox = font_text.getbbox(seg)
+            total_w += bbox[2] - bbox[0]
+    return total_w
+
+
+def wrap_text(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    font_emoji: ImageFont.FreeTypeFont | None = None,
+) -> list[str]:
+    """Chia văn bản thành các dòng không vượt quá max_width, tính đúng chiều rộng emoji."""
     words = text.split()
     if not words:
         return [""]
@@ -38,8 +102,7 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[s
 
     for w in words[1:]:
         test_line = f"{current_line} {w}"
-        bbox = font.getbbox(test_line)
-        line_w = bbox[2] - bbox[0]
+        line_w = measure_line_width(test_line, font, font_emoji)
         if line_w <= max_width:
             current_line = test_line
         else:
@@ -47,6 +110,34 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[s
             current_line = w
     lines.append(current_line)
     return lines
+
+
+def draw_text_with_emoji(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font_text: ImageFont.FreeTypeFont,
+    font_emoji: ImageFont.FreeTypeFont | None,
+    fill: Any,
+) -> int:
+    """Vẽ từng đoạn văn bản kết hợp Segoe UI Emoji với embedded_color=True để emoji sắc nét."""
+    x, y = xy
+    cur_x = x
+    for seg, is_emoji in segment_text_and_emojis(text):
+        if is_emoji and font_emoji:
+            bbox = font_emoji.getbbox(seg)
+            w = max(bbox[2] - bbox[0], int(font_emoji.size * 1.05))
+            try:
+                draw.text((cur_x, y), seg, font=font_emoji, fill=fill, embedded_color=True)
+            except Exception:
+                draw.text((cur_x, y), seg, font=font_text, fill=fill)
+            cur_x += w
+        else:
+            bbox = font_text.getbbox(seg)
+            w = bbox[2] - bbox[0]
+            draw.text((cur_x, y), seg, font=font_text, fill=fill)
+            cur_x += w
+    return cur_x - x
 
 
 def draw_rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
@@ -153,19 +244,22 @@ class ChatFrameRenderer:
         self.characters = {c.id: c for c in characters}
         self.avatar_images = avatar_images or {}
         self.font_msg = get_font(theme.font_size)
+        self.font_emoji = get_emoji_font(int(theme.font_size * 0.95))
         self.font_header_title = get_font(34, bold=True)
         self.font_header_status = get_font(24)
         self.font_seen = get_font(22)
 
     def measure_message(self, msg: Message) -> tuple[int, int, list[str]]:
-        """Tính (chiều rộng bubble, chiều cao bubble, các dòng chữ)."""
-        lines = wrap_text(msg.text, self.font_msg, self.theme.bubble_max_width - 48)
+        """Tính (chiều rộng bubble, chiều cao bubble, các dòng chữ) hỗ trợ đầy đủ emoji."""
+        raw_text = getattr(msg, "display_text", None) or msg.text
+        lines = wrap_text(
+            raw_text, self.font_msg, self.theme.bubble_max_width - 48, self.font_emoji
+        )
         max_line_w = 0
         for line in lines:
-            bbox = self.font_msg.getbbox(line)
-            w = bbox[2] - bbox[0]
-            if w > max_line_w:
-                max_line_w = w
+            line_w = measure_line_width(line, self.font_msg, self.font_emoji)
+            if line_w > max_line_w:
+                max_line_w = line_w
 
         bubble_w = max(100, max_line_w + 48)
         line_h = self.theme.line_spacing
@@ -375,8 +469,9 @@ class ChatFrameRenderer:
                 cur_y += 36
 
             # Xử lý đoạn chuyển cảnh ngoặc đơn "(5 phút sau)", "(10 phút sau tại nhà vệ sinh)"...
-            if is_scene_transition(msg.text):
-                clean_title = format_scene_transition(msg.text)
+            disp_text = getattr(msg, "display_text", None) or msg.text
+            if is_scene_transition(disp_text):
+                clean_title = format_scene_transition(disp_text)
                 tbox = self.font_seen.getbbox(clean_title)
                 tw = tbox[2] - tbox[0]
                 th = tbox[3] - tbox[1]
@@ -440,10 +535,12 @@ class ChatFrameRenderer:
             # Vẽ bo góc bất đối xứng cho grouped bubble
             draw_asymmetric_rounded_rect(b_img, (0, 0, bubble_w, bubble_h), radii, bg_color)
 
-            # Vẽ chữ
+            # Vẽ chữ kèm emoji đầy đủ màu sắc nét không lỗi ô vuông
             text_y = 16
             for line in lines:
-                b_draw.text((24, text_y), line, fill=txt_color, font=self.font_msg)
+                draw_text_with_emoji(
+                    b_draw, (24, text_y), line, self.font_msg, self.font_emoji, txt_color
+                )
                 text_y += self.theme.line_spacing
 
             if scale != 1.0 and scale > 0.1:

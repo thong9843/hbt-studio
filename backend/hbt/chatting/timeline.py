@@ -40,14 +40,16 @@ class ChatTimeline:
 def build_timeline(
     doc: ChatDoc,
     voice_durations: list[tuple[int, Path, float]],
+    library_dir: Path | None = None,
 ) -> ChatTimeline:
     """Tạo timeline chi tiết cho video chat:
     - 0.4s mở đầu (khung chat trống)
     - Mỗi tin:
+      - Nếu chuyển cảnh: 1.3s divider + 0.3s dừng kịch tính
       - Nếu tin bên trái: 0.6s gõ phím ("đang nhập")
       - 0.15s pop tin nhắn (scale 0.85 -> 1.0)
       - Độ dài đọc wav
-      - Nếu có sticker: 0.8s hiện sticker
+      - Nếu có meme/sticker: 3.5s phóng to meme cut-in (hoặc bỏ qua nếu thiếu file)
       - 0.25s nghỉ
     - Cuối: giữ 1.5s
     """
@@ -73,10 +75,11 @@ def build_timeline(
         char = char_map.get(msg.from_)
         is_right = (char.side == "right") if char else False
         wav_path, wav_dur = dur_map.get(idx, (Path(""), 1.0))
+        msg_text = getattr(msg, "display_text", None) or msg.text
 
         # 1. Trường hợp chuyển cảnh ngoặc đơn (5 phút sau), (10 phút sau tại nhà vệ sinh)...
-        if is_scene_transition(msg.text):
-            trans_dur = 1.2
+        if is_scene_transition(msg_text):
+            trans_dur = 1.3
             states.append(
                 TimelineState(
                     start_time=cur_time,
@@ -148,19 +151,27 @@ def build_timeline(
 
         # Nếu có sticker/meme: Meme Cut-in Pause 3.5s phóng to giữa khung hình
         if msg.sticker:
-            meme_dur = 3.5
-            states.append(
-                TimelineState(
-                    start_time=cur_time,
-                    duration=meme_dur,
-                    visible_count=idx + 1,
-                    active_sticker=msg.sticker,
-                    sticker_from_right=is_right,
-                    show_seen=True,
-                    is_meme_cutin=True,
+            has_valid_meme = True
+            if library_dir is not None:
+                from hbt.chatting.stickers import pick_sticker
+
+                stk_file = pick_sticker(library_dir, msg.sticker, doc.background.seed)
+                has_valid_meme = stk_file is not None and stk_file.is_file()
+
+            if has_valid_meme:
+                meme_dur = 3.5
+                states.append(
+                    TimelineState(
+                        start_time=cur_time,
+                        duration=meme_dur,
+                        visible_count=idx + 1,
+                        active_sticker=msg.sticker,
+                        sticker_from_right=is_right,
+                        show_seen=True,
+                        is_meme_cutin=True,
+                    )
                 )
-            )
-            cur_time += meme_dur
+                cur_time += meme_dur
 
         # Nghỉ giữa tin 0.25s (trừ tin cuối cùng)
         if idx < len(doc.messages) - 1:

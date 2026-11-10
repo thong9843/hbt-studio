@@ -30,16 +30,24 @@ TIME_PATTERNS = [
 ]
 
 META_PATTERNS = [
-    re.compile(r"\[(?:sticker|ảnh|video|voice|audio|image|gif)[^\]]*\]", re.IGNORECASE),
-    re.compile(r"\((?:sticker|ảnh|video|cười|khóc|ha ha|huhu|ôm|tym)[^\)]*\)", re.IGNORECASE),
+    re.compile(r"\[(?:sticker|meme|ảnh|video|voice|audio|image|gif)[^\]]*\]", re.IGNORECASE),
     re.compile(r"\b(?:đã xem|đã gửi|đã nhận|seen|active\s*\d+\w*\s*ago)\b", re.IGNORECASE),
 ]
 
+PAREN_ACTION_PATTERN = re.compile(r"\(.*?\)", re.DOTALL)
+BRACKET_META_PATTERN = re.compile(r"\[.*?\]", re.DOTALL)
+
+EMOJI_REGEX = re.compile(
+    r"(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])"
+    r"(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF]|\u200d(?:\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|[\U00010000-\U0010ffff])(?:[\ufe00-\ufe0f]|[\U0001F3FB-\U0001F3FF])?)*",
+    re.UNICODE,
+)
+
 
 def clean_spoken_text(text: str) -> str:
-    """Tách sạch lời thoại để TTS VieNeu chỉ đọc câu nói của nhân vật,
-    bỏ mốc giờ ('20:15', '20h15'), trạng thái ('đã xem'), mô tả sticker,
-    và các đoạn chuyển cảnh ngoặc đơn '(5 phút sau)', '(ở nhà Nam)'...
+    """Tách sạch lời thoại để TTS VieNeu chỉ đọc câu nói thuần túy của nhân vật:
+    lọc sạch toàn bộ emoji, mốc thời gian, ký tự hành động trong ngoặc đơn (...),
+    và các trạng thái [seen], [sticker]...
     """
     if is_scene_transition(text):
         return ""
@@ -49,10 +57,13 @@ def clean_spoken_text(text: str) -> str:
         s = p.sub("", s)
     for p in META_PATTERNS:
         s = p.sub("", s)
+    s = PAREN_ACTION_PATTERN.sub("", s)
+    s = BRACKET_META_PATTERN.sub("", s)
+    s = EMOJI_REGEX.sub("", s)
     # Dọn dẹp khoảng trắng dư thừa
     s = re.sub(r"\s+", " ", s).strip()
     # Nếu chỉ còn dấu câu lẻ loi (vd: '-', ':', '·', '—') thì coi như rỗng
-    if re.fullmatch(r"[-—:.,;~·\s]*", s):
+    if re.fullmatch(r"[-—:.,;~·!?\s]*", s):
         return ""
     return s
 
@@ -125,7 +136,11 @@ def synthesize_chat_voices(
     for idx, msg in enumerate(doc.messages):
         char = char_map.get(msg.from_)
         voice_id = char.voice if char and char.voice else DEFAULT_CHAR_VOICES.get("me", "Adam bựa")
-        spoken = clean_spoken_text(msg.text)
+        spoken = (
+            msg.spoken_text
+            if getattr(msg, "spoken_text", None) is not None
+            else clean_spoken_text(msg.text)
+        )
 
         # Nếu là chuyển cảnh ngoặc đơn hoặc sau khi lọc lời thoại mà rỗng
         is_trans = is_scene_transition(msg.text)

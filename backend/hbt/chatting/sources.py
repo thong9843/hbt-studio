@@ -309,7 +309,22 @@ def parse_direct_script(text: str) -> dict[str, Any]:
                     sticker = normalized_tag
                     speech = sticker_paren_pat.sub("", speech).strip()
 
-        # 4. Phân tích cảm xúc từ khóa nếu chưa có tag rõ ràng
+        # 4. Nhận diện cụm emoji ở cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️)
+        if not sticker and speech:
+            from hbt.chatting.stickers import EMOJI_TAG_MAP
+
+            if "👁️👄👁️" in speech or "👁👄👁" in speech:
+                sticker = "soc"
+            else:
+                em_scores = {}
+                for tag, emojis in EMOJI_TAG_MAP.items():
+                    sc = sum(speech.count(em) for em in emojis)
+                    if sc > 0:
+                        em_scores[tag] = sc
+                if em_scores:
+                    sticker = max(em_scores.items(), key=lambda x: x[1])[0]
+
+        # 5. Phân tích cảm xúc từ khóa nếu chưa có tag rõ ràng
         if not sticker and speech:
             detected = detect_emotion_tag(speech)
             if detected and detected in VALID_STICKER_TAGS:
@@ -341,13 +356,30 @@ def parse_direct_script(text: str) -> dict[str, Any]:
             }
         )
 
+    if len(characters) < 2:
+        characters.append(
+            {
+                "id": "c1",
+                "name": "Bạn bè",
+                "side": "left",
+                "voice": "Trúc Ly",
+                "avatar": None,
+            }
+        )
+
+    from hbt.chatting.voice import clean_spoken_text
+
     messages: list[dict[str, Any]] = []
     for speaker, speech, sticker in raw_dialogues:
         cid = char_id_map.get(speaker, "me")
+        display_txt = speech or "..."
+        spoken_txt = clean_spoken_text(display_txt)
         messages.append(
             {
                 "from": cid,
-                "text": speech or "...",
+                "text": display_txt,
+                "display_text": display_txt,
+                "spoken_text": spoken_txt,
                 "sticker": sticker,
             }
         )

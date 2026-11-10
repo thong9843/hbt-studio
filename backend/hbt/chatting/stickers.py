@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 
@@ -17,6 +18,20 @@ SUPPORTED_IMAGE_EXTS = {".png", ".webp", ".gif", ".jpg", ".jpeg"}
 SUPPORTED_VIDEO_EXTS = {".mp4", ".mov", ".webm"}
 
 
+EMOJI_TAG_MAP = {
+    "gian": ["🤬", "🔨", "🔥", "😡", "💢", "👿", "😤"],
+    "cuoi": ["🤣", "😂", "😹", "😆", "😅", "🤪"],
+    "soc": ["👁️👄👁️", "😱", "😳", "🤯", "😮", "🙀"],
+    "khoc": ["😭", "😢", "🥺", "😿", "💔"],
+    "ngai": ["🤡", "🌚", "👀", "😬", "🙈"],
+    "yeu": ["❤️", "💖", "😍", "🥰", "💕", "😘"],
+    "nghi": ["🤔", "🤨", "🧐"],
+    "can": ["😑", "😐", "🫥", "🤐"],
+    "bat_luc": ["🤦", "🤦‍♂️", "🤦‍♀️", "😮‍💨", "💀", "⚰️"],
+    "ok": ["👍", "👌", "✅", "💯"],
+}
+
+
 def get_memes_dir(library_dir: Path) -> Path:
     memes_dir = Path(library_dir) / "memes"
     if memes_dir.is_dir():
@@ -26,19 +41,103 @@ def get_memes_dir(library_dir: Path) -> Path:
     return stickers_dir if stickers_dir.is_dir() else memes_dir
 
 
-def load_index(library_dir: Path) -> dict[str, list[str]]:
-    """Đọc index.json từ library/memes/."""
+def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
+    """Đọc danh sách meme kèm metadata (file, tags, emojis, start_time, duration)."""
     memes_dir = get_memes_dir(library_dir)
     index_file = memes_dir / "index.json"
     if index_file.is_file():
         try:
             data = json.loads(index_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
+            if isinstance(data, dict) and "memes" in data:
+                return data["memes"]
+            if isinstance(data, list):
                 return data
+            if isinstance(data, dict):
+                # Legacy format: { "soc": ["cat.mp4"] }
+                converted = []
+                for tag, files in data.items():
+                    for f in files:
+                        converted.append(
+                            {
+                                "file": f,
+                                "tags": [tag],
+                                "emojis": [],
+                                "start_time": 0.0,
+                                "duration": 3.5,
+                            }
+                        )
+                return converted
         except Exception as e:
             logger.warning("Không đọc được memes/index.json: %s", e)
 
-    return {tag: [] for tag in sorted(VALID_STICKER_TAGS)}
+    return []
+
+
+def get_meme_metadata(library_dir: Path, meme_file_or_name: Path | str) -> dict[str, Any]:
+    """Lấy thông tin metadata cao trào của 1 clip meme."""
+    name = (
+        meme_file_or_name.name
+        if isinstance(meme_file_or_name, Path)
+        else Path(meme_file_or_name).name
+    )
+    for m in load_memes_metadata(library_dir):
+        if m.get("file") == name:
+            return m
+    return {
+        "file": name,
+        "tags": [],
+        "emojis": [],
+        "start_time": 0.0,
+        "duration": 3.5,
+    }
+
+
+def find_meme_by_emojis(library_dir: Path, text: str) -> Path | None:
+    """Nhận diện cụm emoji cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️) để chọn chính xác meme."""
+    memes_dir = get_memes_dir(library_dir)
+    meta_list = load_memes_metadata(library_dir)
+
+    # 1. So khớp trực tiếp với danh sách emojis trong metadata của từng meme
+    best_meme = None
+    best_score = 0
+    for m in meta_list:
+        emojis = m.get("emojis", [])
+        score = sum(text.count(em) for em in emojis)
+        if score > best_score:
+            best_score = score
+            best_meme = m
+
+    if best_meme and best_score > 0:
+        cand = memes_dir / best_meme["file"]
+        if cand.is_file():
+            return cand
+
+    # 2. So khớp theo nhóm cảm xúc emoji chung
+    if "👁️👄👁️" in text or "👁👄👁" in text:
+        return pick_sticker(library_dir, "soc")
+
+    scores = {}
+    for tag, emojis in EMOJI_TAG_MAP.items():
+        score = sum(text.count(em) for em in emojis)
+        if score > 0:
+            scores[tag] = score
+    if scores:
+        best_tag = max(scores.items(), key=lambda x: x[1])[0]
+        return pick_sticker(library_dir, best_tag)
+
+    return None
+
+
+def load_index(library_dir: Path) -> dict[str, list[str]]:
+    """Đọc index.json và tổng hợp danh sách file theo từng tag hợp lệ."""
+    metadata = load_memes_metadata(library_dir)
+    res = {tag: [] for tag in sorted(VALID_STICKER_TAGS)}
+    for item in metadata:
+        fname = item.get("file", "")
+        for t in item.get("tags", []):
+            if t in res and fname and fname not in res[t]:
+                res[t].append(fname)
+    return res
 
 
 def count_stickers_per_tag(library_dir: Path) -> dict[str, int]:
@@ -75,34 +174,44 @@ def pick_sticker(library_dir: Path, tag: str, seed: int = 0) -> Path | None:
     return None
 
 
-def extract_meme_audio(meme_file: Path, out_wav: Path, max_duration: float = 3.5) -> bool:
-    """Trích xuất âm thanh gốc từ clip meme (mp4/mov/webm). Trả về True nếu có âm thanh."""
+def extract_meme_audio(
+    meme_file: Path,
+    out_wav: Path,
+    start_time: float = 0.0,
+    max_duration: float = 3.5,
+) -> bool:
+    """Trích xuất âm thanh gốc từ clip meme tại mốc cao trào (-ss start_time -t duration)."""
     if not meme_file.is_file():
         return False
     if meme_file.suffix.lower() not in SUPPORTED_VIDEO_EXTS:
         return False
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "-y",
+        "-v",
+        "error",
+    ]
+    if start_time > 0:
+        cmd.extend(["-ss", f"{start_time:.2f}"])
+    cmd.extend(
+        [
+            "-i",
+            str(meme_file),
+            "-t",
+            str(max_duration),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "24000",
+            "-c:a",
+            "pcm_s16le",
+            str(out_wav),
+        ]
+    )
     try:
-        run_ffmpeg(
-            [
-                "-y",
-                "-v",
-                "error",
-                "-i",
-                str(meme_file),
-                "-t",
-                str(max_duration),
-                "-vn",
-                "-ac",
-                "1",
-                "-ar",
-                "24000",
-                "-c:a",
-                "pcm_s16le",
-                str(out_wav),
-            ]
-        )
+        run_ffmpeg(cmd)
         return out_wav.is_file() and out_wav.stat().st_size > 1000
     except Exception as e:
         logger.warning("Không trích được audio từ meme %s: %s", meme_file, e)
@@ -128,9 +237,9 @@ def remove_green_screen(img: Image.Image) -> Image.Image:
 
 
 def load_sticker_or_meme_image(
-    file_path: Path, cache_dir: Path | None = None
+    file_path: Path, cache_dir: Path | None = None, start_time: float = 0.0
 ) -> Image.Image | None:
-    """Nạp ảnh sticker từ file ảnh hoặc trích frame video meme phông xanh."""
+    """Nạp ảnh sticker từ file ảnh hoặc trích frame video meme phông xanh tại mốc cao trào."""
     if not file_path.is_file():
         return None
 
@@ -146,21 +255,23 @@ def load_sticker_or_meme_image(
 
     # 2. Nếu là clip video phông xanh (mp4, mov, webm)
     if ext in SUPPORTED_VIDEO_EXTS:
+        st_tag = int(start_time * 10)
         if cache_dir:
             cache_dir.mkdir(parents=True, exist_ok=True)
-            frame_png = cache_dir / f"{file_path.stem}.png"
+            frame_png = cache_dir / f"{file_path.stem}_s{st_tag}.png"
         else:
-            frame_png = file_path.with_suffix(".thumb.png")
+            frame_png = file_path.with_suffix(f".thumb_s{st_tag}.png")
 
         if not frame_png.is_file():
             try:
+                ss_pos = round(start_time + 0.3, 2)
                 run_ffmpeg(
                     [
                         "-y",
                         "-v",
                         "error",
                         "-ss",
-                        "0.3",
+                        str(ss_pos),
                         "-i",
                         str(file_path),
                         "-vframes",
