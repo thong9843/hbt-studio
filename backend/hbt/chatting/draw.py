@@ -376,8 +376,8 @@ class ChatFrameRenderer:
             is_right = (char.side == "right") if char else False
 
             # Tính bo góc grouped bubble chuẩn Messenger
-            same_prev = (idx > 0 and visible_messages[idx - 1].from_ == msg.from_)
-            same_next = (idx < num_msgs - 1 and visible_messages[idx + 1].from_ == msg.from_)
+            same_prev = idx > 0 and visible_messages[idx - 1].from_ == msg.from_
+            same_next = idx < num_msgs - 1 and visible_messages[idx + 1].from_ == msg.from_
 
             radius_normal = (
                 self.theme.bubble_right_radius if is_right else self.theme.bubble_left_radius

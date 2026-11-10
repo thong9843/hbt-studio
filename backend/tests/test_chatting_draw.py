@@ -115,4 +115,3 @@ def test_grouped_bubbles_and_content_height():
         scroll_offset_override=50,
     )
     assert img.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
-
