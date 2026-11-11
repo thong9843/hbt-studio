@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary, RenderSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { HbtCoreStudioDialog } from '../components/core/HbtCoreStudioDialog';
 import { DraftDialog } from '../components/draft/DraftDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
@@ -231,6 +232,7 @@ export function HomePage() {
   const { open: openNew } = useNewProject();
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [coreStudioOpen, setCoreStudioOpen] = useState(false);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -261,11 +263,21 @@ export function HomePage() {
     <main className="mx-auto max-w-[1280px] space-y-8 px-6 py-10">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
-        <Button tone="soft" title={vi.gd2.buttonTitle} onClick={() => setDraftOpen(true)}>
-          {vi.gd2.button}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            tone="soft"
+            title={vi.hbtCore.openBtnTitle}
+            onClick={() => setCoreStudioOpen(true)}
+          >
+            {vi.hbtCore.openBtn}
+          </Button>
+          <Button tone="soft" title={vi.gd2.buttonTitle} onClick={() => setDraftOpen(true)}>
+            {vi.gd2.button}
+          </Button>
+        </div>
       </div>
       <DraftDialog open={draftOpen} onClose={() => setDraftOpen(false)} />
+      <HbtCoreStudioDialog open={coreStudioOpen} onClose={() => setCoreStudioOpen(false)} />
 
       {isPending && <HomeSkeleton />}
       {error && (

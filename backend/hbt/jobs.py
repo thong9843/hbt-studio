@@ -523,6 +523,9 @@ class JobManager:
             if job.kind == "chatting_render":
                 self._run_chatting_render(job)
                 return
+            if job.kind == "hbt_core_auto":
+                self._run_hbt_core_auto(job)
+                return
             folder = self.storage.project_dir(job.slug)
             cfg = self.app_settings.load() if self.app_settings is not None else None
             opts = RenderOptions(
@@ -980,4 +983,78 @@ class JobManager:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job chatting_render: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_auto(
+        self,
+        slug: str,
+        script: Any,
+        *,
+        voice_id: str | None = None,
+        fps: int = 30,
+        preview: bool = False,
+    ) -> Job:
+        """Job chạy chuỗi tự động HBT Core (V1 Bán tự động / V2 1-Click Prompt)."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        job = Job(uuid.uuid4().hex[:12], slug, preview, fps, None, False, kind="hbt_core_auto")
+        job.core_script = script  # type: ignore[attr-defined]
+        job.core_voice_id = voice_id  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_auto(self, job: Job) -> None:
+        """Thực thi chuỗi tự động HBT Core: VieNeu-TTS -> BGM acrossfade -> SFX -> Render FFmpeg."""
+        from hbt.core.render import render_hbt_core_auto
+
+        folder = self.storage.project_dir(job.slug)
+        script = getattr(job, "core_script", None)
+        voice_id = getattr(job, "core_voice_id", None)
+
+        try:
+            result = render_hbt_core_auto(
+                project_dir=folder,
+                script=script,
+                voice_provider=self.voice,
+                voice_id=voice_id,
+                library_dir=self.library_dir,
+                brand_dir=self.brand_dir,
+                fps=job.fps or 30,
+                preview=job.preview,
+                job_id=job.id,
+                progress=job._progress,
+                cancel_token=job.token,
+            )
+            rel = self.storage.rel
+            output = {
+                "video": rel(result.video),
+                "publish": rel(result.publish),
+                "log": rel(result.log),
+                "srt": None,
+                "cover": None,
+                "youtube_cover": None,
+                "fps": result.fps,
+                "width": result.width,
+                "height": result.height,
+                "duration": round(result.duration, 3),
+                "lufs": -14.0,
+                "preview_seconds": None,
+                "aligner": "vieneu_microsecond",
+                "seconds": round(result.seconds, 1),
+                "warnings": result.warnings,
+                "bgm_tracks": result.bgm_tracks,
+                "sfx_used": result.sfx_used,
+                "timings": [t.model_dump(mode="json") for t in result.timings],
+            }
+            write_run_stats(result.job_dir, result.seconds, False)
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_auto: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)

@@ -229,7 +229,7 @@ export interface Job {
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto';
+  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto';
   status: 'queued' | 'running' | 'waiting_pick';
   progress: number;
   step: string;
@@ -779,4 +779,44 @@ export interface ChatProjectSummary {
     llm_tokens?: number;
   };
   job?: ChattingJobInfo | null;
+}
+
+export type HbtCoreTopic = 'history' | 'fun' | 'science' | 'mystery';
+
+export interface HbtCoreSegment {
+  order: number;
+  text: string;
+  image: string;
+  sfx: string;
+  card_text?: string | null;
+  punch?: boolean;
+}
+
+export interface HbtCoreScript {
+  title: string;
+  topic: HbtCoreTopic | string;
+  segments: HbtCoreSegment[];
+}
+
+export interface HbtCoreAssetsInfo {
+  topics: string[];
+  sfx: { id: string; name: string; category: string }[];
+  sfx_presets: string[];
+  topic_music: Record<string, string[]>;
+  images: string[];
+  gemini_configured: boolean;
+}
+
+export interface HbtCoreRenderResponse {
+  ok?: boolean;
+  success?: boolean;
+  fallback_v1?: boolean;
+  error?: string;
+  message?: string;
+  detail?: string;
+  reason?: string;
+  mode?: 'v1' | 'v2';
+  slug?: string;
+  job_id?: string | null;
+  script?: HbtCoreScript;
 }

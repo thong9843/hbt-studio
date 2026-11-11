@@ -44,6 +44,9 @@ import type {
   ChatProjectDetail,
   ChatProjectSummary,
   ChattingJobInfo,
+  HbtCoreAssetsInfo,
+  HbtCoreRenderResponse,
+  HbtCoreScript,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -350,4 +353,31 @@ export const api = {
   getSensitiveWords: () => apiGet<SensitiveWords>('/settings/sensitive-words'),
   saveSensitiveWords: (words: SensitiveWords) =>
     apiRequest<SensitiveWords>('PUT', '/settings/sensitive-words', { json: words }),
+
+  getHbtCoreAssets: (slug?: string) =>
+    apiGet<HbtCoreAssetsInfo>(`/hbt-core/assets${slug ? `?slug=${enc(slug)}` : ''}`),
+  getProjectCoreScript: (slug: string) =>
+    apiGet<{ slug: string; script: HbtCoreScript }>(`/projects/${enc(slug)}/core-script`),
+  checkHbtCoreV1: (script: string | HbtCoreScript) =>
+    apiRequest<{ ok: boolean; script: HbtCoreScript; segments_count: number }>(
+      'POST',
+      '/hbt-core/v1/check',
+      { json: { script } },
+    ),
+  renderHbtCoreV1: (body: {
+    script: string | HbtCoreScript;
+    slug?: string | null;
+    voice_id?: string | null;
+    fps?: number;
+    preview?: boolean;
+  }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v1/render', { json: body }),
+  promptHbtCoreV2: (body: {
+    prompt: string;
+    topic?: string | null;
+    slug?: string | null;
+    voice_id?: string | null;
+    fps?: number;
+    preview?: boolean;
+    auto_render?: boolean;
+  }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v2/prompt', { json: body }),
 };

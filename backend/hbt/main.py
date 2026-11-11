@@ -15,6 +15,7 @@ from hbt.api import (
     assets,
     backgrounds,
     chatting,
+    core,
     files,
     gd2,
     health,
@@ -141,6 +142,7 @@ def create_app(
         memes,
         gd2,
         chatting,
+        core,
     ):
         app.include_router(module.router, prefix="/api")
     return app
