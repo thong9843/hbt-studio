@@ -81,7 +81,7 @@ def list_active_jobs(state: State):
             "slug": j.slug,
             "kind": (
                 j.kind
-                if j.kind in ("postv_quick", "postv_auto", "voice")
+                if j.kind in ("postv_quick", "postv_auto", "voice", "hbt_core_auto")
                 else ("preview" if j.preview else "final")
             ),
             "status": j.status,
