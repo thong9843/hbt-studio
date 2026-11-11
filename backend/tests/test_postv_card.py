@@ -85,13 +85,14 @@ def test_header_shows_a_plain_grey_person_avatar_not_a_real_photo():
     assert img.getpixel((x, y))[:3] == (0xFD, 0xFD, 0xFD)  # góc ô avatar là nền thẻ (hình tròn)
 
 
-def test_height_grows_with_text_and_stops_at_max_lines():
+def test_height_grows_dynamically_for_long_comments_without_truncation():
     short = bbox(card("Ngắn")[0])[3]
-    mid = bbox(card("Một câu dài hơn một chút " * 3)[0])[3]
-    long = bbox(card("Rất dài " * 400)[0])[3]
-    longer = bbox(card("Rất dài " * 800)[0])[3]
-    assert short < mid < long
-    assert long == longer  # cắt ở số dòng tối đa, thêm `…`
+    mid = bbox(card("Một câu dài hơn một chút để xuống tầm bốn năm dòng. " * 3)[0])[3]
+    sample = "Bình luận tâm sự rất dài chi tiết không bị cắt dấu ba chấm. " * 6
+    very_long = bbox(card(sample)[0])[3]
+    capped_6 = bbox(card(sample, max_lines=6)[0])[3]
+    assert short < mid < very_long
+    assert very_long > capped_6 + 40
 
 
 def test_stats_row_and_views_line_only_appear_when_given():
@@ -338,10 +339,32 @@ def test_full_post_card_does_not_truncate_long_post_at_6_lines():
             "post": {"handle": "tacgia_vip", "age": "2h", "text": long_lines, "likes": 999},
         }
     )
-    img_6lines, low_6 = render_card("tacgia_vip", "2h", long_lines, likes=999)
+    img_6lines, low_6 = render_card("tacgia_vip", "2h", long_lines, likes=999, max_lines=6)
+    img_full_comment, low_full_comment = render_card("tacgia_vip", "2h", long_lines, likes=999)
     img_full = render_project_card(proj, "post", None, TPL, None, "blur")
+    assert low_full_comment > low_6 + 40
     assert bbox(img_full)[3] > low_6 + 40
     assert diff(img_6lines, img_full) is not None
+
+    from hbt.postv.card import render_thread_card
+    from hbt.postv.models import PostvComment
+
+    long_parent = PostvComment(
+        id="p1",
+        handle="cha",
+        text="Bình luận cha rất dài vượt xa mức 3 dòng cũ kiểm tra co giãn chiều cao. " * 3,
+    )
+    long_child = PostvComment(
+        id="c1",
+        parent="p1",
+        handle="con",
+        text="Reply con cũng dài vượt quá 4 dòng cũ nhưng vẫn hiện trọn vẹn chữ. " * 3,
+    )
+    short_parent = PostvComment(id="p0", handle="cha", text="Ngắn.")
+    short_child = PostvComment(id="c0", parent="p0", handle="con", text="Cũng ngắn.")
+    _, long_thread_bottom = render_thread_card(long_parent, long_child, tpl=TPL)
+    _, short_thread_bottom = render_thread_card(short_parent, short_child, tpl=TPL)
+    assert long_thread_bottom > short_thread_bottom + 200
 
 
 def test_card_media_respects_840x550_fit_and_comment_images(tmp_path):

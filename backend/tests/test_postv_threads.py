@@ -470,10 +470,14 @@ def test_extract_threads_playwright_graphql_posts_edges_and_child_blobs():
 
     assert len(res.comments) == 38
     assert res.comments[0].id == "c1"
-    assert res.comments[1].id == "c2" and res.comments[1].parent is None
-    assert res.comments[2].handle == "inline_child" and res.comments[2].parent == "c2"
-    vip_reply = next(c for c in res.comments if c.handle == "vip_replier")
-    assert vip_reply.parent == "c1"
+    # Reply con của c1 (từ child_blobs) phải đứng ngay sau c1 theo cây hội thoại tuần tự
+    assert res.comments[1].handle == "vip_replier" and res.comments[1].parent == "c1"
+    c2_idx = next(i for i, c in enumerate(res.comments) if c.id == "c2")
+    assert res.comments[c2_idx].parent is None
+    assert (
+        res.comments[c2_idx + 1].handle == "inline_child"
+        and res.comments[c2_idx + 1].parent == "c2"
+    )
 
 
 def test_extract_threads_playwright_rescues_http_error():

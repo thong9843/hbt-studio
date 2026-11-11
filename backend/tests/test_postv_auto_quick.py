@@ -881,8 +881,8 @@ def test_meme_cutin_pause_never_overlaps_tts_or_early_card_scroll(tmp_path):
 
     joined = tmp_path / "voice.wav"
     spans = join_wavs([p1, p2, p3], joined, post_gaps=gaps)
-    # Đoạn 2 (index 1) có meme cut-in: khoảng trống giữa hết đọc p2 và đầu đọc p3 phải >= 3.0s
-    assert spans[2][0] - spans[1][1] >= 3.0
+    # Đoạn 2 (index 1) có meme cut-in: khoảng trống >= Duration(Meme) + 0.3s
+    assert spans[2][0] - spans[1][1] >= 3.3
     assert wav_seconds(joined) >= 7.5
 
     first_start = [s[0] for s in spans]
@@ -894,10 +894,27 @@ def test_meme_cutin_pause_never_overlaps_tts_or_early_card_scroll(tmp_path):
     )
     assert starts[0] == 0.0
     win = windows[1]
-    # Meme chạy sau khi hết đọc đoạn 1 (TTS dừng hoàn toàn) và thẻ tiếp theo chỉ cuộn sau meme
+    # Meme tắt hoàn toàn cả hình lẫn tiếng + >= 0.3s lặng trước khi đọc bình luận kế tiếp
     assert win.start >= last_end[1]
-    assert win.end <= first_start[2]
+    assert first_start[2] - win.end >= 0.3 - 1e-6
     assert starts[2] >= win.end
+
+
+def test_list_and_categorize_sfx_from_library(tmp_path):
+    from hbt.postv.audio import categorize_sfx_files, list_sfx_files
+
+    sfx_dir = tmp_path / "sfx"
+    sfx_dir.mkdir()
+    (sfx_dir / "fast-swoosh.mp3").write_bytes(b"fake")
+    (sfx_dir / "pop-card.wav").write_bytes(b"fake")
+    (sfx_dir / "bass-drop.mp3").write_bytes(b"fake")
+    (sfx_dir / "ignore.txt").write_text("no", encoding="utf-8")
+
+    files = list_sfx_files(tmp_path)
+    assert [p.name for p in files] == ["bass-drop.mp3", "fast-swoosh.mp3", "pop-card.wav"]
+    trans, emph = categorize_sfx_files(tmp_path)
+    assert [p.name for p in trans] == ["fast-swoosh.mp3", "pop-card.wav"]
+    assert [p.name for p in emph] == ["bass-drop.mp3"]
 
 
 def test_step_pick_debug_budget_log_and_low_comments_warning():
@@ -975,3 +992,32 @@ def test_step_voice_emits_sentence_progress_and_releases_lock(tmp_path):
     assert any(e.get("current") == 3 and e.get("percent") == 100 for e in voice_events)
     assert jm.is_generating_voice.get(proj.slug) is False
     jm.shutdown()
+
+
+def test_step_pick_preserves_sequential_conversational_tree_order():
+    import logging
+
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+
+    proj = PostvProject(version=1, kind="postv", slug="tree-order", title="Tree Order")
+    proj.post.text = "Bài gốc mở đầu câu chuyện."
+    # c1 có reply tuần tự r1 -> r2 (r2 nhiều like hơn vẫn giữ đúng mạch hội thoại r1 trước r2)
+    proj.comments = [
+        PostvComment(id="c1", handle="cha1", text="Bình luận cha một rất hay.", likes=500),
+        PostvComment(id="c2", handle="cha2", text="Bình luận cha hai cũng hay.", likes=200),
+        PostvComment(id="r1", parent="c1", handle="con1", text="Reply đầu hỏi tiếp.", likes=5),
+        PostvComment(id="r2", parent="c1", handle="con2", text="Reply hai trả lời lại.", likes=300),
+        PostvComment(id="r2-sub", parent="c2", handle="con3", text="Reply con cha hai.", likes=10),
+    ]
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    jm.library_dir = None
+    jm.postv_words = None
+    job = Job("j-tree", "tree-order", False, 60, True, False, kind="postv_quick")
+
+    _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": 60}, logging.getLogger("test"))
+
+    picked_ids = [c.id for c in proj.comments if c.picked]
+    assert picked_ids == ["c1", "r1", "r2", "c2", "r2-sub"]
