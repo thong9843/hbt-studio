@@ -177,10 +177,7 @@ def test_scan_local_and_round_robin_meme_pool(tmp_path):
     assert len({p.name for p in cycle2}) == 5
 
 
-def test_api_memes_search_uses_local_only_no_network(client, monkeypatch):  # noqa: F811
-    from hbt.api.deps import _state_cache
-
-    _state_cache.clear()
+def test_api_memes_search_uses_local_only_no_network(client):  # noqa: F811
     with patch("hbt.postv.memes.httpx.AsyncClient") as mocked_async:
         r = client.get("/api/memes/search?q=cat&count=50")
     assert r.status_code == 200
