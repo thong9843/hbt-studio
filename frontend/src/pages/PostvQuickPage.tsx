@@ -565,12 +565,15 @@ export function PostvQuickPage() {
     }
   };
 
-  // Người dùng xác nhận danh sách bình luận đã tự chọn
+  // Người dùng xác nhận danh sách bình luận đã tự chọn (giữ đúng thứ tự kéo thả trong orderedComments)
   const handleConfirmPick = async () => {
     if (!jobId) return;
     setIsSubmitting(true);
     try {
-      const res = await api.submitPostvPick(jobId, checkedCommentIds);
+      const checkedSet = new Set(checkedCommentIds);
+      const orderedIds = orderedComments.filter((c) => checkedSet.has(c.id)).map((c) => c.id);
+      const finalIds = orderedIds.length > 0 ? orderedIds : checkedCommentIds;
+      const res = await api.submitPostvPick(jobId, finalIds);
       setIsWaitingPick(false);
       if (res.job_id && res.job_id !== jobId) {
         setJobId(res.job_id);
@@ -1410,8 +1413,8 @@ export function PostvQuickPage() {
                 )}
               </div>
 
-              {/* Trình phát video 9:16 */}
-              <div className="mx-auto max-w-[360px] overflow-hidden rounded-2xl border border-line bg-black shadow-2xl">
+              {/* Trình phát video 9:16 nhỏ gọn đặt trung tâm */}
+              <div className="mx-auto w-full max-w-[240px] sm:max-w-[260px] overflow-hidden rounded-2xl border border-line bg-black shadow-xl">
                 {output.video ? (
                   <video
                     src={fileUrl(output.video)}
@@ -1426,18 +1429,46 @@ export function PostvQuickPage() {
                 )}
               </div>
 
-              {/* Các nút hành động chính */}
+              {/* Các nút thao tác chính: Tải video, Mở thư mục, Render lại */}
               <div className="space-y-3">
-                {output.video && (
-                  <a
-                    href={fileUrl(output.video)}
-                    download
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-body font-bold text-ink shadow-md transition-all hover:brightness-105 active:scale-[0.99]"
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  {output.video && (
+                    <a
+                      href={fileUrl(output.video)}
+                      download
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-small font-bold text-ink shadow-md transition-all hover:brightness-105 active:scale-[0.99]"
+                    >
+                      <DownloadIcon size={18} />
+                      {T.result.downloadVideo}
+                    </a>
+                  )}
+                  {(output.project_slug || projectSlug) && (
+                    <Button
+                      size="md"
+                      tone="soft"
+                      onClick={() => {
+                        const targetSlug = output.project_slug || projectSlug;
+                        if (targetSlug) {
+                          void api
+                            .openPostvFolder(targetSlug)
+                            .catch((e) => setErrorMessage(String(e)));
+                        }
+                      }}
+                    >
+                      <FolderIcon size={16} />
+                      {T.result.openFolder}
+                    </Button>
+                  )}
+                  <Button
+                    size="md"
+                    tone="soft"
+                    disabled={isSubmitting || !submittedInput.trim()}
+                    onClick={() => void handleStartAuto(true)}
                   >
-                    <DownloadIcon size={20} />
-                    {T.result.downloadVideo}
-                  </a>
-                )}
+                    <PlayIcon size={16} />
+                    {T.result.reRender}
+                  </Button>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {output.publish && (

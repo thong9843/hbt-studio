@@ -476,6 +476,8 @@ export const vi = {
       needSave: 'Đang lưu dự án trước khi dựng…',
       video: 'Tải video.mp4',
       publish: 'Tải nội dung đăng',
+      openFolder: 'Mở thư mục',
+      reRender: 'Render lại',
       player: 'Video vừa dựng',
       warnings: 'Cảnh báo',
       meta: (seconds: number, fps: number, took: number) =>
@@ -1131,6 +1133,8 @@ export const vi = {
       lowCommentsWarning: (count: number) =>
         `Bài viết gốc chỉ có ${count} bình luận (< 10), video có thể bị ngắn. Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang.`,
       downloadVideo: 'Tải video',
+      openFolder: 'Mở thư mục',
+      reRender: 'Render lại',
       copyPublish: 'Sao chép nội dung đăng',
       copiedPublish: 'Đã sao chép!',
       downloadCover: 'Tải ảnh bìa',
