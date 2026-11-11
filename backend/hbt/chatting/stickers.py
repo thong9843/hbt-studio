@@ -12,6 +12,7 @@ from PIL import Image
 
 from hbt.chatting.models import VALID_STICKER_TAGS
 from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.postv.memes import resolve_memes_dir
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,7 @@ EMOJI_TAG_MAP = {
 
 
 def get_memes_dir(library_dir: Path) -> Path:
-    base = Path(library_dir).resolve()
-    memes_dir = base / "memes"
-    if memes_dir.is_dir():
-        return memes_dir
-    alt_dir = base / "meme"
-    if alt_dir.is_dir():
-        return alt_dir
-    # Fallback thư mục cũ nếu có
-    stickers_dir = base / "stickers"
-    return stickers_dir if stickers_dir.is_dir() else memes_dir
+    return resolve_memes_dir(library_dir)
 
 
 def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
@@ -253,6 +245,8 @@ def extract_meme_audio(
         "-y",
         "-v",
         "error",
+        "-threads",
+        "2",
     ]
     if start_time > 0:
         cmd.extend(["-ss", f"{start_time:.2f}"])
@@ -295,7 +289,9 @@ def remove_green_screen(img: Image.Image) -> Image.Image:
             edge_alpha = max(0, int(a * (1.0 - (g - max(r, b)) / 60.0)))
             raw_bytes[i + 3] = edge_alpha
 
-    return Image.frombytes("RGBA", rgba.size, bytes(raw_bytes))
+    res = Image.frombytes("RGBA", rgba.size, bytes(raw_bytes))
+    rgba.close()
+    return res
 
 
 def load_sticker_or_meme_image(
@@ -332,6 +328,8 @@ def load_sticker_or_meme_image(
                         "-y",
                         "-v",
                         "error",
+                        "-threads",
+                        "2",
                         "-ss",
                         str(ss_pos),
                         "-i",
@@ -347,8 +345,8 @@ def load_sticker_or_meme_image(
 
         if frame_png.is_file():
             try:
-                raw_img = Image.open(frame_png)
-                return remove_green_screen(raw_img)
+                with Image.open(frame_png) as raw_img:
+                    return remove_green_screen(raw_img)
             except Exception as e:
                 logger.warning("Lỗi xử lý frame meme %s: %s", frame_png, e)
                 return None

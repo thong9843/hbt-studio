@@ -111,6 +111,8 @@ def assemble_voice_track(
                         "-y",
                         "-v",
                         "error",
+                        "-threads",
+                        "2",
                         "-i",
                         str(audio_path),
                         "-ac",
@@ -483,6 +485,8 @@ def render_chat_video(
 
             pct = 35 + int(25 * (global_i + 1) / total_states)
             tick(pct, f"Vẽ & nén phân đoạn {global_i + 1}/{total_states}")
+            if stk_img is not None:
+                stk_img.close()
 
         # Kết thúc chunk concat
         if last_chunk_fname:
@@ -491,7 +495,17 @@ def render_chat_video(
         chunk_concat_file.write_text("".join(chunk_concat_lines), encoding="utf-8")
 
         chunk_mp4 = frames_dir / f"chunk_{chunk_idx // chunk_size:03d}.mp4"
-        chunk_cmd: list[str] = ["-y", "-v", "error"]
+        chunk_cmd: list[str] = [
+            "-y",
+            "-v",
+            "error",
+            "-threads",
+            "2",
+            "-filter_threads",
+            "2",
+            "-filter_complex_threads",
+            "2",
+        ]
         if bg_file and bg_file.is_file():
             bg_offset = (chunk_start_time % bg_dur) if (bg_dur and bg_dur > 0) else 0.0
             chunk_cmd.extend(["-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-i", str(bg_file)])
@@ -514,11 +528,13 @@ def render_chat_video(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "fast",
+                "veryfast",
                 "-crf",
-                "18",
+                "22",
                 "-pix_fmt",
                 "yuv420p",
+                "-max_muxing_queue_size",
+                "512",
                 "-an",
                 "-t",
                 f"{chunk_total_dur:.3f}",
@@ -650,6 +666,12 @@ def render_chat_video(
         filter_complex = ";".join(filter_parts)
         cmd.extend(
             [
+                "-threads",
+                "2",
+                "-filter_threads",
+                "2",
+                "-filter_complex_threads",
+                "2",
                 "-filter_complex",
                 filter_complex,
                 "-map",
@@ -659,11 +681,13 @@ def render_chat_video(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "fast",
+                "veryfast",
                 "-crf",
                 "22",
                 "-pix_fmt",
                 "yuv420p",
+                "-max_muxing_queue_size",
+                "512",
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -677,6 +701,8 @@ def render_chat_video(
         # Không có meme overlay: nối thẳng stream video (-c:v copy) tiết kiệm tối đa CPU/RAM
         cmd.extend(
             [
+                "-threads",
+                "2",
                 "-map",
                 "0:v",
                 "-map",
@@ -687,6 +713,8 @@ def render_chat_video(
                 "aac",
                 "-b:a",
                 "192k",
+                "-max_muxing_queue_size",
+                "512",
                 "-t",
                 f"{target_duration:.3f}",
                 str(out_mp4),
@@ -699,8 +727,11 @@ def render_chat_video(
     for cf in chunk_files:
         cf.unlink(missing_ok=True)
     chunks_concat.unlink(missing_ok=True)
+    voice_mix_wav.unlink(missing_ok=True)
+    final_audio.unlink(missing_ok=True)
     for av in avatar_images.values():
         av.close()
+    avatar_images.clear()
     gc.collect()
 
     # Lưu metadata của lần render

@@ -109,17 +109,21 @@ def save_avatar(workspace_dir: Path, slug: str, char_id: str, image_bytes: bytes
     avatars_dir = project_dir / "avatars"
     avatars_dir.mkdir(parents=True, exist_ok=True)
 
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    with Image.open(io.BytesIO(image_bytes)) as raw_img:
+        img = raw_img.convert("RGBA")
     w, h = img.size
     min_dim = min(w, h)
     left = (w - min_dim) // 2
     top = (h - min_dim) // 2
     img_cropped = img.crop((left, top, left + min_dim, top + min_dim))
+    img.close()
     img_resized = img_cropped.resize((256, 256), Image.Resampling.LANCZOS)
+    img_cropped.close()
 
     filename = f"{char_id}.png"
     dest_path = avatars_dir / filename
     img_resized.save(dest_path, format="PNG")
+    img_resized.close()
 
     rel_path = f"avatars/{filename}"
     return rel_path

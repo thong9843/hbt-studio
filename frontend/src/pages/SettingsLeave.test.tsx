@@ -55,13 +55,18 @@ function open() {
       },
       { path: '/', element: <p>Trang chủ mẫu</p> },
     ],
-    { initialEntries: ['/settings'] },
+    {
+      initialEntries: ['/settings'],
+      future: {
+        v7_relativeSplatPath: true,
+      },
+    },
   );
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <RouterProvider router={router} />
+      <RouterProvider router={router} future={{ v7_startTransition: true }} />
     </QueryClientProvider>,
   );
   return router;
