@@ -1,14 +1,16 @@
 """Tích hợp Gemini Flash API cho Chế độ V2 (1-Click Prompt) của HBT Core.
 
 - Đọc GEMINI_API_KEY từ file .env hoặc biến môi trường.
-- Gọi endpoint v1beta models/gemini-1.5-flash với payload chuẩn chống lỗi 400:
+- Gọi endpoint v1beta models/{model_name}:generateContent với danh sách fallback:
+  MODELS = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+- Payload chuẩn chống lỗi 400:
   {
     "contents": [{"role": "user", "parts": [{"text": system_prompt + "\\n\\n" + user_prompt}]}],
     "generationConfig": {"temperature": 0.7, "responseMimeType": "application/json"}
   }
 - System prompt ép model trả về đúng định dạng JSON tương thích 100% với cấu trúc đầu vào của V1.
-- Nếu gặp lỗi API (hết quota / lỗi mạng / thiếu key), ném GeminiClientError kèm cờ fallback_v1=True
-  để giao diện thông báo rõ ràng và tự động chuyển hướng sang chế độ V1.
+- Nếu gặp lỗi API (hết quota / lỗi mạng / thiếu key / 404 tất cả model), ném GeminiClientError
+  kèm cờ fallback_v1=True để giao diện thông báo rõ ràng và tự động chuyển hướng sang chế độ V1.
 """
 
 from __future__ import annotations
@@ -27,10 +29,14 @@ from hbt.core.models import HbtCoreScript
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-1.5-flash"
-GEMINI_ENDPOINT = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-)
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+MODELS: list[str] = [
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-exp",
+]
+GEMINI_MODEL = MODELS[0]
+GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
 
 SYSTEM_PROMPT = (
     "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức 'Vì Sao' (HBT Core) tiếng Việt.\n"
@@ -75,6 +81,23 @@ class GeminiClientError(RuntimeError):
         self.fallback_v1 = fallback_v1
 
 
+def normalize_model_name(model_name: str) -> str:
+    """Chuẩn hóa tên model, loại bỏ tiền tố 'models/' thừa để không bị lặp 'models/models/...'."""
+    clean = (model_name or "").strip()
+    while clean.startswith("models/"):
+        clean = clean[len("models/") :].strip()
+    return clean or MODELS[0]
+
+
+def build_gemini_url(model_name: str, api_key: str) -> str:
+    """Tạo URL chuẩn v1beta cho model Gemini, đảm bảo không bao giờ lặp 'models/models/...'."""
+    clean_model = normalize_model_name(model_name)
+    return (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{clean_model}:generateContent?key={api_key}"
+    )
+
+
 def load_gemini_api_key(env_file: Path | None = None) -> str:
     """Đọc GEMINI_API_KEY từ biến môi trường hoặc file .env ở thư mục gốc dự án."""
     env_val = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -106,7 +129,7 @@ def load_gemini_api_key(env_file: Path | None = None) -> str:
 
 
 def build_gemini_payload(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -> dict[str, Any]:
-    """Tạo payload chuẩn chống lỗi 400 cho v1beta models/gemini-1.5-flash."""
+    """Tạo payload chuẩn chống lỗi 400 cho v1beta models/{model_name}:generateContent."""
     prompt_clean = user_prompt.strip()
     combined_text = system_prompt + "\n\n" + prompt_clean
     return {
@@ -142,10 +165,15 @@ def generate_script_from_prompt(
     topic_hint: str | None = None,
     api_key: str | None = None,
     env_file: Path | None = None,
+    models: list[str] | None = None,
     timeout_s: float = 30.0,
     transport: httpx.BaseTransport | None = None,
 ) -> HbtCoreScript:
-    """Gọi Gemini 1.5 Flash sinh kịch bản JSON chuẩn V1 từ 1 câu prompt của người dùng."""
+    """Gọi Gemini Flash API sinh kịch bản JSON chuẩn V1 từ 1 câu prompt của người dùng.
+
+    Tự động thử lần lượt các model trong `MODELS = ["gemini-1.5-flash-latest",
+    "gemini-1.5-flash", "gemini-2.0-flash-exp"]` nếu gặp lỗi HTTP 404.
+    """
     prompt_clean = (user_prompt or "").strip()
     if not prompt_clean:
         raise GeminiClientError(
@@ -169,15 +197,38 @@ def generate_script_from_prompt(
         full_user_prompt = f"{prompt_clean}\n(Chủ đề ưu tiên: {topic_hint.strip()})"
 
     payload = build_gemini_payload(full_user_prompt, system_prompt=SYSTEM_PROMPT)
-    url = f"{GEMINI_ENDPOINT}?key={key}"
+    candidate_models = [normalize_model_name(m) for m in (models or MODELS) if m and m.strip()]
+    if not candidate_models:
+        candidate_models = list(MODELS)
+
+    response: httpx.Response | None = None
+    last_404_detail = ""
 
     try:
         with httpx.Client(timeout=timeout_s, transport=transport) as client:
-            response = client.post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
+            for idx, model_name in enumerate(candidate_models):
+                url = build_gemini_url(model_name, key)
+                response = client.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                if response.status_code == 404:
+                    try:
+                        err_body = response.json()
+                        last_404_detail = err_body.get("error", {}).get("message", "")
+                    except Exception:
+                        last_404_detail = response.text[:200]
+                    logger.warning(
+                        "Model Gemini '%s' trả về 404 (%s)%s",
+                        model_name,
+                        last_404_detail,
+                        f", thử tiếp '{candidate_models[idx + 1]}'"
+                        if idx + 1 < len(candidate_models)
+                        else ", đã hết danh sách fallback",
+                    )
+                    continue
+                break
     except httpx.TimeoutException as exc:
         logger.warning("Gemini API quá thời gian chờ: %s", exc)
         raise GeminiClientError(
@@ -195,6 +246,13 @@ def generate_script_from_prompt(
             fallback_v1=True,
         ) from exc
 
+    if response is None:
+        raise GeminiClientError(
+            "Không thể khởi tạo yêu cầu tới Gemini API. Đã tự động chuyển sang Chế độ V1.",
+            reason="api_error",
+            fallback_v1=True,
+        )
+
     if response.status_code == 429:
         raise GeminiClientError(
             "Gemini API đã hết hạn mức (Quota 429). "
@@ -211,6 +269,8 @@ def generate_script_from_prompt(
             detail = err_body.get("error", {}).get("message", "")
         except Exception:
             detail = response.text[:200]
+        if not detail and response.status_code == 404:
+            detail = last_404_detail
         suffix = f": {detail}" if detail else ""
         raise GeminiClientError(
             f"Gemini API trả về lỗi HTTP {response.status_code}{suffix}. "

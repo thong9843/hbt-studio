@@ -31,9 +31,11 @@ from hbt.core.audio import (
 )
 from hbt.core.gemini_client import (
     GEMINI_ENDPOINT,
+    MODELS,
     SYSTEM_PROMPT,
     GeminiClientError,
     build_gemini_payload,
+    build_gemini_url,
     generate_script_from_prompt,
     load_gemini_api_key,
 )
@@ -268,6 +270,80 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
         )
     assert exc_info.value.fallback_v1 is True
     assert exc_info.value.status_code == 429
+
+
+def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
+    # 1. Đảm bảo URL chuẩn xác và không bao giờ lặp "models/models/..."
+    assert MODELS == ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+    url1 = build_gemini_url("gemini-1.5-flash-latest", "test-key")
+    url2 = build_gemini_url("models/gemini-1.5-flash-latest", "test-key")
+    url3 = build_gemini_url("models/models/gemini-2.0-flash-exp", "test-key")
+    assert (
+        url1
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=test-key"
+    )
+    assert url2 == url1
+    assert "models/models/" not in url3
+    assert (
+        url3
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=test-key"
+    )
+
+    # 2. Nếu model đầu tiên (gemini-1.5-flash-latest) và thứ hai (gemini-1.5-flash) trả về 404,
+    # tự động thử sang model kế tiếp (gemini-2.0-flash-exp) và nhận status_code == 200
+    called_urls: list[str] = []
+    statuses: list[int] = []
+
+    def fallback_404_handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        called_urls.append(url_str)
+        if "gemini-1.5-flash" in url_str:
+            resp = httpx.Response(
+                404,
+                json={
+                    "error": {
+                        "message": "models/gemini-1.5-flash is not found for API version v1beta"
+                    }
+                },
+            )
+            statuses.append(resp.status_code)
+            return resp
+
+        mock_script = {
+            "title": "Vì sao Đấu trường La Mã vĩ đại?",
+            "topic": "history",
+            "segments": [
+                {
+                    "order": 1,
+                    "text": "Đấu trường La Mã là biểu tượng kiến trúc cổ đại.",
+                    "image": "scene-01.png",
+                    "sfx": "whoosh",
+                }
+            ],
+        }
+        resp = httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"content": {"parts": [{"text": json.dumps(mock_script, ensure_ascii=False)}]}}
+                ]
+            },
+        )
+        statuses.append(resp.status_code)
+        return resp
+
+    script = generate_script_from_prompt(
+        "Làm video vì sao về Đấu trường La Mã",
+        api_key="test-key-fallback",
+        transport=httpx.MockTransport(fallback_404_handler),
+    )
+    assert statuses == [404, 404, 200]
+    assert statuses[-1] == 200
+    assert len(called_urls) == 3
+    assert "gemini-1.5-flash-latest:generateContent" in called_urls[0]
+    assert "gemini-1.5-flash:generateContent" in called_urls[1]
+    assert "gemini-2.0-flash-exp:generateContent" in called_urls[2]
+    assert script.title == "Vì sao Đấu trường La Mã vĩ đại?"
 
 
 # ---------------------------------------------------------------------------
