@@ -536,25 +536,26 @@ def synthesize_plan(
     if cached:
         msg = f"Dùng lại {cached}/{total} đoạn đã có"
         report(cached, msg)
-        emit_detail(cached, f"Đang sinh giọng bình luận {cached}/{total}...")
+        emit_detail(cached, f"Đang đọc đoạn {cached}/{total}...")
     if todo:
         items = [SynthItem(plan[k].text, plan[k].voice_id, paths[k]) for k in todo]
 
         def on_item(i: int, state: str) -> None:
             idx_1 = min(total, cached + i + 1)
-            msg = f"Đang sinh giọng bình luận {idx_1}/{total}..."
             if state == "begin":
                 n = cached + i
+                msg = f"Đang đọc đoạn {n + 1}/{total}"
                 report(n, msg)
-                emit_detail(idx_1, msg)
+                emit_detail(idx_1, f"Đang đọc đoạn {idx_1}/{total}...")
             else:
                 n = cached + i + 1
-                report(n, f"Xong đoạn {n}/{total}")
-                emit_detail(n, msg if n < total else f"Đã sinh giọng {n}/{total} đoạn")
+                msg = f"Xong đoạn {n}/{total}"
+                report(n, msg)
+                emit_detail(n, msg)
 
         provider.synthesize_many(items, on_item)
     elif total:
-        emit_detail(total, f"Đã sinh giọng {total}/{total} đoạn")
+        emit_detail(total, f"Xong đoạn {total}/{total}")
     if progress:
         progress(96, "voice", "Đang nối các đoạn")
     out = folder / "voice.wav"
