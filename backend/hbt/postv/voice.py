@@ -20,7 +20,7 @@ import wave
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from hbt.pipeline import cancel
 from hbt.postv.models import PostvProject
@@ -488,6 +488,7 @@ class VoiceResult:
 
 
 Progress = Callable[[float, str, str], None]
+DetailProgress = Callable[[dict[str, Any]], None]
 
 
 def plan_signature(plan: Sequence[VoicePlanItem]) -> str:
@@ -501,6 +502,7 @@ def synthesize_plan(
     cast: dict[str, str],
     progress: Progress | None = None,
     post_gaps: Sequence[float] | None = None,
+    on_detail: DetailProgress | None = None,
 ) -> VoiceResult:
     """Sinh (bỏ qua đoạn đã có trong cache) rồi nối thành `voice.wav` ở thư mục dự án.
 
@@ -508,6 +510,21 @@ def synthesize_plan(
     total = len(plan)
     cache = folder / "build" / "voice"
     cache.mkdir(parents=True, exist_ok=True)
+
+    def emit_detail(current: int, msg: str) -> None:
+        if on_detail is None:
+            return
+        safe_total = max(total, 1)
+        cur = min(max(current, 0), safe_total)
+        on_detail(
+            {
+                "step": "voice",
+                "current": cur,
+                "total": safe_total,
+                "percent": round(cur / safe_total * 100),
+                "message": msg,
+            }
+        )
 
     def report(done: int, msg: str) -> None:
         if progress:
@@ -517,18 +534,27 @@ def synthesize_plan(
     todo = [k for k, path in enumerate(paths) if not path.is_file()]
     cached = total - len(todo)
     if cached:
-        report(cached, f"Dùng lại {cached}/{total} đoạn đã có")
+        msg = f"Dùng lại {cached}/{total} đoạn đã có"
+        report(cached, msg)
+        emit_detail(cached, f"Đang sinh giọng bình luận {cached}/{total}...")
     if todo:
         items = [SynthItem(plan[k].text, plan[k].voice_id, paths[k]) for k in todo]
 
         def on_item(i: int, state: str) -> None:
-            n = cached + i + (1 if state == "done" else 0)
+            idx_1 = min(total, cached + i + 1)
+            msg = f"Đang sinh giọng bình luận {idx_1}/{total}..."
             if state == "begin":
-                report(n, f"Đang đọc đoạn {n + 1}/{total}")
+                n = cached + i
+                report(n, msg)
+                emit_detail(idx_1, msg)
             else:
+                n = cached + i + 1
                 report(n, f"Xong đoạn {n}/{total}")
+                emit_detail(n, msg if n < total else f"Đã sinh giọng {n}/{total} đoạn")
 
         provider.synthesize_many(items, on_item)
+    elif total:
+        emit_detail(total, f"Đã sinh giọng {total}/{total} đoạn")
     if progress:
         progress(96, "voice", "Đang nối các đoạn")
     out = folder / "voice.wav"

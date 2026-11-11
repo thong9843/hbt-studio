@@ -278,6 +278,12 @@ def delete_postv_project(slug: str, state: State):
     return Response(status_code=204)
 
 
+@router.post("/postv/{slug}/unlock")
+def unlock_postv_project(slug: str, state: State):
+    """Huỷ tác vụ bị kẹt và mở khoá dự án PostV."""
+    return state.jobs.unlock_project(slug)
+
+
 @router.post("/projects/{slug}/postv/script/check")
 def script_check(slug: str, state: State):
     """Ước thời lượng và nhắc từ nhạy cảm của dự án PostV (chỉ nhắc, không chặn)."""

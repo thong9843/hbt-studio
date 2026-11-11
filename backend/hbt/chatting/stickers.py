@@ -34,11 +34,15 @@ EMOJI_TAG_MAP = {
 
 
 def get_memes_dir(library_dir: Path) -> Path:
-    memes_dir = Path(library_dir) / "memes"
+    base = Path(library_dir).resolve()
+    memes_dir = base / "memes"
     if memes_dir.is_dir():
         return memes_dir
+    alt_dir = base / "meme"
+    if alt_dir.is_dir():
+        return alt_dir
     # Fallback thư mục cũ nếu có
-    stickers_dir = Path(library_dir) / "stickers"
+    stickers_dir = base / "stickers"
     return stickers_dir if stickers_dir.is_dir() else memes_dir
 
 
@@ -46,19 +50,19 @@ def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
     """Đọc danh sách meme kèm metadata (file, tags, emojis, start_time, duration)."""
     memes_dir = get_memes_dir(library_dir)
     index_file = memes_dir / "index.json"
+    entries: list[dict[str, Any]] = []
     if index_file.is_file():
         try:
             data = json.loads(index_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and "memes" in data:
-                return data["memes"]
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
+            if isinstance(data, dict) and "memes" in data and isinstance(data["memes"], list):
+                entries = [m for m in data["memes"] if isinstance(m, dict)]
+            elif isinstance(data, list):
+                entries = [m for m in data if isinstance(m, dict)]
+            elif isinstance(data, dict):
                 # Legacy format: { "soc": ["cat.mp4"] }
-                converted = []
                 for tag, files in data.items():
                     for f in files:
-                        converted.append(
+                        entries.append(
                             {
                                 "file": f,
                                 "tags": [tag],
@@ -67,11 +71,26 @@ def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
                                 "duration": 3.5,
                             }
                         )
-                return converted
         except Exception as e:
             logger.warning("Không đọc được memes/index.json: %s", e)
 
-    return []
+    # Bổ sung mọi file video meme có thật trên đĩa dù chưa khai báo trong index.json
+    known_files = {str(item.get("file") or "") for item in entries}
+    if memes_dir.is_dir():
+        for path in sorted(memes_dir.iterdir(), key=lambda p: p.name.lower()):
+            if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTS:
+                if path.name not in known_files:
+                    entries.append(
+                        {
+                            "file": path.name,
+                            "tags": ["ok"],
+                            "emojis": [],
+                            "start_time": 0.0,
+                            "duration": 3.5,
+                        }
+                    )
+                    known_files.add(path.name)
+    return entries
 
 
 def get_meme_metadata(library_dir: Path, meme_file_or_name: Path | str) -> dict[str, Any]:

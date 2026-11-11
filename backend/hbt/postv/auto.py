@@ -131,18 +131,26 @@ def emit_stage_event(
     message: str,
     data: dict[str, Any] | None = None,
     logger: logging.Logger | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
-    """Phát sự kiện tiến trình SSE {stage, status, progress, message, [data]}."""
+    """Phát sự kiện tiến trình SSE {stage, step, status, progress, message, [data]}."""
     pct = round(progress, 1)
     with job._lock:
+        if hasattr(job, "last_heartbeat"):
+            import time as _time
+
+            job.last_heartbeat = _time.time()
         job.progress = pct
         job.step = stage
         payload: dict[str, Any] = {
             "stage": stage,
+            "step": stage,
             "status": status,
             "progress": pct,
             "message": message,
         }
+        if extra:
+            payload.update(extra)
         if data:
             payload["data"] = data
         job._events.append(("progress", payload))
@@ -232,6 +240,10 @@ def run_auto_job(job_manager: Any, job: Any) -> None:
             logger=logger,
         )
         job._finish("failed", error=err_msg)
+    finally:
+        _set_jm_lock(job_manager, job.slug, voice=False, render=False)
+        if not getattr(job, "finished", True):
+            job._finish("failed", error="Tác vụ tự động kết thúc bất thường, đã mở khoá dự án.")
 
 
 def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logger) -> None:
@@ -445,9 +457,9 @@ def _has_meme_library(library_dir: Path | str | None) -> bool:
     if not isinstance(library_dir, (str, Path)):
         return False
     try:
-        from hbt.chatting.stickers import load_memes_metadata
+        from hbt.postv.memes import MemeLibrary
 
-        return bool(load_memes_metadata(Path(library_dir)))
+        return bool(MemeLibrary(Path(library_dir)).scan_local())
     except Exception:
         return False
 
@@ -659,26 +671,25 @@ def _infer_meme_tag(text: str) -> str | None:
 def _assign_climax_memes(
     segments: list[PostvSegment],
     comments_by_id: dict[str, PostvComment],
-    library_dir: Path | None,
+    library_dir: Path | str | None,
 ) -> None:
-    """Gắn meme phông xanh từ library/memes/ cho các comment cao trào, xoay vòng không lặp lại."""
-    if not library_dir:
+    """Nạp toàn bộ kho meme cục bộ (library/memes/) vào vòng xoay tua Round-Robin Shuffle."""
+    if not isinstance(library_dir, (str, Path)):
         return
     try:
-        from hbt.chatting.stickers import find_meme_by_emojis, load_memes_metadata, pick_sticker
+        from hbt.postv.memes import RoundRobinMemePool
     except Exception:
         return
 
-    meta_list = load_memes_metadata(library_dir)
-    if not meta_list:
+    pool = RoundRobinMemePool(library_dir)
+    if pool.size == 0:
         return
 
-    used_memes: set[str] = set()
     comment_segs = [(i, s) for i, s in enumerate(segments) if s.role == "comment" and s.ref]
     if not comment_segs:
         return
 
-    # Ưu tiên các bình luận điểm cao hoặc có emoji/từ cảm xúc cao trào, cách nhau ít nhất 1 đoạn
+    # Ưu tiên các bình luận điểm cao / cao trào, cách nhau ít nhất 1 đoạn, xoay vòng toàn kho cục bộ
     ranked = sorted(
         comment_segs,
         key=lambda pair: (
@@ -686,7 +697,7 @@ def _assign_climax_memes(
         ),
         reverse=True,
     )
-    max_memes = max(1, min(6, (len(comment_segs) + 2) // 3))
+    max_memes = max(1, min(12, (len(comment_segs) + 2) // 3))
     assigned_indices: set[int] = set()
 
     for seg_idx, seg in ranked:
@@ -697,11 +708,8 @@ def _assign_climax_memes(
             continue
         comment = comments_by_id.get(seg.ref or "")
         text = comment.text if comment else seg.voice
-        chosen_path = find_meme_by_emojis(library_dir, text, used_memes=used_memes)
-        if chosen_path is None:
-            tag = _infer_meme_tag(text)
-            if tag:
-                chosen_path = pick_sticker(library_dir, tag, used_memes=used_memes)
+        tag = _infer_meme_tag(text)
+        chosen_path = pool.next_meme(preferred_emojis_text=text, preferred_tag=tag)
         if chosen_path is not None and chosen_path.is_file():
             seg.meme_id = chosen_path.name
             seg.meme_pos = "center"
@@ -843,6 +851,27 @@ def _step_script(
     )
 
 
+def _set_jm_lock(
+    job_manager: Any, slug: str, *, voice: bool | None = None, render: bool | None = None
+) -> None:
+    lock = getattr(job_manager, "_lock", None)
+    vmap = getattr(job_manager, "is_generating_voice", None)
+    rmap = getattr(job_manager, "is_rendering", None)
+    if not isinstance(vmap, dict) or not isinstance(rmap, dict):
+        return
+    if lock is not None:
+        with lock:
+            if voice is not None:
+                vmap[slug] = voice
+            if render is not None:
+                rmap[slug] = render
+    else:
+        if voice is not None:
+            vmap[slug] = voice
+        if render is not None:
+            rmap[slug] = render
+
+
 def _step_voice(
     job_manager: Any, job: Any, options: dict[str, Any], logger: logging.Logger
 ) -> None:
@@ -850,8 +879,10 @@ def _step_voice(
         job,
         stage=STAGE_VOICE,
         status="running",
-        progress=50.0,
-        message="Đang sinh giọng đọc VieNeu…",
+        progress=45.0,
+        message="Đang chuẩn bị sinh giọng đọc VieNeu…",
+        data={"step": "voice", "current": 0, "total": 1, "percent": 0},
+        extra={"current": 0, "total": 1, "percent": 0},
         logger=logger,
     )
 
@@ -865,14 +896,21 @@ def _step_voice(
     pdir = job_manager.storage.project_dir(job.slug)
 
     plan, cast = build_plan(project, job_manager.voice.list_voices())
+    total_items = len(plan)
 
-    def on_voice_progress(pct: float, step: str, msg: str) -> None:
+    def on_voice_detail(detail: dict[str, Any]) -> None:
+        cur = int(detail.get("current", 0))
+        tot = int(detail.get("total", max(total_items, 1)))
+        vpct = int(detail.get("percent", 0))
+        vmsg = str(detail.get("message") or f"Đang sinh giọng bình luận {cur}/{tot}...")
         emit_stage_event(
             job,
             stage=STAGE_VOICE,
             status="running",
-            progress=45.0 + pct * 0.20,
-            message=f"Sinh giọng: {msg}",
+            progress=45.0 + (vpct * 0.20),
+            message=vmsg,
+            data={"step": "voice", "current": cur, "total": tot, "percent": vpct, "message": vmsg},
+            extra={"current": cur, "total": tot, "percent": vpct},
             logger=logger,
         )
 
@@ -880,7 +918,19 @@ def _step_voice(
         [s for s in project.segments if s.voice.strip()],
         getattr(job_manager, "library_dir", None),
     )
-    synthesize_plan(plan, pdir, job_manager.voice, cast, on_voice_progress, post_gaps=post_gaps)
+    _set_jm_lock(job_manager, job.slug, voice=True)
+    try:
+        synthesize_plan(
+            plan,
+            pdir,
+            job_manager.voice,
+            cast,
+            None,
+            post_gaps=post_gaps,
+            on_detail=on_voice_detail,
+        )
+    finally:
+        _set_jm_lock(job_manager, job.slug, voice=False)
 
     latest = job_manager.storage.load_any(job.slug)
     latest.voice = latest.voice.model_copy(
@@ -893,7 +943,15 @@ def _step_voice(
         stage=STAGE_VOICE,
         status="done",
         progress=STAGE_PROGRESS[STAGE_VOICE],
-        message="Đã sinh xong toàn bộ giọng đọc",
+        message=f"Đã sinh xong {total_items}/{total_items} đoạn giọng đọc",
+        data={
+            "step": "voice",
+            "current": total_items,
+            "total": total_items,
+            "percent": 100,
+            "message": f"Đã sinh xong {total_items}/{total_items} đoạn giọng đọc",
+        },
+        extra={"current": total_items, "total": total_items, "percent": 100},
         logger=logger,
     )
 

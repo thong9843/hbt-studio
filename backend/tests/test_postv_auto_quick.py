@@ -935,3 +935,43 @@ def test_step_pick_debug_budget_log_and_low_comments_warning():
     assert done_payload["total_comments"] == 4
     assert done_payload["low_comments_warning"]
     assert "< 10" in done_payload["low_comments_warning"]
+
+
+def test_step_voice_emits_sentence_progress_and_releases_lock(tmp_path):
+    import logging
+
+    from hbt.jobs import Job, JobManager
+    from hbt.postv.auto import _step_voice
+    from hbt.postv.models import PostvSegment
+    from hbt.postv.voice import FakeVoice
+    from hbt.storage import Storage
+
+    store = Storage(tmp_path / "ws")
+    proj = store.create_postv("Progress Voice")
+    proj.comments = [
+        PostvComment(id="c1", handle="u1", text="Bình luận một"),
+        PostvComment(id="c2", handle="u2", text="Bình luận hai"),
+    ]
+    proj.segments = [
+        PostvSegment(role="post", card="post", voice="Bài mở đầu ngắn", speaker="post"),
+        PostvSegment(role="comment", card="comment", voice="Bình luận một", ref="c1", speaker="c1"),
+        PostvSegment(role="comment", card="comment", voice="Bình luận hai", ref="c2", speaker="c2"),
+    ]
+    store.save_any(proj.slug, proj)
+
+    jm = JobManager(store, tmp_path / "lib", voice=FakeVoice(), tool_check=None)
+    job = Job("j-voice-prog", proj.slug, False, 60, True, False, kind="postv_quick")
+    _step_voice(jm, job, {}, logging.getLogger("test"))
+
+    voice_events = [
+        payload
+        for ev, payload in job._events
+        if ev == "progress" and payload.get("step") == "voice"
+    ]
+    assert any(
+        e.get("current") == 1 and e.get("total") == 3 and "1/3" in e.get("message", "")
+        for e in voice_events
+    )
+    assert any(e.get("current") == 3 and e.get("percent") == 100 for e in voice_events)
+    assert jm.is_generating_voice.get(proj.slug) is False
+    jm.shutdown()

@@ -103,6 +103,11 @@ export const api = {
     apiRequest<PostvParseResult>('POST', '/postv/parse', { json: { text } }),
   fetchThreads: (url: string) =>
     apiRequest<PostvParseResult>('POST', '/postv/fetch-threads', { json: { url } }),
+  unlockProject: (slug: string) =>
+    apiRequest<{ ok: boolean; slug: string; unlocked: number }>(
+      'POST',
+      `/projects/${enc(slug)}/unlock`,
+    ),
   searchMemes: (q: string, count = 12) =>
     apiGet<MemeEntry[]>(`/memes/search?q=${enc(q)}&count=${count}`),
   listMemeLibrary: () => apiGet<MemeEntry[]>('/memes/library'),

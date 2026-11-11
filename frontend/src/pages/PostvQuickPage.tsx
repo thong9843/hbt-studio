@@ -204,6 +204,13 @@ export function PostvQuickPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pickData, setPickData] = useState<PickSnippetData | null>(null);
   const [lowCommentsWarning, setLowCommentsWarning] = useState<string | null>(null);
+  const [voiceProgress, setVoiceProgress] = useState<{
+    current: number;
+    total: number;
+    percent: number;
+    message: string;
+  } | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const [output, setOutput] = useState<CompletedOutput | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [copiedPublish, setCopiedPublish] = useState(false);
@@ -255,6 +262,25 @@ export function PostvQuickPage() {
           }
           if (payload.message) {
             setStageMessage(payload.message);
+          }
+          if (payload.stage === 'voice' || payload.step === 'voice') {
+            const cur = payload.current ?? payload.data?.current;
+            const tot = payload.total ?? payload.data?.total;
+            const pct = payload.percent ?? payload.data?.percent;
+            const msg = payload.data?.message || payload.message || '';
+            if (typeof cur === 'number' || typeof pct === 'number') {
+              setVoiceProgress({
+                current: typeof cur === 'number' ? cur : 0,
+                total: typeof tot === 'number' && tot > 0 ? tot : 1,
+                percent:
+                  typeof pct === 'number'
+                    ? pct
+                    : typeof cur === 'number' && typeof tot === 'number' && tot > 0
+                      ? Math.round((cur / tot) * 100)
+                      : 0,
+                message: msg,
+              });
+            }
           }
           if (payload.data) {
             if (payload.stage === 'fetch') {
@@ -457,6 +483,7 @@ export function PostvQuickPage() {
         setOutput(null);
         setPickData(null);
         setLowCommentsWarning(null);
+        setVoiceProgress(null);
         setStageStatuses({
           fetch: 'running',
           pick: 'waiting',
@@ -473,6 +500,32 @@ export function PostvQuickPage() {
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Huỷ tác vụ bị kẹt và mở khoá dự án khi gặp lỗi deadlock / 409
+  const isLockedError = Boolean(
+    errorMessage && /đang được dựng|đang sinh giọng|đang bận|\b409\b/i.test(errorMessage),
+  );
+  const unlockTargetSlug = projectSlug || duplicateSlug || postvProjects[0]?.slug || null;
+  const handleUnlockProject = async () => {
+    if (!unlockTargetSlug) return;
+    setIsUnlocking(true);
+    try {
+      await api.unlockProject(unlockTargetSlug);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+      setErrorMessage(null);
+      setIsWaitingPick(false);
+      setJobId(null);
+      setVoiceProgress(null);
+      void refetchProjects();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -599,6 +652,7 @@ export function PostvQuickPage() {
     setOutput(null);
     setPickData(null);
     setLowCommentsWarning(null);
+    setVoiceProgress(null);
     setErrorMessage(null);
     setDuplicateSlug(null);
     setProgressPct(0);
@@ -832,9 +886,21 @@ export function PostvQuickPage() {
               {/* Lỗi nếu có */}
               {errorMessage && (
                 <Card className="border-danger/40 bg-danger/5 p-4 text-small text-danger">
-                  <div className="flex items-center gap-2 font-medium">
-                    <AlertIcon size={18} />
-                    <span>{errorMessage}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-3 font-medium">
+                    <div className="flex items-center gap-2">
+                      <AlertIcon size={18} />
+                      <span>{errorMessage}</span>
+                    </div>
+                    {isLockedError && unlockTargetSlug && (
+                      <Button
+                        size="sm"
+                        tone="soft"
+                        disabled={isUnlocking}
+                        onClick={handleUnlockProject}
+                      >
+                        {isUnlocking ? T.progress.unlocking : T.progress.unlock}
+                      </Button>
+                    )}
                   </div>
                 </Card>
               )}
@@ -1234,6 +1300,20 @@ export function PostvQuickPage() {
                             </div>
                           )}
 
+                          {/* Thanh tiến trình sinh giọng VieNeu Bước 3 */}
+                          {stg === 'voice' && isCurrent && (
+                            <div className="mt-2 space-y-1">
+                              <Progress
+                                value={voiceProgress?.percent ?? 0}
+                                label="Tiến độ sinh giọng VieNeu"
+                              />
+                              <p className="text-tiny font-medium text-brand">
+                                {voiceProgress?.message || stageMessage || 'Đang sinh giọng…'} (
+                                {voiceProgress?.percent ?? 0}%)
+                              </p>
+                            </div>
+                          )}
+
                           {/* Thanh % ở bước dựng render */}
                           {stg === 'render' && isCurrent && (
                             <div className="mt-2">
@@ -1263,6 +1343,18 @@ export function PostvQuickPage() {
                 {errorMessage && (
                   <div className="mt-4 rounded-xl border border-danger/40 bg-danger/5 p-3 text-small text-danger">
                     <p className="font-semibold">{errorMessage}</p>
+                    {isLockedError && unlockTargetSlug && (
+                      <div className="mt-2">
+                        <Button
+                          size="sm"
+                          tone="soft"
+                          disabled={isUnlocking}
+                          onClick={handleUnlockProject}
+                        >
+                          {isUnlocking ? T.progress.unlocking : T.progress.unlock}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 
