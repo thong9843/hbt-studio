@@ -156,7 +156,8 @@ def render_state(
         t = display(w)
         t = t.upper() if style.upper else t
         texts.append(STARS if m and mode == "stars" else t)
-    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    probe_im = Image.new("L", (1, 1))
+    probe = ImageDraw.Draw(probe_im)
     widths = [probe.textlength(t, font=f) for t in texts]
     lines = _layout(texts, f, style.gap)
     im = Image.new("RGBA", (W, BAND), (0, 0, 0, 0))
@@ -176,9 +177,14 @@ def render_state(
                 stroke_width=style.stroke, stroke_fill=style.stroke_color,
             )  # fmt: skip
             if hidden:  # làm mờ đúng vùng chữ của từ đó
-                im.alpha_composite(target.filter(ImageFilter.GaussianBlur(blur)))
+                blurred = target.filter(ImageFilter.GaussianBlur(blur))
+                im.alpha_composite(blurred)
+                blurred.close()
+                target.close()
             x += widths[k] + style.gap
     im.save(path)
+    im.close()
+    probe_im.close()
 
 
 _CODE = code_digest(sys.modules[__name__])  # đổi kiểu vẽ thì vẽ lại PNG

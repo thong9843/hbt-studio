@@ -98,6 +98,27 @@ describe('syncSegments', () => {
         .map((s) => s.voice),
     ).toEqual(['Một', 'Hai']);
   });
+
+  it('preserves manual meme_id and fills blank voice from newly edited comment text', () => {
+    const p = project({
+      comments: [comment('c1', { picked: true, text: 'Nội dung mới thêm' })],
+      segments: [
+        {
+          role: 'comment',
+          card: 'comment',
+          voice: '',
+          ref: 'c1',
+          meme_id: 'custom_cat_id',
+          meme_pos: 'center',
+        },
+      ],
+    });
+    const synced = syncSegments(p);
+    const seg = synced.find((s) => s.ref === 'c1');
+    expect(seg?.meme_id).toBe('custom_cat_id');
+    expect(seg?.meme_pos).toBe('center');
+    expect(seg?.voice).toBe('Nội dung mới thêm');
+  });
 });
 
 describe('suggestByLikes', () => {

@@ -261,23 +261,11 @@ export function PostvExportPage() {
             tone="accent"
             options={{ preview: false, fps, outro: project.settings.outro }}
             blocked={ready ? null : T.notReady}
+            videoRef={videoRef}
+            overrideVideoUrl={played?.video && releasing !== played.job_id ? played.video : null}
+            onOpenFolder={() => void api.openPostvFolder(project.slug).catch((e) => toast.error(e))}
           />
         </Card>
-
-        {media && (
-          <Card as="section" className="space-y-3">
-            <div className="ui-frame mx-auto overflow-hidden bg-black">
-              <video
-                ref={videoRef}
-                key={media.key}
-                controls
-                aria-label={vi.postv.render.player}
-                className="h-full w-full bg-black object-contain"
-                src={releasing === media.key ? undefined : media.video}
-              />
-            </div>
-          </Card>
-        )}
       </aside>
 
       {toDelete && (

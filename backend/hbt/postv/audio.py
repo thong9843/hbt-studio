@@ -215,6 +215,8 @@ def prepare_sfx_clip(
         "-v",
         "error",
         "-y",
+        "-threads",
+        "2",
         "-i",
         str(src),
         "-t",

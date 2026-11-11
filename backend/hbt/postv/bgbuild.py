@@ -104,9 +104,11 @@ def build_background(
     labels = "".join(f"[v{i}]" for i in range(len(pieces)))
     fc = ";".join([*chains, f"{labels}concat=n={len(pieces)}:v=1:a=0[bg]"])
     partial = out.with_name(out.stem + ".part.mp4")
+    bg_crf = max(int(crf), 20)
     run_ffmpeg([
+        "-threads", "2", "-filter_threads", "2", "-filter_complex_threads", "2",
         *args, "-filter_complex", fc, "-map", "[bg]", "-an", "-r", str(fps),
-        "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-g", str(2 * fps),
-        "-pix_fmt", "yuv420p", partial,
+        "-c:v", "libx264", "-preset", preset, "-crf", str(bg_crf), "-g", str(2 * fps),
+        "-max_muxing_queue_size", "256", "-pix_fmt", "yuv420p", partial,
     ])  # fmt: skip
     cache.publish_atomic(partial, out)

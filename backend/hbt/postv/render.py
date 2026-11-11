@@ -8,6 +8,7 @@ lớn; chép phần điều phối (D15). `pipeline/` không bị sửa (N1); kh
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import subprocess
@@ -70,6 +71,10 @@ ALIGN_START, ALIGN_END = 10.0, 25.0  # khung tiến độ của bước 3 (Căn 
 LONG_SECONDS = 185.0
 MAX_PREVIEW_SECONDS = 60
 CROSSFADE = audio.OUTRO_CROSSFADE
+POSTV_FFMPEG_THREADS = 2
+POSTV_FINAL_PRESET = "veryfast"
+POSTV_FINAL_CRF = 22
+POSTV_MAX_MUXING_QUEUE = 512
 
 
 def postv_outro_clip(fps: int, brand_dir: Path) -> Path:
@@ -113,41 +118,43 @@ def voiced_segments(project: PostvProject):
 
 def _run_with_progress(cmd: list[str], total: float, on_frac, partial: Path) -> None:
     """Chạy ffmpeg, đọc `-progress` để báo tiến độ; huỷ thì kill và xoá file dở."""
-    err = tempfile.TemporaryFile()
-    proc = subprocess.Popen(
-        [*cmd, "-progress", "pipe:1", "-nostats"],
-        stdout=subprocess.PIPE,
-        stderr=err,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    token = cancel.current()
-    if token is not None:
-        token.track(proc)
-    try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
-                try:
-                    done = int(line.split("=", 1)[1]) / 1e6
-                except ValueError:
-                    continue
-                on_frac(min(max(done / max(total, 1e-3), 0.0), 1.0))
-        proc.wait()
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(
+            [*cmd, "-progress", "pipe:1", "-nostats"],
+            stdout=subprocess.PIPE,
+            stderr=err,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        token = cancel.current()
         if token is not None:
-            token.untrack(proc)
-    try:
-        cancel.check_current()  # bộ mã hoá chết vì bị huỷ thì không phải lỗi mã hoá
-        if proc.returncode != 0:
-            err.seek(0)
-            detail = err.read().decode("utf-8", errors="replace").strip()[-800:]
-            raise RenderError(f"Bộ mã hoá lỗi (mã {proc.returncode}):\n{detail}")
-    except BaseException:
+            token.track(proc)
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                    try:
+                        done = int(line.split("=", 1)[1]) / 1e6
+                    except ValueError:
+                        continue
+                    on_frac(min(max(done / max(total, 1e-3), 0.0), 1.0))
+            proc.wait()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            if token is not None:
+                token.untrack(proc)
+        try:
+            cancel.check_current()  # bộ mã hoá chết vì bị huỷ thì không phải lỗi mã hoá
+            if proc.returncode != 0:
+                err.seek(0)
+                detail = err.read().decode("utf-8", errors="replace").strip()[-800:]
+                raise RenderError(f"Bộ mã hoá lỗi (mã {proc.returncode}):\n{detail}")
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
         partial.unlink(missing_ok=True)  # không để lại video dang dở
         raise
 
@@ -240,10 +247,15 @@ def compose_postv(
     inputs += ["-i", audio_wav]
     partial = out.with_name(out.stem + ".part.mp4")
     cmd = [
-        ffmpeg_exe(), "-hide_banner", "-v", "error", "-y", *map(str, inputs),
+        ffmpeg_exe(), "-hide_banner", "-v", "error", "-y",
+        "-threads", str(POSTV_FFMPEG_THREADS),
+        "-filter_threads", str(POSTV_FFMPEG_THREADS),
+        "-filter_complex_threads", str(POSTV_FFMPEG_THREADS),
+        *map(str, inputs),
         "-filter_complex", ";".join(graph), "-map", "[v]", "-map", f"{index}:a", "-r", str(fps),
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-profile:v", "high",
-        "-g", str(2 * fps), "-c:a", "aac", "-b:a", audio_bitrate,
+        "-g", str(2 * fps), "-max_muxing_queue_size", str(POSTV_MAX_MUXING_QUEUE),
+        "-c:a", "aac", "-b:a", audio_bitrate,
         "-shortest", "-movflags", "+faststart", str(partial),
     ]  # fmt: skip
     out.with_name("compose.txt").write_text(  # để xem lại khi lỗi (không phải kết quả dựng)
@@ -416,6 +428,46 @@ def _render_postv(
     if total >= LONG_SECONDS:
         warn(f"Video dài {total:.0f} s, nên dưới {LONG_SECONDS:.0f} s (3 phút)")
 
+    from hbt.chatting.stickers import extract_meme_audio, get_meme_metadata
+    from hbt.postv.memes import resolve_meme_file
+    from hbt.postv.timeline import (
+        pad_voice_wav_for_memes,
+        plan_meme_cutin_and_card_starts,
+        resolve_meme_cutin_duration,
+    )
+
+    resolved_memes: dict[int, tuple[Path, float, float, str, bool]] = {}
+    meme_durations: dict[int, float] = {}
+    for k, seg in enumerate(segs):
+        m_id = getattr(seg, "meme_id", None)
+        if not m_id:
+            continue
+        m_file = resolve_meme_file(library_dir, m_id)
+        if m_file is None or not m_file.is_file():
+            continue
+        meta = get_meme_metadata(library_dir, m_file.name)
+        ss_start = float(meta.get("start_time", 0.0))
+        cutin_dur = resolve_meme_cutin_duration(library_dir, m_file.name)
+        try:
+            m_info = probe(m_file)
+            m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
+        except Exception:
+            m_file_dur = 3.0
+        avail_file = max(0.5, m_file_dur - ss_start) if m_file_dur > ss_start else m_file_dur
+        needs_loop = avail_file + 0.05 < cutin_dur
+        m_pos = getattr(seg, "meme_pos", "center")
+        resolved_memes[k] = (m_file, cutin_dur, ss_start, m_pos, needs_loop)
+        meme_durations[k] = cutin_dur
+
+    if meme_durations:
+        padded_wav = build / "voice_meme_padded.wav"
+        voice_align, times, was_padded = pad_voice_wav_for_memes(
+            voice_align, padded_wav, times, scene_of, n_scenes, meme_durations
+        )
+        if was_padded:
+            total = media_duration(voice_align)
+            rep.say(f"Đồng bộ {len(meme_durations)} meme thủ công: tự đệm khoảng lặng (+0.3s)")
+
     # ---- 3b. Che từ nhạy cảm (25)
     rep.at(25, "Che từ nhạy cảm")
     windows = censorfx.censor_windows(tokens, scene_of, times, matchers, total) if matchers else []
@@ -436,9 +488,6 @@ def _render_postv(
 
     # ---- 4. Mốc đổi thẻ & Cửa sổ Meme Cut-in Pause độc lập (25)
     rep.at(25, "Mốc đổi thẻ")
-    from hbt.chatting.stickers import extract_meme_audio, get_meme_metadata, get_memes_dir
-    from hbt.postv.timeline import plan_meme_cutin_and_card_starts, resolve_meme_cutin_duration
-
     offsets = scene_offsets(times, scene_of, n_scenes)
     if n_scenes > 1 and not offsets_valid(offsets):
         raise RenderError("Mốc chuyển đoạn không hợp lệ: có đoạn quá ngắn so với lời đọc")
@@ -446,32 +495,6 @@ def _render_postv(
     for si in range(n_scenes):
         idx = [i for i, s in enumerate(scene_of) if s == si]
         first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
-
-    meme_lib_dir = get_memes_dir(library_dir)
-    resolved_memes: dict[int, tuple[Path, float, float, str, bool]] = {}
-    meme_durations: dict[int, float] = {}
-    for k, seg in enumerate(segs):
-        m_id = getattr(seg, "meme_id", None)
-        if not m_id:
-            continue
-        m_file = meme_lib_dir / m_id
-        if not m_file.is_file():
-            m_file = meme_lib_dir / f"{m_id}.mp4"
-        if not m_file.is_file():
-            continue
-        meta = get_meme_metadata(library_dir, m_file.name)
-        ss_start = float(meta.get("start_time", 0.0))
-        cutin_dur = resolve_meme_cutin_duration(library_dir, m_file.name)
-        try:
-            m_info = probe(m_file)
-            m_file_dur = float(m_info.get("format", {}).get("duration", 3.0))
-        except Exception:
-            m_file_dur = 3.0
-        avail_file = max(0.5, m_file_dur - ss_start) if m_file_dur > ss_start else m_file_dur
-        needs_loop = avail_file + 0.05 < cutin_dur
-        m_pos = getattr(seg, "meme_pos", "center")
-        resolved_memes[k] = (m_file, cutin_dur, ss_start, m_pos, needs_loop)
-        meme_durations[k] = cutin_dur
 
     base_starts = cardfx.segment_starts(offsets, n_scenes, X)
     starts, meme_windows = plan_meme_cutin_and_card_starts(
@@ -683,14 +706,18 @@ def _render_postv(
 
     # ---- 9. Ghép cuối (60–98)
     rep.at(60, "Ghép cuối")
+    gc.collect()
     video = job_dir / "video.mp4"
+    compose_preset = POSTV_FINAL_PRESET if not q.preview else q.final_preset
+    compose_crf = POSTV_FINAL_CRF if not q.preview else q.final_crf
     compose_postv(
         bg=bg, caption_concat=concat, caption_y=captions.band_y(cap_style), cards=cards, tpl=tpl,
         fps=q.fps, width=q.width, height=q.height, frames=int(round(body_seconds * q.fps)),
         outro_clip=outro_clip, audio_wav=final_audio, out_seconds=out_total,
-        preset=q.final_preset, crf=q.final_crf, audio_bitrate=q.audio_bitrate, out=video,
+        preset=compose_preset, crf=compose_crf, audio_bitrate=q.audio_bitrate, out=video,
         on_frac=lambda f: rep.tick(60 + 38 * f), memes=meme_items,
     )  # fmt: skip
+    gc.collect()
 
     # ---- 10. Kiểm tra đầu ra (98–100)
     rep.at(98, "Kiểm tra đầu ra")
@@ -790,7 +817,10 @@ def _make_covers(
         source, thumb.lines, thumb.series or project.series, thumb.accent, brand_dir / LOGO_FILE,
         fit_background=True,
     )  # fmt: skip
-    return save_covers(image, out_dir)
+    try:
+        return save_covers(image, out_dir)
+    finally:
+        image.close()
 
 
 __all__ = [

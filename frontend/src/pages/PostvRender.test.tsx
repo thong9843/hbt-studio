@@ -343,4 +343,35 @@ describe('Bước 5 · Xuất bản đẹp', () => {
 
     await waitFor(() => expect(deleted).toBe(true));
   });
+
+  it('renders compact 9:16 preview with Open Folder and Re-render actions', async () => {
+    const user = userEvent.setup();
+    let openedFolder = false;
+    backend(postv(), {
+      'GET /api/projects/bai/renders': [
+        {
+          job_id: 'j-done',
+          project: 'bai',
+          video: '/files/bai/renders/j-done/video.mp4',
+          publish: '/files/bai/renders/j-done/publish.txt',
+          preview: false,
+          duration: 62,
+          fps: 60,
+          created_at: '2026-11-11T10:00:00Z',
+        },
+      ],
+      'POST /api/postv/bai/open-folder': () => {
+        openedFolder = true;
+        return json({ ok: true, path: 'workspace/projects/bai/renders' });
+      },
+    });
+    app('/postv/bai/export');
+
+    const player = await screen.findByLabelText(t.postv.render.player);
+    expect(player).toBeVisible();
+    expect(player.className).toContain('aspect-[9/16]');
+    expect(screen.getByRole('button', { name: 'Render lại' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Mở thư mục' }));
+    await waitFor(() => expect(openedFolder).toBe(true));
+  });
 });

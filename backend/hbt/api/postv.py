@@ -832,3 +832,20 @@ def delete_postv_source(slug: str, state: State) -> None:
         c.text = ""
     project.source.url = ""
     state.storage.save_any(slug, project)
+
+
+@router.post("/postv/{slug}/open-folder")
+def open_postv_folder(slug: str, state: State) -> dict[str, Any]:
+    """Mở thư mục chứa video/dự án PostV trên máy local."""
+    import os
+    import sys
+
+    project_dir = state.storage.project_dir(slug)
+    renders_dir = project_dir / "renders"
+    target = renders_dir if renders_dir.is_dir() else project_dir
+    if sys.platform == "win32" and hasattr(os, "startfile"):
+        try:
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        except OSError:
+            pass
+    return {"ok": True, "path": str(target)}

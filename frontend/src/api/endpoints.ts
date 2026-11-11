@@ -108,6 +108,10 @@ export const api = {
       'POST',
       `/projects/${enc(slug)}/unlock`,
     ),
+  openPostvFolder: (slug: string) =>
+    apiRequest<{ ok: boolean; path: string }>('POST', `/postv/${enc(slug)}/open-folder`, {
+      json: {},
+    }),
   searchMemes: (q: string, count = 12) =>
     apiGet<MemeEntry[]>(`/memes/search?q=${enc(q)}&count=${count}`),
   listMemeLibrary: () => apiGet<MemeEntry[]>('/memes/library'),

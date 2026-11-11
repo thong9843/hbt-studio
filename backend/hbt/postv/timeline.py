@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import wave
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,12 +61,81 @@ def resolve_meme_cutin_duration(library_dir: Path | None, meme_id: str | None) -
     if library_dir is not None:
         try:
             from hbt.chatting.stickers import get_meme_metadata
+            from hbt.postv.memes import resolve_meme_file
 
-            meta = get_meme_metadata(library_dir, meme_id)
+            resolved = resolve_meme_file(library_dir, meme_id)
+            lookup_key = resolved.name if resolved is not None else meme_id
+            meta = get_meme_metadata(library_dir, lookup_key)
             return clamp_meme_cutin_duration(float(meta.get("duration", DEFAULT_MEME_CUTIN_SEC)))
         except Exception:
             pass
     return DEFAULT_MEME_CUTIN_SEC
+
+
+def pad_voice_wav_for_memes(
+    wav_in: Path,
+    wav_out: Path,
+    times: Sequence[tuple[float, float]],
+    scene_of: Sequence[int],
+    n_scenes: int,
+    meme_durations: dict[int, float],
+    min_trail_silence: float = MEME_TRAIL_SILENCE_SEC,
+) -> tuple[Path, list[tuple[float, float]], bool]:
+    """Chèn khoảng lặng PCM đúng chuẩn `Duration(Meme) + 0.3s` khi người dùng gắn meme thủ công
+    sau bước sinh giọng mà file voice.wav chưa đủ chỗ trống giữa 2 đoạn."""
+    if not meme_durations or n_scenes <= 1:
+        return wav_in, list(times), False
+
+    first_start = [0.0] * n_scenes
+    last_end = [0.0] * n_scenes
+    for si in range(n_scenes):
+        idx = [i for i, s in enumerate(scene_of) if s == si]
+        if idx:
+            first_start[si], last_end[si] = times[idx[0]][0], times[idx[-1]][1]
+
+    insert_after: list[tuple[int, float, float]] = []
+    for k, m_dur in sorted(meme_durations.items()):
+        if not 0 <= k < n_scenes - 1:
+            continue
+        cur_gap = max(0.0, first_start[k + 1] - last_end[k])
+        needed = float(m_dur) + float(min_trail_silence)
+        extra = needed - cur_gap
+        if extra > 0.05:
+            insert_after.append((k, last_end[k], extra))
+
+    if not insert_after:
+        return wav_in, list(times), False
+
+    with wave.open(str(wav_in), "rb") as src:
+        params = src.getparams()
+        sr = src.getframerate()
+        frame_width = src.getsampwidth() * src.getnchannels()
+        pcm = src.readframes(src.getnframes())
+
+    chunks: list[bytes] = []
+    cursor_byte = 0
+    for _k, cut_sec, extra_sec in insert_after:
+        cut_frame = min(len(pcm) // frame_width, max(0, int(round(cut_sec * sr))))
+        cut_byte = cut_frame * frame_width
+        if cut_byte > cursor_byte:
+            chunks.append(pcm[cursor_byte:cut_byte])
+            cursor_byte = cut_byte
+        pad_frames = max(1, int(round(extra_sec * sr)))
+        chunks.append(b"\x00" * (pad_frames * frame_width))
+    if cursor_byte < len(pcm):
+        chunks.append(pcm[cursor_byte:])
+
+    wav_out.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(wav_out), "wb") as dst:
+        dst.setparams(params)
+        dst.writeframes(b"".join(chunks))
+
+    adjusted_times: list[tuple[float, float]] = []
+    for i, (t0, t1) in enumerate(times):
+        si = scene_of[i]
+        shift = sum(extra for k, _cut, extra in insert_after if si > k)
+        adjusted_times.append((round(t0 + shift, 4), round(t1 + shift, 4)))
+    return wav_out, adjusted_times, True
 
 
 def compute_time_budget(
