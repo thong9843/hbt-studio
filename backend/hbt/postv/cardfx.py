@@ -201,23 +201,37 @@ def build_asset(
                     project_dir=project_dir,
                 )
             by_scale[k_count] = image.crop(box)
+            if k_count < 1.0:
+                image.close()
         crop = by_scale[k_count]
+        resized: Image.Image | None = None
+        frame: Image.Image | None = None
+        to_save = crop
         if bounce:
             factor = bounce_scale(at, bcfg)
+            src_img = crop
             if factor != 1.0:
-                crop = crop.resize((round(w * factor), round(h * factor)), Image.LANCZOS)
+                resized = crop.resize((round(w * factor), round(h * factor)), Image.LANCZOS)
+                src_img = resized
             frame = Image.new("RGBA", canvas, (0, 0, 0, 0))
             frame.alpha_composite(
-                crop, ((canvas[0] - crop.width) // 2, (canvas[1] - crop.height) // 2)
+                src_img, ((canvas[0] - src_img.width) // 2, (canvas[1] - src_img.height) // 2)
             )
-            crop = frame
-        raw = crop.tobytes()
-        if raw == previous:  # giống trạng thái trước: gộp vào, không thêm
-            continue
-        previous = raw
-        name = f"{key[:10]}-{k:02d}.png"
-        crop.save(out_dir / name)
-        states.append((name, at))
+            to_save = frame
+        raw = to_save.tobytes()
+        if raw != previous:  # giống trạng thái trước: gộp vào, không thêm
+            previous = raw
+            name = f"{key[:10]}-{k:02d}.png"
+            to_save.save(out_dir / name)
+            states.append((name, at))
+        if resized is not None:
+            resized.close()
+        if frame is not None:
+            frame.close()
+    for cached_img in by_scale.values():
+        cached_img.close()
+    by_scale.clear()
+    final.close()
     if bounce:  # đặt khung cố định sao cho tâm trùng tâm thẻ gốc
         x, y = x + w // 2 - canvas[0] // 2, y + h // 2 - canvas[1] // 2
     box_xywh = [x, y, *canvas]

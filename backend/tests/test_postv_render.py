@@ -262,3 +262,93 @@ def test_cancel_leaves_no_video(tmp_path):
         render_postv(pdir, opts, progress=progress, cancel_token=token)
     renders = list((pdir / "renders").glob("*"))
     assert not any((d / "video.mp4").exists() or (d / "video.part.mp4").exists() for d in renders)
+
+
+def test_compose_postv_caps_threads_crf_and_muxing_queue(tmp_path, monkeypatch):
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, total, on_frac, partial):
+        captured.append([str(a) for a in cmd])
+        partial.write_bytes(b"mp4")
+
+    monkeypatch.setattr(R, "_run_with_progress", fake_run)
+    bg = tmp_path / "bg.mp4"
+    cap = tmp_path / "cap.ffconcat"
+    aud = tmp_path / "audio.wav"
+    out = tmp_path / "out.mp4"
+    bg.write_bytes(b"bg")
+    cap.write_text("ffconcat version 1.0\n", encoding="utf-8")
+    aud.write_bytes(b"aud")
+
+    R.compose_postv(
+        bg=bg,
+        caption_concat=cap,
+        caption_y=1500,
+        cards=[],
+        tpl={"card": {"x": 72, "top": 282, "w": 936}},
+        fps=60,
+        width=1080,
+        height=1920,
+        frames=300,
+        outro_clip=None,
+        audio_wav=aud,
+        out_seconds=5.0,
+        preset=R.POSTV_FINAL_PRESET,
+        crf=R.POSTV_FINAL_CRF,
+        audio_bitrate="192k",
+        out=out,
+        on_frac=lambda _f: None,
+    )
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert R.POSTV_FINAL_PRESET == "veryfast"
+    assert R.POSTV_FINAL_CRF == 22
+    for flag, val in (
+        ("-threads", str(R.POSTV_FFMPEG_THREADS)),
+        ("-filter_threads", str(R.POSTV_FFMPEG_THREADS)),
+        ("-filter_complex_threads", str(R.POSTV_FFMPEG_THREADS)),
+        ("-max_muxing_queue_size", str(R.POSTV_MAX_MUXING_QUEUE)),
+        ("-preset", "veryfast"),
+        ("-crf", "22"),
+    ):
+        idx = cmd.index(flag)
+        assert cmd[idx + 1] == val
+
+
+def test_resolve_meme_file_and_pad_voice_for_manual_memes(tmp_path):
+    import wave
+
+    from hbt.postv.memes import resolve_meme_file
+    from hbt.postv.timeline import pad_voice_wav_for_memes
+
+    lib = tmp_path / "lib"
+    memes_dir = lib / "memes"
+    memes_dir.mkdir(parents=True)
+    m_path = memes_dir / "cat-shock.mp4"
+    m_path.write_bytes(b"mp4")
+    (memes_dir / "index.json").write_text(
+        json.dumps([{"id": "custom_cat_id", "title": "Cat Shock", "file": "cat-shock.mp4"}]),
+        encoding="utf-8",
+    )
+
+    # Gán thủ công bằng id, stem hoặc tên file đều phải tìm ra đúng file
+    assert resolve_meme_file(lib, "custom_cat_id") == m_path
+    assert resolve_meme_file(lib, "cat-shock") == m_path
+    assert resolve_meme_file(lib, "cat-shock.mp4") == m_path
+
+    # Giả lập voice.wav sinh trước khi gắn meme (khoảng nghỉ giữa đoạn chỉ 0.25s)
+    src_wav = tmp_path / "voice.wav"
+    write_wav(src_wav, [("tone", 1.0), ("gap", 0.25), ("tone", 1.0)])
+    times = [(0.0, 1.0), (1.25, 2.25)]
+    scene_of = [0, 1]
+    padded_wav = tmp_path / "padded.wav"
+    out_wav, new_times, padded = pad_voice_wav_for_memes(
+        src_wav, padded_wav, times, scene_of, 2, {0: 3.0}
+    )
+    assert padded is True and out_wav == padded_wav
+    # Khoảng trống sau đoạn 0 giờ phải >= 3.0 + 0.3 = 3.3s
+    assert new_times[1][0] - new_times[0][1] >= 3.3 - 0.02
+    with wave.open(str(out_wav), "rb") as wf:
+        dur = wf.getnframes() / wf.getframerate()
+    assert dur >= 5.2
