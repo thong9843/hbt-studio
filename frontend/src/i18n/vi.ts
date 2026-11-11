@@ -362,8 +362,8 @@ export const vi = {
     },
     memes: {
       title: 'Meme & Sticker phông xanh',
-      lead: 'Chọn meme phản ứng từ greenscreenmemes.com để chèn vào video',
-      searchPlaceholder: 'Tìm kiếm meme (vd: cat, laugh, crying, shocked, dance…)',
+      lead: 'Chọn meme phản ứng từ thư viện cục bộ library/memes/ để chèn vào video',
+      searchPlaceholder: 'Tìm kiếm meme cục bộ (vd: cat, angry, laughing, shocked…)',
       search: 'Tìm',
       searching: 'Đang tìm…',
       noResults: 'Không tìm thấy meme nào phù hợp.',
@@ -378,8 +378,8 @@ export const vi = {
         center: 'Chính giữa',
       },
       duration: (s: number) => `${Math.round(s * 10) / 10} s`,
-      libraryTab: 'Đã tải về',
-      onlineTab: 'Tìm trực tuyến',
+      libraryTab: 'Kho cục bộ',
+      onlineTab: 'Tìm trong kho',
     },
     script: {
       listTitle: 'Lời đọc từng đoạn',

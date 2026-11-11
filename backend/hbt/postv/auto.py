@@ -445,9 +445,9 @@ def _has_meme_library(library_dir: Path | str | None) -> bool:
     if not isinstance(library_dir, (str, Path)):
         return False
     try:
-        from hbt.chatting.stickers import load_memes_metadata
+        from hbt.postv.memes import MemeLibrary
 
-        return bool(load_memes_metadata(Path(library_dir)))
+        return bool(MemeLibrary(Path(library_dir)).scan_local())
     except Exception:
         return False
 
@@ -661,24 +661,23 @@ def _assign_climax_memes(
     comments_by_id: dict[str, PostvComment],
     library_dir: Path | None,
 ) -> None:
-    """Gắn meme phông xanh từ library/memes/ cho các comment cao trào, xoay vòng không lặp lại."""
+    """Nạp toàn bộ kho meme cục bộ (library/memes/) vào vòng xoay tua Round-Robin Shuffle."""
     if not library_dir:
         return
     try:
-        from hbt.chatting.stickers import find_meme_by_emojis, load_memes_metadata, pick_sticker
+        from hbt.postv.memes import RoundRobinMemePool
     except Exception:
         return
 
-    meta_list = load_memes_metadata(library_dir)
-    if not meta_list:
+    pool = RoundRobinMemePool(library_dir)
+    if pool.size == 0:
         return
 
-    used_memes: set[str] = set()
     comment_segs = [(i, s) for i, s in enumerate(segments) if s.role == "comment" and s.ref]
     if not comment_segs:
         return
 
-    # Ưu tiên các bình luận điểm cao hoặc có emoji/từ cảm xúc cao trào, cách nhau ít nhất 1 đoạn
+    # Ưu tiên các bình luận điểm cao / cao trào, cách nhau ít nhất 1 đoạn, xoay vòng toàn kho cục bộ
     ranked = sorted(
         comment_segs,
         key=lambda pair: (
@@ -686,7 +685,7 @@ def _assign_climax_memes(
         ),
         reverse=True,
     )
-    max_memes = max(1, min(6, (len(comment_segs) + 2) // 3))
+    max_memes = max(1, min(12, (len(comment_segs) + 2) // 3))
     assigned_indices: set[int] = set()
 
     for seg_idx, seg in ranked:
@@ -697,11 +696,8 @@ def _assign_climax_memes(
             continue
         comment = comments_by_id.get(seg.ref or "")
         text = comment.text if comment else seg.voice
-        chosen_path = find_meme_by_emojis(library_dir, text, used_memes=used_memes)
-        if chosen_path is None:
-            tag = _infer_meme_tag(text)
-            if tag:
-                chosen_path = pick_sticker(library_dir, tag, used_memes=used_memes)
+        tag = _infer_meme_tag(text)
+        chosen_path = pool.next_meme(preferred_emojis_text=text, preferred_tag=tag)
         if chosen_path is not None and chosen_path.is_file():
             seg.meme_id = chosen_path.name
             seg.meme_pos = "center"

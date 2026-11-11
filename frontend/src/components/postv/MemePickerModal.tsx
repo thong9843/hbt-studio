@@ -24,9 +24,9 @@ export function MemePickerModal({
 }: Props) {
   const t = vi.postv.memes;
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'online' | 'library'>('online');
-  const [searchQuery, setSearchQuery] = useState('cat');
-  const [submittedQuery, setSubmittedQuery] = useState('cat');
+  const [tab, setTab] = useState<'online' | 'library'>('library');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
   const [pos, setPos] = useState<'bottom_right' | 'bottom_center' | 'center'>(currentPos);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 

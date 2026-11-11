@@ -142,3 +142,47 @@ def test_api_memes_endpoints(client, monkeypatch):  # noqa: F811
     # 3. Delete
     r_del = client.delete("/api/memes/test-cat")
     assert r_del.status_code == 200
+
+
+def test_scan_local_and_round_robin_meme_pool(tmp_path):
+    from hbt.postv.memes import RoundRobinMemePool, pick_round_robin_memes, resolve_memes_dir
+
+    # Hỗ trợ thư mục library/meme/ cũng như library/memes/
+    meme_alt = tmp_path / "meme"
+    meme_alt.mkdir()
+    (meme_alt / "angry-cat.mp4").write_bytes(b"v1")
+    (meme_alt / "laughing-dog.mov").write_bytes(b"v2")
+    assert resolve_memes_dir(tmp_path) == meme_alt.resolve()
+
+    # Thư viện library/memes/ có cả file ngoài index.json -> tự quét đủ 100%
+    memes_dir = tmp_path / "memes"
+    memes_dir.mkdir()
+    (memes_dir / "index.json").write_text(
+        '{"memes": [{"file": "cat1.mp4", "tags": ["cuoi"], "emojis": ["😂"]}]}',
+        encoding="utf-8",
+    )
+    for i in range(1, 11):
+        (memes_dir / f"cat{i}.mp4").write_bytes(f"v{i}".encode())
+
+    lib = MemeLibrary(tmp_path)
+    items = lib.list()
+    assert len(items) == 10
+    assert all(e.downloaded for e in items)
+
+    pool = RoundRobinMemePool(tmp_path, seed=42)
+    picks = [pool.next_meme() for _ in range(10)]
+    assert len({p.name for p in picks if p is not None}) == 10
+    # Chu kỳ thứ 2 xoay vòng lại đầy đủ
+    cycle2 = pick_round_robin_memes(tmp_path, 5, seed=7)
+    assert len({p.name for p in cycle2}) == 5
+
+
+def test_api_memes_search_uses_local_only_no_network(client, monkeypatch):  # noqa: F811
+    from hbt.api.deps import _state_cache
+
+    _state_cache.clear()
+    with patch("hbt.postv.memes.httpx.AsyncClient") as mocked_async:
+        r = client.get("/api/memes/search?q=cat&count=50")
+    assert r.status_code == 200
+    assert not mocked_async.called
+    assert isinstance(r.json(), list)

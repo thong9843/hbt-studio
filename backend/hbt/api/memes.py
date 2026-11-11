@@ -21,13 +21,13 @@ class DownloadMemeBody(BaseModel):
 
 
 @router.get("/memes/search", response_model=list[MemeEntry])
-async def search_memes(
+def search_memes(
     state: State,
-    q: str = Query(default="", description="Từ khoá tìm kiếm meme"),
-    count: int = Query(default=12, ge=1, le=24),
+    q: str = Query(default="", description="Từ khoá tìm kiếm meme cục bộ"),
+    count: int = Query(default=50, ge=1, le=200),
 ):
-    """Tìm kiếm meme phông xanh từ greenscreenmemes.com (hoặc thư viện cục bộ)."""
-    return await state.memes.search_online(query=q, count=count)
+    """Tìm kiếm trực tiếp trong thư viện meme cục bộ (library/memes/), không gọi API ngoài."""
+    return state.memes.search_local(query=q, count=count)
 
 
 @router.get("/memes/library", response_model=list[MemeEntry])
