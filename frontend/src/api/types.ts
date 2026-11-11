@@ -672,8 +672,12 @@ export interface PostvQuickAutoResponse {
 
 export interface PostvStageEvent {
   stage: PostvStage;
+  step?: string;
   status: 'running' | 'done' | 'failed' | 'waiting_pick';
   progress: number;
+  current?: number;
+  total?: number;
+  percent?: number;
   message: string;
   data?: {
     handle?: string;
@@ -683,6 +687,11 @@ export interface PostvStageEvent {
     target_seconds?: number;
     estimated_seconds?: number;
     low_comments_warning?: string | null;
+    step?: string;
+    current?: number;
+    total?: number;
+    percent?: number;
+    message?: string;
     video?: string;
     cover?: string | null;
     youtube_cover?: string | null;

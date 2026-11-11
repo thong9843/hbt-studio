@@ -1117,6 +1117,8 @@ export const vi = {
     progress: {
       cancel: 'Huỷ',
       retry: 'Thử lại',
+      unlock: 'Huỷ tác vụ bị kẹt / Mở khoá dự án',
+      unlocking: 'Đang mở khoá…',
       eta: (s: number) => `Còn ≈ ${s} giây`,
       pickSnippet: (handle: string, count: number) => `@${handle} · Đã chọn ${count} bình luận`,
     },

@@ -6,6 +6,9 @@ export interface JobProgress {
   progress: number;
   step: string;
   message: string;
+  current?: number;
+  total?: number;
+  percent?: number;
 }
 
 const EMPTY: JobProgress = { progress: 0, step: '', message: '' };
@@ -54,6 +57,9 @@ export function useJob(jobId: string | null, onFinished?: (job: Job) => void) {
           progress: data.progress ?? 0,
           step: data.step ?? '',
           message: data.message ?? '',
+          current: data.current,
+          total: data.total,
+          percent: data.percent,
         });
       } catch {
         // Bỏ qua sự kiện hỏng.

@@ -565,4 +565,67 @@ describe('PostvQuickPage', () => {
 
     expect(await screen.findByText(/chỉ có 4 bình luận \(< 10\)/i)).toBeInTheDocument();
   });
+
+  it('shows Step 3 VieNeu voice progress bar and unlock button on 409 lock error', async () => {
+    const user = userEvent.setup();
+    let unlockedSlug = '';
+    stubFetch({
+      'GET /api/projects': defaultProjects,
+      'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
+      'GET /api/postv/settings': { voice_id: 'adam-bua' },
+      'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
+      'GET /api/jobs': [],
+      'POST /api/postv/auto': () =>
+        json({
+          project_slug: 'bai-cu',
+          job_id: 'job-voice-prog',
+          existing_slug: null,
+        }),
+      'POST /api/projects/bai-cu/unlock': () => {
+        unlockedSlug = 'bai-cu';
+        return json({ ok: true, slug: 'bai-cu', unlocked: 1 });
+      },
+    });
+
+    page();
+
+    const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
+    await user.type(textarea, 'Bài test tiến trình giọng');
+    await user.click(screen.getByRole('button', { name: 'Tạo video' }));
+
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    const es = FakeEventSource.instances[0];
+    act(() => {
+      es.emit('progress', {
+        stage: 'voice',
+        step: 'voice',
+        status: 'running',
+        progress: 53,
+        current: 2,
+        total: 5,
+        percent: 40,
+        message: 'Đang sinh giọng bình luận 2/5...',
+      });
+    });
+
+    expect(
+      await screen.findByRole('progressbar', { name: 'Tiến độ sinh giọng VieNeu' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Đang sinh giọng bình luận 2\/5\.\.\. \(40%\)/)).toBeInTheDocument();
+
+    // Khi gặp lỗi khoá dự án 409, hiện nút Huỷ tác vụ bị kẹt / Mở khoá dự án
+    act(() => {
+      es.emit('end', {
+        status: 'failed',
+        error: 'Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job',
+      });
+    });
+
+    const unlockBtn = await screen.findByRole('button', {
+      name: /Huỷ tác vụ bị kẹt \/ Mở khoá dự án/i,
+    });
+    await user.click(unlockBtn);
+    await waitFor(() => expect(unlockedSlug).toBe('bai-cu'));
+  });
 });

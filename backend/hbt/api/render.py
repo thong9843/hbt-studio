@@ -102,6 +102,12 @@ def cancel_job(job_id: str, state: State):
     return job_view(state.jobs.cancel(job_id))
 
 
+@router.post("/projects/{slug}/unlock")
+def unlock_project(slug: str, state: State):
+    """Huỷ tác vụ bị kẹt và giải phóng toàn bộ cờ khoá của dự án."""
+    return state.jobs.unlock_project(slug)
+
+
 @router.get("/jobs/{job_id}/events")
 async def job_events(job_id: str, request: Request, state: State):
     """SSE: `event: progress` với `{progress, step, message}`; kết thúc bằng `event: end` với

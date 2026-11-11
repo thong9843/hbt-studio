@@ -367,7 +367,7 @@ class RoundRobinMemePool:
         preferred_emojis_text: str = "",
         preferred_tag: str | None = None,
     ) -> Path | None:
-        """Chọn 1 meme kế tiếp trong vòng xoay tua: ưu tiên khớp emoji/tag, hết kho mới xoay vòng."""
+        """Chọn 1 meme kế tiếp theo vòng xoay tua (ưu tiên khớp emoji/tag, hết kho mới lặp)."""
         if not self._entries:
             return None
 

@@ -99,3 +99,63 @@ def test_voice_job_cancelled_while_queued_does_not_run(env):
     assert wait_for(lambda: not m.is_busy("demo"))
     assert voice.calls == []
     m.shutdown()
+
+
+def test_voice_job_releases_lock_flags_on_error_and_stale_heartbeat(env):
+    slug = new_postv(env[0], text="Câu một có chữ lỗi để kiểm thử try finally")
+    failing_voice = FakeVoice(fail_on="lỗi")
+    m = JobManager(
+        env[0],
+        env[1].library_dir,
+        env[1].brand_dir,
+        render_fn=FakeRender(),
+        tool_check=None,
+        voice=failing_voice,
+        stale_timeout=0.05,
+    )
+    job = m.submit_voice(slug)
+    assert job.wait(5) and job.status == FAILED
+    assert not m.is_busy(slug)
+    assert m.is_generating_voice.get(slug) is False
+    assert m.is_rendering.get(slug) is False
+
+    # Giả lập job treo kẹt không còn worker sống & hết hạn heartbeat
+    stuck = Job("stuck1", slug, False, None, None, False, kind="voice", status="running")
+    stuck.last_heartbeat = time.time() - 10.0
+    m._jobs[stuck.id] = stuck
+    m.is_generating_voice[slug] = True
+    assert not m.is_busy(slug)
+    assert stuck.status == FAILED
+    assert m.is_generating_voice[slug] is False
+    m.shutdown()
+
+
+def test_api_unlock_project_endpoint(env, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from hbt.config import Settings
+    from hbt.main import create_app
+
+    store, opts = env
+    slug = new_postv(store, text="Dự án cần mở khoá")
+    settings = Settings(
+        workspace_dir=store.workspace_dir,
+        library_dir=opts.library_dir,
+        whisper_model="large-v3",
+        whisper_device="cpu",
+        default_fps=50,
+    )
+    app = create_app(settings, brand_dir=opts.brand_dir)
+    with TestClient(app) as tc:
+        jm = app.state.hbt.jobs
+        stuck = Job("stuck-api", slug, False, None, None, False, kind="voice", status="running")
+        jm._jobs[stuck.id] = stuck
+        jm._active_workers.add(stuck.id)
+        jm.is_generating_voice[slug] = True
+
+        r = tc.post(f"/api/projects/{slug}/unlock")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["unlocked"] == 1
+        assert not jm.is_busy(slug)
+        assert jm.is_generating_voice[slug] is False
