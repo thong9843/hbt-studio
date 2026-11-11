@@ -97,7 +97,7 @@ def render_bgm_playlist_wav(
     fade_start = max(0.0, total_duration - actual_fade_out)
     vol_suffix = f",volume={volume_db:g}dB" if volume_db is not None else ""
 
-    cmd: list[str] = ["-y", "-v", "error"]
+    cmd: list[str] = ["-y", "-v", "error", "-threads", "2"]
     if len(playlist) == 1:
         track_path, track_dur = playlist[0]
         if track_dur < total_duration:
@@ -169,6 +169,8 @@ def mix_voice_and_bgm_playlist(
                 "-y",
                 "-v",
                 "error",
+                "-threads",
+                "2",
                 "-i",
                 str(voice_mix_wav),
                 "-i",
@@ -187,3 +189,5 @@ def mix_voice_and_bgm_playlist(
         logger.warning("Trộn Playlist BGM thất bại: %s, giữ nguyên track giọng thuần", e)
         shutil.copyfile(voice_mix_wav, out_wav)
         return out_wav
+    finally:
+        bgm_wav.unlink(missing_ok=True)

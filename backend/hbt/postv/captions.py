@@ -207,7 +207,8 @@ def render_states(
     out_dir.mkdir(parents=True, exist_ok=True)
     blank = out_dir / "blank.png"
     if not blank.exists():
-        Image.new("RGBA", (W, BAND), (0, 0, 0, 0)).save(blank)
+        with Image.new("RGBA", (W, BAND), (0, 0, 0, 0)) as blank_im:
+            blank_im.save(blank)
     spans: list[tuple[float, float, Path]] = []
     for p in phrases:
         for lo, hi, act in p.states:

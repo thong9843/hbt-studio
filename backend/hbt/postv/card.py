@@ -199,8 +199,10 @@ def _round_image(im: Image.Image, size: tuple[int, int], radius: int) -> Image.I
         (0, 0, w * s - 1, h * s - 1), radius=radius * s, fill=255
     )
     mask = big_mask.resize((w, h), Image.LANCZOS)
+    big_mask.close()
     rgba = im.convert("RGBA")
     rgba.putalpha(mask)
+    mask.close()
     return rgba
 
 
@@ -251,7 +253,9 @@ def _build_media_block(images: list[Image.Image], max_w: int, max_h: int) -> Ima
         r, col = divmod(idx, cols)
         fitted = ImageOps.fit(im, (tile_w, tile_h), method=Image.LANCZOS)
         tile = _round_image(fitted, (tile_w, tile_h), radius=16)
+        fitted.close()
         block.alpha_composite(tile, (col * (tile_w + gap), r * (tile_h + gap)))
+        tile.close()
     return block
 
 
@@ -393,19 +397,24 @@ def render_card(
     if media_images:
         avail_media_h = max(200, min(550, safe_bottom - (top + base_h + media_gap)))
         media_block = _build_media_block(media_images, min(inner, 840), avail_media_h)
+        for m_im in media_images:
+            m_im.close()
 
     media_extra = (media_gap + media_block.height) if media_block is not None else 0
     height = base_h + media_extra
 
     img = canvas if canvas is not None else _canvas(tpl)
-    img.alpha_composite(_round_rect((cw, height), c["radius"], _rgb(c["bg"])), (cx, top))
+    rect = _round_rect((cw, height), c["radius"], _rgb(c["bg"]))
+    img.alpha_composite(rect, (cx, top))
+    rect.close()
     if rp and draw_reply_bar:  # đường kẻ dọc nối với bình luận mẹ, cao bằng thẻ
-        img.alpha_composite(
-            _round_rect((rp["line_w"], height), rp["line_w"] // 2, _rgb(rp["line_color"])),
-            (c["x"] + rp["line_x"], top),
-        )
+        rbar = _round_rect((rp["line_w"], height), rp["line_w"] // 2, _rgb(rp["line_color"]))
+        img.alpha_composite(rbar, (c["x"] + rp["line_x"], top))
+        rbar.close()
     x0, y0 = cx + c["pad"], top + c["pad"]
-    img.alpha_composite(_avatar(hd["avatar"], hd["avatar_bg"], hd["avatar_fg"]), (x0, y0))
+    av = _avatar(hd["avatar"], hd["avatar_bg"], hd["avatar_fg"])
+    img.alpha_composite(av, (x0, y0))
+    av.close()
     tx = x0 + hd["avatar"] + hd["gap"]
     d = ImageDraw.Draw(img)
     name_font, age_font = (
@@ -429,13 +438,16 @@ def render_card(
         mx = cx + (cw - media_block.width) // 2
         img.alpha_composite(media_block, (mx, int(y)))
         y += media_block.height
+        media_block.close()
     y += st["top_gap"] if stats_h else 0
     if stat_items:
         sfont = _font(st["font"], st["size"])
         x = float(x0)
         color = _rgb(st["color"])
         for kind, value in stat_items:
-            img.alpha_composite(_icon(kind, st["icon"], color), (int(x), int(y)))
+            icon_im = _icon(kind, st["icon"], color)
+            img.alpha_composite(icon_im, (int(x), int(y)))
+            icon_im.close()
             label = format_count(value)
             d.text(
                 (x + st["icon"] + 10, y + (st["icon"] - st["size"]) / 2 - 2),
@@ -614,12 +626,17 @@ def composite_preview(
     layer: Image.Image, background: Image.Image | None, flat: str = "#6DB33F"
 ) -> Image.Image:
     """Lớp thẻ đặt trên khung nền (ảnh clip) hoặc một màu phẳng, để xem trước trên giao diện."""
-    base = Image.new("RGBA", layer.size, _rgb(flat) + (255,))
     if background is not None:
         bg = background.convert("RGB")
         scale = max(layer.width / bg.width, layer.height / bg.height)
-        bg = bg.resize((round(bg.width * scale), round(bg.height * scale)), Image.LANCZOS)
-        left, top = (bg.width - layer.width) // 2, (bg.height - layer.height) // 2
-        base = bg.crop((left, top, left + layer.width, top + layer.height)).convert("RGBA")
+        bg_scaled = bg.resize((round(bg.width * scale), round(bg.height * scale)), Image.LANCZOS)
+        bg.close()
+        left, top = (bg_scaled.width - layer.width) // 2, (bg_scaled.height - layer.height) // 2
+        base = bg_scaled.crop((left, top, left + layer.width, top + layer.height)).convert("RGBA")
+        bg_scaled.close()
+    else:
+        base = Image.new("RGBA", layer.size, _rgb(flat) + (255,))
     base.alpha_composite(layer)
-    return base.convert("RGB")
+    result = base.convert("RGB")
+    base.close()
+    return result

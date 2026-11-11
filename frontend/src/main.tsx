@@ -11,21 +11,28 @@ const queryClient = new QueryClient({
 });
 
 // Data router: cần cho `useBlocker` (cảnh báo rời Cài đặt khi chưa Lưu). `App` giữ `<Routes>` bên trong.
-const router = createBrowserRouter([
+const router = createBrowserRouter(
+  [
+    {
+      path: '*',
+      element: (
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      ),
+    },
+  ],
   {
-    path: '*',
-    element: (
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    ),
+    future: {
+      v7_relativeSplatPath: true,
+    },
   },
-]);
+);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <RouterProvider router={router} future={{ v7_startTransition: true }} />
     </QueryClientProvider>
   </StrictMode>,
 );

@@ -141,6 +141,11 @@ def _run_with_progress(cmd: list[str], total: float, on_frac, partial: Path) -> 
                     on_frac(min(max(done / max(total, 1e-3), 0.0), 1.0))
             proc.wait()
         finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except Exception:
+                    pass
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
@@ -543,6 +548,7 @@ def _render_postv(
         cards.append((concat, asset, span, timing))
         rep.tick(45 + 5 * (k + 1) / len(spans))
     rep.say(f"{len(cards)} thẻ")
+    gc.collect()
 
     # ---- 6b. Memes phông xanh (cắt âm thanh chuẩn + 0.3s lặng) & SFX chuyển thẻ / nhấn mạnh
     meme_items: list[tuple[Path, float, float, str, float, bool]] = []
@@ -780,6 +786,7 @@ def _render_postv(
         f"{f'{lufs:.1f} LUFS, ' if lufs is not None else ''}"
         f"{video.stat().st_size / 1e6:.1f} MB, aligner {aligner}"
     )
+    gc.collect()
     return RenderResult(
         job_dir=job_dir, video=video, srt=srt, publish=publish_path, log=job_dir / "log.txt",
         fps=q.fps, width=q.width, height=q.height, duration=duration, lufs=lufs,
