@@ -59,6 +59,38 @@ def resolve_memes_dir(library_dir: str | Path) -> Path:
     return primary
 
 
+def resolve_meme_file(library_dir: str | Path | None, meme_id: str | None) -> Path | None:
+    """Tìm file video meme theo `id`, tên file, stem hoặc thư mục con trong library/memes/."""
+    if not meme_id or not str(meme_id).strip() or library_dir is None:
+        return None
+    needle = str(meme_id).strip()
+    memes_dir = resolve_memes_dir(library_dir)
+    if not memes_dir.is_dir():
+        return None
+
+    direct = memes_dir / needle
+    if direct.is_file():
+        return direct
+    for ext in MEME_VIDEO_EXTS:
+        candidate = memes_dir / f"{needle}{ext}"
+        if candidate.is_file():
+            return candidate
+
+    try:
+        _, found = MemeLibrary(library_dir).find(needle)
+        if found.is_file():
+            return found
+    except NotFound:
+        pass
+
+    stem_needle = Path(needle).stem
+    for p in sorted(memes_dir.rglob("*"), key=lambda x: x.name.lower()):
+        if p.is_file() and p.suffix.lower() in MEME_VIDEO_EXTS:
+            if p.name == needle or p.stem == needle or p.stem == stem_needle:
+                return p
+    return None
+
+
 def _infer_tags_from_name(filename: str) -> list[str]:
     low = filename.lower()
     tags = [tag for tag, cues in FILENAME_TAG_CUES if any(cue in low for cue in cues)]
