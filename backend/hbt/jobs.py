@@ -613,12 +613,19 @@ class JobManager:
                         percent=detail.get("percent", 0),
                     )
 
+                from hbt.postv.timeline import estimate_meme_pause_slots
+
+                post_gaps = estimate_meme_pause_slots(
+                    [s for s in project.segments if s.voice.strip()],
+                    self.library_dir,
+                )
                 result = synthesize_plan(
                     plan,
                     self.storage.project_dir(job.slug),
                     self.voice,
                     cast,
                     job._progress,
+                    post_gaps=post_gaps,
                     on_detail=on_detail,
                 )
             latest = self.storage.load_any(

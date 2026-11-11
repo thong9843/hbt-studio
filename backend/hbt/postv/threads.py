@@ -321,6 +321,8 @@ def extract_threads_post(
     if not comments:
         warnings.append("Copy cả trang bài (Ctrl+A) rồi dán vào đây để thêm bình luận")
 
+    comments = order_comments_tree(comments)
+
     return ParseResult(
         guess="threads_text",
         source_url=clean_url,
@@ -330,6 +332,38 @@ def extract_threads_post(
         hints=[],
         warnings=warnings,
     )
+
+
+def order_comments_tree(comments: list[ParsedComment]) -> list[ParsedComment]:
+    """Sắp xếp cây hội thoại tuần tự theo thứ tự duyệt sâu: Cha -> Reply con -> Cháu,
+    giữ nguyên thứ tự xuất hiện tự nhiên của từng cấp."""
+    if len(comments) <= 1:
+        return list(comments)
+    valid_ids = {c.id for c in comments if c.id}
+    children_map: dict[str, list[ParsedComment]] = {}
+    roots: list[ParsedComment] = []
+    for c in comments:
+        if c.parent and c.parent in valid_ids and c.parent != c.id:
+            children_map.setdefault(c.parent, []).append(c)
+        else:
+            roots.append(c)
+
+    ordered: list[ParsedComment] = []
+    seen: set[str] = set()
+
+    def _visit(node: ParsedComment) -> None:
+        if node.id in seen:
+            return
+        seen.add(node.id)
+        ordered.append(node)
+        for child in children_map.get(node.id, []):
+            _visit(child)
+
+    for r in roots:
+        _visit(r)
+    for c in comments:
+        _visit(c)
+    return ordered
 
 
 def _is_avatar_url(url: str) -> bool:

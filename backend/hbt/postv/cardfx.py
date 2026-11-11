@@ -245,10 +245,10 @@ def card_timing(span: CardSpan, tpl: dict, mode: str, total: float) -> dict:
     anim = tpl["anim"]
     smooth, bounce = anim["smooth"], anim["bounce"]
     bounced = span.fresh and (mode == "bounce" or span.kind == "hook")
-    if not span.fresh:
-        in_d, slide = smooth["change"], 0.0
-    elif bounced:
+    if bounced:
         in_d, slide = bounce["duration"], 0.0
+    elif not span.fresh:
+        in_d, slide = smooth["change"], float(smooth["slide"])
     else:
         in_d, slide = smooth["in"], float(smooth["slide"])
     out_d = smooth["change"] if span.handoff else smooth["out"]
@@ -274,7 +274,7 @@ def card_chain(
     prev: str,
     out: str,
 ) -> list[str]:
-    """Các đoạn filtergraph đưa thẻ (input số `index`) lên `prev` → `out`."""
+    """Filtergraph đưa thẻ (input số `index`) lên `prev` → `out` với Fade + Slide-up mượt."""
     t_in, s = timing["in"], span.start
     chain = [f"[{index}:v]fps={fps},format=rgba"]
     if scale != 1.0:
@@ -283,7 +283,7 @@ def card_chain(
     if timing["slide"]:
         slide = timing["slide"] * scale
         pos = (
-            f"x={_num(x0)}:y='{_num(y0)}-{_num(slide)}*pow(max(1-(t-{_num(s)})/{_num(t_in)},0),3)'"
+            f"x={_num(x0)}:y='{_num(y0)}+{_num(slide)}*pow(max(1-(t-{_num(s)})/{_num(t_in)},0),3)'"
         )
     else:
         pos = f"x={_num(x0)}:y={_num(y0)}"
@@ -292,5 +292,5 @@ def card_chain(
     chain.append(f"setpts=PTS+{_num(s)}/TB[{label}]")
     return [
         ",".join(chain),
-        f"[{prev}][{label}]overlay={pos}:eval=frame:eof_action=pass:repeatlast=0[{out}]",
+        f"[{prev}][{label}]overlay={pos}:eval=frame:eof_action=pass:repeatlast=0:format=auto[{out}]",
     ]

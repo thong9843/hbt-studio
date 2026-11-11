@@ -499,22 +499,27 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     current_sec = estimate_tts_seconds(project.post.text)
     has_memes = _has_meme_library(getattr(job_manager, "library_dir", None))
 
-    # Nhóm cấu trúc Threaded Tree: cha ở trên, reply con nổi bật bám ngay dưới cha
+    # Nhóm cấu trúc Threaded Tree: cha ở trên, reply con giữ đúng thứ tự hội thoại bám ngay dưới cha
     valid_ids = {c.id for c in valid_comments}
     children_by_parent: dict[str, list[PostvComment]] = {}
     top_level: list[PostvComment] = []
     for c in valid_comments:
-        if c.parent and c.parent in valid_ids:
+        if c.parent and c.parent in valid_ids and c.parent != c.id:
             children_by_parent.setdefault(c.parent, []).append(c)
         else:
             top_level.append(c)
 
-    for pid, kids in children_by_parent.items():
-        children_by_parent[pid] = sorted(kids, key=lambda k: score_comment(k), reverse=True)
+    def _subtree_count(cid: str, _visited: set[str] | None = None) -> int:
+        visited = _visited if _visited is not None else set()
+        if cid in visited:
+            return 0
+        visited.add(cid)
+        kids = children_by_parent.get(cid, [])
+        return len(kids) + sum(_subtree_count(k.id, visited) for k in kids)
 
     sorted_roots = sorted(
         top_level,
-        key=lambda c: (-score_comment(c, len(children_by_parent.get(c.id, []))), c.id),
+        key=lambda c: (-score_comment(c, _subtree_count(c.id)), c.id),
     )
 
     picked_ordered: list[PostvComment] = []
@@ -524,6 +529,8 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
 
     def _add_with_budget(item: PostvComment) -> None:
         nonlocal current_sec
+        if item.id in picked_ids:
+            return
         picked_ids.add(item.id)
         picked_ordered.append(item)
         current_sec += estimate_tts_seconds(item.text)
@@ -534,18 +541,25 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
     def _should_stop() -> bool:
         return len(picked_ids) >= max_pick or current_sec >= target_seconds
 
+    def _pick_replies_dfs(parent_id: str, remaining_slots: list[int]) -> None:
+        for kid in children_by_parent.get(parent_id, []):
+            if remaining_slots[0] <= 0 or len(picked_ids) >= max_pick:
+                break
+            _add_with_budget(kid)
+            remaining_slots[0] -= 1
+            if current_sec >= target_seconds + 5.0:
+                break
+            _pick_replies_dfs(kid.id, remaining_slots)
+            if current_sec >= target_seconds + 5.0:
+                break
+
     for root in sorted_roots:
         if _should_stop():
             break
         _add_with_budget(root)
 
-        # BẮT BUỘC bóc theo tối đa 2 reply con nổi bật lồng bên dưới comment cha đã chọn
-        for kid in children_by_parent.get(root.id, [])[:2]:
-            if len(picked_ids) >= max_pick:
-                break
-            _add_with_budget(kid)
-            if current_sec >= target_seconds + 5.0:
-                break
+        # Duyệt cây reply con lồng tuần tự bên dưới comment cha (tối đa 3 reply liên tiếp mỗi nhánh)
+        _pick_replies_dfs(root.id, [3])
 
     pick_mode = options.get("pick_mode", "auto")
     if pick_mode == "auto" and picked_ordered:

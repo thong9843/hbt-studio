@@ -91,11 +91,11 @@ def test_segment_starts_use_middle_of_the_pause():
 
 
 # ------------------------------------------------------------------ thời gian và hiệu ứng
-def test_smooth_enter_slides_and_change_does_not():
+def test_smooth_enter_and_card_switch_both_slide_up():
     a = card_timing(post_span(2, 8), TPL, "smooth", 20)
     b = card_timing(post_span(2, 8, fresh=False), TPL, "smooth", 20)
     assert (a["in"], a["slide"], a["out"], a["bounce"]) == (0.35, 24.0, 0.25, False)
-    assert (b["in"], b["slide"]) == (0.3, 0.0)
+    assert (b["in"], b["slide"]) == (0.3, 24.0)
     assert a["seconds"] == pytest.approx(6.0 + 0.25)
 
 
@@ -256,14 +256,14 @@ def test_card_fades_in_stays_then_fades_out(tmp_path):
 
 
 @needs_ffmpeg
-def test_smooth_enter_slides_down_into_place(tmp_path):
+def test_smooth_enter_slides_up_into_place(tmp_path):
     frames = run_chain(tmp_path, post_span(1.0, 4.0), "smooth", scale=0.5)
 
     def top(frame):
         rows = np.nonzero(ink(frame).sum(axis=1) > 20)[0]
         return rows.min() if len(rows) else None
 
-    assert top(at(frames, 1.1)) < top(at(frames, 2.5))  # đang trượt xuống dần
+    assert top(at(frames, 1.1)) > top(at(frames, 2.5))  # bắt đầu thấp hơn rồi trượt lên mượt
 
 
 @needs_ffmpeg

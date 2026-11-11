@@ -340,6 +340,7 @@ def render_card(
     media_paths: Sequence[Path | str] | None = None,
     max_lines: int | None = None,
     fit_full_post: bool = False,
+    font_size_override: int | None = None,
     canvas: Image.Image | None = None,
     indent_override: int | None = None,
     draw_reply_bar: bool = True,
@@ -364,27 +365,28 @@ def render_card(
     stats_h = (st["icon"] if stat_items else 0) + (
         int(st["size"] * 1.4) if views is not None else 0
     )
-    safe_bottom = 1280  # chừa khoảng an toàn trên dải phụ đề karaoke
+    safe_bottom = 1480 if not fit_full_post else 1380  # chừa khoảng an toàn trên dải phụ đề karaoke
     media_images = _load_media_images(media_paths)
-    line_cap = (
-        (max_lines if max_lines is not None else 24)
-        if fit_full_post
-        else (max_lines if max_lines is not None else b["max_lines"])
-    )
 
-    body_size = b["size"]
+    body_size = font_size_override if font_size_override is not None else b["size"]
     while True:
         font = _font(b["font"], body_size)
         words = _words(text)
         _mark(words, censor_spans, "censored")
-        lines = _ellipsize(_wrap(words, font, inner), line_cap, font, inner)
+        wrapped = _wrap(words, font, inner)
+        # Chỉ cắt khi caller truyền max_lines tường minh; mặc định hiển thị 100% nội dung
+        lines = _ellipsize(wrapped, max_lines, font, inner) if max_lines is not None else wrapped
         lh = int(body_size * b["line_height"])
         gaps = (b["gap"] if lines else 0) + (st["top_gap"] if stats_h else 0)
         base_h = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
         min_needed_media = 200 if media_images else 0
-        if not fit_full_post or body_size <= 30 or (top + base_h + min_needed_media) <= safe_bottom:
+        if (
+            font_size_override is not None
+            or body_size <= 26
+            or (top + base_h + min_needed_media) <= safe_bottom
+        ):
             break
-        body_size -= 4
+        body_size -= 2
 
     media_block: Image.Image | None = None
     media_gap = 20
@@ -478,48 +480,66 @@ def render_thread_card(
     count_scale: float = 1.0,
     project_dir: Path | None = None,
 ) -> tuple[Image.Image, int]:
-    """Vẽ cây Thread (bình luận gốc ở trên + đường kẻ nối nhánh + thẻ reply sổ xuống dưới)."""
+    """Vẽ cây Thread (bình luận gốc ở trên + đường kẻ nối nhánh + thẻ reply sổ xuống dưới).
+    Hiển thị đầy đủ 100% chữ cả cha và con, tự co cỡ chữ đồng bộ nếu cụm thread quá cao."""
     tpl = tpl or load_template()
-    c, rp = tpl["card"], tpl["reply"]
-    img = _canvas(tpl)
-    # 1. Thẻ bình luận cha ở trên (giới hạn 3 dòng để vừa cả cha và con trên khung dọc)
-    _, parent_bottom = render_card(
-        parent.handle,
-        parent.age,
-        parent.text,
-        likes=parent.likes,
-        replies=parent.replies,
-        reposts=parent.reposts,
-        shares=parent.shares,
-        views=parent.views,
-        tpl=tpl,
-        censor=censor,
-        censor_mode=censor_mode,
-        max_lines=3,
-        canvas=img,
-    )
-    # 2. Thẻ reply sổ xuống dưới, lùi sang phải theo indent
+    c, rp, b = tpl["card"], tpl["reply"], tpl["body"]
     thread_gap = 24
+    max_bottom = 1520
+    media_paths = _resolve_media_paths(reply_comment, project_dir)
+
+    font_size = b["size"]
+    thread_top = c["top"]
+    # Dựng nháp để đo tổng chiều cao; nếu tràn vùng phụ đề thì co cỡ chữ rồi đẩy top lên
+    while True:
+        probe = _canvas(tpl)
+        _, probe_parent_bottom = render_card(
+            parent.handle,
+            parent.age,
+            parent.text,
+            likes=parent.likes,
+            replies=parent.replies,
+            reposts=parent.reposts,
+            shares=parent.shares,
+            views=parent.views,
+            tpl=tpl,
+            censor=censor,
+            censor_mode=censor_mode,
+            top=thread_top,
+            font_size_override=font_size,
+            canvas=probe,
+        )
+        _, probe_reply_bottom = render_card(
+            reply_comment.handle,
+            reply_comment.age,
+            reply_comment.text,
+            likes=_scaled(reply_comment.likes, count_scale),
+            replies=_scaled(reply_comment.replies, count_scale),
+            reposts=_scaled(reply_comment.reposts, count_scale),
+            shares=_scaled(reply_comment.shares, count_scale),
+            views=reply_comment.views,
+            tpl=tpl,
+            censor=censor,
+            censor_mode=censor_mode,
+            top=probe_parent_bottom + thread_gap,
+            reply=True,
+            media_paths=media_paths,
+            font_size_override=font_size,
+            canvas=probe,
+            draw_reply_bar=False,
+        )
+        if probe_reply_bottom <= max_bottom:
+            img, parent_bottom, reply_bottom = probe, probe_parent_bottom, probe_reply_bottom
+            break
+        if font_size > 26:
+            font_size -= 2
+        elif thread_top > 120:
+            thread_top = max(120, thread_top - (probe_reply_bottom - max_bottom))
+        else:
+            img, parent_bottom, reply_bottom = probe, probe_parent_bottom, probe_reply_bottom
+            break
+
     reply_top = parent_bottom + thread_gap
-    _, reply_bottom = render_card(
-        reply_comment.handle,
-        reply_comment.age,
-        reply_comment.text,
-        likes=_scaled(reply_comment.likes, count_scale),
-        replies=_scaled(reply_comment.replies, count_scale),
-        reposts=_scaled(reply_comment.reposts, count_scale),
-        shares=_scaled(reply_comment.shares, count_scale),
-        views=reply_comment.views,
-        tpl=tpl,
-        censor=censor,
-        censor_mode=censor_mode,
-        top=reply_top,
-        reply=True,
-        media_paths=_resolve_media_paths(reply_comment, project_dir),
-        max_lines=4,
-        canvas=img,
-        draw_reply_bar=False,
-    )
     # 3. Đường kẻ chỉ nhánh nối từ thẻ bình luận cha xuống thẻ reply
     line_color = _rgb(rp["line_color"])
     line_w = rp["line_w"]

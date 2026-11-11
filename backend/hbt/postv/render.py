@@ -176,7 +176,8 @@ def compose_postv(
     """Một lệnh ffmpeg: nền + thẻ + meme + phụ đề → thân; xfade 0,5 s với outro."""
     scale = width / 1080
     inputs: list[str | Path] = ["-i", bg, "-f", "concat", "-safe", "0", "-i", caption_concat]
-    graph = ["[0:v]null[b0]"]
+    # Đệm khung nền 1s cuối phòng trường hợp clip nền hụt vài mili-giây gây chớp đen khi xfade outro
+    graph = [f"[0:v]fps={fps},setsar=1,tpad=stop_mode=clone:stop_duration=1[b0]"]
     prev, index = "b0", 2
     for k, (concat, asset, span, timing) in enumerate(cards):
         inputs += ["-f", "concat", "-safe", "0", "-i", concat]
@@ -205,12 +206,12 @@ def compose_postv(
             pos_expr = f"x=W-w-{round(36 * scale)}:y=H-h-{round(220 * scale)}"
 
         graph.append(
-            f"[{index}:v]colorkey=0x00FF00:0.35:0.15,scale={m_w}:-2:flags=lanczos,"
-            f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{m_idx}]"
+            f"[{index}:v]fps={fps},setsar=1,format=rgba,colorkey=0x00FF00:0.35:0.15,"
+            f"scale={m_w}:-2:flags=lanczos,setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{m_idx}]"
         )
         graph.append(
             f"[{prev}][m{m_idx}]overlay={pos_expr}:enable='between(t,{m_start:.4f},"
-            f"{m_start + m_dur:.4f})':eof_action=pass[b_m{m_idx}]"
+            f"{m_start + m_dur:.4f})':eof_action=pass:repeatlast=0:format=auto[b_m{m_idx}]"
         )
         prev = f"b_m{m_idx}"
         index += 1
@@ -522,7 +523,7 @@ def _render_postv(
         rep.tick(45 + 5 * (k + 1) / len(spans))
     rep.say(f"{len(cards)} thẻ")
 
-    # ---- 6b. Memes & Stickers phông xanh (Cut-in Pause chạy độc lập, âm thanh gốc)
+    # ---- 6b. Memes phông xanh (cắt âm thanh chuẩn + 0.3s lặng) & SFX chuyển thẻ / nhấn mạnh
     meme_items: list[tuple[Path, float, float, str, float, bool]] = []
     for k, (m_file, _cutin_dur, ss_start, m_pos, needs_loop) in resolved_memes.items():
         win = meme_windows.get(k)
@@ -531,13 +532,60 @@ def _render_postv(
         m_start, m_dur = win.start, win.duration
         meme_items.append((m_file, m_start, m_dur, m_pos, ss_start, needs_loop))
 
-        m_audio = build / "memes" / f"m_{k}_{m_file.stem}.wav"
-        if not (m_audio.is_file() and m_audio.stat().st_size > 1000):
-            extract_meme_audio(m_file, m_audio, start_time=ss_start, max_duration=m_dur)
-        if m_audio.is_file() and m_audio.stat().st_size > 1000:
-            sfx.append((m_audio, m_start, 0.85))
+        m_raw = build / "memes" / f"m_{k}_{m_file.stem}_raw.wav"
+        if not (m_raw.is_file() and m_raw.stat().st_size > 1000):
+            extract_meme_audio(m_file, m_raw, start_time=ss_start, max_duration=m_dur)
+        if m_raw.is_file() and m_raw.stat().st_size > 1000:
+            m_clean = build / "memes" / f"m_{k}_{m_file.stem}_{round(m_dur, 2):.2f}.wav"
+            try:
+                _postv_audio.prepare_sfx_clip(m_raw, m_clean, max_duration=m_dur, fade_out=0.12)
+                sfx.append((m_clean, m_start, 0.85))
+            except Exception:
+                sfx.append((m_raw, m_start, 0.85))
     if meme_items:
         rep.say(f"{len(meme_items)} meme cut-in pause (không đè TTS)")
+
+    # Quét SFX chuyển cảnh & nhấn mạnh từ library/sfx/
+    trans_sfx, emph_sfx = _postv_audio.categorize_sfx_files(library_dir)
+    sfx_dir = build / "sfx"
+    sfx_limit = partial or total
+    if trans_sfx and len(spans) > 1:
+        added_trans = 0
+        for idx_s, sp in enumerate(spans[1:], start=1):
+            if sp.start >= sfx_limit - 0.2:
+                continue
+            src_sfx = trans_sfx[(idx_s - 1) % len(trans_sfx)]
+            clip_wav = sfx_dir / f"tr_{src_sfx.stem}.wav"
+            try:
+                _postv_audio.prepare_sfx_clip(src_sfx, clip_wav, max_duration=0.65, fade_out=0.12)
+                sfx.append((clip_wav, sp.start, 0.22))
+                added_trans += 1
+            except Exception:
+                continue
+        if added_trans:
+            rep.say(f"Chèn {added_trans} SFX chuyển thẻ từ library/sfx/")
+
+    if emph_sfx and len(spans) > 2:
+        added_emph = 0
+        cmt_by_id = {c.id: c for c in project.comments}
+        for idx_s, sp in enumerate(spans):
+            if added_emph >= 2:
+                break
+            if sp.kind != "comment" or sp.ref is None or sp.start >= sfx_limit - 0.5:
+                continue
+            # Tránh đè lên khoảng dừng có meme
+            if any(w.start - 0.4 <= sp.start <= w.end + 0.4 for w in meme_windows.values()):
+                continue
+            cmt = cmt_by_id.get(sp.ref)
+            if cmt is not None and ((cmt.likes or 0) >= 50 or idx_s % 4 == 2):
+                src_e = emph_sfx[added_emph % len(emph_sfx)]
+                clip_e = sfx_dir / f"em_{src_e.stem}.wav"
+                try:
+                    _postv_audio.prepare_sfx_clip(src_e, clip_e, max_duration=0.85, fade_out=0.15)
+                    sfx.append((clip_e, sp.start + 0.05, 0.25))
+                    added_emph += 1
+                except Exception:
+                    continue
 
     # ---- 7. Âm thanh (50–55)
     rep.at(50, "Âm thanh")
@@ -588,7 +636,7 @@ def _render_postv(
     mix = build / "mix.wav"
     key = cache.digest(
         "mix", voice_mix, effective_music_src, music_start, round(total, 3),
-        [(round(at, 3), vol) for _, at, vol in sfx], PIPELINE_VERSION,
+        [(p.name, round(at, 3), vol) for p, at, vol in sfx], PIPELINE_VERSION,
     )  # fmt: skip
     if not cache.is_fresh(mix, key):
         audio.mix_audio(voice_mix, effective_music_src, music_start, total, mix, build, sfx)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,7 +13,12 @@ from hbt.chatting.audio import build_bgm_playlist, list_music_files, render_bgm_
 from hbt.config import REPO_ROOT
 from hbt.library import MusicLibrary
 from hbt.models import Music
+from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.postv.models import PostvProject
+
+SFX_EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac")
+_TRANSITION_KEYWORDS = ("swoosh", "whoosh", "pop", "retrieve", "ting", "chime", "click", "swipe")
+_EMPHASIS_KEYWORDS = ("bass", "drop", "scratch", "laugh", "trumpet", "trombone", "boom", "hit")
 
 log = logging.getLogger(__name__)
 
@@ -163,3 +169,64 @@ def build_postv_bgm_playlist_wav(
         volume_db=None,
     )
     return playlist
+
+
+def list_sfx_files(library_dir: Path | str | None = None) -> list[Path]:
+    """Quét toàn bộ file hiệu ứng âm thanh trong `library/sfx/`."""
+    sfx_dir = resolve_library_dir(library_dir) / "sfx"
+    if not sfx_dir.is_dir():
+        return []
+    return sorted(
+        [p for p in sfx_dir.iterdir() if p.is_file() and p.suffix.lower() in SFX_EXTS],
+        key=lambda p: p.name.casefold(),
+    )
+
+
+def categorize_sfx_files(library_dir: Path | str | None = None) -> tuple[list[Path], list[Path]]:
+    """Phân loại SFX thành (chuyển cảnh thẻ, nhấn mạnh/cao trào) từ `library/sfx/`."""
+    all_sfx = list_sfx_files(library_dir)
+    if not all_sfx:
+        return [], []
+    transitions = [p for p in all_sfx if any(kw in p.stem.lower() for kw in _TRANSITION_KEYWORDS)]
+    emphases = [p for p in all_sfx if any(kw in p.stem.lower() for kw in _EMPHASIS_KEYWORDS)]
+    if not transitions:
+        transitions = list(all_sfx)
+    if not emphases:
+        emphases = list(all_sfx)
+    return transitions, emphases
+
+
+def prepare_sfx_clip(
+    src: Path,
+    out_wav: Path,
+    max_duration: float = 0.75,
+    fade_out: float = 0.12,
+) -> Path:
+    """Giải mã, cắt gọn theo `max_duration` và fade-out mượt cho một clip SFX/meme."""
+    if out_wav.is_file() and out_wav.stat().st_size > 1000:
+        return out_wav
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    dur = max(0.15, float(max_duration))
+    fo = min(max(0.05, float(fade_out)), dur * 0.45)
+    st = max(0.0, dur - fo)
+    af = f"afade=t=in:st=0:d=0.015,afade=t=out:st={st:.4f}:d={fo:.4f}"
+    cmd = [
+        ffmpeg_exe(),
+        "-v",
+        "error",
+        "-y",
+        "-i",
+        str(src),
+        "-t",
+        f"{dur:.4f}",
+        "-vn",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-af",
+        af,
+        str(out_wav),
+    ]
+    subprocess.run(cmd, check=True)
+    return out_wav
