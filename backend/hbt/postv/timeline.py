@@ -14,6 +14,7 @@ SENTENCE_PAD_SEC = 0.4
 MEME_CUTIN_MIN_SEC = 2.5
 MEME_CUTIN_MAX_SEC = 3.5
 DEFAULT_MEME_CUTIN_SEC = 3.0
+MEME_TRAIL_SILENCE_SEC = 0.3
 SENTENCE_SPLIT_RE = re.compile(r"[.!?\n…]+")
 
 
@@ -98,13 +99,13 @@ def estimate_meme_pause_slots(
     """Trả về danh sách khoảng nghỉ (giây) ngay SAU từng đoạn trong `segments`.
 
     - Đoạn thường: nghỉ `default_gap` (0.25s).
-    - Đoạn kích hoạt meme: dừng đọc TTS hoàn toàn trong `meme_dur + 0.35s` (trọn 2.5s-3.5s meme).
+    - Đoạn kích hoạt meme: Start_Time_Audio(sau) = End_Time(trước) + Duration(Meme) + 0.3s.
     """
     gaps: list[float] = []
     for seg in segments:
         if getattr(seg, "meme_id", None):
             m_dur = resolve_meme_cutin_duration(library_dir, seg.meme_id)
-            gaps.append(round(m_dur + 0.35, 3))
+            gaps.append(round(m_dur + MEME_TRAIL_SILENCE_SEC, 3))
         else:
             gaps.append(default_gap)
     return gaps
@@ -121,11 +122,11 @@ def plan_meme_cutin_and_card_starts(
 ) -> tuple[list[float], dict[int, MemeCutinWindow]]:
     """Điều phối mốc chuyển thẻ & cửa sổ Meme Cut-in Pause không đè lên TTS.
 
+    Công thức bắt buộc:
     - Giây 0.00 luôn mở ngay Thẻ Bài Gốc (starts[0] == 0.0).
-    - Khi đoạn `k` kích hoạt meme:
-      + TTS ngừng ở `last_end[k]`.
-      + Meme chạy độc lập tại `[last_end[k] + 0.12, m_end]` (2.5s–3.5s).
-      + Chỉ sau khi meme kết thúc (`m_end`) thẻ tiếp theo (`starts[k + 1]`) mới cuộn tới.
+    - Meme chạy tại [last_end[k], last_end[k] + actual_dur] và TẮT HẲN ít nhất 0.3s trước
+      khi câu bình luận tiếp theo cất tiếng (`next_voice - 0.3s`).
+    - Thẻ kế tiếp (`starts[k + 1]`) chỉ chuyển sang sau khi meme đã tắt hẳn.
     """
     starts = list(base_starts)
     if starts:
@@ -135,20 +136,24 @@ def plan_meme_cutin_and_card_starts(
     for k, m_dur in meme_durations.items():
         if k >= len(segments) or k >= len(last_end):
             continue
-        m_start = last_end[k] + 0.12
+        m_start = last_end[k]
         next_voice = first_start[k + 1] if k + 1 < len(first_start) else total
-        # Đảm bảo không cắt lẹm vào giọng đọc đoạn kế tiếp nếu thiếu khoảng trống
+        # Chỉ phát tới tối đa next_voice - 0.3s để âm thanh gốc meme tắt hoàn toàn trước TTS sau
         max_avail = (
-            max(0.5, next_voice - m_start - 0.05)
+            max(0.0, next_voice - m_start - MEME_TRAIL_SILENCE_SEC)
             if k + 1 < len(first_start)
-            else max(0.5, total - m_start)
+            else max(0.0, total - m_start)
         )
+        if max_avail < 0.35:
+            # Khoảng nghỉ quá ngắn (vd: file thu sẵn không chừa slot) → bỏ meme tránh đè tiếng
+            continue
         actual_dur = min(m_dur, max_avail)
         m_end = m_start + actual_dur
         windows[k] = MemeCutinWindow(seg_index=k, start=m_start, duration=actual_dur, end=m_end)
 
         if k + 1 < len(starts):
-            target_transition = min(next_voice - 0.04, m_end + 0.06)
+            # Chuyển thẻ ngay giữa khoảng lặng 0.3s sau khi meme đã tắt hẳn hình & tiếng
+            target_transition = min(next_voice - 0.04, m_end + 0.08)
             if target_transition > starts[k]:
                 starts[k + 1] = max(starts[k + 1], target_transition)
 
