@@ -30,6 +30,7 @@ from hbt.core.audio import (
     scan_sfx_library,
 )
 from hbt.core.gemini_client import (
+    BACKEND_DIR,
     GEMINI_ENDPOINT,
     MODELS,
     SYSTEM_PROMPT,
@@ -38,6 +39,10 @@ from hbt.core.gemini_client import (
     build_gemini_url,
     generate_script_from_prompt,
     load_gemini_api_key,
+    resolve_candidate_env_paths,
+)
+from hbt.core.gemini_client import (
+    REPO_ROOT as GEMINI_REPO_ROOT,
 )
 from hbt.core.models import HbtCoreScript, HbtCoreSegment
 from hbt.core.render import (
@@ -190,14 +195,40 @@ def test_ffmpeg_clamping_flags_and_pillow_gc_collect(
 # 4. Kiểm thử Gemini Client (Chế độ V2): Payload chuẩn chống lỗi 400, đọc .env, Fallback V1
 # ---------------------------------------------------------------------------
 def test_gemini_client_payload_and_env_loading(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     env_file = tmp_path / ".env"
     env_file.write_text('GEMINI_API_KEY="AIzaSyTestKey123456"\n', encoding="utf-8")
 
+    # Kiểm tra danh sách đường dẫn đa tầng (Multi-path Resolver)
+    cands = resolve_candidate_env_paths()
+    assert cands == [
+        Path(GEMINI_REPO_ROOT) / ".env",
+        Path(BACKEND_DIR) / ".env",
+        Path(GEMINI_REPO_ROOT) / ".env.example",
+    ]
+
     key = load_gemini_api_key(env_file=env_file)
     assert key == "AIzaSyTestKey123456"
+    captured = capsys.readouterr().out
+    assert (
+        "[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: True (Độ dài: 19, Bắt đầu bằng AIzaSy: True)"
+        in captured
+    )
+
+    # Nếu file cấu hình chỉ chứa key mẫu placeholder, tự động trả về rỗng và bật fallback_v1=True
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    placeholder_env = tmp_path / ".env.example"
+    placeholder_env.write_text("GEMINI_API_KEY=AIzaSy_your_gemini_api_key_here\n", encoding="utf-8")
+    empty_key = load_gemini_api_key(env_file=placeholder_env)
+    assert empty_key == ""
+    with pytest.raises(GeminiClientError) as exc_info:
+        generate_script_from_prompt(
+            "Làm video vì sao về Đấu trường La Mã",
+            env_file=placeholder_env,
+        )
+    assert exc_info.value.fallback_v1 is True
 
     user_prompt = "Làm video vì sao về Đấu trường La Mã"
     payload = build_gemini_payload(user_prompt, system_prompt=SYSTEM_PROMPT)

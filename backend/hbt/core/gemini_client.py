@@ -1,6 +1,9 @@
 """Tích hợp Gemini Flash API cho Chế độ V2 (1-Click Prompt) của HBT Core.
 
-- Đọc GEMINI_API_KEY từ file .env hoặc biến môi trường.
+- Đọc GEMINI_API_KEY qua cơ chế dò tìm file cấu hình đa tầng (Multi-path Resolver):
+  + Path(REPO_ROOT) / ".env"
+  + Path(BACKEND_DIR) / ".env"
+  + Path(REPO_ROOT) / ".env.example"
 - Gọi endpoint v1beta models/{model_name}:generateContent với danh sách fallback:
   MODELS = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
 - Payload chuẩn chống lỗi 400:
@@ -23,11 +26,23 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
-from hbt.config import REPO_ROOT
 from hbt.core.models import HbtCoreScript
 
 logger = logging.getLogger(__name__)
+
+# Xác định đường dẫn tuyệt đối của thư mục gốc project và backend thông qua Path(__file__).resolve()
+# __file__ = <REPO_ROOT>/backend/hbt/core/gemini_client.py
+BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
+REPO_ROOT: Path = Path(__file__).resolve().parents[3]
+
+PLACEHOLDER_KEYS = {
+    "",
+    "aizasy_your_gemini_api_key_here",
+    "your_gemini_api_key_here",
+    "your_api_key_here",
+}
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 MODELS: list[str] = [
@@ -98,34 +113,58 @@ def build_gemini_url(model_name: str, api_key: str) -> str:
     )
 
 
-def load_gemini_api_key(env_file: Path | None = None) -> str:
-    """Đọc GEMINI_API_KEY từ biến môi trường hoặc file .env ở thư mục gốc dự án."""
-    env_val = os.environ.get("GEMINI_API_KEY", "").strip()
-    if env_val:
-        return env_val
+def _clean_key_value(raw: str | None) -> str:
+    """Chuẩn hóa chuỗi GEMINI_API_KEY: cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder."""
+    key = (raw or "").strip().strip('"').strip("'").strip()
+    if key.lower() in PLACEHOLDER_KEYS:
+        return ""
+    return key
 
-    candidates: list[Path] = []
+
+def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
+    """Trả về danh sách đường dẫn file cấu hình đa tầng (Multi-path Resolver)."""
+    candidate_paths: list[Path] = []
     if env_file is not None:
-        candidates.append(Path(env_file))
-    candidates.extend([REPO_ROOT / ".env", Path.cwd() / ".env"])
+        candidate_paths.append(Path(env_file).resolve())
+    candidate_paths.extend(
+        [
+            Path(REPO_ROOT) / ".env",
+            Path(BACKEND_DIR) / ".env",
+            Path(REPO_ROOT) / ".env.example",
+        ]
+    )
+    return candidate_paths
 
-    for path in candidates:
-        if not path.is_file():
-            continue
-        try:
-            for raw_line in path.read_text(encoding="utf-8").splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                if k.strip() == "GEMINI_API_KEY":
-                    cleaned = v.strip().strip('"').strip("'").strip()
-                    if cleaned:
-                        return cleaned
-        except OSError:
-            continue
 
-    return ""
+def load_gemini_api_key(env_file: Path | None = None) -> str:
+    """Dò tìm file cấu hình đa tầng bằng `load_dotenv(dotenv_path=env_path, override=True)`
+    và chuẩn hóa chuỗi `GEMINI_API_KEY`.
+    """
+    existing = _clean_key_value(os.getenv("GEMINI_API_KEY"))
+    if existing and env_file is None:
+        key = existing
+    else:
+        if env_file is not None:
+            candidate_paths = [Path(env_file)]
+        else:
+            candidate_paths = resolve_candidate_env_paths()
+
+        for env_path in candidate_paths:
+            if env_path.exists():
+                load_dotenv(dotenv_path=env_path, override=True)
+                loaded = _clean_key_value(os.getenv("GEMINI_API_KEY"))
+                if loaded:
+                    break
+                # Nếu là giá trị mẫu placeholder thì xoá khỏi os.environ để tiếp tục dò
+                os.environ.pop("GEMINI_API_KEY", None)
+
+        key = _clean_key_value(os.getenv("GEMINI_API_KEY", ""))
+
+    print(
+        f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
+        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
+    )
+    return key
 
 
 def build_gemini_payload(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -> dict[str, Any]:
@@ -182,10 +221,21 @@ def generate_script_from_prompt(
             fallback_v1=False,
         )
 
-    key = (api_key if api_key is not None else load_gemini_api_key(env_file=env_file)).strip()
+    if api_key is not None:
+        key = _clean_key_value(api_key)
+        print(
+            f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
+            f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
+        )
+    else:
+        key = load_gemini_api_key(env_file=env_file)
+
     if not key:
+        logger.warning(
+            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc không hợp lệ -> Kích hoạt fallback_v1=True."
+        )
         raise GeminiClientError(
-            "Chưa cấu hình GEMINI_API_KEY trong file .env. "
+            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong file .env. "
             "Đã tự động chuyển sang Chế độ V1 (Dán JSON thủ công).",
             status_code=401,
             reason="missing_api_key",
