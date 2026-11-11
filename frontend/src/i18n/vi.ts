@@ -1126,6 +1126,8 @@ export const vi = {
         `Dùng ${picked}/${total} bình luận · video ${sec}s`,
       durationWarning: (target: number, actual: number) =>
         `Thời lượng video (${actual}s) ngắn hơn mục tiêu (${target}s) do bài viết có ít bình luận phù hợp. Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang.`,
+      lowCommentsWarning: (count: number) =>
+        `Bài viết gốc chỉ có ${count} bình luận (< 10), video có thể bị ngắn. Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang.`,
       downloadVideo: 'Tải video',
       copyPublish: 'Sao chép nội dung đăng',
       copiedPublish: 'Đã sao chép!',

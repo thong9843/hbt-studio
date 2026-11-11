@@ -371,3 +371,150 @@ def test_extract_threads_45_items_with_comment_media(tmp_path):
     assert len(res.comments) == 45
     assert res.comments[0].media_urls == ["https://scontent.cdninstagram.com/v/c1.jpg"]
     assert res.comments[1].parent == "c1"
+
+
+def test_extract_threads_playwright_graphql_posts_edges_and_child_blobs():
+    import json
+
+    ssr_html = """
+    <html><head>
+      <meta property="og:title" content="Host (@host) on Threads" />
+      <meta property="og:description" content="Bài viết gốc nhiều tương tác thực tế." />
+    </head><body>
+      <script type="application/json">
+      {
+        "thread_items": [
+          {
+            "post": {
+              "user": {"username": "top_vip"},
+              "caption": {"text": "Bình luận đầu bảng siêu hot!"},
+              "like_count": 500,
+              "text_post_app_info": {"direct_reply_count": 10}
+            }
+          }
+        ]
+      }
+      </script>
+    </body></html>
+    """
+    gql_edges = []
+    for i in range(1, 36):
+        posts_edges = [
+            {
+                "node": {
+                    "user": {"username": f"user_{i}"},
+                    "caption": {"text": f"Bình luận GraphQL trang sâu số {i} rất dài và hay."},
+                    "like_count": 100 - i,
+                }
+            }
+        ]
+        if i == 1:
+            posts_edges.append(
+                {
+                    "node": {
+                        "user": {"username": "inline_child"},
+                        "caption": {"text": "Reply nối đuôi nằm sẵn trong posts.edges nè!"},
+                        "like_count": 25,
+                    }
+                }
+            )
+        gql_edges.append({"node": {"posts": {"edges": posts_edges}}})
+
+    child_node = {
+        "node": {
+            "user": {"username": "vip_replier"},
+            "caption": {"text": "Reply con bóc qua fetchChildReplies!"},
+            "like_count": 88,
+        }
+    }
+    child_blob = json.dumps(
+        {
+            "data": {
+                "media": {
+                    "text_post_app_info": {
+                        "direct_replies": {"edges": [{"node": {"posts": {"edges": [child_node]}}}]}
+                    }
+                }
+            }
+        }
+    )
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = ssr_html
+
+    browser_payload = {
+        "final_url": "https://www.threads.com/@host/post/DEEP99",
+        "og": {},
+        "scripts": [],
+        "graphql_payloads": [
+            json.dumps(
+                {
+                    "data": {
+                        "media": {"text_post_app_info": {"direct_replies": {"edges": gql_edges}}}
+                    }
+                }
+            )
+        ],
+        "child_reply_blobs": [
+            {"parent_text": "Bình luận đầu bảng siêu hot!", "payload": child_blob}
+        ],
+        "dom_text": "",
+    }
+
+    with (
+        patch("httpx.Client.get", return_value=mock_resp),
+        patch("hbt.postv.threads._scrape_threads_with_playwright", return_value=browser_payload),
+    ):
+        res = extract_threads_post("https://www.threads.com/@host/post/DEEP99")
+
+    assert len(res.comments) == 38
+    assert res.comments[0].id == "c1"
+    assert res.comments[1].id == "c2" and res.comments[1].parent is None
+    assert res.comments[2].handle == "inline_child" and res.comments[2].parent == "c2"
+    vip_reply = next(c for c in res.comments if c.handle == "vip_replier")
+    assert vip_reply.parent == "c1"
+
+
+def test_extract_threads_playwright_rescues_http_error():
+    import json
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.text = "Forbidden"
+
+    browser_payload = {
+        "final_url": "https://www.threads.com/@tacgia/post/OK123",
+        "og": {
+            "og:title": "Tác Giả (@tacgia) on Threads",
+            "og:description": "Bài viết bị chặn SSR bot nhưng Chromium đọc được.",
+        },
+        "scripts": [
+            json.dumps(
+                {
+                    "thread_items": [
+                        {
+                            "post": {
+                                "user": {"username": "reader_1"},
+                                "caption": {"text": "Chromium cứu thành công bài bị chặn SSR!"},
+                                "like_count": 42,
+                            }
+                        }
+                    ]
+                }
+            )
+        ],
+        "graphql_payloads": [],
+        "child_reply_blobs": [],
+        "dom_text": "",
+    }
+
+    with (
+        patch("httpx.Client.get", return_value=mock_resp),
+        patch("hbt.postv.threads._scrape_threads_with_playwright", return_value=browser_payload),
+    ):
+        res = extract_threads_post("https://www.threads.com/@tacgia/post/OK123")
+
+    assert res.post.handle == "tacgia"
+    assert len(res.comments) == 1
+    assert res.comments[0].handle == "reader_1"

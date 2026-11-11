@@ -516,4 +516,53 @@ describe('PostvQuickPage', () => {
       expect(deleteCalled).toBe(true);
     });
   });
+
+  it('shows immediate warning banner when fetched post has fewer than 10 comments', async () => {
+    const user = userEvent.setup();
+    stubFetch({
+      'GET /api/projects': defaultProjects,
+      'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
+      'GET /api/postv/settings': { voice_id: 'adam-bua' },
+      'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
+      'GET /api/jobs': [],
+      'POST /api/postv/auto': () =>
+        json({
+          project_slug: 'postv-low-cmt',
+          job_id: 'job-low-1',
+          existing_slug: null,
+        }),
+    });
+
+    page();
+
+    const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
+    await user.type(textarea, 'https://www.threads.net/@author/post/LOW99');
+    await user.click(screen.getByRole('button', { name: 'Tạo video' }));
+
+    expect(await screen.findByText('Tiến trình tạo video')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+
+    const es = FakeEventSource.instances[0];
+    act(() => {
+      es.emit('progress', {
+        stage: 'pick',
+        status: 'done',
+        progress: 30,
+        message: 'Đã chọn 4/4 bình luận',
+        data: {
+          handle: 'author',
+          snippet: 'Bài viết ít bình luận',
+          picked_count: 4,
+          total_comments: 4,
+          target_seconds: 120,
+          estimated_seconds: 28,
+          low_comments_warning:
+            'Bài viết gốc chỉ có 4 bình luận (< 10), video có thể ngắn hơn mục tiêu.',
+        },
+      });
+    });
+
+    expect(await screen.findByText(/chỉ có 4 bình luận \(< 10\)/i)).toBeInTheDocument();
+  });
 });
