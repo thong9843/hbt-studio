@@ -300,6 +300,13 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
         script: validScript,
         slug: resultSlug ?? initialSlug ?? null,
       });
+      if (res.success === false || res.ok === false || !res.slug) {
+        const msg = res.message || res.detail || res.error || vi.export.failed;
+        setRendering(false);
+        setRenderError(msg);
+        toast.error(new Error(msg));
+        return;
+      }
       setResultSlug(res.slug);
       if (res.job_id) {
         connectJobSse(res.job_id, res.slug);
@@ -328,24 +335,52 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
         slug: resultSlug ?? initialSlug ?? null,
         auto_render: true,
       });
+      // Nếu backend trả về cấu trúc fallback_v1 (ví dụ: {success: false, fallback_v1: true, message, error})
+      if (res.fallback_v1 || res.success === false || res.ok === false || !res.script) {
+        const fallbackMsg =
+          res.message ||
+          res.detail ||
+          res.error ||
+          'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang Chế độ V1.';
+        setFallbackNotice(fallbackMsg);
+        setMode('v1');
+        toast.error(new Error(fallbackMsg));
+        return;
+      }
+
       // Nạp kịch bản Gemini vừa sinh vào V1 state và kích hoạt tiến trình
       const sc = res.script;
       setTitle(sc.title);
       setTopic((sc.topic as HbtCoreTopic) || v2Topic);
       setSegments(sc.segments);
       setJsonText(JSON.stringify(sc, null, 2));
-      setResultSlug(res.slug);
+      if (res.slug) {
+        setResultSlug(res.slug);
+      }
       toast.info(T.v2.successToast);
-      if (res.job_id) {
+      if (res.job_id && res.slug) {
         connectJobSse(res.job_id, res.slug);
       }
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang Chế độ V1.';
+      let msg = 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang Chế độ V1.';
+      if (err instanceof ApiError) {
+        const errBody = err.body as {
+          message?: unknown;
+          detail?: unknown;
+          error?: unknown;
+        } | null;
+        if (errBody && typeof errBody.message === 'string' && errBody.message.trim()) {
+          msg = errBody.message;
+        } else if (errBody && typeof errBody.detail === 'string' && errBody.detail.trim()) {
+          msg = errBody.detail;
+        } else if (errBody && typeof errBody.error === 'string' && errBody.error.trim()) {
+          msg = errBody.error;
+        } else if (err.message) {
+          msg = err.message;
+        }
+      } else if (err instanceof Error && err.message) {
+        msg = err.message;
+      }
       setFallbackNotice(msg);
       // Tự động chuyển hướng người dùng sang Chế độ V1 để không bị gián đoạn công việc
       setMode('v1');

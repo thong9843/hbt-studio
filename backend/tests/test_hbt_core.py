@@ -424,7 +424,28 @@ def test_hbt_core_v1_and_v2_api_endpoints(
         json={"prompt": "Làm video vì sao về Đấu trường La Mã", "auto_render": False},
     )
     assert v2_fail_res.status_code == 401
-    assert v2_fail_res.json()["fallback_v1"] is True
+    v2_fail_json = v2_fail_res.json()
+    assert v2_fail_json["success"] is False
+    assert v2_fail_json["fallback_v1"] is True
+    assert "error" in v2_fail_json
+    assert "message" in v2_fail_json
+
+    # 3b. POST /api/hbt-core/v2/prompt khi xảy ra ngoại lệ bất ngờ -> KHÔNG crash 500,
+    # trả JSON có cấu trúc fallback_v1=True
+    def _raise_unexpected(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("Simulated unexpected crash in V2")
+
+    monkeypatch.setattr("hbt.api.core.generate_script_from_prompt", _raise_unexpected)
+    v2_exc_res = client.post(
+        "/api/hbt-core/v2/prompt",
+        json={"prompt": "Làm video vì sao về Đấu trường La Mã", "auto_render": False},
+    )
+    assert v2_exc_res.status_code != 500
+    v2_exc_json = v2_exc_res.json()
+    assert v2_exc_json["success"] is False
+    assert v2_exc_json["fallback_v1"] is True
+    assert "Simulated unexpected crash in V2" in v2_exc_json["error"]
+    assert "Chế độ V1" in v2_exc_json["message"]
 
     # 4. POST /api/hbt-core/v2/prompt thành công khi mock Gemini
     monkeypatch.setattr(

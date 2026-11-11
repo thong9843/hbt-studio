@@ -117,4 +117,42 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
       'true',
     );
   });
+
+  it('automatically switches from V2 to V1 mode when backend returns structured fallback JSON (200 OK with success=false, fallback_v1=true)', async () => {
+    stubFetch({
+      'GET /api/hbt-core/assets': assetsMock,
+      'POST /api/hbt-core/v2/prompt': () =>
+        new Response(
+          JSON.stringify({
+            success: false,
+            fallback_v1: true,
+            error: 'RuntimeError: Unexpected error',
+            message:
+              'Hệ thống gặp sự cố khi tạo kịch bản tự động V2. Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh).',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
+    await user.click(tabV2);
+
+    const promptBox = screen.getByLabelText('Câu nhắc 1-Click Prompt');
+    await user.type(promptBox, 'Làm video vì sao về Đấu trường La Mã');
+    await user.click(screen.getByRole('button', { name: 'Tạo kịch bản & Dựng video (1-Click)' }));
+
+    expect(
+      await screen.findByText('Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)'),
+    ).toBeVisible();
+    expect(
+      screen.getAllByText(/Hệ thống gặp sự cố khi tạo kịch bản tự động V2/).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('tab', { name: /Chế độ V1 · Bán tự động/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
 });

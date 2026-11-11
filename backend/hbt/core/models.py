@@ -101,4 +101,3 @@ class SegmentVoiceTiming(BaseModel):
     end_s: float
     duration_s: float
     cached: bool = False
-

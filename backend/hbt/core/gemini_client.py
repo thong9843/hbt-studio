@@ -136,6 +136,22 @@ def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
     return candidate_paths
 
 
+def _safe_print_config(msg: str) -> None:
+    """In log chẩn đoán an toàn ra stdout, chống lỗi UnicodeEncodeError (cp1252) trên Windows."""
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        try:
+            import sys
+
+            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+            safe_msg = msg.encode(enc, errors="replace").decode(enc, errors="replace")
+            print(safe_msg, flush=True)
+        except Exception:
+            pass
+    logger.info(msg)
+
+
 def load_gemini_api_key(env_file: Path | None = None) -> str:
     """Dò tìm file cấu hình đa tầng bằng `load_dotenv(dotenv_path=env_path, override=True)`
     và chuẩn hóa chuỗi `GEMINI_API_KEY`.
@@ -160,7 +176,7 @@ def load_gemini_api_key(env_file: Path | None = None) -> str:
 
         key = _clean_key_value(os.getenv("GEMINI_API_KEY", ""))
 
-    print(
+    _safe_print_config(
         f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
         f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
     )
@@ -223,7 +239,7 @@ def generate_script_from_prompt(
 
     if api_key is not None:
         key = _clean_key_value(api_key)
-        print(
+        _safe_print_config(
             f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
             f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
         )

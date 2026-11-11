@@ -808,9 +808,15 @@ export interface HbtCoreAssetsInfo {
 }
 
 export interface HbtCoreRenderResponse {
-  ok: boolean;
-  mode: 'v1' | 'v2';
-  slug: string;
-  job_id: string | null;
-  script: HbtCoreScript;
+  ok?: boolean;
+  success?: boolean;
+  fallback_v1?: boolean;
+  error?: string;
+  message?: string;
+  detail?: string;
+  reason?: string;
+  mode?: 'v1' | 'v2';
+  slug?: string;
+  job_id?: string | null;
+  script?: HbtCoreScript;
 }
