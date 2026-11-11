@@ -50,6 +50,7 @@ interface PickSnippetData {
   picked_count?: number;
   total_comments?: number;
   estimated_seconds?: number;
+  low_comments_warning?: string | null;
 }
 
 interface CompletedOutput {
@@ -202,6 +203,7 @@ export function PostvQuickPage() {
   const [stageMessage, setStageMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pickData, setPickData] = useState<PickSnippetData | null>(null);
+  const [lowCommentsWarning, setLowCommentsWarning] = useState<string | null>(null);
   const [output, setOutput] = useState<CompletedOutput | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [copiedPublish, setCopiedPublish] = useState(false);
@@ -255,8 +257,23 @@ export function PostvQuickPage() {
             setStageMessage(payload.message);
           }
           if (payload.data) {
-            if (payload.stage === 'pick') {
+            if (payload.stage === 'fetch') {
+              const total = payload.data.total_comments;
+              if (payload.data.low_comments_warning) {
+                setLowCommentsWarning(payload.data.low_comments_warning);
+              } else if (typeof total === 'number' && total < 10) {
+                setLowCommentsWarning(T.result.lowCommentsWarning(total));
+              }
+            } else if (payload.stage === 'pick') {
               setPickData(payload.data);
+              const total = payload.data.total_comments;
+              if (payload.data.low_comments_warning) {
+                setLowCommentsWarning(payload.data.low_comments_warning);
+              } else if (typeof total === 'number' && total < 10) {
+                setLowCommentsWarning(T.result.lowCommentsWarning(total));
+              } else if (typeof total === 'number' && total >= 10) {
+                setLowCommentsWarning(null);
+              }
               if (payload.status === 'waiting_pick') {
                 setIsWaitingPick(true);
                 setManualPickData(payload.data as unknown as PostvPickData);
@@ -439,6 +456,7 @@ export function PostvQuickPage() {
         setIsWaitingPick(false);
         setOutput(null);
         setPickData(null);
+        setLowCommentsWarning(null);
         setStageStatuses({
           fetch: 'running',
           pick: 'waiting',
@@ -580,6 +598,7 @@ export function PostvQuickPage() {
     setIsWaitingPick(false);
     setOutput(null);
     setPickData(null);
+    setLowCommentsWarning(null);
     setErrorMessage(null);
     setDuplicateSlug(null);
     setProgressPct(0);
@@ -1019,6 +1038,16 @@ export function PostvQuickPage() {
                 </div>
               </div>
 
+              {/* Cảnh báo khi bài viết gốc có dưới 10 bình luận */}
+              {(lowCommentsWarning || orderedComments.length < 10) && (
+                <div className="mb-4 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-tiny font-medium text-accent">
+                  <AlertIcon size={16} className="shrink-0 text-accent" />
+                  <span>
+                    {lowCommentsWarning || T.result.lowCommentsWarning(orderedComments.length)}
+                  </span>
+                </div>
+              )}
+
               {/* Danh sách TẤT CẢ bình luận */}
               <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
                 {orderedComments.map((c, index) => {
@@ -1222,6 +1251,14 @@ export function PostvQuickPage() {
                   <p className="mt-4 text-center text-tiny text-muted">{stageMessage}</p>
                 )}
 
+                {/* Cảnh báo rõ nếu bài viết gốc có quá ít bình luận (< 10) */}
+                {lowCommentsWarning && !errorMessage && (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-tiny font-medium text-accent">
+                    <AlertIcon size={16} className="shrink-0 text-accent" />
+                    <span>{lowCommentsWarning}</span>
+                  </div>
+                )}
+
                 {/* Báo lỗi nếu có */}
                 {errorMessage && (
                   <div className="mt-4 rounded-xl border border-danger/40 bg-danger/5 p-3 text-small text-danger">
@@ -1259,18 +1296,23 @@ export function PostvQuickPage() {
                     Math.round(output.duration ?? 0),
                   )}
                 </p>
-                {/* Cảnh báo nếu thời lượng thực tế hụt so với mục tiêu */}
+                {/* Cảnh báo nếu thời lượng thực tế hụt so với mục tiêu hoặc ít bình luận (< 10) */}
                 {(output.warning ||
+                  lowCommentsWarning ||
+                  (output.total_comments !== undefined && output.total_comments < 10) ||
                   (output.target_seconds &&
                     (output.duration ?? 0) < output.target_seconds - 5)) && (
                   <div className="mx-auto mt-2 flex max-w-md items-center justify-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-tiny font-medium text-accent">
                     <AlertIcon size={16} className="text-accent shrink-0" />
                     <span>
                       {output.warning ||
-                        T.result.durationWarning?.(
-                          output.target_seconds ?? 75,
-                          Math.round(output.duration ?? 0),
-                        )}
+                        lowCommentsWarning ||
+                        (output.total_comments !== undefined && output.total_comments < 10
+                          ? T.result.lowCommentsWarning(output.total_comments)
+                          : T.result.durationWarning?.(
+                              output.target_seconds ?? 75,
+                              Math.round(output.duration ?? 0),
+                            ))}
                     </span>
                   </div>
                 )}

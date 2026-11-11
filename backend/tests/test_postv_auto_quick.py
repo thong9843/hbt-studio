@@ -898,3 +898,40 @@ def test_meme_cutin_pause_never_overlaps_tts_or_early_card_scroll(tmp_path):
     assert win.start >= last_end[1]
     assert win.end <= first_start[2]
     assert starts[2] >= win.end
+
+
+def test_step_pick_debug_budget_log_and_low_comments_warning():
+    import logging
+
+    from hbt.jobs import Job
+    from hbt.postv.auto import _step_pick
+
+    proj = PostvProject(version=1, kind="postv", slug="low-cmt", title="Low")
+    proj.post.text = "Bài viết gốc chỉ có vài bình luận ngắn ngủi."
+    proj.comments = [
+        PostvComment(
+            id=f"c{i}",
+            handle=f"u{i}",
+            text=f"Bình luận hợp lệ thứ {i} dài hơn 8 ký tự nè.",
+            likes=20 - i,
+        )
+        for i in range(1, 5)
+    ]
+
+    jm = MagicMock()
+    jm.storage.load_any.return_value = proj
+    jm.library_dir = None
+    jm.postv_words = None
+    job = Job("j-low", "low-cmt", False, 60, True, False, kind="postv_quick")
+    mock_logger = MagicMock(spec=logging.Logger)
+
+    _step_pick(jm, job, {"pick_mode": "auto", "target_seconds": 120}, mock_logger)
+
+    info_msgs = [str(c.args[0]) for c in mock_logger.info.call_args_list if c.args]
+    assert any("[DEBUG]" in m and "cào=4" in m and "tích_lũy=" in m for m in info_msgs)
+
+    pick_payloads = [payload for ev, payload in job._events if ev == "progress"]
+    done_payload = pick_payloads[-1]["data"]
+    assert done_payload["total_comments"] == 4
+    assert done_payload["low_comments_warning"]
+    assert "< 10" in done_payload["low_comments_warning"]

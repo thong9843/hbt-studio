@@ -661,6 +661,7 @@ export interface PostvPickData {
   total_comments: number;
   target_seconds: number;
   estimated_seconds: number;
+  low_comments_warning?: string | null;
 }
 
 export interface PostvQuickAutoResponse {
@@ -681,6 +682,7 @@ export interface PostvStageEvent {
     total_comments?: number;
     target_seconds?: number;
     estimated_seconds?: number;
+    low_comments_warning?: string | null;
     video?: string;
     cover?: string | null;
     youtube_cover?: string | null;

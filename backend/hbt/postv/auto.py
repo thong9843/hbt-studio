@@ -35,6 +35,7 @@ from hbt.postv.threads import (
 )
 from hbt.postv.timeline import (
     DEFAULT_MEME_CUTIN_SEC,
+    compute_time_budget,
     estimate_meme_pause_slots,
     estimate_tts_seconds,
 )
@@ -76,7 +77,7 @@ def _setup_auto_logger(workspace_dir: Path | None) -> logging.Logger:
             fh = logging.FileHandler(str(log_file), encoding="utf-8")
             fh.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
             logger.addHandler(fh)
-            logger.setLevel(logging.INFO)
+            logger.setLevel(logging.DEBUG)
     return logger
 
 
@@ -321,13 +322,31 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
     job_manager.storage.save_any(job.slug, project)
 
     fetch_msg = f"Đã tải bài viết của @{project.post.handle}"
+    low_warn = None
     if not project.comments:
+        low_warn = (
+            "Bài viết gốc chưa cào được bình luận nào (< 10). "
+            "Gợi ý: Copy cả trang bài (Ctrl+A) rồi dán vào đây để thêm bình luận."
+        )
         fetch_msg += (
             " (chưa có bình luận. Gợi ý: Copy cả trang bài (Ctrl+A) "
             "rồi dán vào đây để thêm bình luận)"
         )
     else:
         fetch_msg += f" ({len(project.comments)} bình luận)"
+        if len(project.comments) < LOW_COMMENTS_THRESHOLD:
+            low_warn = (
+                f"Bài viết gốc chỉ có {len(project.comments)} bình luận "
+                f"(< {LOW_COMMENTS_THRESHOLD}), video có thể ngắn hơn mục tiêu."
+            )
+
+    debug_fetch = (
+        f"[DEBUG] Fetch @{project.post.handle}: cào={len(project.comments)} "
+        f"(cha={sum(1 for c in project.comments if not c.parent)}, "
+        f"reply_con={sum(1 for c in project.comments if c.parent)})"
+    )
+    log.debug(debug_fetch)
+    logger.info(debug_fetch)
 
     emit_stage_event(
         job,
@@ -335,12 +354,14 @@ def _step_fetch(job_manager: Any, job: Any, raw_input: str, logger: logging.Logg
         status="done",
         progress=STAGE_PROGRESS[STAGE_FETCH],
         message=fetch_msg,
+        data={"total_comments": len(project.comments), "low_comments_warning": low_warn},
         logger=logger,
     )
 
 
 MIN_COMMENT_LENGTH = 8
 MAX_AUTO_COMMENTS = 200
+LOW_COMMENTS_THRESHOLD = 10
 SPAM_COMMENT_RE = re.compile(
     r"(?:^|\b)(?:check\s+bio|link\s+(?:ở|trong|dưới)?\s*bio|ib\s+zalo|"
     r"tương\s+tác\s+chéo|follow\s+chéo|fl\s+chéo|mua\s+ngay\s+tại|shopee\.vn|lazada\.vn)(?:\b|$)"
@@ -541,6 +562,35 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
 
     job_manager.storage.save_any(job.slug, project)
 
+    est_meme_durs = [
+        DEFAULT_MEME_CUTIN_SEC
+        for idx, item in enumerate(picked_ordered, 1)
+        if has_memes and item.parent is None and idx % 3 == 1
+    ]
+    budget = compute_time_budget(
+        project.post.text,
+        picked_ordered,
+        est_meme_durs,
+        target_seconds=target_seconds,
+    )
+    debug_pick = (
+        f"[DEBUG] Pick ngân sách: cào={len(project.comments)} | "
+        f"hợp_lệ={len(valid_comments)} | chọn={len(picked_ids)} | "
+        f"T_post={budget.t_post:.2f}s | T_comments={budget.t_comments_replies:.2f}s | "
+        f"T_memes={budget.t_memes:.2f}s | "
+        f"tích_lũy={current_sec:.2f}s / mục_tiêu={target_seconds:.0f}s"
+    )
+    log.debug(debug_pick)
+    logger.info(debug_pick)
+
+    low_comments_warning = None
+    if len(project.comments) < LOW_COMMENTS_THRESHOLD:
+        low_comments_warning = (
+            f"Bài viết gốc chỉ có {len(project.comments)} bình luận (< {LOW_COMMENTS_THRESHOLD}), "
+            "video có thể ngắn hơn mục tiêu. "
+            "Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang (Ctrl+A)."
+        )
+
     data = {
         "handle": project.post.handle,
         "snippet": project.post.text[:120],
@@ -550,6 +600,7 @@ def _step_pick(job_manager: Any, job: Any, options: dict[str, Any], logger: logg
         "total_comments": len(project.comments),
         "target_seconds": target_seconds,
         "estimated_seconds": current_sec,
+        "low_comments_warning": low_comments_warning,
     }
 
     if pick_mode == "manual":
@@ -904,6 +955,11 @@ def _step_render(
         warning_msg = (
             f"Thời lượng video ({duration_rounded:g}s) ngắn hơn mục tiêu "
             f"({target_sec:g}s) do bài viết có ít bình luận phù hợp. "
+            "Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang."
+        )
+    elif total_cnt < LOW_COMMENTS_THRESHOLD:
+        warning_msg = (
+            f"Bài viết gốc chỉ có {total_cnt} bình luận (< {LOW_COMMENTS_THRESHOLD}). "
             "Gợi ý: Trên Threads cuộn và bấm Xem thêm bình luận trước khi copy cả trang."
         )
 
