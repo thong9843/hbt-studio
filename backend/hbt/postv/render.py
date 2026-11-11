@@ -155,8 +155,6 @@ def _run_with_progress(cmd: list[str], total: float, on_frac, partial: Path) -> 
         except BaseException:
             partial.unlink(missing_ok=True)
             raise
-        partial.unlink(missing_ok=True)  # không để lại video dang dở
-        raise
 
 
 def compose_postv(
