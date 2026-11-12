@@ -35,9 +35,11 @@ from hbt.core.gemini_client import (
     MODELS,
     SYSTEM_PROMPT,
     GeminiClientError,
+    build_gemini_headers,
     build_gemini_payload,
     build_gemini_url,
     generate_script_from_prompt,
+    is_valid_gemini_api_key,
     load_gemini_api_key,
     resolve_candidate_env_paths,
 )
@@ -201,29 +203,35 @@ def test_gemini_client_payload_and_env_loading(
     env_file = tmp_path / ".env"
     env_file.write_text('GEMINI_API_KEY="AIzaSyTestKey123456"\n', encoding="utf-8")
 
-    # Kiểm tra danh sách đường dẫn đa tầng (Multi-path Resolver)
+    # Kiểm tra danh sách đường dẫn đa tầng (Multi-path Resolver chỉ đọc từ .env)
     cands = resolve_candidate_env_paths()
     assert cands == [
         Path(GEMINI_REPO_ROOT) / ".env",
         Path(BACKEND_DIR) / ".env",
-        Path(GEMINI_REPO_ROOT) / ".env.example",
     ]
 
     key = load_gemini_api_key(env_file=env_file)
     assert key == "AIzaSyTestKey123456"
+    assert is_valid_gemini_api_key(key) is True
     captured = capsys.readouterr().out
-    assert "[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: True" in captured
-    assert "Độ dài: 19, Bắt đầu bằng AIzaSy: True" in captured
+    assert (
+        "[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: True (Độ dài: 19, Bắt đầu bằng AIzaSy: True)"
+        in captured
+    )
 
-    # Hỗ trợ cả định dạng key mới AQ.... của Google AI Studio và tự động bỏ tiền tố AIzaSy ghép nhầm
-    aq_env = tmp_path / ".env.aq"
-    aq_env.write_text("GEMINI_API_KEY=AIzaSyAQ.Ab8RN6TestKey\n", encoding="utf-8")
-    aq_key = load_gemini_api_key(env_file=aq_env)
-    assert aq_key == "AQ.Ab8RN6TestKey"
+    # Key không bắt đầu bằng AIzaSy hoặc rỗng -> không gửi request, bật fallback_v1=True ngay
+    assert is_valid_gemini_api_key("") is False
+    assert is_valid_gemini_api_key("invalid-key-without-prefix") is False
+    with pytest.raises(GeminiClientError) as invalid_exc:
+        generate_script_from_prompt(
+            "Làm video vì sao về Đấu trường La Mã",
+            api_key="invalid-key-without-prefix",
+        )
+    assert invalid_exc.value.fallback_v1 is True
 
-    # Nếu file cấu hình chỉ chứa key mẫu placeholder, tự động trả về rỗng và bật fallback_v1=True
+    # Nếu file .env chỉ chứa key mẫu placeholder, tự động trả về rỗng và bật fallback_v1=True
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    placeholder_env = tmp_path / ".env.example"
+    placeholder_env = tmp_path / "placeholder.env"
     placeholder_env.write_text("GEMINI_API_KEY=AIzaSy_your_gemini_api_key_here\n", encoding="utf-8")
     empty_key = load_gemini_api_key(env_file=placeholder_env)
     assert empty_key == ""
@@ -285,13 +293,16 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
     transport = httpx.MockTransport(mock_handler)
     script = generate_script_from_prompt(
         "Làm video vì sao về Đấu trường La Mã",
-        api_key="test-key-xyz",
+        api_key="AIzaSyTestKeyXyz123",
         transport=transport,
     )
     assert script.title == "Vì sao Đấu trường La Mã bền vững?"
     assert script.topic == "history"
     assert len(script.segments) == 2
-    assert str(captured_requests[0].url).startswith(GEMINI_ENDPOINT)
+    assert str(captured_requests[0].url) == GEMINI_ENDPOINT
+    assert "?key=" not in str(captured_requests[0].url)
+    assert captured_requests[0].headers.get("x-goog-api-key") == "AIzaSyTestKeyXyz123"
+    assert captured_requests[0].headers.get("content-type") == "application/json"
 
     # Kiểm thử lỗi Quota 429 -> ném GeminiClientError có fallback_v1=True
     quota_transport = httpx.MockTransport(
@@ -300,7 +311,7 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
     with pytest.raises(GeminiClientError) as exc_info:
         generate_script_from_prompt(
             "Làm video vì sao về Đấu trường La Mã",
-            api_key="test-key-xyz",
+            api_key="AIzaSyTestKeyXyz123",
             transport=quota_transport,
         )
     assert exc_info.value.fallback_v1 is True
@@ -308,24 +319,34 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
 
 
 def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
-    # 1. Đảm bảo URL chuẩn xác và không bao giờ lặp "models/models/..."
-    assert "gemini-3.5-flash" in MODELS
-    assert "gemini-1.5-flash-latest" in MODELS
-    url1 = build_gemini_url("gemini-1.5-flash-latest", "test-key")
-    url2 = build_gemini_url("models/gemini-1.5-flash-latest", "test-key")
-    url3 = build_gemini_url("models/models/gemini-2.0-flash-exp", "test-key")
+    # 1. Đảm bảo URL endpoint sạch (không gắn ?key=) và không bao giờ lặp "models/models/..."
+    assert MODELS == [
+        "gemini-1.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro",
+    ]
+    url1 = build_gemini_url("gemini-1.5-flash")
+    url2 = build_gemini_url("models/gemini-1.5-flash")
+    url3 = build_gemini_url("models/models/gemini-2.0-flash")
     assert (
         url1
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=test-key"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     )
     assert url2 == url1
+    assert "?key=" not in url1
     assert "models/models/" not in url3
     assert (
         url3
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=test-key"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     )
+    assert build_gemini_headers("  AIzaSyHeaderKey  ") == {
+        "Content-Type": "application/json",
+        "x-goog-api-key": "AIzaSyHeaderKey",
+    }
 
-    # 2. Nếu các model đầu trả về 404, tự động thử sang model kế tiếp và nhận status_code == 200
+    # 2. Nếu model đầu tiên (gemini-1.5-flash) và thứ hai (gemini-2.0-flash) trả về 404,
+    # tự động thử sang model kế tiếp (gemini-1.5-flash-latest) và nhận status_code == 200
     called_urls: list[str] = []
     statuses: list[int] = []
     sent_headers: list[str] = []
@@ -367,17 +388,25 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
 
     script = generate_script_from_prompt(
         "Làm video vì sao về Đấu trường La Mã",
-        api_key="AQ.test-key-fallback",
-        models=["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-3.5-flash"],
+        api_key="AIzaSyFallbackTestKey",
         transport=httpx.MockTransport(fallback_404_handler),
     )
     assert statuses == [404, 404, 200]
     assert statuses[-1] == 200
     assert len(called_urls) == 3
-    assert all(h == "AQ.test-key-fallback" for h in sent_headers)
-    assert "gemini-1.5-flash-latest:generateContent" in called_urls[0]
-    assert "gemini-1.5-flash:generateContent" in called_urls[1]
-    assert "gemini-3.5-flash:generateContent" in called_urls[2]
+    assert all(h == "AIzaSyFallbackTestKey" for h in sent_headers)
+    assert (
+        called_urls[0]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    )
+    assert (
+        called_urls[1]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    )
+    assert (
+        called_urls[2]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+    )
     assert script.title == "Vì sao Đấu trường La Mã vĩ đại?"
 
 

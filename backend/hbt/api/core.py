@@ -24,6 +24,7 @@ from hbt.core.audio import scan_music_by_topic, scan_sfx_library
 from hbt.core.gemini_client import (
     GeminiClientError,
     generate_script_from_prompt,
+    is_valid_gemini_api_key,
     load_gemini_api_key,
 )
 from hbt.core.models import VALID_TOPICS, HbtCoreScript
@@ -158,7 +159,7 @@ def get_hbt_core_assets(state: State, slug: str | None = None) -> Any:
                     if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
                 )
 
-        has_gemini_key = bool(load_gemini_api_key())
+        has_gemini_key = is_valid_gemini_api_key(load_gemini_api_key())
         return {
             "topics": list(VALID_TOPICS),
             "sfx": sfx_items,

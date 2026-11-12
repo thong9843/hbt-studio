@@ -3,9 +3,9 @@
 - Đọc GEMINI_API_KEY qua cơ chế dò tìm file cấu hình đa tầng (Multi-path Resolver):
   + Path(REPO_ROOT) / ".env"
   + Path(BACKEND_DIR) / ".env"
-  + Path(REPO_ROOT) / ".env.example"
-- Gọi endpoint v1beta models/{model_name}:generateContent với danh sách fallback:
-  MODELS = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+- Gọi endpoint v1beta models/{model_name}:generateContent với xác thực qua Header `x-goog-api-key`
+  và danh sách fallback:
+  MODELS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
 - Payload chuẩn chống lỗi 400:
   {
     "contents": [{"role": "user", "parts": [{"text": system_prompt + "\\n\\n" + user_prompt}]}],
@@ -46,12 +46,10 @@ PLACEHOLDER_KEYS = {
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 MODELS: list[str] = [
-    "gemini-3.5-flash",
-    "gemini-flash-lite-latest",
-    "gemini-3-flash-preview",
-    "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
-    "gemini-2.0-flash-exp",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
 ]
 GEMINI_MODEL = MODELS[0]
 GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
@@ -107,31 +105,39 @@ def normalize_model_name(model_name: str) -> str:
     return clean or MODELS[0]
 
 
-def build_gemini_url(model_name: str, api_key: str) -> str:
-    """Tạo URL chuẩn v1beta cho model Gemini, đảm bảo không bao giờ lặp 'models/models/...'."""
+def build_gemini_url(model_name: str, api_key: str | None = None) -> str:
+    """Tạo URL endpoint sạch v1beta cho model Gemini (không gắn ?key= vào URL,
+    xác thực qua Header `x-goog-api-key`). Đảm bảo không bao giờ lặp 'models/models/...'.
+    """
+    _ = api_key
     clean_model = normalize_model_name(model_name)
-    return (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{clean_model}:generateContent?key={api_key}"
-    )
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent"
+
+
+def build_gemini_headers(api_key: str) -> dict[str, str]:
+    """Tạo Header chuẩn Google AI Studio với `x-goog-api-key`."""
+    return {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key.strip(),
+    }
 
 
 def _clean_key_value(raw: str | None) -> str:
-    """Chuẩn hóa chuỗi GEMINI_API_KEY:
-    - Cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder.
-    - Tự động sửa lỗi ghép thừa tiền tố 'AIzaSy' vào đầu key định dạng mới 'AQ....' của AI Studio
-      (ví dụ 'AIzaSyAQ.Ab8...' -> 'AQ.Ab8...').
-    """
+    """Chuẩn hóa chuỗi GEMINI_API_KEY: cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder."""
     key = (raw or "").strip().strip('"').strip("'").strip()
     if key.lower() in PLACEHOLDER_KEYS:
         return ""
-    if key.startswith("AIzaSyAQ."):
-        key = key[len("AIzaSy") :]
     return key
 
 
+def is_valid_gemini_api_key(api_key: str | None) -> bool:
+    """Kiểm tra tính hợp lệ của Key trước khi gọi: không rỗng và bắt đầu bằng 'AIzaSy'."""
+    key = _clean_key_value(api_key)
+    return bool(key) and key.startswith("AIzaSy")
+
+
 def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
-    """Trả về danh sách đường dẫn file cấu hình đa tầng (Multi-path Resolver)."""
+    """Trả về danh sách đường dẫn file cấu hình `.env` đa tầng (Multi-path Resolver)."""
     candidate_paths: list[Path] = []
     if env_file is not None:
         candidate_paths.append(Path(env_file).resolve())
@@ -139,7 +145,6 @@ def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
         [
             Path(REPO_ROOT) / ".env",
             Path(BACKEND_DIR) / ".env",
-            Path(REPO_ROOT) / ".env.example",
         ]
     )
     return candidate_paths
@@ -187,8 +192,7 @@ def load_gemini_api_key(env_file: Path | None = None) -> str:
 
     _safe_print_config(
         f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
-        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')}, "
-        f"Bắt đầu bằng AQ.: {key.startswith('AQ.')})"
+        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
     )
     return key
 
@@ -256,15 +260,16 @@ def generate_script_from_prompt(
     else:
         key = load_gemini_api_key(env_file=env_file)
 
-    if not key:
+    if not is_valid_gemini_api_key(key):
         logger.warning(
-            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc không hợp lệ -> Kích hoạt fallback_v1=True."
+            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc sai định dạng (phải bắt đầu bằng 'AIzaSy') "
+            "-> Kích hoạt fallback_v1=True ngay lập tức."
         )
         raise GeminiClientError(
-            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong file .env. "
+            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong .env (bắt đầu bằng 'AIzaSy'). "
             "Đã tự động chuyển sang Chế độ V1 (Dán JSON thủ công).",
             status_code=401,
-            reason="missing_api_key",
+            reason="invalid_or_missing_api_key",
             fallback_v1=True,
         )
 
@@ -273,6 +278,7 @@ def generate_script_from_prompt(
         full_user_prompt = f"{prompt_clean}\n(Chủ đề ưu tiên: {topic_hint.strip()})"
 
     payload = build_gemini_payload(full_user_prompt, system_prompt=SYSTEM_PROMPT)
+    headers = build_gemini_headers(key)
     candidate_models = [normalize_model_name(m) for m in (models or MODELS) if m and m.strip()]
     if not candidate_models:
         candidate_models = list(MODELS)
@@ -283,14 +289,11 @@ def generate_script_from_prompt(
     try:
         with httpx.Client(timeout=timeout_s, transport=transport) as client:
             for idx, model_name in enumerate(candidate_models):
-                url = build_gemini_url(model_name, key)
+                url = build_gemini_url(model_name)
                 response = client.post(
                     url,
                     json=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": key,
-                    },
+                    headers=headers,
                 )
                 if response.status_code == 404:
                     try:
