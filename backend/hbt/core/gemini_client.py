@@ -61,27 +61,39 @@ GEMINI_MODEL = MODELS[0]
 GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
 
 SYSTEM_PROMPT = (
-    "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức 'Vì Sao' (HBT Core) tiếng Việt.\n"
-    "Nhiệm vụ của bạn là sinh kịch bản JSON chuẩn xác theo cấu trúc đầu vào của Chế độ V1:\n"
+    "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức chuẩn kênh 'Hay Biết Tốt'.\n"
+    "Hãy trả về DUY NHẤT một đối tượng JSON thuần 100% (KHÔNG bọc trong markdown ```json),\n"
+    "tuân thủ nghiêm ngặt cấu trúc Schema kèm ví dụ Few-shot sau:\n\n"
     "{\n"
-    '  "title": "Tiêu đề video hấp dẫn",\n'
-    '  "topic": "history | fun | science | mystery",\n'
+    '  "topic": "Tên chủ đề",\n'
+    '  "total_segments": 8,\n'
     '  "segments": [\n'
     "    {\n"
-    '      "order": 1,\n'
-    '      "text": "Lời thoại tiếng Việt tự nhiên, súc tích, dễ hiểu cho phân đoạn 1...",\n'
-    '      "image": "scene-01.png",\n'
-    '      "sfx": "whoosh"\n'
+    '      "id": 1,\n'
+    '      "title": "TIÊU ĐỀ THẺ KEM NGẮN",\n'
+    '      "text": "Câu thoại thuyết minh tiếng Việt tự nhiên, lôi cuốn...",\n'
+    '      "sticker": "shock",\n'
+    '      "image_prompt": "Cinematic shot of ancient Roman Colosseum under dramatic golden '
+    "hour sunlight, ultra realistic, highly detailed historical atmosphere, "
+    '9:16 vertical framing"\n'
     "    }\n"
     "  ]\n"
     "}\n\n"
-    "QUY TẮC BẮT BUỘC:\n"
-    "1. Chỉ trả về DUY NHẤT một đối tượng JSON hợp lệ, không bọc trong markdown ```json.\n"
-    '2. Trường "topic" chỉ được nhận 1 trong 4 giá trị: "history", "fun", "science", "mystery".\n'
-    '3. Danh sách "segments" gồm từ 4 đến 8 phân đoạn (order đánh số liên tiếp từ 1).\n'
-    '4. Trường "text" ở mỗi phân đoạn là lời đọc tiếng Việt thuần túy (18 đến 40 từ mỗi đoạn).\n'
-    '5. Trường "image" đặt tên gợi ý ảnh minh họa (ví dụ: "scene-01.png", "scene-02.png"...).\n'
-    '6. Trường "sfx" chọn hiệu ứng chuyển cảnh: "whoosh" hoặc "pop".'
+    "YÊU CẦU KỊCH BẢN & PHONG CÁCH 'HAY BIẾT TỐT':\n"
+    "1. Mỗi video gồm 6 đến 8 phân đoạn (id đánh số liên tiếp từ 1..N, khớp với total_segments).\n"
+    "2. KHÔNG GIỚI HẠN SỐ TỪ (hệ thống dùng VieNeu-TTS cục bộ không giới hạn): viết tự nhiên,\n"
+    "   đầy đủ chiều sâu, không cần cắt gọt gượng ép theo mốc 750 từ.\n"
+    "3. Nhịp điệu kể chuyện chuẩn Hay Biết Tốt:\n"
+    "   - Đoạn 1: Hook mở đầu giật gân, đặt nghịch lý hoặc câu hỏi khơi gợi tò mò.\n"
+    '   - Các đoạn thân (2..N-1): Giải thích cơ chế, lật lại các lầm tưởng ("Nhưng khoan đã...").\n'
+    "   - Đoạn cuối (N): Đặt câu hỏi kích thích bình luận + kết đúng câu chốt:\n"
+    '     "Theo dõi Hay Biết Tốt trên TikTok và YouTube nhé".\n'
+    '4. Trường "title": Tiêu đề thẻ kem ngắn gọn, súc tích IN HOA (3-7 từ) nổi bật trên video.\n'
+    '5. Trường "sticker": Chọn loại biểu cảm phù hợp: '
+    "question | shock | laugh | think | check | warning.\n"
+    '6. Trường "image_prompt": Câu mô tả sinh ảnh BẰNG TIẾNG ANH chi tiết, phong cách điện ảnh\n'
+    "   chân thực (cinematic, photorealistic, dramatic lighting, 9:16 vertical framing) dành\n"
+    "   riêng cho ComfyUI / Stable Diffusion / Flux."
 )
 
 
@@ -226,9 +238,13 @@ def build_gemini_payload(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -
 
 
 def _extract_json_text(raw_text: str) -> str:
-    """Làm sạch khối JSON nếu model vô tình bọc trong ```json ... ```."""
-    s = raw_text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
+    """Làm sạch khối JSON: tự động cắt bỏ markdown code block (```json ... ```) trước json.loads."""
+    s = (raw_text or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*```$", "", s)
+        s = s.strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
     if fence:
         return fence.group(1).strip()
     start = s.find("{")

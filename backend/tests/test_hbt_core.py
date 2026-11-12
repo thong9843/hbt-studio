@@ -14,6 +14,7 @@ Bao gồm:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,7 @@ from hbt.core.render import (
     build_core_scene_layers_safe,
     render_hbt_core_auto,
 )
+from hbt.core.tts_pipeline import synthesize_script_segments
 from hbt.core.voice import synthesize_core_segments
 from tests.test_api import client  # noqa: F401
 
@@ -574,9 +576,99 @@ def test_hbt_core_full_auto_render_pipeline(tmp_path: Path) -> None:
     assert len(res.bgm_tracks) >= 1
     assert len(res.sfx_used) == 2
 
-    # Đảm bảo đã bắn sự kiện tiến trình step="voice" có current, total, percent
+    # Đảm bảo đã tạo audio/segment_1.wav .. audio/segment_2.wav và bắn SSE step="voice"
+    assert (project_dir / "audio" / "segment_1.wav").is_file()
+    assert (project_dir / "audio" / "segment_2.wav").is_file()
     voice_events = [ev for ev in events if ev[1] == "voice"]
     assert len(voice_events) == 2
     assert voice_events[0][3]["current"] == 1
     assert voice_events[0][3]["total"] == 2
     assert voice_events[1][3]["percent"] == 100
+
+
+def test_hay_biet_tot_schema_markdown_cleanup_no_word_limit_and_tts_pipeline(
+    tmp_path: Path,
+) -> None:
+    # 1. Kiểm tra SYSTEM_PROMPT theo nhịp điệu Hay Biết Tốt & Schema chuẩn ComfyUI
+    assert "total_segments" in SYSTEM_PROMPT
+    assert "image_prompt" in SYSTEM_PROMPT
+    assert "sticker" in SYSTEM_PROMPT
+    assert "Nhưng khoan đã..." in SYSTEM_PROMPT
+    assert "Theo dõi Hay Biết Tốt trên TikTok và YouTube nhé" in SYSTEM_PROMPT
+    assert "18 đến 40 từ" not in SYSTEM_PROMPT
+
+    # 2. Gemini trả về JSON bọc markdown ```json ... ``` với lời thoại > 800 từ (gỡ giới hạn 750 từ)
+    long_text = " ".join(["Kiến thức thú vị chuẩn Hay Biết Tốt không giới hạn."] * 100)
+    assert len(long_text.split()) > 750
+
+    markdown_wrapped = (
+        "```json\n"
+        + json.dumps(
+            {
+                "topic": "Vì sao Đấu trường La Mã vẫn bền vững?",
+                "total_segments": 6,
+                "segments": [
+                    {
+                        "id": 1,
+                        "title": "BÍ MẬT ĐẤU TRƯỜNG LA MÃ",
+                        "text": long_text,
+                        "sticker": "shock",
+                        "image_prompt": (
+                            "Cinematic shot of ancient Roman Colosseum under dramatic "
+                            "golden hour sunlight, 9:16 vertical framing"
+                        ),
+                    },
+                    {
+                        "id": 2,
+                        "title": "NHƯNG KHOAN ĐÃ...",
+                        "text": "Nhưng khoan đã, nhiều người nghĩ đó là nhờ đá hoa cương!",
+                        "sticker": "think",
+                        "image_prompt": (
+                            "Macro shot of volcanic ash concrete crumbling and self-healing "
+                            "in ancient Rome, ultra realistic, 9:16 vertical framing"
+                        ),
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n```"
+    )
+
+    transport = httpx.MockTransport(
+        lambda _req: httpx.Response(
+            200,
+            json={"candidates": [{"content": {"parts": [{"text": markdown_wrapped}]}}]},
+        )
+    )
+    script = generate_script_from_prompt(
+        "Làm video về Đấu trường La Mã",
+        api_key="AIzaSyTestKeyHayBietTot1234567890",
+        transport=transport,
+    )
+    assert script.topic == "Vì sao Đấu trường La Mã vẫn bền vững?"
+    assert script.total_segments == 2
+    assert script.segments[0].id == 1
+    assert script.segments[0].title == "BÍ MẬT ĐẤU TRƯỜNG LA MÃ"
+    assert script.segments[0].sticker == "shock"
+    assert "9:16 vertical framing" in script.segments[0].image_prompt
+    assert len(script.segments[0].text.split()) > 750
+
+    # 3. Kiểm thử pipeline async synthesize_script_segments -> sinh audio/segment_X.wav + duration
+    enriched = asyncio.run(
+        synthesize_script_segments(
+            script.segments,
+            voice_id="vienneu_default",
+            output_dir=tmp_path,
+        )
+    )
+    assert len(enriched) == 2
+    assert Path(enriched[0]["audio_path"]).name == "segment_1.wav"
+    assert Path(enriched[1]["audio_path"]).name == "segment_2.wav"
+    assert Path(enriched[0]["audio_path"]).is_file()
+    assert Path(enriched[1]["audio_path"]).is_file()
+    assert enriched[0]["duration"] > 1.0
+    assert enriched[0]["start_time"] == 0.0
+    assert enriched[0]["end_time"] == enriched[0]["duration"]
+    assert enriched[1]["start_time"] > enriched[0]["end_time"]
+    assert enriched[1]["end_time"] > enriched[1]["start_time"]

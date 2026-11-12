@@ -34,7 +34,8 @@ from hbt.core.audio import (
     render_smart_bgm_wav,
     resolve_sfx_file,
 )
-from hbt.core.models import HbtCoreScript, SegmentVoiceTiming
+from hbt.core.models import HbtCoreScript, SegmentVoiceTiming, infer_music_topic
+from hbt.core.tts_pipeline import sync_wavs_to_audio_folder
 from hbt.core.voice import synthesize_core_segments
 from hbt.models import Card, CardLine, Music, Project, Scene, Voice
 from hbt.pipeline import cache, cancel
@@ -221,8 +222,9 @@ def sync_script_to_project(
     vẫn giữ nguyên danh sách phân đoạn trong `core_script.json` và tự động điền đủ cảnh hợp lệ
     cho `project.json` để không bao giờ làm đứt gãy logic cũ.
     """
+    music_topic = infer_music_topic(script.topic, script.title)
     project.title = script.title
-    project.series = TOPIC_SERIES_LABELS.get(script.topic, project.series or "Vì Sao")
+    project.series = TOPIC_SERIES_LABELS.get(music_topic, project.series or "Hay Biết Tốt")
 
     new_scenes: list[Scene] = []
     for seg in script.segments:
@@ -230,10 +232,10 @@ def sync_script_to_project(
             project_dir,
             seg.image,
             seg.order,
-            topic=script.topic,
+            topic=music_topic,
             title=script.title,
         )
-        headline = (seg.card_text or auto_card_headline(seg.text)).strip()
+        headline = (seg.title or seg.card_text or auto_card_headline(seg.text)).strip()
         card = Card(
             y="top",
             lines=[
@@ -644,6 +646,10 @@ def _render_hbt_core_auto_impl(
         voice_id=voice_id,
         on_sse_event=on_voice_sse,
     )
+    sync_wavs_to_audio_folder(
+        [(t.order, Path(t.wav_path)) for t in timings],
+        project_dir,
+    )
     project.voice = Voice(file="voice.wav")
 
     # Lưu bảng mốc thời gian micro-giây của các segment
@@ -659,11 +665,12 @@ def _render_hbt_core_auto_impl(
     )
 
     # 3. Nhạc nền BGM thông minh (theo topic + acrossfade=d=2.0)
-    emit(38.0, "bgm", f"Chọn nhạc nền BGM theo chủ đề '{script.topic}' (acrossfade=d=2.0)")
+    music_topic = infer_music_topic(script.topic, script.title)
+    emit(38.0, "bgm", f"Chọn nhạc nền BGM theo chủ đề '{music_topic}' (acrossfade=d=2.0)")
     bgm_playlist = build_topic_bgm_playlist(
         lib_dir,
         total_duration_s,
-        topic=script.topic,
+        topic=music_topic,
         seed=project.slug,
     )
     bgm_wav: Path | None = None
@@ -724,13 +731,13 @@ def _render_hbt_core_auto_impl(
             project_dir,
             seg.image,
             seg.order,
-            topic=script.topic,
+            topic=music_topic,
             title=script.title,
         )
         img_src = project_dir / rel_img
         base_png = build_dir / f"base_{idx:02d}.png"
         card_png = build_dir / f"card_{idx:02d}.png"
-        headline = (seg.card_text or auto_card_headline(seg.text)).strip()
+        headline = (seg.title or seg.card_text or auto_card_headline(seg.text)).strip()
         scene_dict = {
             "card": {
                 "y": "top",

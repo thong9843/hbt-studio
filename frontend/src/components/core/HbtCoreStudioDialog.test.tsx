@@ -90,6 +90,43 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
+  it('parses Hay Biet Tot V1 JSON schema (id, title, sticker, image_prompt) without word limit warnings', async () => {
+    stubFetch({
+      'GET /api/hbt-core/assets': assetsMock,
+      'GET /api/hbt/core/models': geminiModelsMock,
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const longSpeech = Array.from({ length: 800 }, () => 'từ').join(' ');
+    const hbtJson = JSON.stringify({
+      topic: 'Bí ẩn đại dương',
+      total_segments: 1,
+      segments: [
+        {
+          id: 1,
+          title: 'KHÁM PHÁ ĐÁY BIỂN',
+          text: longSpeech,
+          sticker: 'shock',
+          image_prompt: 'Deep ocean bioluminescence cinematic shot, 9:16 vertical framing',
+        },
+      ],
+    });
+
+    const textarea = await screen.findByLabelText(/Khối JSON kịch bản/);
+    await user.clear(textarea);
+    await user.click(textarea);
+    await user.paste(hbtJson);
+    await user.click(screen.getByRole('button', { name: 'Nạp JSON xuống dòng chỉnh sửa' }));
+
+    expect(await screen.findByDisplayValue('KHÁM PHÁ ĐÁY BIỂN')).toBeInTheDocument();
+    expect(
+      screen.getByDisplayValue('Deep ocean bioluminescence cinematic shot, 9:16 vertical framing'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/750/)).not.toBeInTheDocument();
+  });
+
   it('automatically switches from V2 to V1 mode with a clear alert when Gemini API fails or quota is exceeded', async () => {
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,

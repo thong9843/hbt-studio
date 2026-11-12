@@ -784,17 +784,26 @@ export interface ChatProjectSummary {
 export type HbtCoreTopic = 'history' | 'fun' | 'science' | 'mystery';
 
 export interface HbtCoreSegment {
+  id?: number;
   order: number;
+  title?: string;
   text: string;
+  sticker?: string;
+  image_prompt?: string;
   image: string;
   sfx: string;
   card_text?: string | null;
   punch?: boolean;
+  duration?: number | null;
+  audio_path?: string | null;
+  start_time?: number | null;
+  end_time?: number | null;
 }
 
 export interface HbtCoreScript {
   title: string;
   topic: HbtCoreTopic | string;
+  total_segments?: number;
   segments: HbtCoreSegment[];
 }
 

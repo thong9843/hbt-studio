@@ -77,9 +77,9 @@ class CoreV1RenderBody(BaseModel):
 
 
 class CoreV2PromptBody(BaseModel):
-    """Yêu cầu Chế độ V2 (1-Click Prompt -> Gemini Flash -> Pipeline V1)."""
+    """Yêu cầu Chế độ V2 (1-Click Prompt -> Gemini Flash -> Pipeline V1). Không giới hạn số từ."""
 
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1)
     topic: str | None = Field(default=None)
     model_name: str | None = Field(default=None)
     selectedModel: str | None = Field(default=None)
@@ -341,8 +341,16 @@ def get_project_core_script(slug: str, state: State) -> Any:
 
         segments = [
             {
+                "id": idx,
                 "order": idx,
+                "title": (
+                    " ".join(ln.text for ln in sc.card.lines).strip()
+                    if sc.card and sc.card.lines
+                    else f"Phân đoạn {idx}"
+                ),
                 "text": sc.voice or f"Lời thoại phân đoạn {idx}",
+                "sticker": "shock" if sc.punch else "question",
+                "image_prompt": "",
                 "image": sc.image or f"scene-{idx:02d}.png",
                 "sfx": "impact" if sc.punch else "whoosh",
             }

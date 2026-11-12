@@ -27,25 +27,43 @@ const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
 ];
 
+const STICKER_PRESETS = ['question', 'shock', 'laugh', 'think', 'check', 'warning'] as const;
+
 const SAMPLE_V1_SCRIPT: HbtCoreScript = {
   title: 'Vì sao Đấu trường La Mã vẫn đứng vững sau 2000 năm?',
   topic: 'history',
+  total_segments: 3,
   segments: [
     {
+      id: 1,
       order: 1,
+      title: 'BÍ MẬT ĐẤU TRƯỜNG LA MÃ',
       text: 'Bạn có biết vì sao Đấu trường La Mã trải qua hàng chục trận động đất mà vẫn hiên ngang suốt hai thiên niên kỷ?',
+      sticker: 'shock',
+      image_prompt:
+        'Cinematic shot of ancient Roman Colosseum under dramatic golden hour sunlight, ultra realistic, highly detailed historical atmosphere, 9:16 vertical framing',
       image: 'scene-01.png',
-      sfx: 'whoosh',
+      sfx: 'impact',
     },
     {
+      id: 2,
       order: 2,
-      text: 'Bí mật nằm ở loại bê tông tro núi lửa Pozzolana kết hợp với vôi sống tự liền vết nứt khi gặp nước mưa.',
+      title: 'BÊ TÔNG TỰ LIỀN VẾT NỨT',
+      text: 'Nhưng khoan đã, bí mật thực sự nằm ở loại bê tông tro núi lửa Pozzolana kết hợp với vôi sống tự liền vết nứt khi gặp nước mưa.',
+      sticker: 'think',
+      image_prompt:
+        'Close-up cinematic shot of ancient Roman pozzolanic volcanic ash concrete texture with subtle golden light rays, photorealistic, 9:16 vertical framing',
       image: 'scene-02.png',
       sfx: 'pop',
     },
     {
+      id: 3,
       order: 3,
-      text: 'Hệ thống 80 cổng vòm phân tán lực cực kỳ thông minh giúp công trình chịu tải hàng vạn khán giả.',
+      title: 'THEO DÕI HAY BIẾT TỐT',
+      text: 'Theo bạn công trình cổ đại nào bền bỉ nhất? Hãy bình luận bên dưới và theo dõi Hay Biết Tốt trên TikTok và YouTube nhé!',
+      sticker: 'question',
+      image_prompt:
+        'Wide aerial twilight shot of illuminated Roman Colosseum with starry sky, epic atmosphere, ultra detailed, 9:16 vertical framing',
       image: 'scene-03.png',
       sfx: 'whoosh',
     },
@@ -144,15 +162,20 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
     nextTopic: string,
     nextSegments: HbtCoreSegment[],
   ) => {
-    const normalized = nextSegments.map((s, idx) => ({
+    const normalized: HbtCoreSegment[] = nextSegments.map((s, idx) => ({
+      id: idx + 1,
       order: idx + 1,
+      title: s.title ?? '',
       text: s.text,
+      sticker: s.sticker || 'question',
+      image_prompt: s.image_prompt ?? '',
       image: s.image,
       sfx: s.sfx || 'whoosh',
     }));
     const doc: HbtCoreScript = {
       title: nextTitle,
       topic: nextTopic,
+      total_segments: normalized.length,
       segments: normalized,
     };
     setJsonText(JSON.stringify(doc, null, 2));
@@ -163,27 +186,33 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
     try {
       const parsed = JSON.parse(jsonText) as Partial<HbtCoreScript>;
       if (!parsed || typeof parsed !== 'object') {
-        throw new Error('JSON phải là đối tượng { title, topic, segments }');
+        throw new Error('JSON phải là đối tượng { topic, total_segments, segments }');
       }
-      const nextTitle = String(parsed.title ?? '').trim();
+      const rawTopicStr = String(parsed.topic ?? '').trim();
+      const nextTitle = String(parsed.title ?? rawTopicStr).trim();
       if (!nextTitle) {
-        throw new Error('Thiếu trường "title" trong JSON');
+        throw new Error('Thiếu trường "topic" hoặc "title" trong JSON');
       }
-      const rawTopic = String(parsed.topic ?? 'science')
-        .trim()
-        .toLowerCase();
+      const rawTopic = (rawTopicStr || 'science').toLowerCase();
       const validTopic: HbtCoreTopic = (
         ['history', 'fun', 'science', 'mystery'].includes(rawTopic) ? rawTopic : 'science'
       ) as HbtCoreTopic;
       if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) {
         throw new Error('Trường "segments" phải là mảng có ít nhất 1 phân đoạn');
       }
-      const nextSegs: HbtCoreSegment[] = parsed.segments.map((item, idx) => ({
-        order: idx + 1,
-        text: String(item?.text ?? '').trim(),
-        image: String(item?.image ?? `scene-0${idx + 1}.png`).trim(),
-        sfx: String(item?.sfx ?? 'whoosh').trim() || 'whoosh',
-      }));
+      const nextSegs: HbtCoreSegment[] = parsed.segments.map((item, idx) => {
+        const orderNum = Number(item?.id ?? item?.order ?? idx + 1) || idx + 1;
+        return {
+          id: orderNum,
+          order: idx + 1,
+          title: String(item?.title ?? item?.card_text ?? '').trim(),
+          text: String(item?.text ?? '').trim(),
+          sticker: String(item?.sticker ?? 'question').trim() || 'question',
+          image_prompt: String(item?.image_prompt ?? '').trim(),
+          image: String(item?.image ?? `scene-${String(idx + 1).padStart(2, '0')}.png`).trim(),
+          sfx: String(item?.sfx ?? 'whoosh').trim() || 'whoosh',
+        };
+      });
       if (!nextSegs.some((s) => s.text.length > 0)) {
         throw new Error('Cần ít nhất 1 phân đoạn có lời thoại "text"');
       }
@@ -191,7 +220,12 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
       setTopic(validTopic);
       setSegments(nextSegs);
       setJsonError(null);
-      return { title: nextTitle, topic: validTopic, segments: nextSegs };
+      return {
+        title: nextTitle,
+        topic: rawTopicStr || validTopic,
+        total_segments: nextSegs.length,
+        segments: nextSegs,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Khối JSON không hợp lệ';
       setJsonError(msg);
@@ -210,8 +244,12 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
     const next: HbtCoreSegment[] = [
       ...segments,
       {
+        id: nextOrder,
         order: nextOrder,
+        title: '',
         text: '',
+        sticker: 'question',
+        image_prompt: '',
         image: `scene-${String(nextOrder).padStart(2, '0')}.png`,
         sfx: 'whoosh',
       },
@@ -595,11 +633,47 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
                       )}
                     </div>
 
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Input
+                        label={T.v1.segmentCardTitleLabel(idx + 1)}
+                        value={seg.title ?? ''}
+                        placeholder="TIÊU ĐỀ THẺ KEM NGẮN"
+                        onChange={(e) =>
+                          updateSegment(idx, { title: e.target.value, card_text: e.target.value })
+                        }
+                      />
+                      <div className="ui-field">
+                        <label htmlFor={`hbt-core-sticker-${idx}`} className="ui-label">
+                          {T.v1.segmentStickerLabel(idx + 1)}
+                        </label>
+                        <select
+                          id={`hbt-core-sticker-${idx}`}
+                          className="ui-input"
+                          value={seg.sticker || 'question'}
+                          onChange={(e) => updateSegment(idx, { sticker: e.target.value })}
+                        >
+                          {STICKER_PRESETS.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
                     <Textarea
                       label={T.v1.segmentTextLabel(idx + 1)}
                       rows={2}
                       value={seg.text}
                       onChange={(e) => updateSegment(idx, { text: e.target.value })}
+                    />
+
+                    <Textarea
+                      label={T.v1.segmentImagePromptLabel(idx + 1)}
+                      rows={2}
+                      value={seg.image_prompt ?? ''}
+                      placeholder="Cinematic shot..., 9:16 vertical framing"
+                      onChange={(e) => updateSegment(idx, { image_prompt: e.target.value })}
                     />
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

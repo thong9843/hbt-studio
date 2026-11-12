@@ -62,8 +62,8 @@ def create_fallback_speech_wav(dest: Path, text: str, sample_rate: int = SAMPLE_
     dest.parent.mkdir(parents=True, exist_ok=True)
     words = [w for w in (text or "").split() if w.strip()]
     word_count = max(2, len(words))
-    # Mỗi từ ~0.24s phát âm + 0.05s nghỉ nhẹ, tổng tối thiểu 1.2s
-    dur_s = max(1.2, min(12.0, word_count * 0.28 + 0.25))
+    # Mỗi từ ~0.24s phát âm + 0.05s nghỉ nhẹ, không giới hạn 750 từ
+    dur_s = max(1.2, word_count * 0.28 + 0.25)
     total_frames = int(round(dur_s * sample_rate))
 
     buf = bytearray(total_frames * 2)
