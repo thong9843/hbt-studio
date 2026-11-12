@@ -131,9 +131,13 @@ def _clean_key_value(raw: str | None) -> str:
 
 
 def is_valid_gemini_api_key(api_key: str | None) -> bool:
-    """Kiểm tra tính hợp lệ của Key trước khi gọi: không rỗng và bắt đầu bằng 'AIzaSy'."""
-    key = _clean_key_value(api_key)
-    return bool(key) and key.startswith("AIzaSy")
+    """Kiểm tra tính hợp lệ của Key trước khi gọi:
+    Chấp nhận cả chuẩn cũ AIzaSy... và chuẩn mới AQ.... (độ dài >= 30).
+    """
+    if not api_key:
+        return False
+    k = _clean_key_value(api_key)
+    return (k.startswith("AIzaSy") or k.startswith("AQ.")) and len(k) >= 30
 
 
 def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
@@ -262,11 +266,12 @@ def generate_script_from_prompt(
 
     if not is_valid_gemini_api_key(key):
         logger.warning(
-            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc sai định dạng (phải bắt đầu bằng 'AIzaSy') "
+            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc sai định dạng "
             "-> Kích hoạt fallback_v1=True ngay lập tức."
         )
         raise GeminiClientError(
-            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong .env (bắt đầu bằng 'AIzaSy'). "
+            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong .env "
+            "(yêu cầu bắt đầu bằng 'AIzaSy' hoặc 'AQ.'). "
             "Đã tự động chuyển sang Chế độ V1 (Dán JSON thủ công).",
             status_code=401,
             reason="invalid_or_missing_api_key",
