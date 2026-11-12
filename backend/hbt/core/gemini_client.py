@@ -46,6 +46,9 @@ PLACEHOLDER_KEYS = {
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 MODELS: list[str] = [
+    "gemini-3.5-flash",
+    "gemini-flash-lite-latest",
+    "gemini-3-flash-preview",
     "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
     "gemini-2.0-flash-exp",
@@ -114,10 +117,16 @@ def build_gemini_url(model_name: str, api_key: str) -> str:
 
 
 def _clean_key_value(raw: str | None) -> str:
-    """Chuẩn hóa chuỗi GEMINI_API_KEY: cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder."""
+    """Chuẩn hóa chuỗi GEMINI_API_KEY:
+    - Cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder.
+    - Tự động sửa lỗi ghép thừa tiền tố 'AIzaSy' vào đầu key định dạng mới 'AQ....' của AI Studio
+      (ví dụ 'AIzaSyAQ.Ab8...' -> 'AQ.Ab8...').
+    """
     key = (raw or "").strip().strip('"').strip("'").strip()
     if key.lower() in PLACEHOLDER_KEYS:
         return ""
+    if key.startswith("AIzaSyAQ."):
+        key = key[len("AIzaSy") :]
     return key
 
 
@@ -154,31 +163,32 @@ def _safe_print_config(msg: str) -> None:
 
 def load_gemini_api_key(env_file: Path | None = None) -> str:
     """Dò tìm file cấu hình đa tầng bằng `load_dotenv(dotenv_path=env_path, override=True)`
-    và chuẩn hóa chuỗi `GEMINI_API_KEY`.
+    và chuẩn hóa chuỗi `GEMINI_API_KEY`. Luôn ưu tiên đọc lại `.env` nếu tồn tại để cập nhật
+    ngay khi người dùng sửa key mà không cần khởi động lại server.
     """
-    existing = _clean_key_value(os.getenv("GEMINI_API_KEY"))
-    if existing and env_file is None:
-        key = existing
+    if env_file is not None:
+        candidate_paths = [Path(env_file)]
     else:
-        if env_file is not None:
-            candidate_paths = [Path(env_file)]
-        else:
-            candidate_paths = resolve_candidate_env_paths()
+        candidate_paths = resolve_candidate_env_paths()
 
-        for env_path in candidate_paths:
-            if env_path.exists():
-                load_dotenv(dotenv_path=env_path, override=True)
-                loaded = _clean_key_value(os.getenv("GEMINI_API_KEY"))
-                if loaded:
-                    break
-                # Nếu là giá trị mẫu placeholder thì xoá khỏi os.environ để tiếp tục dò
-                os.environ.pop("GEMINI_API_KEY", None)
+    loaded_from_file = False
+    for env_path in candidate_paths:
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path, override=True)
+            loaded = _clean_key_value(os.getenv("GEMINI_API_KEY"))
+            if loaded:
+                loaded_from_file = True
+                break
+            # Nếu là giá trị mẫu placeholder thì xoá khỏi os.environ để tiếp tục dò
+            os.environ.pop("GEMINI_API_KEY", None)
 
-        key = _clean_key_value(os.getenv("GEMINI_API_KEY", ""))
+    key = _clean_key_value(os.getenv("GEMINI_API_KEY", ""))
+    _ = loaded_from_file
 
     _safe_print_config(
         f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
-        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
+        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')}, "
+        f"Bắt đầu bằng AQ.: {key.startswith('AQ.')})"
     )
     return key
 
@@ -277,7 +287,10 @@ def generate_script_from_prompt(
                 response = client.post(
                     url,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": key,
+                    },
                 )
                 if response.status_code == 404:
                     try:

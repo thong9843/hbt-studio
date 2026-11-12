@@ -212,10 +212,14 @@ def test_gemini_client_payload_and_env_loading(
     key = load_gemini_api_key(env_file=env_file)
     assert key == "AIzaSyTestKey123456"
     captured = capsys.readouterr().out
-    assert (
-        "[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: True (Độ dài: 19, Bắt đầu bằng AIzaSy: True)"
-        in captured
-    )
+    assert "[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: True" in captured
+    assert "Độ dài: 19, Bắt đầu bằng AIzaSy: True" in captured
+
+    # Hỗ trợ cả định dạng key mới AQ.... của Google AI Studio và tự động bỏ tiền tố AIzaSy ghép nhầm
+    aq_env = tmp_path / ".env.aq"
+    aq_env.write_text("GEMINI_API_KEY=AIzaSyAQ.Ab8RN6TestKey\n", encoding="utf-8")
+    aq_key = load_gemini_api_key(env_file=aq_env)
+    assert aq_key == "AQ.Ab8RN6TestKey"
 
     # Nếu file cấu hình chỉ chứa key mẫu placeholder, tự động trả về rỗng và bật fallback_v1=True
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -305,7 +309,8 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
 
 def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
     # 1. Đảm bảo URL chuẩn xác và không bao giờ lặp "models/models/..."
-    assert MODELS == ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+    assert "gemini-3.5-flash" in MODELS
+    assert "gemini-1.5-flash-latest" in MODELS
     url1 = build_gemini_url("gemini-1.5-flash-latest", "test-key")
     url2 = build_gemini_url("models/gemini-1.5-flash-latest", "test-key")
     url3 = build_gemini_url("models/models/gemini-2.0-flash-exp", "test-key")
@@ -320,22 +325,19 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
         == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=test-key"
     )
 
-    # 2. Nếu model đầu tiên (gemini-1.5-flash-latest) và thứ hai (gemini-1.5-flash) trả về 404,
-    # tự động thử sang model kế tiếp (gemini-2.0-flash-exp) và nhận status_code == 200
+    # 2. Nếu các model đầu trả về 404, tự động thử sang model kế tiếp và nhận status_code == 200
     called_urls: list[str] = []
     statuses: list[int] = []
+    sent_headers: list[str] = []
 
     def fallback_404_handler(request: httpx.Request) -> httpx.Response:
         url_str = str(request.url)
         called_urls.append(url_str)
-        if "gemini-1.5-flash" in url_str:
+        sent_headers.append(request.headers.get("x-goog-api-key", ""))
+        if len(called_urls) < 3:
             resp = httpx.Response(
                 404,
-                json={
-                    "error": {
-                        "message": "models/gemini-1.5-flash is not found for API version v1beta"
-                    }
-                },
+                json={"error": {"message": "model is not found for API version v1beta"}},
             )
             statuses.append(resp.status_code)
             return resp
@@ -365,15 +367,17 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
 
     script = generate_script_from_prompt(
         "Làm video vì sao về Đấu trường La Mã",
-        api_key="test-key-fallback",
+        api_key="AQ.test-key-fallback",
+        models=["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-3.5-flash"],
         transport=httpx.MockTransport(fallback_404_handler),
     )
     assert statuses == [404, 404, 200]
     assert statuses[-1] == 200
     assert len(called_urls) == 3
+    assert all(h == "AQ.test-key-fallback" for h in sent_headers)
     assert "gemini-1.5-flash-latest:generateContent" in called_urls[0]
     assert "gemini-1.5-flash:generateContent" in called_urls[1]
-    assert "gemini-2.0-flash-exp:generateContent" in called_urls[2]
+    assert "gemini-3.5-flash:generateContent" in called_urls[2]
     assert script.title == "Vì sao Đấu trường La Mã vĩ đại?"
 
 
