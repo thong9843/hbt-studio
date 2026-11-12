@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
 import type { ProjectSummary, RenderSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { HbtCoreStudioDialog } from '../components/core/HbtCoreStudioDialog';
-import { DraftDialog } from '../components/draft/DraftDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
 import {
@@ -238,10 +237,20 @@ export function HomePage() {
   const t = vi.home;
   const { open: openNew } = useNewProject();
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
-  const [draftOpen, setDraftOpen] = useState(false);
-  const [coreStudioOpen, setCoreStudioOpen] = useState(false);
   const queryClient = useQueryClient();
   const toast = useToast();
+
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => fetchHealth(),
+    retry: false,
+  });
+
+  const { data: coreAssets } = useQuery({
+    queryKey: ['hbt-core-assets', ''],
+    queryFn: () => api.getHbtCoreAssets(),
+    retry: false,
+  });
 
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
@@ -270,25 +279,35 @@ export function HomePage() {
     <main className="mx-auto max-w-[1280px] space-y-8 px-6 py-10">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link to="/core" className="ui-btn ui-btn-brand">
-            <ZapIcon size={18} />
-            {vi.nav.hbtCore}
-          </Link>
-          <Button
-            tone="soft"
-            title={vi.hbtCore.openBtnTitle}
-            onClick={() => setCoreStudioOpen(true)}
-          >
-            {vi.hbtCore.openBtn}
-          </Button>
-          <Button tone="soft" title={vi.gd2.buttonTitle} onClick={() => setDraftOpen(true)}>
-            {vi.gd2.button}
-          </Button>
+        <div
+          aria-label={vi.health.title}
+          className="flex flex-wrap items-center gap-2 rounded-pill border border-line bg-card px-3.5 py-1.5 text-tiny font-bold"
+        >
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${health?.vieneu ? 'bg-ok' : 'bg-muted'}`}
+              aria-hidden="true"
+            />
+            VieNeu-TTS
+          </span>
+          <span className="text-line">·</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${coreAssets?.gemini_configured ? 'bg-ok' : 'bg-muted'}`}
+              aria-hidden="true"
+            />
+            Gemini
+          </span>
+          <span className="text-line">·</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${health?.ffmpeg ? 'bg-ok' : 'bg-muted'}`}
+              aria-hidden="true"
+            />
+            FFmpeg
+          </span>
         </div>
       </div>
-      <DraftDialog open={draftOpen} onClose={() => setDraftOpen(false)} />
-      <HbtCoreStudioDialog open={coreStudioOpen} onClose={() => setCoreStudioOpen(false)} />
 
       {/* Lối tắt tạo video nhanh (3 Động cơ Studio) */}
       <section aria-label={t.hub.title} className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">

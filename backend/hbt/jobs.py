@@ -45,6 +45,7 @@ from hbt.postv.voice import (
 )
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
+from shared.sse_manager import format_sse_progress
 
 log = logging.getLogger(__name__)
 
@@ -120,9 +121,7 @@ class Job:
             self.progress, self.step = pct, step
             if message:
                 self._log.append(message)
-            payload: dict[str, Any] = {"progress": round(pct, 1), "step": step, "message": message}
-            if extra:
-                payload.update(extra)
+            payload = format_sse_progress(pct, step, message, **extra)
             self._events.append(("progress", payload))
 
     def _finish_locked(self, status: str, **extra: Any) -> None:
@@ -217,7 +216,7 @@ class JobManager:
         self.app_settings = app_settings
         self.voice = voice
         self.stale_timeout = stale_timeout
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
+        self._pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._active_workers: set[str] = set()

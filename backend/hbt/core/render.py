@@ -43,26 +43,10 @@ from hbt.pipeline.ffutil import media_duration, probe, run_ffmpeg
 from hbt.pipeline.publish import build_publish_text
 from hbt.pipeline.visual import CARD_Y, CREAM, SIZES, H, W, color_of, font
 from hbt.postv.voice import VoiceProvider
+from shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
+from shared.sse_manager import SSEProgressEmitter
 
 logger = logging.getLogger(__name__)
-
-# Tham số kẹp tài nguyên FFmpeg bắt buộc theo Nhiệm vụ 1.4
-FFMPEG_RESOURCE_CLAMP: tuple[str, ...] = (
-    "-threads",
-    "2",
-    "-filter_threads",
-    "2",
-)
-FFMPEG_ENCODE_CLAMP: tuple[str, ...] = (
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "22",
-    "-max_muxing_queue_size",
-    "512",
-)
 
 
 @dataclass
@@ -604,16 +588,14 @@ def _render_hbt_core_auto_impl(
     log_path = job_dir / "log.txt"
     warnings: list[str] = []
 
+    emitter = SSEProgressEmitter(progress)
+
     def emit(pct: float, step: str, message: str, **extra: Any) -> None:
         cancel.check_current()
         line = f"[{time.time() - t0:6.1f}s] [{step}] {message}"
         with log_path.open("a", encoding="utf-8") as lf:
             lf.write(line + "\n")
-        if progress is not None:
-            try:
-                progress(pct, step, message, **extra)
-            except TypeError:
-                progress(pct, step, message)
+        emitter.emit(pct, step, message, **extra)
 
     # 1. Đồng bộ script vào project.json
     emit(2.0, "init", f"Khởi tạo kịch bản '{script.title}' (chủ đề: {script.topic})")

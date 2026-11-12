@@ -12,6 +12,7 @@ import type {
 import { SAMPLE_V1_SCRIPT, useStudioWorkspace } from '../../hooks/studioWorkspace';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
+import { WaterfallProgress, type WaterfallStep, type WaterfallStepState } from '../../shared';
 import {
   AlertIcon,
   CheckIcon,
@@ -24,8 +25,8 @@ import {
 } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { Dialog } from '../ui/Dialog';
 import { Input, Textarea } from '../ui/Field';
-import { Progress } from '../ui/Progress';
 import { cx } from '../ui/cx';
 
 const T = vi.hbtCore;
@@ -118,9 +119,16 @@ export function HbtCoreWorkspace({
   const [rendering, setRendering] = useState(false);
   const [progressPct, setProgressPct] = useState(0);
   const [progressStep, setProgressStep] = useState('');
-  const [progressMsg, setProgressMsg] = useState('');
   const [voiceDetail, setVoiceDetail] = useState<VoiceProgressDetail | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [stepLogs, setStepLogs] = useState<
+    Record<'script' | 'voice' | 'assets' | 'render', string[]>
+  >({
+    script: [],
+    voice: [],
+    assets: [],
+    render: [],
+  });
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -305,8 +313,13 @@ export function HbtCoreWorkspace({
     setResultVideoUrl(null);
     setProgressPct(2);
     setProgressStep('init');
-    setProgressMsg('Đang khởi động chuỗi tự động HBT Core…');
     setVoiceDetail(null);
+    setStepLogs((prev) => ({
+      ...prev,
+      voice: [],
+      assets: [],
+      render: ['Khởi tạo phiên dựng video HBT Core…'],
+    }));
 
     if (typeof EventSource === 'undefined') {
       return;
@@ -327,7 +340,21 @@ export function HbtCoreWorkspace({
         };
         if (typeof data.progress === 'number') setProgressPct(data.progress);
         if (data.step) setProgressStep(data.step);
-        if (data.message) setProgressMsg(data.message);
+        if (data.message) {
+          const msg = String(data.message);
+          const bucket: 'script' | 'voice' | 'assets' | 'render' =
+            data.step === 'init'
+              ? 'script'
+              : data.step === 'voice'
+                ? 'voice'
+                : data.step === 'bgm' || data.step === 'sfx'
+                  ? 'assets'
+                  : 'render';
+          setStepLogs((prev) => ({
+            ...prev,
+            [bucket]: [...prev[bucket].slice(-25), msg],
+          }));
+        }
         if (
           data.step === 'voice' &&
           typeof data.current === 'number' &&
@@ -416,6 +443,12 @@ export function HbtCoreWorkspace({
     setV2Loading(true);
     setFallbackNotice(null);
     setRenderError(null);
+    setStepLogs({
+      script: [`Gửi yêu cầu Gemini (${selectedModel}) cho chủ đề: "${cleanPrompt}"`],
+      voice: [],
+      assets: [],
+      render: [],
+    });
     try {
       const res = await api.promptHbtCoreV2({
         prompt: cleanPrompt,
@@ -610,20 +643,49 @@ export function HbtCoreWorkspace({
           </div>
         )}
 
-        {/* Menu thu gọn Vi chỉnh nâng cao (JSON thủ công - giấu mặc định) */}
-        {showAdvancedJson && (
-          <section
-            aria-label={T.studio.advancedTitle}
-            className="space-y-3 rounded-card border border-indigo-500/30 bg-card p-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-small font-bold">{T.studio.advancedTitle}</p>
+        {/* Dialog phụ nhẹ nhàng cho Vi chỉnh nâng cao / Dán JSON */}
+        <Dialog
+          open={showAdvancedJson}
+          onClose={() => setShowAdvancedJson(false)}
+          title={T.studio.advancedTitle}
+          className="!max-w-[760px]"
+          footer={
+            <div className="flex flex-wrap items-center justify-between gap-2 w-full">
               <Badge tone="ok">{T.offlineBadge}</Badge>
+              <div className="flex items-center gap-2">
+                <Button tone="soft" size="sm" onClick={() => setShowAdvancedJson(false)}>
+                  {vi.common.close}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const parsed = applyJsonTextareaToSegments();
+                    if (parsed) {
+                      toast.info(T.v1.validJsonToast);
+                      setShowAdvancedJson(false);
+                    }
+                  }}
+                >
+                  {T.v1.parseBtn}
+                </Button>
+              </div>
             </div>
+          }
+        >
+          <div className="space-y-4">
+            <Input
+              label={T.v1.videoTitleLabel}
+              value={title}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTitle(v);
+                syncEditorToJsonText(v, topic, segments);
+              }}
+            />
             <Textarea
               label={T.v1.jsonLabel}
               value={jsonText}
-              rows={7}
+              rows={10}
               spellCheck={false}
               error={jsonError ?? undefined}
               className="!font-mono !text-tiny"
@@ -632,30 +694,8 @@ export function HbtCoreWorkspace({
                 setJsonError(null);
               }}
             />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button
-                tone="soft"
-                size="sm"
-                onClick={() => {
-                  const parsed = applyJsonTextareaToSegments();
-                  if (parsed) toast.info(T.v1.validJsonToast);
-                }}
-              >
-                {T.v1.parseBtn}
-              </Button>
-              <Input
-                aria-label={T.v1.videoTitleLabel}
-                value={title}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setTitle(v);
-                  syncEditorToJsonText(v, topic, segments);
-                }}
-                className="!min-h-9 !text-small"
-              />
-            </div>
-          </section>
-        )}
+          </div>
+        </Dialog>
 
         {/* Danh sách các phân cảnh (Segments Cards) */}
         <section aria-label={T.v1.segmentsTitle} className="space-y-3">
@@ -898,59 +938,107 @@ export function HbtCoreWorkspace({
           </div>
         </section>
 
-        {/* Khối hiển thị tiến trình SSE VieNeu-TTS & Render */}
-        {(rendering || resultVideoUrl || renderError) && (
-          <section
-            aria-label={T.progress.title}
-            className="space-y-3 rounded-card border border-line bg-card p-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-small font-bold">{T.progress.title}</p>
-              <span className="num text-small font-extrabold text-amber-400">
-                {Math.round(progressPct)}%
-              </span>
-            </div>
-            <Progress value={progressPct} label={T.progress.title} />
-            {voiceDetail && progressStep === 'voice' && (
-              <p className="text-small font-semibold">
-                {T.progress.voiceStep(voiceDetail.current, voiceDetail.total, voiceDetail.percent)}
-              </p>
-            )}
-            {progressMsg && <p className="text-tiny text-muted">{progressMsg}</p>}
+        {/* Khối hiển thị tiến trình Waterfall Dropdown */}
+        {(v2Loading || rendering || resultVideoUrl || renderError) &&
+          (() => {
+            const done = Boolean(resultVideoUrl) && !rendering;
+            const scriptState: WaterfallStepState = v2Loading
+              ? 'running'
+              : renderError && !rendering && progressPct <= 5
+                ? 'error'
+                : 'done';
+            const voiceState: WaterfallStepState = done
+              ? 'done'
+              : progressStep === 'voice' && rendering
+                ? 'running'
+                : ['bgm', 'sfx', 'render', 'mix', 'compose'].includes(progressStep)
+                  ? 'done'
+                  : 'waiting';
+            const assetsState: WaterfallStepState = done
+              ? 'done'
+              : ['bgm', 'sfx'].includes(progressStep) && rendering
+                ? 'running'
+                : ['render', 'mix', 'compose'].includes(progressStep)
+                  ? 'done'
+                  : 'waiting';
+            const renderState: WaterfallStepState = done
+              ? 'done'
+              : renderError && !rendering
+                ? 'error'
+                : ['render', 'mix', 'compose'].includes(progressStep) && rendering
+                  ? 'running'
+                  : 'waiting';
 
-            {renderError && (
-              <p role="alert" className="text-small font-bold text-danger">
-                {renderError}
-              </p>
-            )}
+            const wfSteps: WaterfallStep[] = [
+              {
+                id: 'script',
+                icon: '📝',
+                title: 'Khởi tạo kịch bản (Gemini API)',
+                state: scriptState,
+                logs: stepLogs.script,
+              },
+              {
+                id: 'voice',
+                icon: '🎙️',
+                title: 'Sinh giọng thuyết minh (VieNeu-TTS từng câu)',
+                state: voiceState,
+                badgeText: voiceDetail
+                  ? `${voiceDetail.current}/${voiceDetail.total} câu`
+                  : undefined,
+                logs: stepLogs.voice,
+              },
+              {
+                id: 'assets',
+                icon: '🎨',
+                title: 'Chuẩn bị hình ảnh & Sticker',
+                state: assetsState,
+                logs: stepLogs.assets,
+              },
+              {
+                id: 'render',
+                icon: '🎬',
+                title: 'Render video hoàn chỉnh (FFmpeg timeline 9:16)',
+                state: renderState,
+                logs: stepLogs.render,
+              },
+            ];
 
-            {resultVideoUrl && (
-              <div className="space-y-3 pt-2">
-                <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <a
-                    href={resultVideoUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ui-btn ui-btn-ink ui-btn-sm"
-                  >
-                    <PlayIcon size={16} />
-                    {T.progress.watchVideo}
-                  </a>
-                  {resultSlug && (
-                    <Link
-                      to={`/p/${encodeURIComponent(resultSlug)}`}
-                      className="ui-btn ui-btn-soft ui-btn-sm"
-                      onClick={onClose}
-                    >
-                      {T.progress.openProject}
-                    </Link>
-                  )}
-                </div>
+            return (
+              <div className="space-y-3">
+                <WaterfallProgress
+                  title={T.progress.title}
+                  overallPercent={v2Loading ? 10 : progressPct}
+                  steps={wfSteps}
+                  error={renderError}
+                />
+                {resultVideoUrl && (
+                  <div className="space-y-3 rounded-card border border-ok/40 bg-card p-4">
+                    <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={resultVideoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ui-btn ui-btn-ink ui-btn-sm"
+                      >
+                        <PlayIcon size={16} />
+                        {T.progress.watchVideo}
+                      </a>
+                      {resultSlug && (
+                        <Link
+                          to={`/p/${encodeURIComponent(resultSlug)}`}
+                          className="ui-btn ui-btn-soft ui-btn-sm"
+                          onClick={onClose}
+                        >
+                          {T.progress.openProject}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </section>
-        )}
+            );
+          })()}
       </aside>
     </div>
   );

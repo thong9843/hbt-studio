@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/endpoints';
 import type { AssetHubCategory, AssetHubItem } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { DownloadIcon, FolderIcon, PlayIcon, TrashIcon, UploadIcon } from '../components/icons';
+import { DownloadIcon, FolderIcon, PlayIcon, TrashIcon } from '../components/icons';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Dialog } from '../components/ui/Dialog';
@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { cx } from '../components/ui/cx';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
+import { Dropzone } from '../shared';
 
 const T = vi.assetHub;
 
@@ -29,9 +30,7 @@ function formatBytes(bytes: number): string {
 
 export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<AssetHubCategory>('stickers');
-  const [dragging, setDragging] = useState(false);
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -62,11 +61,6 @@ export function AssetHubPage() {
     },
     onError: (e) => toast.error(e),
   });
-
-  const handleFiles = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    upload.mutate(Array.from(list));
-  };
 
   const items = data?.items ?? [];
 
@@ -116,49 +110,13 @@ export function AssetHubPage() {
       </div>
 
       {/* Khu vực kéo thả (Dropzone) */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          handleFiles(e.dataTransfer.files);
-        }}
-        onClick={() => fileInputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInputRef.current?.click();
-          }
-        }}
-        className={cx(
-          'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed px-6 py-8 text-center transition duration-150',
-          dragging
-            ? 'border-indigo-400 bg-indigo-500/10'
-            : 'border-line bg-card hover:border-indigo-500/60 hover:bg-soft-2',
-        )}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-soft text-indigo-400">
-          <UploadIcon size={22} />
-        </span>
-        <p className="text-body font-bold">{upload.isPending ? T.uploading : T.dropTitle}</p>
-        <p className="text-tiny text-muted">{T.dropHint}</p>
-      </div>
+      <Dropzone
+        title={T.dropTitle}
+        hint={T.dropHint}
+        busy={upload.isPending}
+        busyTitle={T.uploading}
+        onFiles={(files) => upload.mutate(files)}
+      />
 
       {error && (
         <div className="space-y-2">
