@@ -45,10 +45,12 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
     <Routes>
       <Route element={<AppShell render={render} />}>
         <Route path="/" element={<Where />} />
+        <Route path="/core" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
         <Route path="/postv/:slug/*" element={<Where />} />
         <Route path="/postv/*" element={<Where />} />
+        <Route path="/chatting/*" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
     </Routes>,
@@ -84,7 +86,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt']);
+    expect(labels).toEqual(['Trang chủ', 'HBT Core', 'Dự án', 'PostV', 'Chatting', 'Cài đặt']);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
@@ -231,7 +233,16 @@ describe('AppShell, wide (>= 1280 px)', () => {
   it('is reachable by keyboard in reading order', async () => {
     stubFetch(routes());
     shell();
-    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt'];
+    const order = [
+      'HBT Studio',
+      'Tạo video',
+      'Trang chủ',
+      'HBT Core',
+      'Dự án',
+      'PostV',
+      'Chatting',
+      'Cài đặt',
+    ];
     for (const name of order) {
       await userEvent.tab();
       expect(document.activeElement).toHaveAccessibleName(name);

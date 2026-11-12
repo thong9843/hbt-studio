@@ -8,7 +8,14 @@ import { HbtCoreStudioDialog } from '../components/core/HbtCoreStudioDialog';
 import { DraftDialog } from '../components/draft/DraftDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
-import { CheckIcon, MoreIcon, PlayIcon } from '../components/icons';
+import {
+  CheckIcon,
+  MessagesSquareIcon,
+  MoreIcon,
+  PlayIcon,
+  SmartphoneIcon,
+  ZapIcon,
+} from '../components/icons';
 import { CardImage } from '../components/ProjectCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -264,6 +271,10 @@ export function HomePage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
         <div className="flex flex-wrap items-center gap-2">
+          <Link to="/core" className="ui-btn ui-btn-brand">
+            <ZapIcon size={18} />
+            {vi.nav.hbtCore}
+          </Link>
           <Button
             tone="soft"
             title={vi.hbtCore.openBtnTitle}
@@ -278,6 +289,54 @@ export function HomePage() {
       </div>
       <DraftDialog open={draftOpen} onClose={() => setDraftOpen(false)} />
       <HbtCoreStudioDialog open={coreStudioOpen} onClose={() => setCoreStudioOpen(false)} />
+
+      {/* Lối tắt tạo video nhanh (3 Động cơ Studio) */}
+      <section aria-label={t.hub.title} className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">
+        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-brand text-white">
+                <ZapIcon size={18} />
+              </span>
+              <h2 className="text-body font-extrabold">{t.hub.hbtCoreTitle}</h2>
+            </div>
+            <p className="text-small text-muted">{t.hub.hbtCoreDesc}</p>
+          </div>
+          <Link to="/core" className="ui-btn ui-btn-ink ui-btn-sm self-start">
+            {t.hub.hbtCoreCta}
+          </Link>
+        </Card>
+
+        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-hero text-on-hero">
+                <SmartphoneIcon size={18} />
+              </span>
+              <h2 className="text-body font-extrabold">{t.hub.postvTitle}</h2>
+            </div>
+            <p className="text-small text-muted">{t.hub.postvDesc}</p>
+          </div>
+          <Link to="/postv" className="ui-btn ui-btn-soft ui-btn-sm self-start">
+            {t.hub.postvCta}
+          </Link>
+        </Card>
+
+        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-hero text-on-hero">
+                <MessagesSquareIcon size={18} />
+              </span>
+              <h2 className="text-body font-extrabold">{t.hub.chattingTitle}</h2>
+            </div>
+            <p className="text-small text-muted">{t.hub.chattingDesc}</p>
+          </div>
+          <Link to="/chatting" className="ui-btn ui-btn-soft ui-btn-sm self-start">
+            {t.hub.chattingCta}
+          </Link>
+        </Card>
+      </section>
 
       {isPending && <HomeSkeleton />}
       {error && (
