@@ -1,5 +1,7 @@
+import { Link } from 'react-router-dom';
 import type { AppSettings, Fps } from '../../api/types';
 import { vi } from '../../i18n/vi';
+import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { Chip } from '../ui/Chip';
 import { Input } from '../ui/Field';
@@ -154,6 +156,40 @@ export function AdvancedModeCard({ value, onChange }: Props) {
         >
           {isAdvanced ? vi.common.yes : vi.common.no}
         </Chip>
+      </div>
+    </Card>
+  );
+}
+
+/** Thẻ Cấu hình Động cơ AI & Thư viện (Gemini API, VieNeu-TTS, Sticker/BGM) trong Settings. */
+export function StudioEnginesCard({ health }: { health: { vieneu?: boolean } | undefined }) {
+  const E = S.studioEnginesCard;
+  const vieneuOk = Boolean(health?.vieneu);
+  return (
+    <Card as="section" aria-label={E.title} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-h2 font-bold">{E.title}</h2>
+        <Link to="/core" className="ui-btn ui-btn-soft ui-btn-sm">
+          {E.openCoreBtn}
+        </Link>
+      </div>
+      <p className="text-small text-muted">{E.help}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5 rounded-inner border border-line bg-soft p-3.5">
+          <p className="text-small font-bold">{E.geminiLabel}</p>
+          <p className="text-tiny text-muted">
+            Hỗ trợ Gemini 3.8 Flash / 3.5 Flash Lite &amp; Chế độ V1 Offline 0-Token
+          </p>
+        </div>
+        <div className="space-y-1.5 rounded-inner border border-line bg-soft p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-small font-bold">{E.vieneuLabel}</p>
+            <Badge tone={vieneuOk ? 'ok' : 'neutral'}>
+              {vieneuOk ? E.vieneuReady : E.vieneuMissing}
+            </Badge>
+          </div>
+          <p className="text-tiny text-muted">{E.stickerPresets}</p>
+        </div>
       </div>
     </Card>
   );

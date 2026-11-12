@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
+from shared.ffmpeg_utils import ACROSSFADE_DURATION_S, build_acrossfade_filter_graph
 
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
-ACROSSFADE_DURATION_S = 2.0
 
 # Ánh xạ từ topic (history / fun / science / mystery) sang các từ khoá mood trong library/music/
 TOPIC_MOOD_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -130,42 +130,6 @@ def build_topic_bgm_playlist(
         idx += 1
 
     return playlist
-
-
-def build_acrossfade_filter_graph(
-    num_tracks: int,
-    target_duration_s: float,
-    *,
-    crossfade_s: float = ACROSSFADE_DURATION_S,
-) -> tuple[str, str]:
-    """Sinh chuỗi filter_complex nối các bài nhạc bằng `acrossfade=d=2.0` chuẩn FFmpeg."""
-    fade_out_st = max(0.5, target_duration_s - 1.5)
-    if num_tracks <= 1:
-        fc = (
-            f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"atrim=0:{target_duration_s:.3f},asetpts=PTS-STARTPTS,"
-            f"afade=t=in:st=0:d=1.0,afade=t=out:st={fade_out_st:.3f}:d=1.5[bgm]"
-        )
-        return fc, "[bgm]"
-
-    parts: list[str] = []
-    for i in range(num_tracks):
-        parts.append(
-            f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"asetpts=PTS-STARTPTS[a{i}]"
-        )
-
-    prev_label = "[a0]"
-    for i in range(1, num_tracks):
-        out_label = f"[xf{i}]"
-        parts.append(f"{prev_label}[a{i}]acrossfade=d={crossfade_s:.1f}:c1=tri:c2=tri{out_label}")
-        prev_label = out_label
-
-    parts.append(
-        f"{prev_label}atrim=0:{target_duration_s:.3f},asetpts=PTS-STARTPTS,"
-        f"afade=t=in:st=0:d=1.0,afade=t=out:st={fade_out_st:.3f}:d=1.5[bgm]"
-    )
-    return ";".join(parts), "[bgm]"
 
 
 def render_smart_bgm_wav(

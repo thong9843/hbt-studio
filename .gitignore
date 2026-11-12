@@ -1,6 +1,7 @@
 # Media & dữ liệu người dùng — không lên Git
 workspace/
 models/
+assets/
 library/music/**
 !library/music/index.json
 library/backgrounds/**

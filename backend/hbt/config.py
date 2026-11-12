@@ -34,6 +34,9 @@ class Settings:
     default_fps: int
     chatting_model: str = "qwen2.5:3b-instruct"
     models_dir: Path = REPO_ROOT / "models"  # model Whisper tải về đây (đã ignore)
+    assets_dir: Path = (
+        REPO_ROOT / "assets"
+    )  # kho tài nguyên Asset Hub (stickers, memes, backgrounds, renders)
 
 
 WHISPER_MODELS = ("auto", "small", "medium", "large-v3")
@@ -66,6 +69,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         default_fps=fps,
         chatting_model=env.get("CHATTING_MODEL", "qwen2.5:3b-instruct"),
         models_dir=path("MODELS_DIR", "./models"),
+        assets_dir=path("ASSETS_DIR", "./assets"),
     )
 
 
@@ -76,5 +80,6 @@ _KEYS = (
     "WHISPER_DEVICE",
     "DEFAULT_FPS",
     "MODELS_DIR",
+    "ASSETS_DIR",
     "CHATTING_MODEL",
 )

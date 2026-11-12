@@ -58,12 +58,21 @@ const brief = project({
 });
 
 describe('HomePage', () => {
-  it('has a button that opens the draft JSON dialog, on top of the project list', async () => {
-    const user = userEvent.setup();
-    stubFetch({ 'GET /api/projects': [] });
+  it('shows the 3 studio shortcut cards and resource status bar without extra JSON/Core modal buttons', async () => {
+    stubFetch({
+      'GET /api/projects': [],
+      'GET /api/health': { ok: true, ffmpeg: true, whisper: false, gpu: false, vieneu: true },
+      'GET /api/hbt-core/assets': { gemini_configured: true },
+    });
     page();
-    await user.click(screen.getByRole('button', { name: 'Từ JSON nháp' }));
-    expect(await screen.findByRole('dialog', { name: 'Tạo dự án từ JSON nháp' })).toBeVisible();
+    expect(
+      await screen.findByRole('region', { name: 'Khởi tạo nhanh 3 Động cơ Studio' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Từ JSON nháp' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'HBT Core V1 / V2' })).toBeNull();
+    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('VieNeu-TTS');
+    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('Gemini');
+    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('FFmpeg');
   });
 
   it('greets with the title and shows skeletons while loading', async () => {

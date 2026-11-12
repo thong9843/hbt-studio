@@ -835,3 +835,14 @@ export interface HbtCoreRenderResponse {
   job_id?: string | null;
   script?: HbtCoreScript;
 }
+
+export type AssetHubCategory = 'stickers' | 'memes' | 'backgrounds' | 'renders';
+
+export interface AssetHubItem {
+  name: string;
+  category: AssetHubCategory;
+  kind: 'image' | 'video' | 'audio' | 'other';
+  size: number;
+  modified_at: string;
+  url: string;
+}

@@ -25,8 +25,6 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Chip } from '../components/ui/Chip';
-import { Dialog } from '../components/ui/Dialog';
-import { Menu } from '../components/ui/Menu';
 import { Progress } from '../components/ui/Progress';
 import { Select } from '../components/ui/Select';
 import { cx } from '../components/ui/cx';
@@ -184,9 +182,6 @@ export function PostvQuickPage() {
   const [expandedCommentIds, setExpandedCommentIds] = useState<Set<string>>(new Set());
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
-  // Trạng thái xoá video gần đây
-  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
-
   // Tiến trình SSE
   const [currentStage, setCurrentStage] = useState<PostvStage>('fetch');
   const [stageStatuses, setStageStatuses] = useState<
@@ -214,9 +209,6 @@ export function PostvQuickPage() {
   const [output, setOutput] = useState<CompletedOutput | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [copiedPublish, setCopiedPublish] = useState(false);
-
-  // Drawer ngăn kéo cột trái trên màn hình nhỏ (< 1024 px)
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -683,166 +675,8 @@ export function PostvQuickPage() {
   // Thời gian ước tính còn lại (ETA)
   const remainingEta = Math.max(5, Math.round(((100 - progressPct) / 100) * duration * 0.8));
 
-  // Cột trái: Danh sách Video gần đây
-  const RecentVideosList = (
-    <div className="flex h-full flex-col p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-body font-bold text-ink">{T.recentVideos}</h2>
-        <Button size="sm" tone="brand" onClick={handleReset}>
-          {T.newVideo}
-        </Button>
-      </div>
-
-      <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-        {postvProjects.length === 0 ? (
-          <p className="py-6 text-center text-small text-muted">{T.noRecent}</p>
-        ) : (
-          postvProjects.map((p) => {
-            const hasVideo = Boolean(p.last_final || p.last_render);
-            const isBusy = Boolean(
-              activeJobs?.some((j) => j.slug === p.slug && j.status === 'running'),
-            );
-            return (
-              <div
-                key={p.slug}
-                className={cx(
-                  'group relative flex items-center justify-between rounded-xl border border-line bg-card p-2.5 transition-all hover:border-brand/60 hover:shadow-sm',
-                  projectSlug === p.slug && 'border-brand bg-brand/5',
-                )}
-              >
-                <div
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    navigate(`/postv/${p.slug}`);
-                  }}
-                  className="flex flex-1 cursor-pointer items-center gap-3 min-w-0"
-                >
-                  <div className="relative h-14 w-9 shrink-0 overflow-hidden rounded-md bg-subtle">
-                    <img
-                      src={`/api/projects/${p.slug}/postv/preview.png?w=90`}
-                      alt=""
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-small font-semibold text-ink group-hover:text-brand">
-                      {p.title || p.slug}
-                    </p>
-                    <p className="text-tiny text-muted">{hasVideo ? 'Đã hoàn tất' : 'Bản nháp'}</p>
-                  </div>
-                </div>
-
-                {/* Nút ⋮ mở menu: Mở · Tải video · Xoá */}
-                <div className="shrink-0 pl-1" onClick={(e) => e.stopPropagation()}>
-                  <Menu
-                    label="Tuỳ chọn"
-                    icon={
-                      <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor">
-                        <circle cx="12" cy="5" r="1.5" />
-                        <circle cx="12" cy="12" r="1.5" />
-                        <circle cx="12" cy="19" r="1.5" />
-                      </svg>
-                    }
-                    items={[
-                      {
-                        key: 'open',
-                        label: T.recentMenu.open,
-                        onSelect: () => {
-                          setDrawerOpen(false);
-                          navigate(`/postv/${p.slug}`);
-                        },
-                      },
-                      {
-                        key: 'download',
-                        label: T.recentMenu.download,
-                        disabled: !hasVideo,
-                        onSelect: () => {
-                          window.open(`/api/projects/${p.slug}/postv/video.mp4`, '_blank');
-                        },
-                      },
-                      {
-                        key: 'delete',
-                        label: T.recentMenu.delete,
-                        danger: true,
-                        disabled: isBusy,
-                        reason: isBusy ? T.recentMenu.busy : undefined,
-                        onSelect: () => setDeletingSlug(p.slug),
-                      },
-                    ]}
-                  />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
-      {/* Cột trái: Hiện thẳng trên desktop (>= 1024px) */}
-      <aside className="hidden w-72 shrink-0 border-r border-line bg-nav lg:block">
-        {RecentVideosList}
-      </aside>
-
-      {/* Nút mở ngăn kéo cột trái trên thiết bị nhỏ (< 1024px) */}
-      <div className="fixed bottom-4 left-4 z-40 lg:hidden">
-        <Button tone="soft" size="sm" onClick={() => setDrawerOpen(true)}>
-          <FolderIcon size={16} />
-          {T.recentVideos}
-        </Button>
-      </div>
-
-      {/* Drawer ngăn kéo di động */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="relative w-80 max-w-[85vw] bg-nav shadow-2xl">{RecentVideosList}</div>
-        </div>
-      )}
-
-      {/* Hộp xác nhận xoá video gần đây */}
-      {deletingSlug && (
-        <Dialog
-          open={true}
-          onClose={() => setDeletingSlug(null)}
-          title={T.recentMenu.deleteConfirmTitle}
-          role="alertdialog"
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button size="sm" tone="soft" onClick={() => setDeletingSlug(null)}>
-                {T.recentMenu.cancel}
-              </Button>
-              <Button
-                size="sm"
-                tone="danger"
-                onClick={async () => {
-                  const slug = deletingSlug;
-                  setDeletingSlug(null);
-                  try {
-                    await api.deletePostvProject(slug);
-                    void refetchProjects();
-                  } catch (e) {
-                    setErrorMessage(String(e));
-                  }
-                }}
-              >
-                {T.recentMenu.confirm}
-              </Button>
-            </div>
-          }
-        >
-          <p className="text-small text-muted">{T.recentMenu.deleteConfirmDesc}</p>
-        </Dialog>
-      )}
-
       {/* Khu vực giữa chính */}
       <main className="flex flex-1 flex-col items-center justify-center p-4 md:p-8">
         <div className="w-full max-w-2xl">

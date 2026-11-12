@@ -104,8 +104,8 @@ describe('PostvQuickPage', () => {
     expect(screen.getByText('60 fps')).toBeInTheDocument();
     expect(screen.getByText('Outro: Bật')).toBeInTheDocument();
 
-    // Cột trái video gần đây
-    expect(await screen.findByText('Bài cũ Threads')).toBeInTheDocument();
+    // Khu vực Video gần đây đã được chuyển sang Asset Hub
+    expect(screen.queryByText('Video gần đây')).toBeNull();
   });
 
   it('enables submit button upon typing, submits on Enter and sends options', async () => {
@@ -474,47 +474,20 @@ describe('PostvQuickPage', () => {
     expect(previewBtn).toBeInTheDocument();
   });
 
-  it('provides three-dot menu on recent video cards with Open, Download and Delete confirmation', async () => {
-    const user = userEvent.setup();
-    let deleteCalled = false;
-
+  it('omits recent videos sidebar because history is centralized in Asset Hub', async () => {
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
-      'DELETE /api/postv/bai-cu': () => {
-        deleteCalled = true;
-        return json({ ok: true });
-      },
     });
 
     page();
 
-    expect(await screen.findByText('Bài cũ Threads')).toBeInTheDocument();
-
-    // Bấm nút ⋮ (ba chấm dọc)
-    const moreBtn = screen.getByTitle('Tuỳ chọn');
-    await user.click(moreBtn);
-
-    // Menu bung ra
-    expect(await screen.findByRole('menuitem', { name: 'Mở' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Tải video' })).toBeInTheDocument();
-    const deleteBtn = screen.getByRole('menuitem', { name: 'Xoá' });
-    expect(deleteBtn).toBeInTheDocument();
-
-    // Bấm Xoá
-    await user.click(deleteBtn);
-
-    // Hộp xác nhận mở ra
-    expect(await screen.findByText('Xoá video này?')).toBeInTheDocument();
-    const confirmDeleteBtn = screen.getByRole('button', { name: 'Xoá' });
-    await user.click(confirmDeleteBtn);
-
-    await waitFor(() => {
-      expect(deleteCalled).toBe(true);
-    });
+    expect(await screen.findByText('Tạo video Threads')).toBeInTheDocument();
+    expect(screen.queryByText('Video gần đây')).toBeNull();
+    expect(screen.queryByText('Bài cũ Threads')).toBeNull();
   });
 
   it('shows immediate warning banner when fetched post has fewer than 10 comments', async () => {

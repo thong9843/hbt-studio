@@ -10,6 +10,7 @@ import {
   AdvancedModeCard,
   FpsCard,
   HEX,
+  StudioEnginesCard,
   ThemeCard,
   WhisperCard,
 } from '../components/settings/GeneralCards';
@@ -96,6 +97,7 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         <FpsCard value={value} onChange={change} />
         <ThemeCard value={value} onChange={change} />
       </div>
+      <StudioEnginesCard health={health.data} />
       <AdvancedModeCard value={value} onChange={change} />
       <WhisperCard value={value} onChange={change} health={health.data} />
       <WordsCard

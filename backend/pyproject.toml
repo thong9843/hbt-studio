@@ -25,7 +25,7 @@ dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 py-modules = ["cli"]
 
 [tool.setuptools.packages.find]
-include = ["hbt*"]
+include = ["hbt*", "shared*"]
 
 [tool.setuptools.package-data]
 hbt = ["fonts/*", "data/*.json"]

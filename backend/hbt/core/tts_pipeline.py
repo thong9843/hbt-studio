@@ -25,32 +25,29 @@ from hbt.core.voice import (
     spoken_text_for_segment,
     wav_duration_us,
 )
-from hbt.pipeline.ffutil import media_duration
-from hbt.postv.voice import SynthItem, VieNeuProvider, VoiceProvider
+from hbt.postv.voice import VieNeuProvider, VoiceProvider
+from shared.ffmpeg_utils import measure_audio_duration as _shared_measure_audio_duration
+from shared.tts_client import (
+    DEFAULT_VOICE_ALIAS,
+)
+from shared.tts_client import (
+    resolve_voice_id as _shared_resolve_voice_id,
+)
+from shared.tts_client import (
+    synthesize_single_segment_sync as _shared_synthesize_single,
+)
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_VOICE_ALIAS = "vienneu_default"
 
 
 def resolve_voice_id(voice_id: str | None) -> str:
     """Chuẩn hóa `voice_id`: ánh xạ `vienneu_default` về giọng mặc định VieNeu."""
-    raw = (voice_id or DEFAULT_VOICE_ALIAS).strip()
-    if not raw or raw == DEFAULT_VOICE_ALIAS:
-        return DEFAULT_VOICE
-    return raw
+    return _shared_resolve_voice_id(voice_id, DEFAULT_VOICE)
 
 
 def measure_audio_duration(audio_path: Path) -> float:
     """Đo thời lượng chính xác (giây) của file WAV bằng `ffprobe`, fallback sang `wave`."""
-    try:
-        probed = media_duration(audio_path)
-        if probed is not None and probed > 0:
-            return round(float(probed), 6)
-    except Exception:
-        pass
-    dur_us = wav_duration_us(audio_path)
-    return round(dur_us / 1_000_000.0, 6)
+    return _shared_measure_audio_duration(audio_path, fallback_us_fn=wav_duration_us)
 
 
 def _segment_to_dict(seg: HbtCoreSegment | dict[str, Any], index: int) -> dict[str, Any]:
@@ -73,26 +70,16 @@ def _synthesize_single_segment_sync(
     strict_tts: bool,
     index: int,
 ) -> None:
-    dest_wav.parent.mkdir(parents=True, exist_ok=True)
-    if tts_ok and voice_provider is not None and spoken:
-        try:
-            voice_provider.synthesize_many(
-                [SynthItem(text=spoken, voice_id=chosen_voice, out=dest_wav)]
-            )
-            if dest_wav.is_file() and dest_wav.stat().st_size > 44:
-                return
-        except Exception as exc:
-            if strict_tts:
-                raise
-            logger.warning(
-                "VieNeu-TTS lỗi ở phân đoạn %d (%s), dùng WAV dự phòng: %s",
-                index,
-                chosen_voice,
-                exc,
-            )
-    if strict_tts and not tts_ok:
-        raise RuntimeError("VieNeu-TTS (.venv-tts) chưa sẵn sàng trên máy")
-    create_fallback_speech_wav(dest_wav, spoken or f"phân đoạn {index}")
+    _shared_synthesize_single(
+        spoken=spoken,
+        chosen_voice=chosen_voice,
+        dest_wav=dest_wav,
+        voice_provider=voice_provider,
+        tts_ok=tts_ok,
+        strict_tts=strict_tts,
+        index=index,
+        fallback_fn=create_fallback_speech_wav,
+    )
 
 
 async def synthesize_script_segments(

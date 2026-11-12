@@ -45,10 +45,13 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
     <Routes>
       <Route element={<AppShell render={render} />}>
         <Route path="/" element={<Where />} />
+        <Route path="/core" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
         <Route path="/postv/:slug/*" element={<Where />} />
         <Route path="/postv/*" element={<Where />} />
+        <Route path="/chatting/*" element={<Where />} />
+        <Route path="/library" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
     </Routes>,
@@ -84,7 +87,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt']);
+    expect(labels).toEqual(['Trang chủ', 'HBT Core', 'PostV', 'Chatting', 'Thư viện']);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
@@ -191,25 +194,25 @@ describe('AppShell, wide (>= 1280 px)', () => {
     ).toBeInTheDocument();
   });
 
-  it('marks Home as current at "/" and Projects at "/projects"', () => {
+  it('marks Home as current at "/" and Library at "/library"', () => {
     stubFetch(routes());
     const first = shell('/');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).not.toHaveAttribute('aria-current');
     first.unmount();
-    shell('/projects');
-    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('href', '/projects');
+    shell('/library');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).toHaveAttribute('href', '/library');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).not.toHaveAttribute('aria-current');
   });
 
-  it('has its own PostV item: /postv is current on the PostV screens, not on Projects', async () => {
+  it('has its own PostV item: /postv is current on the PostV screens', async () => {
     stubFetch(routes());
     shell('/postv');
     expect(await screen.findByRole('link', { name: 'PostV' })).toHaveAttribute('href', '/postv');
     expect(screen.getByRole('link', { name: 'PostV' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).not.toHaveAttribute('aria-current');
     expect(screen.queryByRole('group', { name: 'Dự án đang mở' })).toBeNull();
   });
 
@@ -224,14 +227,23 @@ describe('AppShell, wide (>= 1280 px)', () => {
   it('ignores the old /?new=1 query: no dialog opens', async () => {
     stubFetch(routes());
     shell('/?new=1');
-    await screen.findByRole('link', { name: 'Dự án' });
+    await screen.findByRole('link', { name: 'Thư viện' });
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('is reachable by keyboard in reading order', async () => {
     stubFetch(routes());
     shell();
-    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'PostV', 'Chatting', 'Cài đặt'];
+    const order = [
+      'HBT Studio',
+      'Tạo video',
+      'Trang chủ',
+      'HBT Core',
+      'PostV',
+      'Chatting',
+      'Thư viện',
+      'Cài đặt',
+    ];
     for (const name of order) {
       await userEvent.tab();
       expect(document.activeElement).toHaveAccessibleName(name);
@@ -248,9 +260,9 @@ describe('AppShell, narrow (< 1280 px)', () => {
       expect(screen.getByRole('complementary')).toHaveClass('w-[72px]');
       expect(screen.queryByText('HBT Studio')).toBeNull();
       // Chữ còn trong DOM dưới dạng sr-only, và có tooltip.
-      const home = screen.getByRole('link', { name: 'Dự án' });
-      expect(home).toHaveAttribute('title', 'Dự án');
-      expect(within(home).getByText('Dự án')).toHaveClass('sr-only');
+      const home = screen.getByRole('link', { name: 'Thư viện' });
+      expect(home).toHaveAttribute('title', 'Thư viện');
+      expect(within(home).getByText('Thư viện')).toHaveClass('sr-only');
       expect(screen.getByRole('button', { name: 'Tạo video' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Xuất video' })).toHaveAttribute(
         'title',
@@ -301,7 +313,7 @@ describe('render progress card', () => {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<Starter />} />
-          <Route path="/projects" element={<Where />} />
+          <Route path="/library" element={<Where />} />
         </Route>
       </Routes>,
       '/',
@@ -312,7 +324,7 @@ describe('render progress card', () => {
     act(() =>
       FakeEventSource.instances[0].emit('progress', { progress: 55, step: 'Mã hoá', message: '' }),
     );
-    await userEvent.click(screen.getByRole('link', { name: 'Dự án' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Thư viện' }));
     const card = screen.getByRole('status', { name: 'Đang dựng' });
     expect(card).toHaveTextContent('55%');
     expect(card).toHaveTextContent('Mã hoá');

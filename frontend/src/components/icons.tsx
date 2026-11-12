@@ -117,3 +117,23 @@ export const MessagesSquareIcon = make(
     <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
   </>,
 );
+export const ZapIcon = make(<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />);
+export const SmartphoneIcon = make(
+  <>
+    <rect x="6" y="2" width="12" height="20" rx="2.5" />
+    <path d="M12 18h.01" />
+  </>,
+);
+export const SparklesIcon = make(
+  <>
+    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z" />
+    <path d="M5 3v4M3 5h4M19 17v4M17 19h4" />
+  </>,
+);
+export const CpuIcon = make(
+  <>
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+    <rect x="9" y="9" width="6" height="6" rx="1" />
+    <path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4" />
+  </>,
+);

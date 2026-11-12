@@ -1,9 +1,11 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AppShell } from '../components/AppShell';
+import { AppLayout } from '../components/layout/AppLayout';
+import { AssetHubPage } from '../pages/AssetHubPage';
 import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
+import { HbtCorePage } from '../pages/HbtCorePage';
 import { HomePage } from '../pages/HomePage';
 import { PostvLayout } from '../pages/PostvLayout';
 import { PostvPickPage } from '../pages/PostvPickPage';
@@ -26,8 +28,9 @@ const UiKit = import.meta.env.DEV ? lazy(() => import('../pages/Gallery')) : nul
 export function App() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
+      <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
+        <Route path="core" element={<HbtCorePage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="p/:slug" element={<ComposePage />}>
           <Route index element={<ScenesTab />} />
@@ -46,6 +49,7 @@ export function App() {
         </Route>
         <Route path="chatting" element={<ChattingHome />} />
         <Route path="chatting/:slug" element={<ChattingEditor />} />
+        <Route path="library" element={<AssetHubPage />} />
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (
           <Route
