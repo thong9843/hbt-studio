@@ -45,6 +45,7 @@ import type {
   ChatProjectSummary,
   ChattingJobInfo,
   HbtCoreAssetsInfo,
+  HbtCoreGeminiModel,
   HbtCoreRenderResponse,
   HbtCoreScript,
 } from './types';
@@ -354,6 +355,8 @@ export const api = {
   saveSensitiveWords: (words: SensitiveWords) =>
     apiRequest<SensitiveWords>('PUT', '/settings/sensitive-words', { json: words }),
 
+  getHbtCoreModels: () =>
+    apiGet<{ models: HbtCoreGeminiModel[]; default: string }>('/hbt/core/models'),
   getHbtCoreAssets: (slug?: string) =>
     apiGet<HbtCoreAssetsInfo>(`/hbt-core/assets${slug ? `?slug=${enc(slug)}` : ''}`),
   getProjectCoreScript: (slug: string) =>
@@ -374,6 +377,8 @@ export const api = {
   promptHbtCoreV2: (body: {
     prompt: string;
     topic?: string | null;
+    selectedModel?: string | null;
+    model_name?: string | null;
     slug?: string | null;
     voice_id?: string | null;
     fps?: number;

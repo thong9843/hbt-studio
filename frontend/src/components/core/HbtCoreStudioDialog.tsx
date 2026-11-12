@@ -3,7 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api } from '../../api/endpoints';
-import type { HbtCoreScript, HbtCoreSegment, HbtCoreTopic } from '../../api/types';
+import type {
+  HbtCoreGeminiModel,
+  HbtCoreScript,
+  HbtCoreSegment,
+  HbtCoreTopic,
+} from '../../api/types';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { AlertIcon, PlayIcon } from '../icons';
@@ -14,6 +19,13 @@ import { Input, Textarea } from '../ui/Field';
 import { Progress } from '../ui/Progress';
 
 const T = vi.hbtCore;
+
+const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)' },
+  { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+];
 
 const SAMPLE_V1_SCRIPT: HbtCoreScript = {
   title: 'Vì sao Đấu trường La Mã vẫn đứng vững sau 2000 năm?',
@@ -67,6 +79,7 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
   // V2 state
   const [prompt, setPrompt] = useState('');
   const [v2Topic, setV2Topic] = useState<HbtCoreTopic>('history');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [v2Loading, setV2Loading] = useState(false);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
@@ -86,6 +99,13 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
     queryKey: ['hbt-core-assets', resultSlug ?? initialSlug ?? ''],
     queryFn: () => api.getHbtCoreAssets(resultSlug ?? initialSlug),
     enabled: open,
+  });
+
+  const { data: modelsData } = useQuery({
+    queryKey: ['hbt-core-models'],
+    queryFn: () => api.getHbtCoreModels(),
+    enabled: open,
+    retry: false,
   });
 
   useEffect(() => {
@@ -332,6 +352,7 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
       const res = await api.promptHbtCoreV2({
         prompt: cleanPrompt,
         topic: v2Topic,
+        selectedModel,
         slug: resultSlug ?? initialSlug ?? null,
         auto_render: true,
       });
@@ -392,6 +413,12 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
 
   const sfxOptions = assets?.sfx_presets ?? ['whoosh', 'pop', 'impact', 'none'];
   const existingImages = assets?.images ?? [];
+  const geminiModels =
+    modelsData?.models && modelsData.models.length > 0
+      ? modelsData.models
+      : assets?.gemini_models && assets.gemini_models.length > 0
+        ? assets.gemini_models
+        : DEFAULT_GEMINI_MODELS;
 
   return (
     <Dialog
@@ -632,21 +659,41 @@ export function HbtCoreStudioDialog({ open, onClose, slug: initialSlug }: Props)
               onChange={(e) => setPrompt(e.target.value)}
             />
 
-            <div className="ui-field">
-              <label htmlFor="hbt-core-v2-topic" className="ui-label">
-                {T.topics.label}
-              </label>
-              <select
-                id="hbt-core-v2-topic"
-                className="ui-input"
-                value={v2Topic}
-                onChange={(e) => setV2Topic(e.target.value as HbtCoreTopic)}
-              >
-                <option value="history">{T.topics.history}</option>
-                <option value="fun">{T.topics.fun}</option>
-                <option value="science">{T.topics.science}</option>
-                <option value="mystery">{T.topics.mystery}</option>
-              </select>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="ui-field">
+                <label htmlFor="hbt-core-v2-topic" className="ui-label">
+                  {T.topics.label}
+                </label>
+                <select
+                  id="hbt-core-v2-topic"
+                  className="ui-input"
+                  value={v2Topic}
+                  onChange={(e) => setV2Topic(e.target.value as HbtCoreTopic)}
+                >
+                  <option value="history">{T.topics.history}</option>
+                  <option value="fun">{T.topics.fun}</option>
+                  <option value="science">{T.topics.science}</option>
+                  <option value="mystery">{T.topics.mystery}</option>
+                </select>
+              </div>
+
+              <div className="ui-field">
+                <label htmlFor="hbt-core-v2-model" className="ui-label">
+                  {T.v2.modelLabel}
+                </label>
+                <select
+                  id="hbt-core-v2-model"
+                  className="ui-input"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                >
+                  {geminiModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}

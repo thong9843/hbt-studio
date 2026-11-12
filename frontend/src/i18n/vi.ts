@@ -1236,7 +1236,7 @@ export const vi = {
     tabV1: 'Chế độ V1 · Bán tự động (JSON Thủ công)',
     tabV2: 'Chế độ V2 · Tự động 1-Click Prompt (Gemini Flash)',
     offlineBadge: 'Offline 100% · 0 Token',
-    geminiBadge: 'Gemini 1.5 Flash API',
+    geminiBadge: 'Gemini Flash API',
     topics: {
       label: 'Chủ đề nhạc nền (Topic)',
       history: 'Lịch sử (history)',
@@ -1264,6 +1264,7 @@ export const vi = {
     v2: {
       promptLabel: 'Câu nhắc 1-Click Prompt',
       promptPlaceholder: 'Ví dụ: Làm video vì sao về Đấu trường La Mã',
+      modelLabel: 'Mô hình Gemini (Model)',
       submitBtn: 'Tạo kịch bản & Dựng video (1-Click)',
       submittingBtn: 'Gemini đang viết kịch bản…',
       fallbackNoticeTitle: 'Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)',

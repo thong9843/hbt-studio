@@ -30,6 +30,7 @@ from hbt.core.audio import (
     scan_sfx_library,
 )
 from hbt.core.gemini_client import (
+    AVAILABLE_GEMINI_MODELS,
     BACKEND_DIR,
     GEMINI_ENDPOINT,
     MODELS,
@@ -321,46 +322,56 @@ def test_gemini_client_success_and_error_fallback(tmp_path: Path) -> None:
 
 
 def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
-    # 1. Đảm bảo URL endpoint sạch (không gắn ?key=) và không bao giờ lặp "models/models/..."
+    # 1. Đảm bảo URL endpoint sạch (không gắn ?key=), không lặp "models/models/..."
+    # và danh sách model chỉ gồm các dòng Gemini thế hệ mới (không còn 1.x / 2.0-*)
     assert MODELS == [
-        "gemini-1.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
     ]
-    url1 = build_gemini_url("gemini-1.5-flash")
-    url2 = build_gemini_url("models/gemini-1.5-flash")
-    url3 = build_gemini_url("models/models/gemini-2.0-flash")
+    assert [m["id"] for m in AVAILABLE_GEMINI_MODELS] == MODELS
+    url1 = build_gemini_url("gemini-3.8-flash")
+    url2 = build_gemini_url("models/gemini-3.8-flash")
+    url3 = build_gemini_url("models/models/gemini-3.5-flash-lite")
     assert (
         url1
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     )
     assert url2 == url1
     assert "?key=" not in url1
     assert "models/models/" not in url3
     assert (
         url3
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
     )
     assert build_gemini_headers("  AIzaSyHeaderKey  ") == {
         "Content-Type": "application/json",
         "x-goog-api-key": "AIzaSyHeaderKey",
     }
 
-    # 2. Nếu model đầu tiên (gemini-1.5-flash) và thứ hai (gemini-2.0-flash) trả về 404,
-    # tự động thử sang model kế tiếp (gemini-1.5-flash-latest) và nhận status_code == 200
+    # 2. Nếu người dùng chọn `model_name="gemini-3.5-flash-lite"`, ưu tiên gọi model này trước;
+    # nếu model này và model fallback kế tiếp gặp lỗi (404/429), tự động chuyển tuần tự sang model
+    # kế tiếp (gemini-3.6-flash) và nhận status_code == 200.
     called_urls: list[str] = []
     statuses: list[int] = []
     sent_headers: list[str] = []
 
-    def fallback_404_handler(request: httpx.Request) -> httpx.Response:
+    def fallback_error_handler(request: httpx.Request) -> httpx.Response:
         url_str = str(request.url)
         called_urls.append(url_str)
         sent_headers.append(request.headers.get("x-goog-api-key", ""))
-        if len(called_urls) < 3:
+        if len(called_urls) == 1:
             resp = httpx.Response(
                 404,
-                json={"error": {"message": "model is not found for API version v1beta"}},
+                json={"error": {"message": "model is not found"}},
+            )
+            statuses.append(resp.status_code)
+            return resp
+        if len(called_urls) == 2:
+            resp = httpx.Response(
+                429,
+                json={"error": {"message": "temporary quota exceeded"}},
             )
             statuses.append(resp.status_code)
             return resp
@@ -390,24 +401,25 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
 
     script = generate_script_from_prompt(
         "Làm video vì sao về Đấu trường La Mã",
+        model_name="gemini-3.5-flash-lite",
         api_key="AIzaSyFallbackTestKey1234567890123",
-        transport=httpx.MockTransport(fallback_404_handler),
+        transport=httpx.MockTransport(fallback_error_handler),
     )
-    assert statuses == [404, 404, 200]
+    assert statuses == [404, 429, 200]
     assert statuses[-1] == 200
     assert len(called_urls) == 3
     assert all(h == "AIzaSyFallbackTestKey1234567890123" for h in sent_headers)
     assert (
         called_urls[0]
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
     )
     assert (
         called_urls[1]
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     )
     assert (
         called_urls[2]
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
     )
     assert script.title == "Vì sao Đấu trường La Mã vĩ đại?"
 
@@ -420,7 +432,18 @@ def test_hbt_core_v1_and_v2_api_endpoints(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # 1. GET /api/hbt-core/assets
+    # 1. GET /api/hbt-core/assets & GET /api/hbt/core/models
+    models_res = client.get("/api/hbt/core/models")
+    assert models_res.status_code == 200
+    models_data = models_res.json()
+    assert models_data["default"] == "gemini-3.8-flash"
+    assert [m["id"] for m in models_data["models"]] == [
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ]
+
     assets_res = client.get("/api/hbt-core/assets")
     assert assets_res.status_code == 200
     assets_data = assets_res.json()
@@ -482,16 +505,26 @@ def test_hbt_core_v1_and_v2_api_endpoints(
     assert "Simulated unexpected crash in V2" in v2_exc_json["error"]
     assert "Chế độ V1" in v2_exc_json["message"]
 
-    # 4. POST /api/hbt-core/v2/prompt thành công khi mock Gemini
-    monkeypatch.setattr(
-        "hbt.api.core.generate_script_from_prompt",
-        lambda prompt, topic_hint=None: HbtCoreScript.model_validate(v1_payload),
-    )
+    # 4. POST /api/hbt-core/v2/prompt thành công khi mock Gemini và truyền selectedModel
+    captured_models: list[str | None] = []
+
+    def _mock_gemini_ok(
+        prompt: str, topic_hint: str | None = None, model_name: str | None = None
+    ) -> HbtCoreScript:
+        captured_models.append(model_name)
+        return HbtCoreScript.model_validate(v1_payload)
+
+    monkeypatch.setattr("hbt.api.core.generate_script_from_prompt", _mock_gemini_ok)
     v2_ok_res = client.post(
         "/api/hbt-core/v2/prompt",
-        json={"prompt": "Làm video vì sao về vùng tam giác Bermuda", "auto_render": False},
+        json={
+            "prompt": "Làm video vì sao về vùng tam giác Bermuda",
+            "selectedModel": "gemini-3.6-flash",
+            "auto_render": False,
+        },
     )
     assert v2_ok_res.status_code == 200
+    assert captured_models == ["gemini-3.6-flash"]
     v2_data = v2_ok_res.json()
     assert v2_data["ok"] is True
     assert v2_data["mode"] == "v2"

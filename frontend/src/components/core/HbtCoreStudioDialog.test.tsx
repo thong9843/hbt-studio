@@ -9,6 +9,16 @@ import { renderWithProviders } from '../../test/render';
 
 afterEach(() => vi.unstubAllGlobals());
 
+const geminiModelsMock = {
+  models: [
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
+    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)' },
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+  ],
+  default: 'gemini-3.8-flash',
+};
+
 const assetsMock = {
   topics: ['history', 'fun', 'science', 'mystery'],
   sfx: [
@@ -116,6 +126,58 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
       'aria-selected',
       'true',
     );
+  });
+
+  it('allows selecting a Gemini model in V2 mode and sends selectedModel in API payload', async () => {
+    const capturedBodies: Record<string, unknown>[] = [];
+    stubFetch({
+      'GET /api/hbt-core/assets': assetsMock,
+      'GET /api/hbt/core/models': geminiModelsMock,
+      'POST /api/hbt-core/v2/prompt': (_url: string, init?: RequestInit) => {
+        capturedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            mode: 'v2',
+            slug: 'dau-truong-la-ma',
+            job_id: null,
+            script: {
+              title: 'Vì sao Đấu trường La Mã vĩ đại?',
+              topic: 'history',
+              segments: [
+                {
+                  order: 1,
+                  text: 'Đấu trường La Mã là kỳ quan cổ đại.',
+                  image: 'scene-01.png',
+                  sfx: 'whoosh',
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      },
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
+    await user.click(tabV2);
+
+    const modelSelect = screen.getByLabelText('Mô hình Gemini (Model)') as HTMLSelectElement;
+    expect(modelSelect.value).toBe('gemini-3.8-flash');
+    await user.selectOptions(modelSelect, 'gemini-3.5-flash-lite');
+    expect(modelSelect.value).toBe('gemini-3.5-flash-lite');
+
+    await user.type(
+      screen.getByLabelText('Câu nhắc 1-Click Prompt'),
+      'Làm video vì sao về Đấu trường La Mã',
+    );
+    await user.click(screen.getByRole('button', { name: 'Tạo kịch bản & Dựng video (1-Click)' }));
+
+    await waitFor(() => expect(capturedBodies).toHaveLength(1));
+    expect(capturedBodies[0]?.selectedModel).toBe('gemini-3.5-flash-lite');
   });
 
   it('automatically switches from V2 to V1 mode when backend returns structured fallback JSON (200 OK with success=false, fallback_v1=true)', async () => {

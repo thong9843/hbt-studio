@@ -798,6 +798,11 @@ export interface HbtCoreScript {
   segments: HbtCoreSegment[];
 }
 
+export interface HbtCoreGeminiModel {
+  id: string;
+  name: string;
+}
+
 export interface HbtCoreAssetsInfo {
   topics: string[];
   sfx: { id: string; name: string; category: string }[];
@@ -805,6 +810,7 @@ export interface HbtCoreAssetsInfo {
   topic_music: Record<string, string[]>;
   images: string[];
   gemini_configured: boolean;
+  gemini_models?: HbtCoreGeminiModel[];
 }
 
 export interface HbtCoreRenderResponse {

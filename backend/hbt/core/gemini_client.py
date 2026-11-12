@@ -4,16 +4,21 @@
   + Path(REPO_ROOT) / ".env"
   + Path(BACKEND_DIR) / ".env"
 - Gọi endpoint v1beta models/{model_name}:generateContent với xác thực qua Header `x-goog-api-key`
-  và danh sách fallback:
-  MODELS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+  và danh sách model thế hệ mới (loại bỏ hoàn toàn dòng 1.x và 2.0-*):
+  AVAILABLE_GEMINI_MODELS = [
+      {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Mặc định / Nhanh)"},
+      {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
+      {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)"},
+      {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite"},
+  ]
 - Payload chuẩn chống lỗi 400:
   {
     "contents": [{"role": "user", "parts": [{"text": system_prompt + "\\n\\n" + user_prompt}]}],
     "generationConfig": {"temperature": 0.7, "responseMimeType": "application/json"}
   }
 - System prompt ép model trả về đúng định dạng JSON tương thích 100% với cấu trúc đầu vào của V1.
-- Nếu gặp lỗi API (hết quota / lỗi mạng / thiếu key / 404 tất cả model), ném GeminiClientError
-  kèm cờ fallback_v1=True để giao diện thông báo rõ ràng và tự động chuyển hướng sang chế độ V1.
+- Nếu model được chọn trả về lỗi, tự động fallback tuần tự qua các model còn lại trong danh sách
+  trước khi ném GeminiClientError kèm cờ fallback_v1=True để chuyển sang chế độ V1.
 """
 
 from __future__ import annotations
@@ -45,12 +50,13 @@ PLACEHOLDER_KEYS = {
 }
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-MODELS: list[str] = [
-    "gemini-1.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro",
+AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
+    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Mặc định / Nhanh)"},
+    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
+    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)"},
+    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite"},
 ]
+MODELS: list[str] = [item["id"] for item in AVAILABLE_GEMINI_MODELS]
 GEMINI_MODEL = MODELS[0]
 GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
 
@@ -236,6 +242,7 @@ def generate_script_from_prompt(
     user_prompt: str,
     *,
     topic_hint: str | None = None,
+    model_name: str | None = None,
     api_key: str | None = None,
     env_file: Path | None = None,
     models: list[str] | None = None,
@@ -244,8 +251,9 @@ def generate_script_from_prompt(
 ) -> HbtCoreScript:
     """Gọi Gemini Flash API sinh kịch bản JSON chuẩn V1 từ 1 câu prompt của người dùng.
 
-    Tự động thử lần lượt các model trong `MODELS = ["gemini-1.5-flash-latest",
-    "gemini-1.5-flash", "gemini-2.0-flash-exp"]` nếu gặp lỗi HTTP 404.
+    Ưu tiên `model_name` được chọn (mặc định `"gemini-3.8-flash"`). Nếu model trả về lỗi,
+    tự động fallback tuần tự qua các model còn lại trong `AVAILABLE_GEMINI_MODELS` trước khi
+    kích hoạt `fallback_v1=True`.
     """
     prompt_clean = (user_prompt or "").strip()
     if not prompt_clean:
@@ -284,56 +292,87 @@ def generate_script_from_prompt(
 
     payload = build_gemini_payload(full_user_prompt, system_prompt=SYSTEM_PROMPT)
     headers = build_gemini_headers(key)
-    candidate_models = [normalize_model_name(m) for m in (models or MODELS) if m and m.strip()]
-    if not candidate_models:
-        candidate_models = list(MODELS)
+    base_models = [normalize_model_name(m) for m in (models or MODELS) if m and m.strip()]
+    if not base_models:
+        base_models = list(MODELS)
+    if model_name and model_name.strip():
+        preferred = normalize_model_name(model_name)
+        candidate_models = [preferred] + [m for m in base_models if m != preferred]
+    else:
+        candidate_models = base_models
 
     response: httpx.Response | None = None
-    last_404_detail = ""
+    last_error_detail = ""
+    last_timeout_exc: httpx.TimeoutException | None = None
+    last_req_exc: httpx.RequestError | None = None
 
-    try:
-        with httpx.Client(timeout=timeout_s, transport=transport) as client:
-            for idx, model_name in enumerate(candidate_models):
-                url = build_gemini_url(model_name)
-                response = client.post(
+    with httpx.Client(timeout=timeout_s, transport=transport) as client:
+        for idx, cand_model in enumerate(candidate_models):
+            url = build_gemini_url(cand_model)
+            try:
+                resp = client.post(
                     url,
                     json=payload,
                     headers=headers,
                 )
-                if response.status_code == 404:
-                    try:
-                        err_body = response.json()
-                        last_404_detail = err_body.get("error", {}).get("message", "")
-                    except Exception:
-                        last_404_detail = response.text[:200]
-                    logger.warning(
-                        "Model Gemini '%s' trả về 404 (%s)%s",
-                        model_name,
-                        last_404_detail,
-                        f", thử tiếp '{candidate_models[idx + 1]}'"
-                        if idx + 1 < len(candidate_models)
-                        else ", đã hết danh sách fallback",
-                    )
+            except httpx.TimeoutException as exc:
+                last_timeout_exc = exc
+                logger.warning(
+                    "Model Gemini '%s' quá thời gian chờ (%s)%s",
+                    cand_model,
+                    exc,
+                    f", fallback sang '{candidate_models[idx + 1]}'"
+                    if idx + 1 < len(candidate_models)
+                    else ", đã hết danh sách fallback",
+                )
+                continue
+            except httpx.RequestError as exc:
+                last_req_exc = exc
+                logger.warning(
+                    "Lỗi kết nối model Gemini '%s' (%s)%s",
+                    cand_model,
+                    exc,
+                    f", fallback sang '{candidate_models[idx + 1]}'"
+                    if idx + 1 < len(candidate_models)
+                    else ", đã hết danh sách fallback",
+                )
+                continue
+
+            response = resp
+            if resp.status_code >= 400:
+                try:
+                    err_body = resp.json()
+                    last_error_detail = err_body.get("error", {}).get("message", "")
+                except Exception:
+                    last_error_detail = resp.text[:200]
+                logger.warning(
+                    "Model Gemini '%s' trả về HTTP %s (%s)%s",
+                    cand_model,
+                    resp.status_code,
+                    last_error_detail,
+                    f", fallback sang '{candidate_models[idx + 1]}'"
+                    if idx + 1 < len(candidate_models)
+                    else ", đã hết danh sách fallback",
+                )
+                if idx + 1 < len(candidate_models):
                     continue
-                break
-    except httpx.TimeoutException as exc:
-        logger.warning("Gemini API quá thời gian chờ: %s", exc)
-        raise GeminiClientError(
-            "Kết nối tới Gemini Flash API bị quá thời gian chờ (timeout). "
-            "Đã chuyển sang Chế độ V1 để bạn dán JSON thủ công.",
-            reason="network_timeout",
-            fallback_v1=True,
-        ) from exc
-    except httpx.RequestError as exc:
-        logger.warning("Lỗi mạng khi gọi Gemini API: %s", exc)
-        raise GeminiClientError(
-            f"Lỗi kết nối mạng khi gọi Gemini Flash API ({exc.__class__.__name__}). "
-            "Đã chuyển sang Chế độ V1 để không gián đoạn công việc.",
-            reason="network_error",
-            fallback_v1=True,
-        ) from exc
+            break
 
     if response is None:
+        if last_timeout_exc is not None:
+            raise GeminiClientError(
+                "Kết nối tới Gemini Flash API bị quá thời gian chờ (timeout). "
+                "Đã chuyển sang Chế độ V1 để bạn dán JSON thủ công.",
+                reason="network_timeout",
+                fallback_v1=True,
+            ) from last_timeout_exc
+        if last_req_exc is not None:
+            raise GeminiClientError(
+                f"Lỗi kết nối mạng khi gọi Gemini Flash API ({last_req_exc.__class__.__name__}). "
+                "Đã chuyển sang Chế độ V1 để không gián đoạn công việc.",
+                reason="network_error",
+                fallback_v1=True,
+            ) from last_req_exc
         raise GeminiClientError(
             "Không thể khởi tạo yêu cầu tới Gemini API. Đã tự động chuyển sang Chế độ V1.",
             reason="api_error",
@@ -350,14 +389,13 @@ def generate_script_from_prompt(
         )
 
     if response.status_code >= 400:
-        detail = ""
-        try:
-            err_body = response.json()
-            detail = err_body.get("error", {}).get("message", "")
-        except Exception:
-            detail = response.text[:200]
-        if not detail and response.status_code == 404:
-            detail = last_404_detail
+        detail = last_error_detail
+        if not detail:
+            try:
+                err_body = response.json()
+                detail = err_body.get("error", {}).get("message", "")
+            except Exception:
+                detail = response.text[:200]
         suffix = f": {detail}" if detail else ""
         raise GeminiClientError(
             f"Gemini API trả về lỗi HTTP {response.status_code}{suffix}. "

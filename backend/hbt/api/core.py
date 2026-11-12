@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 from hbt.api.deps import State
 from hbt.core.audio import scan_music_by_topic, scan_sfx_library
 from hbt.core.gemini_client import (
+    AVAILABLE_GEMINI_MODELS,
+    MODELS,
     GeminiClientError,
     generate_script_from_prompt,
     is_valid_gemini_api_key,
@@ -79,6 +81,8 @@ class CoreV2PromptBody(BaseModel):
 
     prompt: str = Field(min_length=1, max_length=4000)
     topic: str | None = Field(default=None)
+    model_name: str | None = Field(default=None)
+    selectedModel: str | None = Field(default=None)
     slug: str | None = None
     voice_id: str | None = None
     fps: int = Field(default=30)
@@ -134,6 +138,24 @@ def _ensure_project_for_script(
     return slug, project_dir
 
 
+@router.get("/hbt/core/models")
+@router.get("/hbt-core/models")
+def get_hbt_core_models() -> Any:
+    """Trả về danh sách các model Gemini thế hệ mới khả dụng cho Chế độ V2."""
+    try:
+        return {
+            "models": AVAILABLE_GEMINI_MODELS,
+            "default": MODELS[0],
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Lỗi không mong đợi tại GET /hbt/core/models: %s", exc)
+        return {
+            "models": [],
+            "default": "gemini-3.8-flash",
+            "error": str(exc),
+        }
+
+
 @router.get("/hbt-core/assets")
 def get_hbt_core_assets(state: State, slug: str | None = None) -> Any:
     """Liệt kê SFX cục bộ (`library/sfx/`), nhạc theo chủ đề (`library/music/`),
@@ -167,6 +189,7 @@ def get_hbt_core_assets(state: State, slug: str | None = None) -> Any:
             "topic_music": topic_music,
             "images": images,
             "gemini_configured": has_gemini_key,
+            "gemini_models": AVAILABLE_GEMINI_MODELS,
         }
     except Exception as exc:  # noqa: BLE001
         logger.exception("Lỗi không mong đợi tại GET /hbt-core/assets: %s", exc)
@@ -177,6 +200,7 @@ def get_hbt_core_assets(state: State, slug: str | None = None) -> Any:
             "topic_music": {t: [] for t in VALID_TOPICS},
             "images": [],
             "gemini_configured": False,
+            "gemini_models": AVAILABLE_GEMINI_MODELS,
             "error": str(exc),
         }
 
@@ -247,9 +271,11 @@ def run_v2_one_click_prompt(body: CoreV2PromptBody, state: State) -> Any:
     trả về JSON rõ ràng kèm `fallback_v1=True` để giao diện tự động chuyển hướng sang chế độ V1.
     """
     try:
+        chosen_model = body.model_name or body.selectedModel
         script = generate_script_from_prompt(
             body.prompt,
             topic_hint=body.topic,
+            model_name=chosen_model,
         )
         slug, _ = _ensure_project_for_script(state, script, slug=body.slug)
         job_id: str | None = None
