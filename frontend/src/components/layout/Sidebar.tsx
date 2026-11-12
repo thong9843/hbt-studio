@@ -297,7 +297,6 @@ export function Sidebar({ mini, render }: SidebarProps) {
         <div className="space-y-1">
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
           <NavItem to="/core" icon={<ZapIcon />} label={vi.nav.hbtCore} mini={mini} />
-          <NavItem to="/projects" icon={<FolderIcon />} label={vi.nav.projects} mini={mini} />
           <NavItem to="/postv" icon={<SmartphoneIcon />} label={vi.nav.postv} mini={mini} />
           <NavItem
             to="/chatting"
@@ -305,16 +304,15 @@ export function Sidebar({ mini, render }: SidebarProps) {
             label={vi.nav.chatting}
             mini={mini}
           />
+          <NavItem to="/library" icon={<FolderIcon />} label={vi.nav.library} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
         {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}
-        <div className="mt-2 border-t border-line pt-2">
-          <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
-        </div>
       </nav>
 
       {render && <RenderCard render={render} mini={mini} />}
-      <div className="py-1">
+      <div className="space-y-1 border-t border-line py-2">
+        <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
         <ThemeToggle mini={mini} />
       </div>
       <Environment mini={mini} />

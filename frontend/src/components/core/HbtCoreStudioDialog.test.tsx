@@ -47,14 +47,15 @@ function renderDialog() {
   );
 }
 
-describe('HbtCoreStudioDialog (V1 & V2)', () => {
-  it('renders V1 manual JSON mode by default and triggers 0-token offline render pipeline', async () => {
+describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
+  it('renders Prompt-first bar + Live 9:16 preview and triggers V1 offline render pipeline', async () => {
     FakeEventSource.instances = [];
     vi.stubGlobal('EventSource', FakeEventSource);
 
     let postedBody: Record<string, unknown> | null = null;
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
+      'GET /api/hbt/core/models': geminiModelsMock,
       'POST /api/hbt-core/v1/render': (_url: string, init?: RequestInit) => {
         postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return new Response(
@@ -73,15 +74,13 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     const user = userEvent.setup();
     renderDialog();
 
-    expect(await screen.findByRole('tab', { name: /Chế độ V1 · Bán tự động/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(await screen.findByLabelText('Câu nhắc 1-Click Prompt')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Xem trước trực tiếp 9:16' })).toBeVisible();
 
     // Chỉnh sửa trực tiếp lời thoại phân đoạn 1
     const seg1Input = screen.getByLabelText('Lời thoại phân đoạn 1');
     await user.clear(seg1Input);
-    await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa ở chế độ V1.');
+    await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa.');
 
     // Bấm "Dựng video"
     await user.click(screen.getByRole('button', { name: 'Dựng video' }));
@@ -90,7 +89,7 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
-  it('parses Hay Biet Tot V1 JSON schema (id, title, sticker, image_prompt) without word limit warnings', async () => {
+  it('reveals hidden JSON editor via advanced toggle and parses Hay Biet Tot schema without 750-word warnings', async () => {
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
       'GET /api/hbt/core/models': geminiModelsMock,
@@ -98,6 +97,12 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
 
     const user = userEvent.setup();
     renderDialog();
+
+    // Khung JSON được giấu mặc định
+    expect(screen.queryByLabelText(/Khối JSON kịch bản/)).toBeNull();
+
+    // Mở menu Vi chỉnh nâng cao (JSON)
+    await user.click(screen.getByRole('button', { name: 'Vi chỉnh nâng cao (JSON)' }));
 
     const longSpeech = Array.from({ length: 800 }, () => 'từ').join(' ');
     const hbtJson = JSON.stringify({
@@ -127,9 +132,10 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     expect(screen.queryByText(/750/)).not.toBeInTheDocument();
   });
 
-  it('automatically switches from V2 to V1 mode with a clear alert when Gemini API fails or quota is exceeded', async () => {
+  it('opens advanced JSON fallback notice when Gemini API fails or quota is exceeded', async () => {
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
+      'GET /api/hbt/core/models': geminiModelsMock,
       'POST /api/hbt-core/v2/prompt': () =>
         new Response(
           JSON.stringify({
@@ -145,27 +151,17 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     const user = userEvent.setup();
     renderDialog();
 
-    // Chuyển sang Tab V2
-    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
-    await user.click(tabV2);
-    expect(tabV2).toHaveAttribute('aria-selected', 'true');
-
-    // Nhập prompt và bấm 1-Click
-    const promptBox = screen.getByLabelText('Câu nhắc 1-Click Prompt');
+    const promptBox = await screen.findByLabelText('Câu nhắc 1-Click Prompt');
     await user.type(promptBox, 'Làm video vì sao về Đấu trường La Mã');
-    await user.click(screen.getByRole('button', { name: 'Tạo kịch bản & Dựng video (1-Click)' }));
+    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
 
-    // Kiểm tra thông báo lỗi rõ ràng và tự động chuyển về Tab V1
     expect(
       await screen.findByText('Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)'),
     ).toBeVisible();
-    expect(screen.getByRole('tab', { name: /Chế độ V1 · Bán tự động/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(await screen.findByLabelText(/Khối JSON kịch bản/)).toBeVisible();
   });
 
-  it('allows selecting a Gemini model in V2 mode and sends selectedModel in API payload', async () => {
+  it('allows selecting a Gemini model in the prompt toolbar and sends selectedModel in API payload', async () => {
     const capturedBodies: Record<string, unknown>[] = [];
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
@@ -199,10 +195,9 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
     const user = userEvent.setup();
     renderDialog();
 
-    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
-    await user.click(tabV2);
-
-    const modelSelect = screen.getByLabelText('Mô hình Gemini (Model)') as HTMLSelectElement;
+    const modelSelect = (await screen.findByLabelText(
+      'Mô hình Gemini (Model)',
+    )) as HTMLSelectElement;
     expect(modelSelect.value).toBe('gemini-3.8-flash');
     await user.selectOptions(modelSelect, 'gemini-3.5-flash-lite');
     expect(modelSelect.value).toBe('gemini-3.5-flash-lite');
@@ -211,47 +206,9 @@ describe('HbtCoreStudioDialog (V1 & V2)', () => {
       screen.getByLabelText('Câu nhắc 1-Click Prompt'),
       'Làm video vì sao về Đấu trường La Mã',
     );
-    await user.click(screen.getByRole('button', { name: 'Tạo kịch bản & Dựng video (1-Click)' }));
+    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
 
     await waitFor(() => expect(capturedBodies).toHaveLength(1));
     expect(capturedBodies[0]?.selectedModel).toBe('gemini-3.5-flash-lite');
-  });
-
-  it('automatically switches from V2 to V1 mode when backend returns structured fallback JSON (200 OK with success=false, fallback_v1=true)', async () => {
-    stubFetch({
-      'GET /api/hbt-core/assets': assetsMock,
-      'POST /api/hbt-core/v2/prompt': () =>
-        new Response(
-          JSON.stringify({
-            success: false,
-            fallback_v1: true,
-            error: 'RuntimeError: Unexpected error',
-            message:
-              'Hệ thống gặp sự cố khi tạo kịch bản tự động V2. Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh).',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-    });
-
-    const user = userEvent.setup();
-    renderDialog();
-
-    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
-    await user.click(tabV2);
-
-    const promptBox = screen.getByLabelText('Câu nhắc 1-Click Prompt');
-    await user.type(promptBox, 'Làm video vì sao về Đấu trường La Mã');
-    await user.click(screen.getByRole('button', { name: 'Tạo kịch bản & Dựng video (1-Click)' }));
-
-    expect(
-      await screen.findByText('Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)'),
-    ).toBeVisible();
-    expect(
-      screen.getAllByText(/Hệ thống gặp sự cố khi tạo kịch bản tự động V2/).length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole('tab', { name: /Chế độ V1 · Bán tự động/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
   });
 });

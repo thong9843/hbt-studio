@@ -48,6 +48,8 @@ import type {
   HbtCoreGeminiModel,
   HbtCoreRenderResponse,
   HbtCoreScript,
+  AssetHubCategory,
+  AssetHubItem,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -385,4 +387,19 @@ export const api = {
     preview?: boolean;
     auto_render?: boolean;
   }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v2/prompt', { json: body }),
+
+  listAssetHub: (category: AssetHubCategory) =>
+    apiGet<{ category: AssetHubCategory; items: AssetHubItem[] }>(`/asset-hub/${enc(category)}`),
+  uploadAssetHub: (category: AssetHubCategory, file: File) => {
+    const form = new FormData();
+    form.set('file', file);
+    return apiRequest<{ ok: boolean; item: AssetHubItem }>('POST', `/asset-hub/${enc(category)}`, {
+      form,
+    });
+  },
+  deleteAssetHub: (category: AssetHubCategory, filename: string) =>
+    apiRequest<{ ok: boolean; deleted: string }>(
+      'DELETE',
+      `/asset-hub/${enc(category)}/${enc(filename)}`,
+    ),
 };

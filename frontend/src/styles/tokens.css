@@ -78,66 +78,66 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0f0f12;
-    --card: #18181c;
-    --nav: #16161a;
-    --soft: #26262c;
-    --soft-2: #1f1f25;
-    --line: #26262c;
-    --line-input: #3a3a42;
-    --text: #f4f4f6;
-    --text-2: #c9c9d1;
-    --muted: #a0a0aa;
-    --primary: #f4f4f6;
-    --on-primary: #0f0f12;
+    --bg: #090d16;
+    --card: #111726;
+    --nav: #0d121f;
+    --soft: #172033;
+    --soft-2: #141c2d;
+    --line: #1f293d;
+    --line-input: #2c3a54;
+    --text: #f1f5f9;
+    --text-2: #cbd5e1;
+    --muted: #94a3b8;
+    --primary: #f1f5f9;
+    --on-primary: #090d16;
     --ok: #3ccb7f;
-    --ok-soft: #26262c;
+    --ok-soft: #172033;
     --on-ok-soft: #3ccb7f;
-    --tint-red: #26262c;
+    --tint-red: #172033;
     --on-tint-red: #ff8a8f;
-    --tint-yel: #26262c;
+    --tint-yel: #172033;
     --on-tint-yel: #f4b630;
     --danger: #ff6b6b;
-    --on-danger: #0f0f12;
-    --danger-soft: #26262c;
+    --on-danger: #090d16;
+    --danger-soft: #172033;
     --shadow-card: none;
     --shadow-card-hover: none;
     --shadow-pop: none;
     --card-border: var(--line);
-    --scrim: rgba(0, 0, 0, 0.6);
+    --scrim: rgba(4, 7, 15, 0.72);
 
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #0f0f12;
-  --card: #18181c;
-  --nav: #16161a;
-  --soft: #26262c;
-  --soft-2: #1f1f25;
-  --line: #26262c;
-  --line-input: #3a3a42;
-  --text: #f4f4f6;
-  --text-2: #c9c9d1;
-  --muted: #a0a0aa;
-  --primary: #f4f4f6;
-  --on-primary: #0f0f12;
+  --bg: #090d16;
+  --card: #111726;
+  --nav: #0d121f;
+  --soft: #172033;
+  --soft-2: #141c2d;
+  --line: #1f293d;
+  --line-input: #2c3a54;
+  --text: #f1f5f9;
+  --text-2: #cbd5e1;
+  --muted: #94a3b8;
+  --primary: #f1f5f9;
+  --on-primary: #090d16;
   --ok: #3ccb7f;
-  --ok-soft: #26262c;
+  --ok-soft: #172033;
   --on-ok-soft: #3ccb7f;
-  --tint-red: #26262c;
+  --tint-red: #172033;
   --on-tint-red: #ff8a8f;
-  --tint-yel: #26262c;
+  --tint-yel: #172033;
   --on-tint-yel: #f4b630;
   --danger: #ff6b6b;
-  --on-danger: #0f0f12;
-  --danger-soft: #26262c;
+  --on-danger: #090d16;
+  --danger-soft: #172033;
   --shadow-card: none;
   --shadow-card-hover: none;
   --shadow-pop: none;
   --card-border: var(--line);
-  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim: rgba(4, 7, 15, 0.72);
 
   color-scheme: dark;
 }

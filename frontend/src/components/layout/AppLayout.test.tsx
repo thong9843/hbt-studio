@@ -35,7 +35,7 @@ const geminiModelsMock = {
 };
 
 describe('Unified Studio UI: AppLayout & Sidebar & HbtCorePage', () => {
-  it('renders Sidebar with all 5 core studio sections and preserves HBT Core state across navigation', async () => {
+  it('renders Sidebar with 5 ordered sections and preserves HBT Core prompt state across navigation', async () => {
     stubFetch({
       'GET /api/health': health,
       'GET /api/projects': [],
@@ -50,9 +50,9 @@ describe('Unified Studio UI: AppLayout & Sidebar & HbtCorePage', () => {
           <Route element={<AppLayout />}>
             <Route path="/" element={<p>Dashboard Hub</p>} />
             <Route path="/core" element={<HbtCorePage />} />
-            <Route path="/projects" element={<p>Projects View</p>} />
             <Route path="/postv" element={<p>PostV Workspace</p>} />
             <Route path="/chatting" element={<p>Chatting Workspace</p>} />
+            <Route path="/library" element={<p>Asset Hub Workspace</p>} />
             <Route path="/settings" element={<p>Settings Workspace</p>} />
           </Route>
         </Routes>
@@ -61,36 +61,34 @@ describe('Unified Studio UI: AppLayout & Sidebar & HbtCorePage', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Điều hướng chính' });
-    expect(within(nav).getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('href', '/');
-    expect(within(nav).getByRole('link', { name: 'HBT Core' })).toHaveAttribute('href', '/core');
-    expect(within(nav).getByRole('link', { name: 'PostV' })).toHaveAttribute('href', '/postv');
-    expect(within(nav).getByRole('link', { name: 'Chatting' })).toHaveAttribute(
-      'href',
-      '/chatting',
-    );
-    expect(within(nav).getByRole('link', { name: 'Cài đặt' })).toHaveAttribute('href', '/settings');
+    const links = within(nav).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual([
+      'Trang chủ',
+      'HBT Core',
+      'PostV',
+      'Chatting',
+      'Thư viện',
+    ]);
 
-    // Chuyển sang Chế độ V2 và gõ câu nhắc đang dở dang
-    const tabV2 = await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ });
-    await user.click(tabV2);
-    const promptInput = screen.getByLabelText('Câu nhắc 1-Click Prompt');
+    // Thanh Prompt thông minh hiển thị trực tiếp (Prompt-first)
+    const promptInput = await screen.findByLabelText('Câu nhắc 1-Click Prompt');
     await user.type(promptInput, 'Bí ẩn Kim tự tháp Ai Cập');
     expect(promptInput).toHaveValue('Bí ẩn Kim tự tháp Ai Cập');
 
-    // Chuyển sang phân hệ PostV rồi Chatting rồi quay lại HBT Core
+    // Chuyển sang phân hệ PostV, Chatting, Thư viện rồi quay lại HBT Core
     await user.click(within(nav).getByRole('link', { name: 'PostV' }));
     expect(await screen.findByText('PostV Workspace')).toBeVisible();
 
     await user.click(within(nav).getByRole('link', { name: 'Chatting' }));
     expect(await screen.findByText('Chatting Workspace')).toBeVisible();
 
+    await user.click(within(nav).getByRole('link', { name: 'Thư viện' }));
+    expect(await screen.findByText('Asset Hub Workspace')).toBeVisible();
+
     await user.click(within(nav).getByRole('link', { name: 'HBT Core' }));
 
-    // Kiểm tra trạng thái tab V2 và câu nhắc đang nhập vẫn được giữ nguyên
-    expect(
-      await screen.findByRole('tab', { name: /Chế độ V2 · Tự động 1-Click Prompt/ }),
-    ).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByLabelText('Câu nhắc 1-Click Prompt')).toHaveValue(
+    // Kiểm tra câu nhắc đang nhập vẫn được giữ nguyên
+    expect(await screen.findByLabelText('Câu nhắc 1-Click Prompt')).toHaveValue(
       'Bí ẩn Kim tự tháp Ai Cập',
     );
   });

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from hbt.api import (
+    asset_hub,
     assets,
     backgrounds,
     chatting,
@@ -129,6 +130,7 @@ def create_app(
     for module in (
         health,
         projects,
+        asset_hub,
         assets,
         lint,
         settings_api,

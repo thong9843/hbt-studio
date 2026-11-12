@@ -4,7 +4,13 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { App } from './app/App';
 import { ToastProvider } from './components/Toast';
+import { applyTheme, readStoredTheme } from './utils/theme';
 import './index.css';
+
+// Mặc định khởi động Dark Studio (#090D16) nếu người dùng chưa chọn chế độ riêng
+if (readStoredTheme() === null) {
+  applyTheme('dark');
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },

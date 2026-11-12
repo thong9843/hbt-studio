@@ -95,11 +95,11 @@ describe('tokens.css v2', () => {
       '#16120f',
     ]);
     expect([d('--bg'), d('--card'), d('--soft'), d('--line'), d('--text')]).toEqual([
-      '#0f0f12',
-      '#18181c',
-      '#26262c',
-      '#26262c',
-      '#f4f4f6',
+      '#090d16',
+      '#111726',
+      '#172033',
+      '#1f293d',
+      '#f1f5f9',
     ]);
     expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#f4b630', '#b22228', '#b3261e']);
     expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#f4b630', '#b22228', '#ff6b6b']);

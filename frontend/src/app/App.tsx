@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
+import { AssetHubPage } from '../pages/AssetHubPage';
 import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
@@ -48,6 +49,7 @@ export function App() {
         </Route>
         <Route path="chatting" element={<ChattingHome />} />
         <Route path="chatting/:slug" element={<ChattingEditor />} />
+        <Route path="library" element={<AssetHubPage />} />
         <Route path="settings" element={<SettingsPage />} />
         {UiKit && (
           <Route

@@ -72,4 +72,3 @@ export const StudioWorkspaceContext = createContext<StudioWorkspaceDraft | null>
 export function useStudioWorkspace(): StudioWorkspaceDraft | null {
   return useContext(StudioWorkspaceContext);
 }
-

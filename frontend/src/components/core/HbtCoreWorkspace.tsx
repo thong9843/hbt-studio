@@ -2,21 +2,31 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
-import { api } from '../../api/endpoints';
+import { api, projectFileUrl } from '../../api/endpoints';
 import type {
   HbtCoreGeminiModel,
   HbtCoreScript,
   HbtCoreSegment,
   HbtCoreTopic,
 } from '../../api/types';
-import { useToast } from '../../hooks/toast';
 import { SAMPLE_V1_SCRIPT, useStudioWorkspace } from '../../hooks/studioWorkspace';
+import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
-import { AlertIcon, PlayIcon } from '../icons';
+import {
+  AlertIcon,
+  CheckIcon,
+  CopyIcon,
+  PlayIcon,
+  PlusIcon,
+  SettingsIcon,
+  SparklesIcon,
+  TrashIcon,
+} from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Field';
 import { Progress } from '../ui/Progress';
+import { cx } from '../ui/cx';
 
 const T = vi.hbtCore;
 
@@ -29,10 +39,19 @@ const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
 
 const STICKER_PRESETS = ['question', 'shock', 'laugh', 'think', 'check', 'warning'] as const;
 
+const STICKER_EMOJI: Record<string, string> = {
+  question: '🤔',
+  shock: '😲',
+  laugh: '😂',
+  think: '🧐',
+  check: '✅',
+  warning: '⚠️',
+};
+
 export interface HbtCoreWorkspaceProps {
   /** Nếu truyền slug từ dự án đang mở (`/p/:slug`) hoặc `/core?slug=...`. */
   slug?: string;
-  /** Nếu dùng bên trong Dialog cũ, truyền onClose để hiện nút Đóng bên cạnh nút chính. */
+  /** Nếu dùng bên trong Dialog cũ, truyền onClose để hiện nút Đóng. */
   onClose?: () => void;
   /** Cờ bật/tắt query khi nằm trong Dialog ẩn; mặc định `true` cho Workspace View. */
   active?: boolean;
@@ -53,8 +72,6 @@ export function HbtCoreWorkspace({
   const queryClient = useQueryClient();
   const shared = useStudioWorkspace();
 
-  // Local fallback state (khi component được mount độc lập hoặc có initialSlug riêng)
-  const [localMode, setLocalMode] = useState<'v1' | 'v2'>('v1');
   const [localTitle, setLocalTitle] = useState(SAMPLE_V1_SCRIPT.title);
   const [localTopic, setLocalTopic] = useState<HbtCoreTopic>('history');
   const [localSegments, setLocalSegments] = useState<HbtCoreSegment[]>(SAMPLE_V1_SCRIPT.segments);
@@ -68,11 +85,8 @@ export function HbtCoreWorkspace({
   const [localResultVideoUrl, setLocalResultVideoUrl] = useState<string | null>(null);
   const [localResultSlug, setLocalResultSlug] = useState<string | null>(initialSlug ?? null);
 
-  // Dùng shared context khi không gắn chặt vào initialSlug cụ thể để giữ dữ liệu khi đổi tab Sidebar
   const useShared = Boolean(shared && !initialSlug);
 
-  const mode = useShared ? shared!.mode : localMode;
-  const setMode = useShared ? shared!.setMode : setLocalMode;
   const title = useShared ? shared!.title : localTitle;
   const setTitle = useShared ? shared!.setTitle : setLocalTitle;
   const topic = useShared ? shared!.topic : localTopic;
@@ -94,6 +108,9 @@ export function HbtCoreWorkspace({
   const resultSlug = useShared ? shared!.resultSlug : localResultSlug;
   const setResultSlug = useShared ? shared!.setResultSlug : setLocalResultSlug;
 
+  const [selectedSegIndex, setSelectedSegIndex] = useState(0);
+  const [showAdvancedJson, setShowAdvancedJson] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [v2Loading, setV2Loading] = useState(false);
 
@@ -135,7 +152,7 @@ export function HbtCoreWorkspace({
         setResultSlug(initialSlug);
       })
       .catch(() => {
-        // Nếu dự án chưa có core_script thì giữ mẫu mặc định
+        // Giữ mẫu mặc định nếu dự án chưa có core_script
       });
     return () => {
       mounted = false;
@@ -151,6 +168,9 @@ export function HbtCoreWorkspace({
       }
     };
   }, []);
+
+  const safeIndex = Math.min(selectedSegIndex, Math.max(0, segments.length - 1));
+  const activeSegment = segments[safeIndex];
 
   const syncEditorToJsonText = (
     nextTitle: string,
@@ -213,6 +233,7 @@ export function HbtCoreWorkspace({
       }
       setTitle(nextTitle);
       setTopic(validTopic);
+      setV2Topic(validTopic);
       setSegments(nextSegs);
       setJsonError(null);
       return {
@@ -250,6 +271,7 @@ export function HbtCoreWorkspace({
       },
     ];
     setSegments(next);
+    setSelectedSegIndex(next.length - 1);
     syncEditorToJsonText(title, topic, next);
   };
 
@@ -257,7 +279,20 @@ export function HbtCoreWorkspace({
     if (segments.length <= 1) return;
     const next = segments.filter((_, i) => i !== index).map((s, idx) => ({ ...s, order: idx + 1 }));
     setSegments(next);
+    setSelectedSegIndex((prev) => Math.max(0, Math.min(prev, next.length - 1)));
     syncEditorToJsonText(title, topic, next);
+  };
+
+  const handleCopyImagePrompt = async (idx: number, text: string) => {
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIdx(idx);
+      toast.info(T.studio.copiedPrompt);
+      setTimeout(() => setCopiedIdx((curr) => (curr === idx ? null : curr)), 1600);
+    } catch {
+      toast.error(new Error(vi.export.publish.copyFailed));
+    }
   };
 
   const connectJobSse = (jobId: string, targetSlug: string) => {
@@ -394,9 +429,9 @@ export function HbtCoreWorkspace({
           res.message ||
           res.detail ||
           res.error ||
-          'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang Chế độ V1.';
+          'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
         setFallbackNotice(fallbackMsg);
-        setMode('v1');
+        setShowAdvancedJson(true);
         toast.error(new Error(fallbackMsg));
         return;
       }
@@ -405,6 +440,7 @@ export function HbtCoreWorkspace({
       setTitle(sc.title);
       setTopic((sc.topic as HbtCoreTopic) || v2Topic);
       setSegments(sc.segments);
+      setSelectedSegIndex(0);
       setJsonText(JSON.stringify(sc, null, 2));
       if (res.slug) {
         setResultSlug(res.slug);
@@ -414,7 +450,7 @@ export function HbtCoreWorkspace({
         connectJobSse(res.job_id, res.slug);
       }
     } catch (err) {
-      let msg = 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang Chế độ V1.';
+      let msg = 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
       if (err instanceof ApiError) {
         const errBody = err.body as {
           message?: unknown;
@@ -434,7 +470,7 @@ export function HbtCoreWorkspace({
         msg = err.message;
       }
       setFallbackNotice(msg);
-      setMode('v1');
+      setShowAdvancedJson(true);
       toast.error(new Error(msg));
     } finally {
       setV2Loading(false);
@@ -450,74 +486,153 @@ export function HbtCoreWorkspace({
         ? assets.gemini_models
         : DEFAULT_GEMINI_MODELS;
 
+  const activeImageSrc = (() => {
+    if (!activeSegment?.image) return null;
+    if (activeSegment.image.startsWith('http') || activeSegment.image.startsWith('/')) {
+      return activeSegment.image;
+    }
+    if (resultSlug && existingImages.includes(activeSegment.image)) {
+      return projectFileUrl(resultSlug, activeSegment.image);
+    }
+    return null;
+  })();
+
   return (
-    <div className="space-y-6">
-      <p className="text-small text-muted">{T.lead}</p>
-
-      {/* Thanh 2 Tab Chế độ V1 / V2 */}
-      <div role="tablist" aria-label={T.title} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'v1'}
-          onClick={() => setMode('v1')}
-          className={`flex items-center justify-between gap-2 rounded-inner border px-4 py-3 text-left text-small font-bold transition ${
-            mode === 'v1'
-              ? 'border-ink bg-hero text-on-hero'
-              : 'border-line bg-soft text-ink hover:bg-soft-2'
-          }`}
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {/* KHU VỰC TRÁI: WORKSPACE & PROMPT-FIRST INPUT */}
+      <div className="min-w-0 space-y-6">
+        {/* Thanh Prompt thông minh trung tâm */}
+        <section
+          aria-label="Thanh Prompt trung tâm"
+          className="rounded-card border border-line bg-card p-4 transition duration-150 focus-within:border-indigo-500/70"
         >
-          <span>{T.tabV1}</span>
-          <Badge tone="ok">{T.offlineBadge}</Badge>
-        </button>
+          <label htmlFor="hbt-core-prompt-input" className="sr-only">
+            {T.v2.promptLabel}
+          </label>
+          <textarea
+            id="hbt-core-prompt-input"
+            rows={3}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={T.studio.promptPlaceholder}
+            className="w-full resize-none bg-transparent text-body text-ink placeholder:text-muted focus:outline-none"
+          />
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'v2'}
-          onClick={() => setMode('v2')}
-          className={`flex items-center justify-between gap-2 rounded-inner border px-4 py-3 text-left text-small font-bold transition ${
-            mode === 'v2'
-              ? 'border-ink bg-hero text-on-hero'
-              : 'border-line bg-soft text-ink hover:bg-soft-2'
-          }`}
-        >
-          <span>{T.tabV2}</span>
-          <Badge tone="yel">{T.geminiBadge}</Badge>
-        </button>
-      </div>
+          {/* Thanh công cụ tích hợp ngay trong ô input */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label={T.v2.modelLabel}
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
+              >
+                {geminiModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
 
-      {/* Thông báo khi tự động chuyển hướng từ V2 sang V1 do lỗi API / hết quota */}
-      {fallbackNotice && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 rounded-inner bg-danger-soft p-3.5 text-small text-danger"
-        >
-          <AlertIcon size={18} />
-          <div className="space-y-1">
-            <p className="font-bold">{T.v2.fallbackNoticeTitle}</p>
-            <p>{fallbackNotice}</p>
+              <select
+                aria-label={T.topics.label}
+                value={v2Topic}
+                onChange={(e) => {
+                  const next = e.target.value as HbtCoreTopic;
+                  setV2Topic(next);
+                  setTopic(next);
+                  syncEditorToJsonText(title, next, segments);
+                }}
+                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="history">{T.topics.history}</option>
+                <option value="fun">{T.topics.fun}</option>
+                <option value="science">{T.topics.science}</option>
+                <option value="mystery">{T.topics.mystery}</option>
+              </select>
+
+              <button
+                type="button"
+                aria-expanded={showAdvancedJson}
+                aria-label={T.studio.advancedToggle}
+                title={T.studio.advancedToggle}
+                onClick={() => setShowAdvancedJson((v) => !v)}
+                className={cx(
+                  'flex items-center gap-1.5 rounded-inner border px-2.5 py-1.5 text-tiny font-bold transition',
+                  showAdvancedJson
+                    ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                    : 'border-line bg-soft text-muted hover:text-ink',
+                )}
+              >
+                <SettingsIcon size={14} />
+                <span>JSON</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {onClose && (
+                <Button tone="soft" size="sm" disabled={rendering || v2Loading} onClick={onClose}>
+                  {vi.common.close}
+                </Button>
+              )}
+              <Button
+                tone="soft"
+                size="sm"
+                disabled={rendering || v2Loading}
+                onClick={() => void handleStartV1Render()}
+              >
+                {rendering ? T.v1.renderingBtn : T.studio.renderBtn}
+              </Button>
+              <button
+                type="button"
+                disabled={v2Loading || rendering || !prompt.trim()}
+                onClick={() => void handleRunV2Prompt()}
+                className="inline-flex items-center gap-2 rounded-pill bg-gradient-to-r from-indigo-600 via-violet-600 to-amber-500 px-4 py-2 text-small font-bold text-white transition duration-150 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <SparklesIcon size={16} />
+                <span>{v2Loading ? T.studio.generatingBtn : T.studio.generateBtn}</span>
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        </section>
 
-      {mode === 'v1' ? (
-        <div className="space-y-5" role="tabpanel" aria-label={T.tabV1}>
-          {/* Khung Textarea lớn dán trực tiếp khối JSON kịch bản */}
-          <div className="space-y-2">
+        {/* Thông báo fallback V2 -> V1 nếu Gemini lỗi / hết quota */}
+        {fallbackNotice && (
+          <div
+            role="alert"
+            className="flex items-start gap-2.5 rounded-card border border-danger/30 bg-danger-soft p-3.5 text-small text-danger"
+          >
+            <AlertIcon size={18} />
+            <div className="space-y-0.5">
+              <p className="font-bold">{T.v2.fallbackNoticeTitle}</p>
+              <p>{fallbackNotice}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Menu thu gọn Vi chỉnh nâng cao (JSON thủ công - giấu mặc định) */}
+        {showAdvancedJson && (
+          <section
+            aria-label={T.studio.advancedTitle}
+            className="space-y-3 rounded-card border border-indigo-500/30 bg-card p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-small font-bold">{T.studio.advancedTitle}</p>
+              <Badge tone="ok">{T.offlineBadge}</Badge>
+            </div>
             <Textarea
               label={T.v1.jsonLabel}
               value={jsonText}
-              rows={8}
+              rows={7}
               spellCheck={false}
               error={jsonError ?? undefined}
-              className="!bg-hero !font-mono !text-small !text-on-hero"
+              className="!font-mono !text-tiny"
               onChange={(e) => {
                 setJsonText(e.target.value);
                 setJsonError(null);
               }}
             />
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Button
                 tone="soft"
                 size="sm"
@@ -528,63 +643,72 @@ export function HbtCoreWorkspace({
               >
                 {T.v1.parseBtn}
               </Button>
-              <span className="text-tiny text-muted">
-                Chế độ V1 hoàn toàn không gọi API ngoài (0 token, offline 100%).
-              </span>
-            </div>
-          </div>
-
-          {/* Chỉnh sửa tiêu đề & chủ đề nhạc nền */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              label={T.v1.videoTitleLabel}
-              value={title}
-              onChange={(e) => {
-                const v = e.target.value;
-                setTitle(v);
-                syncEditorToJsonText(v, topic, segments);
-              }}
-            />
-            <div className="ui-field">
-              <label htmlFor="hbt-core-v1-topic" className="ui-label">
-                {T.topics.label}
-              </label>
-              <select
-                id="hbt-core-v1-topic"
-                className="ui-input"
-                value={topic}
+              <Input
+                aria-label={T.v1.videoTitleLabel}
+                value={title}
                 onChange={(e) => {
-                  const nextTopic = e.target.value as HbtCoreTopic;
-                  setTopic(nextTopic);
-                  syncEditorToJsonText(title, nextTopic, segments);
+                  const v = e.target.value;
+                  setTitle(v);
+                  syncEditorToJsonText(v, topic, segments);
                 }}
-              >
-                <option value="history">{T.topics.history}</option>
-                <option value="fun">{T.topics.fun}</option>
-                <option value="science">{T.topics.science}</option>
-                <option value="mystery">{T.topics.mystery}</option>
-              </select>
+                className="!min-h-9 !text-small"
+              />
             </div>
+          </section>
+        )}
+
+        {/* Danh sách các phân cảnh (Segments Cards) */}
+        <section aria-label={T.v1.segmentsTitle} className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-body font-extrabold">{title}</h2>
+              <Badge tone="neutral">{segments.length} cảnh</Badge>
+            </div>
+            <Button tone="soft" size="sm" onClick={addSegment}>
+              <PlusIcon size={16} />
+              {T.v1.addSegment}
+            </Button>
           </div>
 
-          {/* Danh sách từng phân đoạn cho phép chỉnh sửa trực tiếp lời thoại, ảnh, SFX */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-small font-bold">{T.v1.segmentsTitle}</h3>
-              <Button tone="soft" size="sm" onClick={addSegment}>
-                {T.v1.addSegment}
-              </Button>
-            </div>
-
-            <ul className="space-y-3">
-              {segments.map((seg, idx) => (
-                <li key={idx} className="space-y-3 rounded-inner border border-line bg-soft p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-small font-extrabold">{T.v1.segmentOrder(idx + 1)}</span>
+          <ul className="space-y-3">
+            {segments.map((seg, idx) => {
+              const selected = idx === safeIndex;
+              return (
+                <li
+                  key={idx}
+                  onClick={() => setSelectedSegIndex(idx)}
+                  className={cx(
+                    'cursor-pointer space-y-3 rounded-card border p-4 transition duration-150',
+                    selected
+                      ? 'border-indigo-500/80 bg-card shadow-sm'
+                      : 'border-line bg-card/70 hover:border-line-input hover:bg-card',
+                  )}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-tiny font-extrabold text-indigo-300">
+                        {idx + 1}
+                      </span>
+                      <span className="text-small font-extrabold">
+                        {seg.title || T.v1.segmentOrder(idx + 1)}
+                      </span>
+                      <Badge tone="neutral">
+                        {STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'}{' '}
+                        {seg.sticker || 'question'}
+                      </Badge>
+                    </div>
                     {segments.length > 1 && (
-                      <Button tone="soft" size="sm" onClick={() => removeSegment(idx)}>
-                        {T.v1.removeSegment(idx + 1)}
-                      </Button>
+                      <button
+                        type="button"
+                        aria-label={T.v1.removeSegment(idx + 1)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeSegment(idx);
+                        }}
+                        className="rounded-inner p-1.5 text-muted transition hover:bg-danger/15 hover:text-danger"
+                      >
+                        <TrashIcon size={15} />
+                      </button>
                     )}
                   </div>
 
@@ -609,7 +733,7 @@ export function HbtCoreWorkspace({
                       >
                         {STICKER_PRESETS.map((st) => (
                           <option key={st} value={st}>
-                            {st}
+                            {STICKER_EMOJI[st]} {st}
                           </option>
                         ))}
                       </select>
@@ -623,13 +747,33 @@ export function HbtCoreWorkspace({
                     onChange={(e) => updateSegment(idx, { text: e.target.value })}
                   />
 
-                  <Textarea
-                    label={T.v1.segmentImagePromptLabel(idx + 1)}
-                    rows={2}
-                    value={seg.image_prompt ?? ''}
-                    placeholder="Cinematic shot..., 9:16 vertical framing"
-                    onChange={(e) => updateSegment(idx, { image_prompt: e.target.value })}
-                  />
+                  {/* Câu lệnh ComfyUI kèm nút Copy 1-click */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor={`hbt-core-img-prompt-${idx}`} className="ui-label !mb-0">
+                        {T.v1.segmentImagePromptLabel(idx + 1)}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleCopyImagePrompt(idx, seg.image_prompt ?? '');
+                        }}
+                        className="inline-flex items-center gap-1 rounded-inner bg-soft px-2.5 py-1 text-tiny font-bold text-ink transition hover:bg-indigo-600 hover:text-white"
+                      >
+                        {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+                        <span>{T.studio.copyPrompt}</span>
+                      </button>
+                    </div>
+                    <textarea
+                      id={`hbt-core-img-prompt-${idx}`}
+                      rows={2}
+                      value={seg.image_prompt ?? ''}
+                      placeholder="Cinematic shot..., 9:16 vertical framing"
+                      onChange={(e) => updateSegment(idx, { image_prompt: e.target.value })}
+                      className="ui-input !min-h-0 font-mono text-tiny"
+                    />
+                  </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
@@ -673,132 +817,141 @@ export function HbtCoreWorkspace({
                     </div>
                   </div>
                 </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-4" role="tabpanel" aria-label={T.tabV2}>
-          <Textarea
-            data-autofocus
-            label={T.v2.promptLabel}
-            rows={4}
-            value={prompt}
-            placeholder={T.v2.promptPlaceholder}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
+              );
+            })}
+          </ul>
+        </section>
+      </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="ui-field">
-              <label htmlFor="hbt-core-v2-topic" className="ui-label">
-                {T.topics.label}
-              </label>
-              <select
-                id="hbt-core-v2-topic"
-                className="ui-input"
-                value={v2Topic}
-                onChange={(e) => setV2Topic(e.target.value as HbtCoreTopic)}
-              >
-                <option value="history">{T.topics.history}</option>
-                <option value="fun">{T.topics.fun}</option>
-                <option value="science">{T.topics.science}</option>
-                <option value="mystery">{T.topics.mystery}</option>
-              </select>
-            </div>
-
-            <div className="ui-field">
-              <label htmlFor="hbt-core-v2-model" className="ui-label">
-                {T.v2.modelLabel}
-              </label>
-              <select
-                id="hbt-core-v2-model"
-                className="ui-input"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-              >
-                {geminiModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Khối hiển thị tiến trình SSE VieNeu-TTS & Render */}
-      {(rendering || resultVideoUrl || renderError) && (
+      {/* KHU VỰC PHẢI: LIVE VERTICAL PREVIEW 9:16 & TIẾN TRÌNH */}
+      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
         <section
-          aria-label={T.progress.title}
-          className="space-y-3 rounded-inner border border-line bg-soft-2 p-4"
+          aria-label={T.studio.previewTitle}
+          className="space-y-3 rounded-card border border-line bg-card p-4"
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-small font-bold">{T.progress.title}</p>
-            <span className="num text-small font-extrabold">{Math.round(progressPct)}%</span>
+            <h2 className="text-small font-extrabold uppercase tracking-wide text-muted">
+              {T.studio.previewTitle}
+            </h2>
+            <span className="text-tiny font-bold text-indigo-300">
+              {T.studio.segmentLabel(safeIndex + 1, segments.length)}
+            </span>
           </div>
-          <Progress value={progressPct} label={T.progress.title} />
-          {voiceDetail && progressStep === 'voice' && (
-            <p className="text-small font-semibold">
-              {T.progress.voiceStep(voiceDetail.current, voiceDetail.total, voiceDetail.percent)}
-            </p>
-          )}
-          {progressMsg && <p className="text-tiny text-muted">{progressMsg}</p>}
 
-          {renderError && (
-            <p role="alert" className="text-small font-bold text-danger">
-              {renderError}
-            </p>
-          )}
-
-          {resultVideoUrl && (
-            <div className="space-y-3 pt-2">
-              <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={resultVideoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ui-btn ui-btn-ink"
-                >
-                  <PlayIcon size={18} />
-                  {T.progress.watchVideo}
-                </a>
-                {resultSlug && (
-                  <Link
-                    to={`/p/${encodeURIComponent(resultSlug)}`}
-                    className="ui-btn ui-btn-soft"
-                    onClick={onClose}
-                  >
-                    {T.progress.openProject}
-                  </Link>
-                )}
+          {/* Khung giả lập video dọc 9:16 */}
+          <div className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-[22px] border border-line-input bg-gradient-to-b from-[#131b2e] via-[#0d1322] to-[#090d16] shadow-lg">
+            {activeImageSrc ? (
+              <img
+                src={activeImageSrc}
+                alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
+                <span className="text-3xl opacity-60">🖼️</span>
+                <p className="mt-2 line-clamp-3 text-tiny text-muted">
+                  {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+                </p>
               </div>
-            </div>
-          )}
-        </section>
-      )}
+            )}
 
-      {/* Thanh hành động chính cuối Workspace */}
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
-        {onClose && (
-          <Button tone="soft" disabled={rendering || v2Loading} onClick={onClose}>
-            {vi.common.close}
-          </Button>
-        )}
-        {mode === 'v1' ? (
-          <Button disabled={rendering} onClick={() => void handleStartV1Render()}>
-            {rendering ? T.v1.renderingBtn : T.v1.renderBtn}
-          </Button>
-        ) : (
-          <Button
-            disabled={v2Loading || rendering || !prompt.trim()}
-            onClick={() => void handleRunV2Prompt()}
+            {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
+            <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
+              <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
+                {activeSegment?.title || title}
+              </p>
+            </div>
+
+            {/* Sticker biểu cảm */}
+            <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
+              <span aria-hidden="true">
+                {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
+              </span>
+            </div>
+
+            {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
+            <div className="absolute inset-x-4 bottom-8 text-center">
+              <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
+                {activeSegment?.text || '…'}
+              </p>
+            </div>
+          </div>
+
+          {/* Điều hướng nhanh cảnh trước / sau */}
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              tone="soft"
+              size="sm"
+              disabled={safeIndex <= 0}
+              onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
+            >
+              ← Trước
+            </Button>
+            <Button
+              tone="soft"
+              size="sm"
+              disabled={safeIndex >= segments.length - 1}
+              onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
+            >
+              Sau →
+            </Button>
+          </div>
+        </section>
+
+        {/* Khối hiển thị tiến trình SSE VieNeu-TTS & Render */}
+        {(rendering || resultVideoUrl || renderError) && (
+          <section
+            aria-label={T.progress.title}
+            className="space-y-3 rounded-card border border-line bg-card p-4"
           >
-            {v2Loading ? T.v2.submittingBtn : T.v2.submitBtn}
-          </Button>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-small font-bold">{T.progress.title}</p>
+              <span className="num text-small font-extrabold text-amber-400">
+                {Math.round(progressPct)}%
+              </span>
+            </div>
+            <Progress value={progressPct} label={T.progress.title} />
+            {voiceDetail && progressStep === 'voice' && (
+              <p className="text-small font-semibold">
+                {T.progress.voiceStep(voiceDetail.current, voiceDetail.total, voiceDetail.percent)}
+              </p>
+            )}
+            {progressMsg && <p className="text-tiny text-muted">{progressMsg}</p>}
+
+            {renderError && (
+              <p role="alert" className="text-small font-bold text-danger">
+                {renderError}
+              </p>
+            )}
+
+            {resultVideoUrl && (
+              <div className="space-y-3 pt-2">
+                <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={resultVideoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ui-btn ui-btn-ink ui-btn-sm"
+                  >
+                    <PlayIcon size={16} />
+                    {T.progress.watchVideo}
+                  </a>
+                  {resultSlug && (
+                    <Link
+                      to={`/p/${encodeURIComponent(resultSlug)}`}
+                      className="ui-btn ui-btn-soft ui-btn-sm"
+                      onClick={onClose}
+                    >
+                      {T.progress.openProject}
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
         )}
-      </div>
+      </aside>
     </div>
   );
 }
