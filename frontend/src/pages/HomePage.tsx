@@ -6,6 +6,7 @@ import { api } from '../api/endpoints';
 import type { ProjectSummary, RenderSummary } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
+import { KanbanBoard } from '../components/KanbanBoard';
 import { ErrorNote } from '../components/ErrorNote';
 import {
   CheckIcon,
@@ -410,6 +411,8 @@ export function HomePage() {
               onCancel={() => setDeleting(null)}
             />
           )}
+
+          <KanbanBoard />
         </>
       )}
     </main>
