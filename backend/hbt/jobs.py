@@ -45,7 +45,7 @@ from hbt.postv.voice import (
 )
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
-from shared.sse_manager import format_sse_progress
+from hbt.shared.sse_manager import format_sse_progress
 
 log = logging.getLogger(__name__)
 
