@@ -1237,7 +1237,7 @@ export const vi = {
     },
     recentProjects: 'Dự án Chatting gần đây',
     noRecent: 'Chưa có dự án nào',
-    noOllama: 'Chưa thấy Ollama. Mở Ollama rồi thử lại.',
+    noGemini: 'Chưa cấu hình GEMINI_API_KEY. Thêm khoá vào .env để dùng AI viết kịch bản.',
     regenBtn: 'Viết lại bằng AI',
     addMsg: 'Thêm tin',
     delMsg: 'Xoá',

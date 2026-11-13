@@ -1,18 +1,18 @@
-"""Tests cho OllamaClient và prompt (CH1)."""
+"""Tests cho GeminiChatClient và prompt (CH1)."""
 
 import json
 from unittest.mock import patch
 
 import httpx
 
-from hbt.chatting.llm import OllamaClient
+from hbt.chatting.llm import GeminiChatClient
 from hbt.chatting.prompt import SYSTEM_PROMPT, build_user_prompt
 
 
 def test_system_prompt_rules():
     assert "Bạn là biên kịch video ngắn tiếng Việt" in SYSTEM_PROMPT
     assert "me" in SYSTEM_PROMPT
-    assert "qwen2.5:3b-instruct" in OllamaClient().model or "qwen" in OllamaClient().model
+    assert "gemini" in GeminiChatClient().model
 
 
 def test_build_user_prompt():
@@ -23,28 +23,26 @@ def test_build_user_prompt():
     assert "Bình luận nổi bật:\n- Bình luận 1" in p
 
 
-def test_ollama_check_status_offline():
-    with patch("httpx.Client.get", side_effect=httpx.ConnectError("Offline")):
-        client = OllamaClient()
+def test_gemini_check_status_missing_key():
+    with patch("hbt.chatting.llm.load_gemini_api_key", return_value=""):
+        client = GeminiChatClient()
         st = client.check_status()
-        assert st["ollama_running"] is False
+        assert st["gemini_configured"] is False
         assert st["model_available"] is False
 
 
-def test_ollama_check_status_online_with_model():
-    mock_resp = httpx.Response(
-        200,
-        json={"models": [{"name": "qwen2.5:3b-instruct:latest"}, {"name": "llama3:latest"}]},
-        request=httpx.Request("GET", "http://127.0.0.1:11434/api/tags"),
-    )
-    with patch("httpx.Client.get", return_value=mock_resp):
-        client = OllamaClient(model="qwen2.5:3b-instruct")
+def test_gemini_check_status_configured():
+    with patch(
+        "hbt.chatting.llm.load_gemini_api_key",
+        return_value="AIzaSyTestKeyForUnitTestsOnly1234567890",
+    ):
+        client = GeminiChatClient(model="gemini-3.8-flash")
         st = client.check_status()
-        assert st["ollama_running"] is True
+        assert st["gemini_configured"] is True
         assert st["model_available"] is True
 
 
-def test_ollama_generate_chat_success():
+def test_gemini_generate_chat_success():
     expected_payload = {
         "title": "Chuyện nhặt ví",
         "characters": [
@@ -60,33 +58,34 @@ def test_ollama_generate_chat_success():
     mock_resp = httpx.Response(
         200,
         json={
-            "message": {"content": json.dumps(expected_payload)},
-            "eval_count": 85,
+            "candidates": [{"content": {"parts": [{"text": json.dumps(expected_payload)}]}}],
+            "usageMetadata": {"candidatesTokenCount": 85},
         },
-        request=httpx.Request("POST", "http://127.0.0.1:11434/api/chat"),
+        request=httpx.Request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        ),
     )
 
-    captured_req = {}
-
-    def mock_post(*args, **kwargs):
-        captured_req["json"] = kwargs.get("json")
-        return mock_resp
-
-    with patch("httpx.Client.post", side_effect=mock_post):
-        client = OllamaClient(model="qwen2.5:3b-instruct")
+    with (
+        patch(
+            "hbt.shared.llm.load_gemini_api_key",
+            return_value="AIzaSyTestKeyForUnitTestsOnly1234567890",
+        ),
+        patch("httpx.Client.post", return_value=mock_resp),
+    ):
+        client = GeminiChatClient(model="gemini-3.8-flash")
         doc, timings = client.generate_chat("Tiêu đề", "Nội dung")
 
         assert doc["title"] == "Chuyện nhặt ví"
         assert timings["llm_tokens"] == 85
         assert timings["llm_retry"] == 0
-
-        # Kiểm tra lời gọi gửi keep_alive: 0
-        assert captured_req["json"].get("keep_alive") == 0
+        assert timings["model"] == "gemini-3.8-flash"
 
 
 def test_fake_llm_mode(monkeypatch):
     monkeypatch.setenv("CHATTING_FAKE_LLM", "1")
-    client = OllamaClient()
+    client = GeminiChatClient()
     doc, timings = client.generate_chat("Tiêu đề test", "Nội dung test")
     assert doc["title"] == "Tiêu đề test"
     assert len(doc["characters"]) == 2

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hbt.chatting.llm import OllamaClient, sanitize_chat_raw
+from hbt.chatting.llm import GeminiChatClient, sanitize_chat_raw
 from hbt.chatting.models import Character, ChatDoc, Message
 from hbt.chatting.render import render_chat_video
 from hbt.chatting.sources import (
@@ -158,11 +158,11 @@ def run_chatting_auto_job(
             {
                 "phase": "llm",
                 "percent": 30,
-                "text": "Ollama đang viết kịch bản chat...",
+                "text": "Gemini đang viết kịch bản chat...",
                 "timings": timings,
             },
         )
-        llm_client = OllamaClient(model=chatting_model)
+        llm_client = GeminiChatClient(model=chatting_model)
         chat_raw, llm_timings = llm_client.generate_chat(
             title=source_data["title"],
             body=source_data["body"],

@@ -899,11 +899,7 @@ class JobManager:
             library_dir = self.library_dir
             brand_dir = self.brand_dir
             voice_provider = self.voice
-            chatting_model = (
-                self.app_settings.load().whisper_model  # fallback if needed
-                if False
-                else os.environ.get("CHATTING_MODEL", "qwen2.5:3b-instruct")
-            )
+            chatting_model = os.environ.get("CHATTING_MODEL", "gemini-3.8-flash")
 
             direct_script = getattr(job, "chatting_direct_script", False)
             target_duration_s = getattr(job, "chatting_target_duration_s", None)

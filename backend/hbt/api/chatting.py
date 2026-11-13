@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
-from hbt.chatting.llm import OllamaClient, sanitize_chat_raw
+from hbt.chatting.llm import DEFAULT_MODEL, GeminiChatClient, sanitize_chat_raw
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.stickers import count_stickers_per_tag
 from hbt.chatting.store import (
@@ -45,17 +45,16 @@ class RenderChatBody(BaseModel):
 
 @router.get("/chatting/status")
 def get_chatting_status(state: State) -> dict[str, Any]:
-    """Kiểm tra trạng thái Ollama và thư viện sticker (không bao giờ trả về lỗi 500)."""
-    default_m = "qwen2.5:3b-instruct"
+    """Kiểm tra trạng thái Gemini API Key và thư viện sticker (không bao giờ trả về lỗi 500)."""
     model_name = os.environ.get(
-        "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+        "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
     )
-    client = OllamaClient(model=model_name)
-    ollama_info = client.check_status()
+    client = GeminiChatClient(model=model_name)
+    llm_info = client.check_status()
     sticker_counts = count_stickers_per_tag(state.settings.library_dir)
 
     return {
-        **ollama_info,
+        **llm_info,
         "stickers": sticker_counts,
         "total_stickers": sum(sticker_counts.values()),
     }
@@ -72,20 +71,19 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
     """Tạo dự án Chatting và khởi động job chatting_auto 4 pha."""
     raw_input = body.input.strip()
 
-    # 1. Kiểm tra Ollama nếu dùng chế độ viết AI
+    # 1. Kiểm tra Gemini API Key nếu dùng chế độ viết AI
     if not body.direct_script:
-        default_m = "qwen2.5:3b-instruct"
         model_name = os.environ.get(
-            "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+            "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
         )
-        client = OllamaClient(model=model_name)
+        client = GeminiChatClient(model=model_name)
         status = client.check_status()
 
         is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
-        if not is_fake_llm and not status["ollama_running"]:
+        if not is_fake_llm and not status["gemini_configured"]:
             raise HTTPException(
                 status_code=503,
-                detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.",
+                detail="Chưa cấu hình GEMINI_API_KEY. Thêm khoá vào .env rồi thử lại.",
             )
 
     # 2. Khởi tạo slug và ghi job.json ban đầu
@@ -266,17 +264,19 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
         )
 
     doc = load_chat(state.settings.workspace_dir, slug)
-    default_m = "qwen2.5:3b-instruct"
     model_name = os.environ.get(
-        "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+        "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
     )
-    client = OllamaClient(model=model_name)
+    client = GeminiChatClient(model=model_name)
 
     is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
     if not is_fake_llm:
         st = client.check_status()
-        if not st["ollama_running"]:
-            raise HTTPException(status_code=503, detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.")
+        if not st["gemini_configured"]:
+            raise HTTPException(
+                status_code=503,
+                detail="Chưa cấu hình GEMINI_API_KEY. Thêm khoá vào .env rồi thử lại.",
+            )
 
     try:
         chat_raw, llm_timings = client.generate_chat(
@@ -287,7 +287,7 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
         )
         chat_raw = sanitize_chat_raw(chat_raw)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi sinh kịch bản Ollama: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Lỗi sinh kịch bản Gemini: {e}") from e
 
     # Cập nhật messages, warnings và title (khớp người gửi với doc.characters hiện tại)
     char_map: dict[str, str] = {}
