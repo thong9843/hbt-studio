@@ -394,8 +394,29 @@ def _best_candidate_url(image_versions2: Any) -> str | None:
     return best_url
 
 
+def _best_video_url(video_versions: Any) -> str | None:
+    """Chọn URL video .mp4 có độ phân giải tốt nhất từ video_versions."""
+    if not isinstance(video_versions, list) or not video_versions:
+        return None
+    best_url: str | None = None
+    best_score = -1
+    for item in video_versions:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        w = int(item.get("width") or 0)
+        h = int(item.get("height") or 0)
+        score = w * h
+        if score > best_score:
+            best_score = score
+            best_url = url
+    return best_url
+
+
 def _node_media_urls(node: dict[str, Any]) -> list[str]:
-    """Trích xuất ảnh đính kèm trực tiếp trên 1 node bài viết / bình luận Threads."""
+    """Trích xuất ảnh, GIF và video (.mp4) đính kèm trực tiếp trên 1 node bài viết / bình luận Threads."""
     urls: list[str] = []
 
     def _add(u: str | None) -> None:
@@ -409,9 +430,13 @@ def _node_media_urls(node: dict[str, Any]) -> list[str]:
     if isinstance(carousel, list) and carousel:
         for item in carousel:
             if isinstance(item, dict):
+                _add(_best_video_url(item.get("video_versions")))
                 _add(_best_candidate_url(item.get("image_versions2")))
                 if isinstance(item.get("display_url"), str):
                     _add(item.get("display_url"))
+    _add(_best_video_url(node.get("video_versions")))
+    if isinstance(node.get("gif_url"), str):
+        _add(node.get("gif_url"))
     if "image_versions2" in node:
         _add(_best_candidate_url(node.get("image_versions2")))
     if isinstance(node.get("display_url"), str):
@@ -500,7 +525,7 @@ def download_post_media(
         return []
     media_dir.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
-    fmt_ext = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+    fmt_ext = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "GIF": ".gif"}
 
     try:
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=BOT_HEADERS) as client:
@@ -512,10 +537,17 @@ def download_post_media(
                     resp = client.get(clean_u)
                     if resp.status_code != 200 or not resp.content:
                         continue
-                    with Image.open(io.BytesIO(resp.content)) as im:
-                        im.verify()
-                    with Image.open(io.BytesIO(resp.content)) as im2:
-                        ext = fmt_ext.get((im2.format or "").upper(), ".jpg")
+                    ctype = (resp.headers.get("content-type") or "").lower()
+                    path_lower = urlparse(clean_u).path.lower()
+                    if "video/mp4" in ctype or path_lower.endswith(".mp4"):
+                        ext = ".mp4"
+                    elif "image/gif" in ctype or path_lower.endswith(".gif"):
+                        ext = ".gif"
+                    else:
+                        with Image.open(io.BytesIO(resp.content)) as im:
+                            im.verify()
+                        with Image.open(io.BytesIO(resp.content)) as im2:
+                            ext = fmt_ext.get((im2.format or "").upper(), ".jpg")
                     target = media_dir / f"{prefix}_{idx:02d}{ext}"
                     target.write_bytes(resp.content)
                     saved.append(target)

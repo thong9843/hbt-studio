@@ -307,7 +307,11 @@ def _render_postv(
     )
     project = load_postv(project_dir)
     job_id = opts.job_id or time.strftime("%Y%m%d-%H%M%S") + ("-preview" if opts.preview else "")
-    job_dir = project_dir / "renders" / job_id
+    assets_root = getattr(settings, "assets_dir", None)
+    if assets_root is not None:
+        job_dir = Path(assets_root) / "renders" / "postv" / job_id
+    else:
+        job_dir = Path(__file__).resolve().parents[3] / "assets" / "renders" / "postv" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     rep = _Reporter(job_dir / "log.txt", progress)
     warnings: list[str] = []
@@ -441,7 +445,16 @@ def _render_postv(
 
     resolved_memes: dict[int, tuple[Path, float, float, str, bool]] = {}
     meme_durations: dict[int, float] = {}
+    last_meme_idx = -3
     for k, seg in enumerate(segs):
+        # Loại bỏ segment rỗng (không có chữ và không có media hợp lệ)
+        seg_text = (getattr(seg, "text", "") or "").strip()
+        seg_media = [m for m in (getattr(seg, "media", None) or []) if m]
+        if not seg_text and not seg_media:
+            continue
+        # Giới hạn mật độ meme: tối đa 1 meme / 2-3 đoạn, giữ đúng thứ tự kịch bản
+        if k - last_meme_idx < 2:
+            continue
         m_id = getattr(seg, "meme_id", None)
         if not m_id:
             continue
@@ -461,6 +474,7 @@ def _render_postv(
         m_pos = getattr(seg, "meme_pos", "center")
         resolved_memes[k] = (m_file, cutin_dur, ss_start, m_pos, needs_loop)
         meme_durations[k] = cutin_dur
+        last_meme_idx = k
 
     if meme_durations:
         padded_wav = build / "voice_meme_padded.wav"
