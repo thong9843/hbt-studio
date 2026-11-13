@@ -122,5 +122,6 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 | **CH0–CH4**| ☑ | **`v1.16.0`**| **Chatting hoàn chỉnh (Ollama Qwen2.5-3B, Messenger/Zalo, stickers, UI 3 cột, bench ~91s, gộp tài liệu)** |
 | **Fix Chatting** | ☑ | **`v1.16.1`** | **Sanitize LLM (cắt tin $\le$ 900 ký tự giữ đầu + 2 cuối, lọc sticker), cảnh báo UI, hỗ trợ Threads** |
 | **CH5** | ☑ | **`v1.18.1`** | **Cải tiến Chatting: Tách sạch lời thoại TTS (bỏ mốc giờ/mô tả), hybrid sub-frames 60fps mượt (typing sine wave, pop spring, cuộn mượt), UI Messenger chuẩn (header avatar active, grouped bubble)** |
+| **Phase 6** | ☑ | **`v2.1.0`** | **Creator Workstation: PostV video/gif & meme cap, SQLite Media Index (`workspace/studio.db`), Kanban 4 cột, Clipper 9:16, OpenCut-style Video Editor + Safe-Zone, Scheduler UI (CI run 43399203837 xanh)** |
 | G4 | ☐ | `v1.19.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
 | GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |
