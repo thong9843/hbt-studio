@@ -18,7 +18,6 @@ from hbt.api import (
     chatting,
     core,
     files,
-    gd2,
     health,
     lint,
     memes,
@@ -142,7 +141,6 @@ def create_app(
         backgrounds,
         voices,
         memes,
-        gd2,
         chatting,
         core,
     ):

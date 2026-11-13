@@ -783,14 +783,6 @@ def _step_script(
         except Exception:
             pass
 
-    if not chosen_voice and ws_dir:
-        try:
-            from hbt.gd2.prefs import Gd2Prefs
-
-            chosen_voice = Gd2Prefs(ws_dir).voice_id()
-        except Exception:
-            pass
-
     if not chosen_voice and job_manager.voice is not None:
         try:
             voices = job_manager.voice.list_voices()
