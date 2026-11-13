@@ -5,15 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from hbt.jobs import JobManager
-from hbt.storage import Storage
-from shared.ffmpeg_utils import (
+from hbt.shared.ffmpeg_utils import (
     FFMPEG_ENCODE_CLAMP,
     FFMPEG_RESOURCE_CLAMP,
     build_acrossfade_filter_graph,
     build_scale_9_16_filter,
 )
-from shared.sse_manager import SSEProgressEmitter, format_sse_progress
-from shared.tts_client import resolve_voice_id
+from hbt.shared.sse_manager import SSEProgressEmitter, format_sse_progress
+from hbt.shared.tts_client import resolve_voice_id
+from hbt.storage import Storage
 
 
 def test_shared_tts_and_ffmpeg_and_sse() -> None:

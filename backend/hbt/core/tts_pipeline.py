@@ -26,14 +26,14 @@ from hbt.core.voice import (
     wav_duration_us,
 )
 from hbt.postv.voice import VieNeuProvider, VoiceProvider
-from shared.ffmpeg_utils import measure_audio_duration as _shared_measure_audio_duration
-from shared.tts_client import (
+from hbt.shared.ffmpeg_utils import measure_audio_duration as _shared_measure_audio_duration
+from hbt.shared.tts_client import (
     DEFAULT_VOICE_ALIAS,
 )
-from shared.tts_client import (
+from hbt.shared.tts_client import (
     resolve_voice_id as _shared_resolve_voice_id,
 )
-from shared.tts_client import (
+from hbt.shared.tts_client import (
     synthesize_single_segment_sync as _shared_synthesize_single,
 )
 

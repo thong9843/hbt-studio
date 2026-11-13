@@ -21,7 +21,7 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
-from hbt.gd2.voice import build_hbt_plan, spoken_chunks, synthesize_hbt
+from hbt.core.hbt_voice import build_hbt_plan, spoken_chunks, synthesize_hbt
 from hbt.library import MusicLibrary
 from hbt.models import Music, Project, Voice
 from hbt.pipeline import cancel
@@ -44,8 +44,8 @@ from hbt.postv.voice import (
     synthesize_plan,
 )
 from hbt.sensitive import SensitiveStore
+from hbt.shared.sse_manager import format_sse_progress
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
-from shared.sse_manager import format_sse_progress
 
 log = logging.getLogger(__name__)
 

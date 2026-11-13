@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
-from shared.ffmpeg_utils import ACROSSFADE_DURATION_S, build_acrossfade_filter_graph
+from hbt.shared.ffmpeg_utils import ACROSSFADE_DURATION_S, build_acrossfade_filter_graph
 
 logger = logging.getLogger(__name__)
 

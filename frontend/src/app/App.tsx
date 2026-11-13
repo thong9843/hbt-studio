@@ -1,4 +1,3 @@
-import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AssetHubPage } from '../pages/AssetHubPage';
@@ -20,10 +19,6 @@ import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
 import { ChattingHome } from '../pages/chatting/ChattingHome';
 import { ChattingEditor } from '../pages/chatting/ChattingEditor';
-
-// Trang xem bộ thành phần: chỉ có khi `npm run dev`. Vite thay `import.meta.env.DEV` bằng
-// `false` khi build nên cả nhánh này (và file trang) bị loại khỏi dist/.
-const UiKit = import.meta.env.DEV ? lazy(() => import('../pages/Gallery')) : null;
 
 export function App() {
   return (
@@ -51,16 +46,6 @@ export function App() {
         <Route path="chatting/:slug" element={<ChattingEditor />} />
         <Route path="library" element={<AssetHubPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        {UiKit && (
-          <Route
-            path="dev/ui"
-            element={
-              <Suspense fallback={null}>
-                <UiKit />
-              </Suspense>
-            }
-          />
-        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

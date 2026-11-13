@@ -43,8 +43,8 @@ from hbt.pipeline.ffutil import media_duration, probe, run_ffmpeg
 from hbt.pipeline.publish import build_publish_text
 from hbt.pipeline.visual import CARD_Y, CREAM, SIZES, H, W, color_of, font
 from hbt.postv.voice import VoiceProvider
-from shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
-from shared.sse_manager import SSEProgressEmitter
+from hbt.shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
+from hbt.shared.sse_manager import SSEProgressEmitter
 
 logger = logging.getLogger(__name__)
 
