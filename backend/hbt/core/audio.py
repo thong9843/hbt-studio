@@ -219,6 +219,16 @@ def scan_sfx_library(library_dir: Path) -> list[dict[str, Any]]:
                 "path": f,
             }
         )
+    if not results:
+        for fallback_cat in ("whoosh", "pop"):
+            results.append(
+                {
+                    "id": fallback_cat,
+                    "name": f"{fallback_cat}.wav",
+                    "category": fallback_cat,
+                    "path": sfx_dir / f"{fallback_cat}.wav",
+                }
+            )
     return results
 
 
