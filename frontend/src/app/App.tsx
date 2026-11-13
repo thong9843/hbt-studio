@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AssetHubPage } from '../pages/AssetHubPage';
+import { ClipperPage } from '../pages/ClipperPage';
+import { EditorPage } from '../pages/EditorPage';
+import { SchedulerPage } from '../pages/SchedulerPage';
 import { AudioTab } from '../pages/AudioTab';
 import { ComposePage } from '../pages/ComposePage';
 import { ExportTab } from '../pages/ExportTab';
@@ -45,6 +48,9 @@ export function App() {
         <Route path="chatting" element={<ChattingHome />} />
         <Route path="chatting/:slug" element={<ChattingEditor />} />
         <Route path="library" element={<AssetHubPage />} />
+        <Route path="clipper" element={<ClipperPage />} />
+        <Route path="editor" element={<EditorPage />} />
+        <Route path="scheduler" element={<SchedulerPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

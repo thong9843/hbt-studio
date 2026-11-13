@@ -304,6 +304,9 @@ export function Sidebar({ mini, render }: SidebarProps) {
             label={vi.nav.chatting}
             mini={mini}
           />
+          <NavItem to="/clipper" icon={<ZapIcon />} label="Clipper & Reaction" mini={mini} />
+          <NavItem to="/editor" icon={<SmartphoneIcon />} label="Chỉnh sửa Video" mini={mini} />
+          <NavItem to="/scheduler" icon={<HomeIcon />} label="Lịch Xuất Bản" mini={mini} />
           <NavItem to="/library" icon={<FolderIcon />} label={vi.nav.library} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}
