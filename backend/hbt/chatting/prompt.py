@@ -1,4 +1,4 @@
-"""Prompt cho Ollama sinh kịch bản Chatting theo §5 (SYSTEM_PROMPT nguyên văn)."""
+"""Prompt cho Gemini API sinh kịch bản Chatting theo §5."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def build_user_prompt(
     platform: str = "messenger",
     target_duration_s: float | None = None,
 ) -> str:
-    """Tạo user prompt chuẩn cho Ollama."""
+    """Tạo user prompt chuẩn cho Gemini API."""
     comment_text = "\n".join(f"- {c}" for c in (comments or [])) if comments else "Không có"
     dur_hint = ""
     if target_duration_s:

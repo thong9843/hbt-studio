@@ -12,9 +12,9 @@ describe('Chatting Pages (Vitest)', () => {
   it('ChattingHome: hiển thị tiêu đề, ô nhập và các nút chọn', async () => {
     stubFetch({
       'GET /api/chatting/status': {
-        ollama_running: true,
+        gemini_configured: true,
         model_available: true,
-        model_name: 'qwen2.5:3b-instruct',
+        model_name: 'gemini-3.8-flash',
         stickers: { soc: 2, cuoi: 1 },
         total_stickers: 3,
       },
@@ -141,7 +141,7 @@ describe('Chatting Pages (Vitest)', () => {
           status: 'running',
           phase: 'llm',
           percent: 45,
-          text: 'Ollama đang viết kịch bản chat...',
+          text: 'Gemini đang viết kịch bản chat...',
         },
       },
       'GET /api/chatting/running-slug/job': {
@@ -150,7 +150,7 @@ describe('Chatting Pages (Vitest)', () => {
         status: 'running',
         phase: 'llm',
         percent: 45,
-        text: 'Ollama đang viết kịch bản chat...',
+        text: 'Gemini đang viết kịch bản chat...',
       },
     });
 
@@ -162,7 +162,7 @@ describe('Chatting Pages (Vitest)', () => {
     );
 
     expect(await screen.findByText('Đang tạo video Chatting...')).toBeInTheDocument();
-    expect(screen.getAllByText('Ollama đang viết kịch bản chat...').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Gemini đang viết kịch bản chat...').length).toBeGreaterThan(0);
     expect(screen.getByText('45%')).toBeInTheDocument();
   });
 });

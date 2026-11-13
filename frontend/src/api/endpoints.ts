@@ -65,7 +65,7 @@ export const api = {
   listProjects: () => apiGet<ProjectSummary[]>('/projects'),
   getChattingStatus: () =>
     apiGet<{
-      ollama_running: boolean;
+      gemini_configured: boolean;
       model_available: boolean;
       model_name: string;
       stickers: Record<string, number>;

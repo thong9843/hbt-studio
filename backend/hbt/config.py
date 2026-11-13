@@ -32,7 +32,7 @@ class Settings:
     whisper_model: str
     whisper_device: str
     default_fps: int
-    chatting_model: str = "qwen2.5:3b-instruct"
+    chatting_model: str = "gemini-3.8-flash"
     models_dir: Path = REPO_ROOT / "models"  # model Whisper tải về đây (đã ignore)
     assets_dir: Path = (
         REPO_ROOT / "assets"
@@ -67,7 +67,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         whisper_model=model,
         whisper_device=device,
         default_fps=fps,
-        chatting_model=env.get("CHATTING_MODEL", "qwen2.5:3b-instruct"),
+        chatting_model=env.get("CHATTING_MODEL", "gemini-3.8-flash"),
         models_dir=path("MODELS_DIR", "./models"),
         assets_dir=path("ASSETS_DIR", "./assets"),
     )

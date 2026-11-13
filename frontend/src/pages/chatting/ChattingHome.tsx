@@ -81,7 +81,8 @@ export function ChattingHome() {
     }
   };
 
-  const isOllamaMissing = !isDirectScript && !isStatusLoading && status && !status.ollama_running;
+  const isGeminiMissing =
+    !isDirectScript && !isStatusLoading && status && !status.gemini_configured;
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
@@ -93,17 +94,16 @@ export function ChattingHome() {
         <p className="mt-2 text-muted">Tạo video dạng tin nhắn Messenger / Zalo nhanh chóng</p>
       </div>
 
-      {/* Màn trống cảnh báo nếu Ollama chưa chạy và đang ở chế độ AI */}
-      {isOllamaMissing && (
+      {/* Màn trống cảnh báo nếu chưa cấu hình GEMINI_API_KEY và đang ở chế độ AI */}
+      {isGeminiMissing && (
         <div className="mb-6 rounded-2xl border border-line bg-tint-yel p-6 text-center text-text">
-          <p className="text-body font-bold">{vi.chatting.noOllama}</p>
+          <p className="text-body font-bold">{vi.chatting.noGemini}</p>
           <p className="mt-1 text-tiny text-muted">
-            Khởi động ứng dụng Ollama trên máy của bạn và đảm bảo model{' '}
-            <code className="font-mono font-bold">
-              {status?.model_name || 'qwen2.5:3b-instruct'}
-            </code>{' '}
-            đã được tải. Hoặc bạn có thể chọn tab <b>Dán kịch bản trực tiếp (Bypass LLM)</b> để tạo
-            video ngay mà không cần Ollama.
+            Hệ thống dùng chung <code className="font-mono font-bold">GEMINI_API_KEY</code> với HBT
+            Core (model{' '}
+            <code className="font-mono font-bold">{status?.model_name || 'gemini-3.8-flash'}</code>
+            ). Hoặc bạn có thể chọn tab <b>Dán kịch bản trực tiếp (Bypass LLM)</b> để tạo video ngay
+            không cần API Key.
           </p>
         </div>
       )}
