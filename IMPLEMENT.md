@@ -1355,3 +1355,8 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
   - Header: Thanh đỉnh 120 px với avatar đối phương, chấm xanh Active `#31A24C`, trạng thái "Đang hoạt động", cùng bộ icon gọi thoại, gọi video và xem thông tin chuẩn màu `#0084FF`.
   - Grouped bubble: Bo góc bất đối xứng (các tin nhắn liền kề cùng người gửi thu hẹp bán kính góc tiếp giáp về 8 px). Nền tin nhắn đối phương xám `#E4E6EB`, nền tin nhắn gửi đi xanh Messenger `#0084FF`. Avatar bên trái chỉ hiển thị ở tin nhắn cuối cùng trong nhóm.
 
+### 15.12 Chuyển đổi Chatting từ Ollama sang Gemini API (Mốc v2.2.0)
+
+- **Shared LLM (`hbt/shared/llm/__init__.py`):** Tái sử dụng `gemini_client.py` (`GEMINI_API_KEY`, fallback `MODELS`) qua `generate_structured_json()` với `responseMimeType: "application/json"`.
+- **Loại bỏ Ollama:** Xóa `OllamaClient` (`127.0.0.1:11434`, `qwen2.5:3b-instruct`, `keep_alive: 0`) thay bằng `GeminiChatClient`; `GET /api/chatting/status` trả về `gemini_configured`; giữ nguyên `sanitize_chat_raw` và `CHATTING_FAKE_LLM=1`.
+

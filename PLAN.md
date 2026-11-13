@@ -123,5 +123,6 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 | **Fix Chatting** | ☑ | **`v1.16.1`** | **Sanitize LLM (cắt tin $\le$ 900 ký tự giữ đầu + 2 cuối, lọc sticker), cảnh báo UI, hỗ trợ Threads** |
 | **CH5** | ☑ | **`v1.18.1`** | **Cải tiến Chatting: Tách sạch lời thoại TTS (bỏ mốc giờ/mô tả), hybrid sub-frames 60fps mượt (typing sine wave, pop spring, cuộn mượt), UI Messenger chuẩn (header avatar active, grouped bubble)** |
 | **Phase 6** | ☑ | **`v2.1.0`** | **Creator Workstation: PostV video/gif & meme cap, SQLite Media Index (`workspace/studio.db`), Kanban 4 cột, Clipper 9:16, OpenCut-style Video Editor + Safe-Zone, Scheduler UI (CI run 43399203837 xanh)** |
+| **Chatting Gemini** | ☑ | **`v2.2.0`** | **Thay thế hoàn toàn Ollama (`qwen2.5:3b-instruct`) bằng Gemini API dùng chung `gemini_client.py` / `hbt.shared.llm` (CI run 43405425835 xanh)** |
 | G4 | ☐ | `v1.19.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
 | GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |
