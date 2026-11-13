@@ -220,14 +220,24 @@ def scan_sfx_library(library_dir: Path) -> list[dict[str, Any]]:
                 "path": f,
             }
         )
-    if not results:
+    if not results and library_dir.is_dir():
+        import wave
+
+        sfx_dir.mkdir(parents=True, exist_ok=True)
         for fallback_cat in ("whoosh", "pop"):
+            wav_path = sfx_dir / f"{fallback_cat}.wav"
+            if not wav_path.is_file():
+                with wave.open(str(wav_path), "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(16000)
+                    wf.writeframes(b"\x00\x00" * 1600)
             results.append(
                 {
                     "id": fallback_cat,
                     "name": f"{fallback_cat}.wav",
                     "category": fallback_cat,
-                    "path": sfx_dir / f"{fallback_cat}.wav",
+                    "path": wav_path,
                 }
             )
     return results
