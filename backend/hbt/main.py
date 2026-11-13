@@ -18,6 +18,7 @@ from hbt.api import (
     chatting,
     clipper,
     core,
+    editor,
     files,
     health,
     kanban,
@@ -146,6 +147,7 @@ def create_app(
         chatting,
         clipper,
         core,
+        editor,
         kanban,
     ):
         app.include_router(module.router, prefix="/api")
