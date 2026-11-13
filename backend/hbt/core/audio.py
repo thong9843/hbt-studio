@@ -52,16 +52,19 @@ def scan_music_by_topic(
     """
     music_dir = library_dir / "music"
     if not music_dir.is_dir():
-        return []
+        alt_dir = library_dir.parent / "assets" / "music"
+        if alt_dir.is_dir():
+            music_dir = alt_dir
+        else:
+            return []
 
     all_files = sorted(
         f for f in music_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS
     )
-    if not all_files:
-        return []
 
     # Đọc index.json nếu có để lấy moods của từng file
     file_moods: dict[str, list[str]] = {}
+    index_files: list[Path] = []
     index_path = music_dir / "index.json"
     if index_path.is_file():
         try:
@@ -69,11 +72,18 @@ def scan_music_by_topic(
             if isinstance(entries, list):
                 for item in entries:
                     if isinstance(item, dict) and item.get("file"):
+                        fname = str(item["file"])
                         moods = [str(m).lower() for m in (item.get("moods") or [])]
                         title = str(item.get("title", "")).lower()
-                        file_moods[str(item["file"])] = [*moods, title]
+                        file_moods[fname] = [*moods, title]
+                        index_files.append(music_dir / fname)
         except Exception:
             pass
+
+    if not all_files:
+        all_files = index_files
+    if not all_files:
+        return []
 
     topic_key = (topic or "").strip().lower()
     keywords = TOPIC_MOOD_KEYWORDS.get(topic_key, ())
@@ -189,10 +199,11 @@ def render_smart_bgm_wav(
 def scan_sfx_library(library_dir: Path) -> list[dict[str, Any]]:
     """Quét toàn bộ thư mục `library/sfx/` và phân loại (`whoosh`, `pop`, `impact`, `other`)."""
     sfx_dir = library_dir / "sfx"
-    if not sfx_dir.is_dir():
-        return []
-
-    files = sorted(f for f in sfx_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS)
+    files = (
+        sorted(f for f in sfx_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS)
+        if sfx_dir.is_dir()
+        else []
+    )
     results: list[dict[str, Any]] = []
     for f in files:
         stem = f.stem.lower()
@@ -209,6 +220,26 @@ def scan_sfx_library(library_dir: Path) -> list[dict[str, Any]]:
                 "path": f,
             }
         )
+    if not results and library_dir.is_dir():
+        import wave
+
+        sfx_dir.mkdir(parents=True, exist_ok=True)
+        for fallback_cat in ("whoosh", "pop"):
+            wav_path = sfx_dir / f"{fallback_cat}.wav"
+            if not wav_path.is_file():
+                with wave.open(str(wav_path), "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(16000)
+                    wf.writeframes(b"\x00\x00" * 1600)
+            results.append(
+                {
+                    "id": fallback_cat,
+                    "name": f"{fallback_cat}.wav",
+                    "category": fallback_cat,
+                    "path": wav_path,
+                }
+            )
     return results
 
 

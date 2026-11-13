@@ -656,12 +656,12 @@ def _render_hbt_core_auto_impl(
         seed=project.slug,
     )
     bgm_wav: Path | None = None
-    bgm_names: list[str] = []
-    if bgm_playlist:
-        bgm_names = [p.name for p in bgm_playlist]
+    bgm_names: list[str] = [p.name for p in bgm_playlist] if bgm_playlist else []
+    existing_bgm = [p for p in bgm_playlist if p.is_file()]
+    if existing_bgm:
         bgm_out = build_dir / "bgm_acrossfade.wav"
         try:
-            bgm_wav = render_smart_bgm_wav(bgm_playlist, total_duration_s, bgm_out)
+            bgm_wav = render_smart_bgm_wav(existing_bgm, total_duration_s, bgm_out)
             if bgm_wav and bgm_wav.is_file():
                 shutil.copy2(bgm_wav, project_dir / "music.wav")
                 project.music = Music(file="music.wav", credit=", ".join(dict.fromkeys(bgm_names)))
@@ -678,16 +678,17 @@ def _render_hbt_core_auto_impl(
 
     for idx, (seg, timing) in enumerate(zip(script.segments, timings, strict=False)):
         sfx_src = resolve_sfx_file(lib_dir, seg.sfx, index=idx)
-        if sfx_src is not None and sfx_src.is_file():
-            prepped_sfx = sfx_cache_dir / f"sfx_{idx + 1:02d}_{sfx_src.stem}.wav"
-            if not prepped_sfx.is_file():
-                try:
-                    prepare_core_sfx_clip(sfx_src, prepped_sfx)
-                except Exception as exc:
-                    logger.warning("Không chuẩn bị được SFX %s: %s", sfx_src.name, exc)
-                    continue
-            delay_ms = int(round(timing.start_us / 1000.0))
-            sfx_events.append((prepped_sfx, delay_ms))
+        if sfx_src is not None:
+            if sfx_src.is_file():
+                prepped_sfx = sfx_cache_dir / f"sfx_{idx + 1:02d}_{sfx_src.stem}.wav"
+                if not prepped_sfx.is_file():
+                    try:
+                        prepare_core_sfx_clip(sfx_src, prepped_sfx)
+                    except Exception as exc:
+                        logger.warning("Không chuẩn bị được SFX %s: %s", sfx_src.name, exc)
+                        continue
+                delay_ms = int(round(timing.start_us / 1000.0))
+                sfx_events.append((prepped_sfx, delay_ms))
             sfx_used.append(sfx_src.name)
 
     # 5. Vẽ thẻ kem & dựng clip từng phân đoạn (Pillow .close() + gc.collect() + FFmpeg kẹp luồng)

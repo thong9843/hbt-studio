@@ -87,7 +87,16 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'HBT Core', 'PostV', 'Chatting', 'Thư viện']);
+    expect(labels).toEqual([
+      'Trang chủ',
+      'HBT Core',
+      'PostV',
+      'Chatting',
+      'Clipper & Reaction',
+      'Chỉnh sửa Video',
+      'Lịch Xuất Bản',
+      'Thư viện',
+    ]);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
@@ -241,6 +250,9 @@ describe('AppShell, wide (>= 1280 px)', () => {
       'HBT Core',
       'PostV',
       'Chatting',
+      'Clipper & Reaction',
+      'Chỉnh sửa Video',
+      'Lịch Xuất Bản',
       'Thư viện',
       'Cài đặt',
     ];

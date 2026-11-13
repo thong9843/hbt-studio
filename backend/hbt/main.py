@@ -16,9 +16,12 @@ from hbt.api import (
     assets,
     backgrounds,
     chatting,
+    clipper,
     core,
+    editor,
     files,
     health,
+    kanban,
     lint,
     memes,
     music,
@@ -142,7 +145,10 @@ def create_app(
         voices,
         memes,
         chatting,
+        clipper,
         core,
+        editor,
+        kanban,
     ):
         app.include_router(module.router, prefix="/api")
     return app

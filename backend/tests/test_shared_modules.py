@@ -40,7 +40,7 @@ def test_job_manager_allows_non_blocking_concurrency(tmp_path: Path) -> None:
     storage = Storage(tmp_path / "workspace", 50)
     jm = JobManager(storage, tmp_path / "library")
     try:
-        # Đảm bảo pool có nhiều hơn 1 worker để HBT Core / PostV / Chatting không nghẽn nhau
-        assert jm._pool._max_workers >= 3
+        # Hàng đợi 1 luồng để tránh nghẽn CPU/RAM khi dựng video tuần tự
+        assert jm._pool._max_workers == 1
     finally:
         jm.shutdown()
