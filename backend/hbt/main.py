@@ -16,6 +16,7 @@ from hbt.api import (
     assets,
     backgrounds,
     chatting,
+    clipper,
     core,
     files,
     health,
@@ -143,6 +144,7 @@ def create_app(
         voices,
         memes,
         chatting,
+        clipper,
         core,
         kanban,
     ):
