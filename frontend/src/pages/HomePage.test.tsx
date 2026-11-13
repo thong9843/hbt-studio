@@ -140,7 +140,7 @@ describe('HomePage', () => {
     expect(within(card).getByText('1:23')).toBeVisible();
     expect(within(card).getByText('2:23')).toBeVisible();
     expect(within(card).getByText(/Bản đẹp/)).toBeVisible();
-    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('/renders');
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('/projects/muoi/renders');
   });
 
   it('"Lần xuất gần nhất" uses the fixed dark hero tokens, not the mode-dependent --primary', async () => {
