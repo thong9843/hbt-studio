@@ -416,7 +416,7 @@ def _best_video_url(video_versions: Any) -> str | None:
 
 
 def _node_media_urls(node: dict[str, Any]) -> list[str]:
-    """Trích xuất ảnh, GIF và video (.mp4) đính kèm trực tiếp trên 1 node bài viết / bình luận Threads."""
+    """Trích xuất ảnh, GIF và video (.mp4) đính kèm trên 1 node bài viết/bình luận Threads."""
     urls: list[str] = []
 
     def _add(u: str | None) -> None:

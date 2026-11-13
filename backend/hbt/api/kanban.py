@@ -43,7 +43,9 @@ def get_kanban_renders(stage: str | None = None, engine: str | None = None) -> d
 def patch_render_stage(render_id: str, body: StageUpdateRequest) -> dict[str, Any]:
     """Cập nhật giai đoạn Kanban (và giờ hẹn đăng nếu có) vào SQLite."""
     if body.pipeline_stage not in PIPELINE_STAGES:
-        raise HTTPException(status_code=422, detail=f"Giai đoạn không hợp lệ: {body.pipeline_stage}")
+        raise HTTPException(
+            status_code=422, detail=f"Giai đoạn không hợp lệ: {body.pipeline_stage}"
+        )
     updated = update_stage(render_id, body.pipeline_stage, scheduled_at=body.scheduled_at)
     if updated is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy video trong chỉ mục")

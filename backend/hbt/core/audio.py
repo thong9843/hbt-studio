@@ -52,16 +52,19 @@ def scan_music_by_topic(
     """
     music_dir = library_dir / "music"
     if not music_dir.is_dir():
-        return []
+        alt_dir = library_dir.parent / "assets" / "music"
+        if alt_dir.is_dir():
+            music_dir = alt_dir
+        else:
+            return []
 
     all_files = sorted(
         f for f in music_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS
     )
-    if not all_files:
-        return []
 
     # Đọc index.json nếu có để lấy moods của từng file
     file_moods: dict[str, list[str]] = {}
+    index_files: list[Path] = []
     index_path = music_dir / "index.json"
     if index_path.is_file():
         try:
@@ -69,11 +72,18 @@ def scan_music_by_topic(
             if isinstance(entries, list):
                 for item in entries:
                     if isinstance(item, dict) and item.get("file"):
+                        fname = str(item["file"])
                         moods = [str(m).lower() for m in (item.get("moods") or [])]
                         title = str(item.get("title", "")).lower()
-                        file_moods[str(item["file"])] = [*moods, title]
+                        file_moods[fname] = [*moods, title]
+                        index_files.append(music_dir / fname)
         except Exception:
             pass
+
+    if not all_files:
+        all_files = index_files
+    if not all_files:
+        return []
 
     topic_key = (topic or "").strip().lower()
     keywords = TOPIC_MOOD_KEYWORDS.get(topic_key, ())

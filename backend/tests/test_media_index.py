@@ -35,7 +35,12 @@ def test_media_index_crud_and_sync(tmp_path: Path) -> None:
     assert items[0]["engine"] == "postv"
     assert items[0]["pipeline_stage"] == "rendered"
 
-    updated = update_stage(items[0]["id"], "scheduled", scheduled_at="2026-11-15T19:00:00", db_path=db_path)
+    updated = update_stage(
+        items[0]["id"],
+        "scheduled",
+        scheduled_at="2026-11-15T19:00:00",
+        db_path=db_path,
+    )
     assert updated is not None
     assert updated["pipeline_stage"] == "scheduled"
     assert updated["scheduled_at"] == "2026-11-15T19:00:00"

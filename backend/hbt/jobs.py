@@ -216,7 +216,7 @@ class JobManager:
         self.app_settings = app_settings
         self.voice = voice
         self.stale_timeout = stale_timeout
-        self._pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="render")
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._active_workers: set[str] = set()
@@ -471,6 +471,8 @@ class JobManager:
             job._pick_event.set()
         if not job._cancel_if_queued():
             job.wait(CANCEL_WAIT)  # đang chạy: chờ luồng dựng dừng hẳn
+            if not job.finished:
+                job._finish(CANCELLED)
         return job
 
     def shutdown(self) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +66,7 @@ def upsert_render(
         if size_mb is None and fp.is_file()
         else float(size_mb or 0.0)
     )
-    ts = created_at or datetime.now(timezone.utc).isoformat()
+    ts = created_at or datetime.now(UTC).isoformat()
     conn = init_db(db_path)
     try:
         conn.execute(
@@ -188,7 +188,9 @@ def sync_renders_dir(renders_root: Path, db_path: Path | None = None) -> dict[st
                 continue
             existing_paths.add(str(mp4))
             rel_parts = mp4.relative_to(renders_root).parts
-            engine = rel_parts[0] if len(rel_parts) >= 2 and rel_parts[0] in VALID_ENGINES else "core"
+            engine = (
+                rel_parts[0] if len(rel_parts) >= 2 and rel_parts[0] in VALID_ENGINES else "core"
+            )
             job_id = rel_parts[1] if len(rel_parts) >= 3 else mp4.stem
             render_id = f"{engine}:{job_id}:{mp4.name}"
             cover_candidate = mp4.with_suffix(".jpg")

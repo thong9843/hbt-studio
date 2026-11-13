@@ -1,21 +1,21 @@
-import { useEffect, useState } from "react";
-import type { KanbanRenderItem } from "../components/KanbanBoard";
+import { useEffect, useState } from 'react';
+import type { KanbanRenderItem } from '../components/KanbanBoard';
 
-type SafeZonePlatform = "none" | "tiktok" | "shorts" | "reels";
+type SafeZonePlatform = 'none' | 'tiktok' | 'shorts' | 'reels';
 
 export function EditorPage() {
   const [renders, setRenders] = useState<KanbanRenderItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
-  const [safeZone, setSafeZone] = useState<SafeZonePlatform>("tiktok");
+  const [selectedId, setSelectedId] = useState<string>('');
+  const [safeZone, setSafeZone] = useState<SafeZonePlatform>('tiktok');
   const [trimStart, setTrimStart] = useState(0);
-  const [trimEnd, setTrimEnd] = useState<string>("");
+  const [trimEnd, setTrimEnd] = useState<string>('');
   const [removeSilence, setRemoveSilence] = useState(false);
   const [volume, setVolume] = useState(1.0);
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/kanban/renders")
+    fetch('/api/kanban/renders')
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((d) => {
         const list = d.items ?? [];
@@ -32,9 +32,9 @@ export function EditorPage() {
     setBusy(true);
     setStatusMsg(null);
     try {
-      const res = await fetch("/api/editor/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/editor/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           render_id: selectedId,
           trim_start: Number(trimStart),
@@ -45,12 +45,12 @@ export function EditorPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatusMsg(`Lỗi: ${data.detail ?? "Không xử lý được video"}`);
+        setStatusMsg(`Lỗi: ${data.detail ?? 'Không xử lý được video'}`);
       } else {
-        setStatusMsg(`Đã xuất bản chỉnh sửa: ${data.item?.title ?? "final.mp4"}`);
+        setStatusMsg(`Đã xuất bản chỉnh sửa: ${data.item?.title ?? 'final.mp4'}`);
       }
     } catch {
-      setStatusMsg("Không thể kết nối FFmpeg Editor backend.");
+      setStatusMsg('Không thể kết nối FFmpeg Editor backend.');
     } finally {
       setBusy(false);
     }
@@ -66,24 +66,24 @@ export function EditorPage() {
           <h1 className="mt-2 text-2xl font-bold text-white">Biên tập hậu kỳ 9:16</h1>
         </div>
         <div className="flex items-center gap-2">
-          {(["none", "tiktok", "shorts", "reels"] as SafeZonePlatform[]).map((p) => (
+          {(['none', 'tiktok', 'shorts', 'reels'] as SafeZonePlatform[]).map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => setSafeZone(p)}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                 safeZone === p
-                  ? "border-[#F59E0B] bg-[#F59E0B]/20 text-amber-200"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:border-white/25"
+                  ? 'border-[#F59E0B] bg-[#F59E0B]/20 text-amber-200'
+                  : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/25'
               }`}
             >
-              {p === "none"
-                ? "Tắt Safe-Zone"
-                : p === "tiktok"
-                  ? "TikTok"
-                  : p === "shorts"
-                    ? "YouTube Shorts"
-                    : "Facebook Reels"}
+              {p === 'none'
+                ? 'Tắt Safe-Zone'
+                : p === 'tiktok'
+                  ? 'TikTok'
+                  : p === 'shorts'
+                    ? 'YouTube Shorts'
+                    : 'Facebook Reels'}
             </button>
           ))}
         </div>
@@ -105,7 +105,7 @@ export function EditorPage() {
               </div>
             )}
 
-            {safeZone !== "none" && (
+            {safeZone !== 'none' && (
               <div className="pointer-events-none absolute inset-0 border-2 border-dashed border-amber-400/70">
                 <div className="absolute inset-x-0 top-0 h-[12%] bg-amber-500/15 text-center text-[10px] text-amber-200">
                   Vùng tránh UI trên ({safeZone.toUpperCase()})
@@ -188,7 +188,7 @@ export function EditorPage() {
               onClick={handleProcess}
               className="rounded-xl bg-[#F59E0B] px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
             >
-              {busy ? "Đang xử lý FFmpeg..." : "Xuất bản đã chỉnh sửa"}
+              {busy ? 'Đang xử lý FFmpeg...' : 'Xuất bản đã chỉnh sửa'}
             </button>
             {statusMsg && <p className="text-sm text-slate-200">{statusMsg}</p>}
           </div>

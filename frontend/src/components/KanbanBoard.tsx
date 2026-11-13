@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
 
-export type PipelineStage = "draft" | "rendered" | "edited" | "scheduled" | "published";
+export type PipelineStage = 'draft' | 'rendered' | 'edited' | 'scheduled' | 'published';
 
 export interface KanbanRenderItem {
   id: string;
   slug: string;
   title: string;
-  engine: "core" | "postv" | "chatting" | "clipper" | "editor";
+  engine: 'core' | 'postv' | 'chatting' | 'clipper' | 'editor';
   file_path: string;
   cover_path: string;
   duration_sec: number;
@@ -18,18 +18,18 @@ export interface KanbanRenderItem {
 }
 
 const COLUMNS: { key: PipelineStage; label: string }[] = [
-  { key: "draft", label: "Bản nháp" },
-  { key: "rendered", label: "Đã xuất" },
-  { key: "edited", label: "Đã chỉnh sửa" },
-  { key: "scheduled", label: "Lên lịch đăng" },
+  { key: 'draft', label: 'Bản nháp' },
+  { key: 'rendered', label: 'Đã xuất' },
+  { key: 'edited', label: 'Đã chỉnh sửa' },
+  { key: 'scheduled', label: 'Lên lịch đăng' },
 ];
 
 const ENGINE_BADGE: Record<string, { label: string; color: string }> = {
-  core: { label: "HBT Core", color: "border-[#B22228]/60 bg-[#B22228]/15 text-red-200" },
-  postv: { label: "PostV", color: "border-[#8B5CF6]/60 bg-[#8B5CF6]/15 text-purple-200" },
-  chatting: { label: "Chatting", color: "border-[#10B981]/60 bg-[#10B981]/15 text-emerald-200" },
-  clipper: { label: "Clipper", color: "border-[#F59E0B]/60 bg-[#F59E0B]/15 text-amber-200" },
-  editor: { label: "Editor", color: "border-[#F59E0B]/60 bg-[#F59E0B]/15 text-amber-200" },
+  core: { label: 'HBT Core', color: 'border-[#B22228]/60 bg-[#B22228]/15 text-red-200' },
+  postv: { label: 'PostV', color: 'border-[#8B5CF6]/60 bg-[#8B5CF6]/15 text-purple-200' },
+  chatting: { label: 'Chatting', color: 'border-[#10B981]/60 bg-[#10B981]/15 text-emerald-200' },
+  clipper: { label: 'Clipper', color: 'border-[#F59E0B]/60 bg-[#F59E0B]/15 text-amber-200' },
+  editor: { label: 'Editor', color: 'border-[#F59E0B]/60 bg-[#F59E0B]/15 text-amber-200' },
 };
 
 export function KanbanBoard() {
@@ -39,7 +39,7 @@ export function KanbanBoard() {
 
   const loadRenders = async () => {
     try {
-      const res = await fetch("/api/kanban/renders");
+      const res = await fetch('/api/kanban/renders');
       if (res.ok) {
         const data = await res.json();
         setItems(data.items ?? []);
@@ -57,12 +57,12 @@ export function KanbanBoard() {
 
   const moveCard = async (id: string, targetStage: PipelineStage) => {
     setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, pipeline_stage: targetStage } : item))
+      prev.map((item) => (item.id === id ? { ...item, pipeline_stage: targetStage } : item)),
     );
     try {
       await fetch(`/api/kanban/renders/${encodeURIComponent(id)}/stage`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pipeline_stage: targetStage }),
       });
     } catch {
@@ -163,9 +163,7 @@ export function KanbanBoard() {
                     );
                   })}
                   {colItems.length === 0 && (
-                    <div className="py-8 text-center text-xs text-slate-500">
-                      Kéo thẻ vào đây
-                    </div>
+                    <div className="py-8 text-center text-xs text-slate-500">Kéo thẻ vào đây</div>
                   )}
                 </div>
               </div>

@@ -1,16 +1,16 @@
-import { useEffect, useState } from "react";
-import type { KanbanRenderItem } from "../components/KanbanBoard";
+import { useEffect, useState } from 'react';
+import type { KanbanRenderItem } from '../components/KanbanBoard';
 
-const DAYS = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"];
+const DAYS = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ Nhật'];
 
 export function SchedulerPage() {
   const [items, setItems] = useState<KanbanRenderItem[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [selectedTime, setSelectedTime] = useState("19:00");
+  const [selectedTime, setSelectedTime] = useState('19:00');
 
   const load = async () => {
     try {
-      const res = await fetch("/api/kanban/renders");
+      const res = await fetch('/api/kanban/renders');
       if (res.ok) {
         const d = await res.json();
         setItems(d.items ?? []);
@@ -28,22 +28,22 @@ export function SchedulerPage() {
     const scheduledAt = `${dayLabel} ${selectedTime}`;
     setItems((prev) =>
       prev.map((i) =>
-        i.id === id ? { ...i, pipeline_stage: "scheduled", scheduled_at: scheduledAt } : i
-      )
+        i.id === id ? { ...i, pipeline_stage: 'scheduled', scheduled_at: scheduledAt } : i,
+      ),
     );
     try {
       await fetch(`/api/kanban/renders/${encodeURIComponent(id)}/stage`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pipeline_stage: "scheduled", scheduled_at: scheduledAt }),
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pipeline_stage: 'scheduled', scheduled_at: scheduledAt }),
       });
     } catch {
       // ignore
     }
   };
 
-  const readyToSchedule = items.filter((i) => i.pipeline_stage === "edited");
-  const scheduled = items.filter((i) => i.pipeline_stage === "scheduled");
+  const readyToSchedule = items.filter((i) => i.pipeline_stage === 'edited');
+  const scheduled = items.filter((i) => i.pipeline_stage === 'scheduled');
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -67,7 +67,9 @@ export function SchedulerPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_1fr]">
         <aside className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
-          <h2 className="text-sm font-semibold text-white">Đã chỉnh sửa ({readyToSchedule.length})</h2>
+          <h2 className="text-sm font-semibold text-white">
+            Đã chỉnh sửa ({readyToSchedule.length})
+          </h2>
           <div className="space-y-2">
             {readyToSchedule.map((item) => (
               <div

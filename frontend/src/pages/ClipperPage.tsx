@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState } from 'react';
 
 export function ClipperPage() {
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [sourceCredit, setSourceCredit] = useState("");
-  const [title, setTitle] = useState("Clip Reaction");
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceCredit, setSourceCredit] = useState('');
+  const [title, setTitle] = useState('Clip Reaction');
   const [startSec, setStartSec] = useState(0);
   const [endSec, setEndSec] = useState(30);
   const [karaokeVi, setKaraokeVi] = useState(true);
@@ -15,9 +15,9 @@ export function ClipperPage() {
     setBusy(true);
     setStatusMsg(null);
     try {
-      const res = await fetch("/api/clipper/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/clipper/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_url: sourceUrl,
           source_credit: sourceCredit,
@@ -29,12 +29,12 @@ export function ClipperPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatusMsg(`Lỗi: ${data.detail ?? "Không trích xuất được clip"}`);
+        setStatusMsg(`Lỗi: ${data.detail ?? 'Không trích xuất được clip'}`);
       } else {
         setStatusMsg(`Đã xuất clip: ${data.item?.title ?? title} (đã lưu vào SQLite)`);
       }
     } catch {
-      setStatusMsg("Không thể kết nối backend Clipper.");
+      setStatusMsg('Không thể kết nối backend Clipper.');
     } finally {
       setBusy(false);
     }
@@ -48,7 +48,9 @@ export function ClipperPage() {
         </span>
         <h1 className="mt-2 text-2xl font-bold text-white">Trích xuất Clip 9:16 & Ghi nguồn</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Dán link video highlight/reaction, tự động gắn nhãn <code className="text-amber-300">Nguồn: ...</code> cố định ở vùng an toàn và chạy phụ đề karaoke tiếng Việt.
+          Dán link video highlight/reaction, tự động gắn nhãn{' '}
+          <code className="text-amber-300">Nguồn: ...</code> cố định ở vùng an toàn và chạy phụ đề
+          karaoke tiếng Việt.
         </p>
       </header>
 
@@ -130,7 +132,7 @@ export function ClipperPage() {
             disabled={busy}
             className="rounded-xl bg-[#F59E0B] px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
           >
-            {busy ? "Đang trích xuất..." : "Trích xuất Clip 9:16"}
+            {busy ? 'Đang trích xuất...' : 'Trích xuất Clip 9:16'}
           </button>
           {statusMsg && <p className="text-sm text-slate-200">{statusMsg}</p>}
         </div>
