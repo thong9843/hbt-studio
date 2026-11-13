@@ -199,10 +199,11 @@ def render_smart_bgm_wav(
 def scan_sfx_library(library_dir: Path) -> list[dict[str, Any]]:
     """Quét toàn bộ thư mục `library/sfx/` và phân loại (`whoosh`, `pop`, `impact`, `other`)."""
     sfx_dir = library_dir / "sfx"
-    if not sfx_dir.is_dir():
-        return []
-
-    files = sorted(f for f in sfx_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS)
+    files = (
+        sorted(f for f in sfx_dir.iterdir() if f.is_file() and f.suffix.lower() in AUDIO_EXTS)
+        if sfx_dir.is_dir()
+        else []
+    )
     results: list[dict[str, Any]] = []
     for f in files:
         stem = f.stem.lower()

@@ -656,10 +656,9 @@ def _render_hbt_core_auto_impl(
         seed=project.slug,
     )
     bgm_wav: Path | None = None
-    bgm_names: list[str] = []
+    bgm_names: list[str] = [p.name for p in bgm_playlist] if bgm_playlist else []
     existing_bgm = [p for p in bgm_playlist if p.is_file()]
     if existing_bgm:
-        bgm_names = [p.name for p in existing_bgm]
         bgm_out = build_dir / "bgm_acrossfade.wav"
         try:
             bgm_wav = render_smart_bgm_wav(existing_bgm, total_duration_s, bgm_out)
