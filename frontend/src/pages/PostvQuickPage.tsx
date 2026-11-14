@@ -3,9 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
-import { AspectModeToggle } from '../components/AspectModeToggle';
+import { WatermarkControl } from '../components/WatermarkControl';
 import type {
-  AspectMode,
   PostvPickComment,
   PostvPickData,
   PostvQuickOptions,
@@ -110,7 +109,6 @@ export function PostvQuickPage() {
   const [music, setMusic] = useState<'auto' | 'none'>('auto');
   const [selectedMusicId, setSelectedMusicId] = useState<string>('');
   const [fps, setFps] = useState<30 | 60>(60);
-  const [aspectMode, setAspectMode] = useState<AspectMode>('fill');
   const [outro, setOutro] = useState<boolean>(true);
   const [pickMode, setPickMode] = useState<'auto' | 'manual'>(() => {
     return (localStorage.getItem('hbt_postv_pick_mode') as 'auto' | 'manual') || 'auto';
@@ -453,7 +451,6 @@ export function PostvQuickPage() {
           ? selectedMusicId
           : undefined,
       fps,
-      aspect_mode: aspectMode,
       outro,
       pick_mode: pickMode,
     };
@@ -879,14 +876,12 @@ export function PostvQuickPage() {
                   <Chip selected={outro} onClick={() => setOutro((o) => !o)}>
                     {outro ? T.options.outroOn : T.options.outroOff}
                   </Chip>
-
-                  {/* 9:16 fill/fit */}
-                  <AspectModeToggle value={aspectMode} onChange={setAspectMode} />
                 </div>
               </div>
 
-              {/* Nút Tạo Video chính */}
-              <div className="flex justify-end">
+              {/* Watermark bản quyền & Nút Tạo Video chính */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <WatermarkControl />
                 <Button
                   size="lg"
                   tone="brand"

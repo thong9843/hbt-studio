@@ -64,5 +64,28 @@ def test_asset_hub_upload_list_serve_and_delete(tmp_path: Path) -> None:
 def test_asset_hub_rejects_invalid_category_and_traversal(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     assert client.get("/api/asset-hub/unknown").status_code == 422
+    assert client.get("/api/asset-hub/renders").status_code == 422
+    assert client.get("/api/asset-hub/watermarks").status_code == 200
+    assert client.get("/api/asset-hub/music").status_code == 200
     assert client.get("/api/asset-hub/files/memes/..secret.mp4").status_code == 422
     assert client.delete("/api/asset-hub/backgrounds/missing.mp4").status_code == 404
+
+
+def test_unified_renders_sync_list_and_delete(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    job_dir = tmp_path / "workspace" / "projects" / "demo-core" / "renders" / "job1"
+    job_dir.mkdir(parents=True)
+    mp4 = job_dir / "video.mp4"
+    mp4.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (job_dir / "publish.txt").write_text("Tiêu đề mẫu\n#HayBietTuot", encoding="utf-8")
+
+    res = client.get("/api/renders")
+    assert res.status_code == 200
+    items = res.json()["items"]
+    assert len(items) == 1
+    assert items[0]["engine"] == "core"
+    assert "Tiêu đề mẫu" in items[0]["publish_text"]
+
+    del_res = client.delete(f"/api/renders/{items[0]['id']}")
+    assert del_res.status_code == 200
+    assert client.get("/api/renders").json()["items"] == []

@@ -43,6 +43,7 @@ import type {
   ChatDoc,
   ChatProjectDetail,
   ChatProjectSummary,
+  UnifiedRenderItem,
   ChattingJobInfo,
   HbtCoreAssetsInfo,
   HbtCoreGeminiModel,
@@ -406,4 +407,10 @@ export const api = {
       'DELETE',
       `/asset-hub/${enc(category)}/${enc(filename)}`,
     ),
+  listUnifiedRenders: (engine?: string) =>
+    apiGet<{ items: UnifiedRenderItem[] }>(
+      engine && engine !== 'all' ? `/renders?engine=${enc(engine)}` : '/renders',
+    ),
+  deleteUnifiedRender: (renderId: string) =>
+    apiRequest<{ ok: boolean; deleted: string }>('DELETE', `/renders/${enc(renderId)}`),
 };

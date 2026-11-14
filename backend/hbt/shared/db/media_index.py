@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -176,35 +177,169 @@ def delete_render(render_id: str, db_path: Path | None = None) -> bool:
         conn.close()
 
 
-def sync_renders_dir(renders_root: Path, db_path: Path | None = None) -> dict[str, int]:
-    """Đồng bộ thư mục assets/renders/<engine>/<job_id>/ với SQLite."""
+def sync_renders_dir(
+    renders_root: Path,
+    db_path: Path | None = None,
+    *,
+    workspace_dir: Path | None = None,
+) -> dict[str, int]:
+    """Đồng bộ thư mục assets/renders/<engine>/<job_id>/ và workspace với SQLite."""
     added_or_updated = 0
     removed = 0
     existing_paths: set[str] = set()
 
+    def _index_mp4(
+        mp4: Path,
+        *,
+        engine: str,
+        slug: str,
+        title: str,
+        duration_sec: float = 0.0,
+        publish_text: str = "",
+    ) -> None:
+        nonlocal added_or_updated
+        resolved_str = str(mp4.resolve())
+        if resolved_str in existing_paths:
+            return
+        existing_paths.add(resolved_str)
+        render_id = f"{engine}:{slug}:{mp4.parent.name}:{mp4.name}"
+        cover_candidate = mp4.parent / "cover_9x16.jpg"
+        if not cover_candidate.is_file():
+            cover_candidate = mp4.with_suffix(".jpg")
+        cover_path = str(cover_candidate.resolve()) if cover_candidate.is_file() else ""
+        mtime_iso = datetime.fromtimestamp(mp4.stat().st_mtime, tz=UTC).isoformat()
+        upsert_render(
+            render_id=render_id,
+            slug=slug,
+            title=title or slug,
+            engine=engine,
+            file_path=mp4.resolve(),
+            cover_path=cover_path,
+            duration_sec=duration_sec,
+            source_credit=publish_text,
+            created_at=mtime_iso,
+            db_path=db_path,
+        )
+        added_or_updated += 1
+
     if renders_root.is_dir():
         for mp4 in renders_root.rglob("*.mp4"):
-            if not mp4.is_file():
+            if not mp4.is_file() or mp4.name.endswith(".part.mp4") or mp4.name.endswith(".tmp.mp4"):
                 continue
-            existing_paths.add(str(mp4))
             rel_parts = mp4.relative_to(renders_root).parts
             engine = (
                 rel_parts[0] if len(rel_parts) >= 2 and rel_parts[0] in VALID_ENGINES else "core"
             )
             job_id = rel_parts[1] if len(rel_parts) >= 3 else mp4.stem
-            render_id = f"{engine}:{job_id}:{mp4.name}"
-            cover_candidate = mp4.with_suffix(".jpg")
-            cover_path = str(cover_candidate) if cover_candidate.is_file() else ""
-            upsert_render(
-                render_id=render_id,
-                slug=job_id,
-                title=mp4.stem,
-                engine=engine,
-                file_path=mp4,
-                cover_path=cover_path,
-                db_path=db_path,
+            pub_file = mp4.parent / "publish.txt"
+            pub_txt = (
+                pub_file.read_text(encoding="utf-8", errors="ignore").strip()
+                if pub_file.is_file()
+                else ""
             )
-            added_or_updated += 1
+            dur = 0.0
+            meta_file = mp4.parent / "meta.json"
+            if meta_file.is_file():
+                try:
+                    mdata = json.loads(meta_file.read_text(encoding="utf-8"))
+                    dur = float(mdata.get("duration", 0.0) or 0.0)
+                except Exception:
+                    pass
+            _index_mp4(
+                mp4,
+                engine=engine,
+                slug=job_id,
+                title=pub_txt.splitlines()[0][:80] if pub_txt else mp4.stem,
+                duration_sec=dur,
+                publish_text=pub_txt,
+            )
+
+    if workspace_dir is not None and workspace_dir.is_dir():
+        # Quét workspace/projects/<slug>/renders/<job_id>/video.mp4 (HBT Core & PostV)
+        projects_dir = workspace_dir / "projects"
+        if projects_dir.is_dir():
+            for pdir in projects_dir.iterdir():
+                if not pdir.is_dir():
+                    continue
+                rdir = pdir / "renders"
+                if not rdir.is_dir():
+                    continue
+                proj_title = pdir.name
+                proj_engine = "core"
+                pjson = pdir / "project.json"
+                if pjson.is_file():
+                    try:
+                        pdata = json.loads(pjson.read_text(encoding="utf-8"))
+                        proj_title = str(pdata.get("title") or pdir.name)
+                        if pdata.get("kind") == "postv" or "post" in pdata:
+                            proj_engine = "postv"
+                    except Exception:
+                        pass
+                for jdir in rdir.iterdir():
+                    if not jdir.is_dir():
+                        continue
+                    vmp4 = jdir / "video.mp4"
+                    if not vmp4.is_file():
+                        continue
+                    pub_file = jdir / "publish.txt"
+                    pub_txt = (
+                        pub_file.read_text(encoding="utf-8", errors="ignore").strip()
+                        if pub_file.is_file()
+                        else ""
+                    )
+                    dur = 0.0
+                    meta_file = jdir / "meta.json"
+                    if meta_file.is_file():
+                        try:
+                            mdata = json.loads(meta_file.read_text(encoding="utf-8"))
+                            dur = float(mdata.get("duration", 0.0) or 0.0)
+                        except Exception:
+                            pass
+                    _index_mp4(
+                        vmp4,
+                        engine=proj_engine,
+                        slug=pdir.name,
+                        title=proj_title,
+                        duration_sec=dur,
+                        publish_text=pub_txt,
+                    )
+
+        # Quét workspace/chatting/<slug>/renders/render_*.mp4 (Chatting)
+        chatting_dir = workspace_dir / "chatting"
+        if chatting_dir.is_dir():
+            for cdir in chatting_dir.iterdir():
+                if not cdir.is_dir():
+                    continue
+                rdir = cdir / "renders"
+                if not rdir.is_dir():
+                    continue
+                chat_title = cdir.name
+                cjson = cdir / "chat.json"
+                if cjson.is_file():
+                    try:
+                        cdata = json.loads(cjson.read_text(encoding="utf-8"))
+                        chat_title = str(cdata.get("title") or cdir.name)
+                    except Exception:
+                        pass
+                for mp4 in rdir.glob("*.mp4"):
+                    if not mp4.is_file():
+                        continue
+                    dur = 0.0
+                    meta_candidate = rdir / f"{mp4.stem}.json"
+                    if meta_candidate.is_file():
+                        try:
+                            mdata = json.loads(meta_candidate.read_text(encoding="utf-8"))
+                            dur = float(mdata.get("duration", 0.0) or 0.0)
+                        except Exception:
+                            pass
+                    _index_mp4(
+                        mp4,
+                        engine="chatting",
+                        slug=cdir.name,
+                        title=chat_title,
+                        duration_sec=dur,
+                        publish_text=f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+                    )
 
     conn = init_db(db_path)
     try:

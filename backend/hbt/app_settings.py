@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from hbt.config import DEFAULT_FPS
 from hbt.models import HEX_COLOR
+from hbt.shared.pipeline.watermark import WatermarkSettings
 
 FpsChoice = Literal[30, 50, 60]
 WhisperModelChoice = Literal["auto", "small", "medium", "large-v3"]
@@ -38,6 +39,7 @@ class AppSettings(BaseModel):
     whisper_model: WhisperModelChoice = "auto"
     whisper_timeout_seconds: int = Field(default=900, ge=30, le=7200)
     advanced_mode: bool = False
+    watermark: WatermarkSettings = Field(default_factory=WatermarkSettings)
 
 
 class AppSettingsStore:

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
-import type { ProjectSummary, RenderSummary } from '../api/types';
+import type { ProjectSummary, RenderSummary, UnifiedRenderItem } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
@@ -19,6 +19,7 @@ import { CardImage } from '../components/ProjectCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Dialog } from '../components/ui/Dialog';
 import { Menu } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
@@ -31,6 +32,19 @@ import { latestExport, readiness } from '../utils/readiness';
 
 const RECENT = 4;
 const TONE = { final: 'red', preview: 'yel', none: 'neutral', broken: 'danger' } as const;
+
+const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting', string> = {
+  all: 'Tất cả',
+  core: 'HBT Core',
+  postv: 'PostV',
+  chatting: 'Chatting',
+};
+
+const ENGINE_BADGE_STYLE: Record<'core' | 'postv' | 'chatting', string> = {
+  core: 'bg-[#D9232E] text-white border-[#F87171]/40',
+  postv: 'bg-white text-[#0B0D12] border-white/80',
+  chatting: 'bg-[#FACC15] text-[#0B0D12] border-[#FACC15]',
+};
 
 function Dot({ on, label }: { on: boolean; label: string }) {
   const t = vi.home.dot;
@@ -237,6 +251,9 @@ export function HomePage() {
   const t = vi.home;
   const { open: openNew } = useNewProject();
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
+  const [activeRender, setActiveRender] = useState<UnifiedRenderItem | null>(null);
+  const [deletingRender, setDeletingRender] = useState<UnifiedRenderItem | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -257,6 +274,12 @@ export function HomePage() {
     queryFn: api.listProjects,
   });
 
+  const rendersQuery = useQuery({
+    queryKey: ['unified-renders'],
+    queryFn: () => api.listUnifiedRenders(),
+    retry: false,
+  });
+
   const remove = useMutation({
     mutationFn: (slug: string) => api.deleteProject(slug),
     onSuccess: () => {
@@ -264,24 +287,58 @@ export function HomePage() {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       toast.info(vi.projects.deleted);
     },
-    onError: (e) => {
+    onError: (err: Error) => {
       setDeleting(null);
-      toast.error(e);
+      toast.error(err);
     },
   });
 
-  // Danh sách đã sắp theo `updated_at` mới nhất trước.
+  const deleteRenderMut = useMutation({
+    mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
+    onSuccess: (_res, item) => {
+      void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
+      toast.info(`Đã xóa video "${item.title}"`);
+      if (activeRender?.id === item.id) setActiveRender(null);
+      setDeletingRender(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err);
+      setDeletingRender(null);
+    },
+  });
+
   const latest = data?.[0];
-  const last = data ? latestExport(data) : null;
   const recent = data?.slice(1, 1 + RECENT) ?? [];
+  const last = data ? latestExport(data) : null;
+
+  const allRenders = rendersQuery.data?.items ?? [];
+  const filteredRenders =
+    engineFilter === 'all' ? allRenders : allRenders.filter((r) => r.engine === engineFilter);
+
+  const handleCopyPublishText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.info('Đã sao chép nội dung đăng bài!');
+    } catch (err) {
+      toast.error(err);
+    }
+  };
 
   return (
-    <main className="mx-auto max-w-[1280px] space-y-8 px-6 py-10">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
+    <main className="mx-auto max-w-[1160px] space-y-6">
+      {/* HBT Signature Hero Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-white/10 bg-[#131720] p-6">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 rounded-pill border border-[#D9232E]/40 bg-[#D9232E]/15 px-3 py-0.5 text-tiny font-bold tracking-wider text-[#FACC15] uppercase">
+            <span>HBT Signature Studio v4.0</span>
+            <span className="text-white/40">•</span>
+            <span className="text-white">9:16 TikTok / Reels / Shorts</span>
+          </div>
+          <h1 className="text-h1 font-extrabold">{t.title}</h1>
+        </div>
         <div
-          aria-label={vi.health.title}
-          className="flex flex-wrap items-center gap-2 rounded-pill border border-line bg-card px-3.5 py-1.5 text-tiny font-bold"
+          aria-label="Trạng thái môi trường"
+          className="flex flex-wrap items-center gap-3 rounded-pill border border-line bg-card px-3.5 py-1.5 text-tiny font-semibold text-muted"
         >
           <span className="flex items-center gap-1.5">
             <span
@@ -309,49 +366,67 @@ export function HomePage() {
         </div>
       </div>
 
-      {/* Lối tắt tạo video nhanh (3 Động cơ Studio) */}
+      {/* Lối tắt tạo video nhanh (3 Động cơ Studio — HBT Signature Bento Cards) */}
       <section aria-label={t.hub.title} className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">
-        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+        {/* 1. HBT Core — Đỏ · Đen */}
+        <Card className="flex flex-col justify-between gap-4 border-[#D9232E]/40 bg-[#131720] p-5">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-brand text-white">
-                <ZapIcon size={18} />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#D9232E] text-white">
+                  <ZapIcon size={18} />
+                </span>
+                <h2 className="text-body font-extrabold">{t.hub.hbtCoreTitle}</h2>
+              </div>
+              <span className="rounded-pill bg-[#D9232E]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
+                9:16 Fill
               </span>
-              <h2 className="text-body font-extrabold">{t.hub.hbtCoreTitle}</h2>
             </div>
             <p className="text-small text-muted">{t.hub.hbtCoreDesc}</p>
           </div>
-          <Link to="/core" className="ui-btn ui-btn-ink ui-btn-sm self-start">
+          <Link to="/core" className="ui-btn ui-btn-brand ui-btn-sm self-start">
             {t.hub.hbtCoreCta}
           </Link>
         </Card>
 
-        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+        {/* 2. PostV — Trắng · Đỏ · Đen */}
+        <Card className="flex flex-col justify-between gap-4 border-white/25 bg-[#131720] p-5">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-hero text-on-hero">
-                <SmartphoneIcon size={18} />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-white text-[#0B0D12]">
+                  <SmartphoneIcon size={18} />
+                </span>
+                <h2 className="text-body font-extrabold">{t.hub.postvTitle}</h2>
+              </div>
+              <span className="rounded-pill bg-white/15 px-2.5 py-0.5 text-tiny font-bold text-white">
+                9:16 Smart Fit
               </span>
-              <h2 className="text-body font-extrabold">{t.hub.postvTitle}</h2>
             </div>
             <p className="text-small text-muted">{t.hub.postvDesc}</p>
           </div>
-          <Link to="/postv" className="ui-btn ui-btn-soft ui-btn-sm self-start">
+          <Link to="/postv" className="ui-btn ui-btn-ink ui-btn-sm self-start">
             {t.hub.postvCta}
           </Link>
         </Card>
 
-        <Card className="flex flex-col justify-between gap-4 border-line bg-soft p-5">
+        {/* 3. Chatting — Vàng · Đen */}
+        <Card className="flex flex-col justify-between gap-4 border-[#FACC15]/40 bg-[#131720] p-5">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-hero text-on-hero">
-                <MessagesSquareIcon size={18} />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#FACC15] text-[#0B0D12]">
+                  <MessagesSquareIcon size={18} />
+                </span>
+                <h2 className="text-body font-extrabold">{t.hub.chattingTitle}</h2>
+              </div>
+              <span className="rounded-pill bg-[#FACC15]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
+                9:16 Smart Fit
               </span>
-              <h2 className="text-body font-extrabold">{t.hub.chattingTitle}</h2>
             </div>
             <p className="text-small text-muted">{t.hub.chattingDesc}</p>
           </div>
-          <Link to="/chatting" className="ui-btn ui-btn-soft ui-btn-sm self-start">
+          <Link to="/chatting" className="ui-btn ui-btn-accent ui-btn-sm self-start">
             {t.hub.chattingCta}
           </Link>
         </Card>
@@ -398,19 +473,226 @@ export function HomePage() {
               </ul>
             </section>
           )}
-
-          {deleting && (
-            <ConfirmDialog
-              title={vi.projects.deleteTitle}
-              message={vi.projects.confirmDelete(deleting.title)}
-              confirmLabel={vi.projects.delete}
-              danger
-              busy={remove.isPending}
-              onConfirm={() => remove.mutate(deleting.slug)}
-              onCancel={() => setDeleting(null)}
-            />
-          )}
         </>
+      )}
+
+      {/* KHO VIDEO ĐÃ XUẤT HỢP NHẤT (Tất cả · HBT Core · PostV · Chatting) */}
+      <section aria-label="Video đã xuất gần đây" className="space-y-4 pt-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-h2 font-extrabold">Video đã xuất gần đây</h2>
+            <p className="text-small text-muted">
+              Tất cả thành phẩm `.mp4` từ HBT Core, PostV và Chatting tập trung tại một nơi duy
+              nhất.
+            </p>
+          </div>
+          <div
+            role="tablist"
+            aria-label="Lọc video theo động cơ"
+            className="flex flex-wrap items-center gap-1.5 rounded-inner border border-line bg-card p-1"
+          >
+            {(['all', 'core', 'postv', 'chatting'] as const).map((eng) => {
+              const active = engineFilter === eng;
+              return (
+                <button
+                  key={eng}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setEngineFilter(eng)}
+                  className={`rounded-inner px-3 py-1.5 text-tiny font-bold transition-colors ${
+                    active ? 'bg-[#D9232E] text-white' : 'text-muted hover:bg-soft hover:text-text'
+                  }`}
+                >
+                  {ENGINE_LABELS[eng]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {filteredRenders.length === 0 ? (
+          <Card className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+            <p className="text-body font-bold">Chưa có video đã xuất trong mục này</p>
+            <p className="max-w-md text-small text-muted">
+              Khi bạn xuất video từ HBT Core, PostV hoặc Chatting, thành phẩm 9:16 và nội dung đăng
+              bài sẽ tự động hiện tại đây.
+            </p>
+          </Card>
+        ) : (
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {filteredRenders.map((item) => (
+              <Card
+                key={item.id}
+                as="li"
+                padded={false}
+                className="flex flex-col overflow-hidden border border-line bg-card"
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveRender(item)}
+                  className="group relative aspect-[9/16] w-full overflow-hidden bg-[#0B0D12] text-left"
+                  aria-label={`Xem thành phẩm: ${item.title}`}
+                >
+                  <video
+                    src={item.video_url}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
+                  />
+                  <span
+                    className={`absolute top-2.5 left-2.5 rounded-pill border px-2.5 py-0.5 text-tiny font-extrabold uppercase ${ENGINE_BADGE_STYLE[item.engine]}`}
+                  >
+                    {ENGINE_LABELS[item.engine]}
+                  </span>
+                  {item.duration_sec > 0 && (
+                    <span className="num absolute right-2.5 bottom-2.5 rounded bg-black/80 px-2 py-0.5 text-tiny font-bold text-white">
+                      {formatDuration(item.duration_sec)}
+                    </span>
+                  )}
+                </button>
+                <div className="flex flex-1 flex-col justify-between gap-2 p-3.5">
+                  <div>
+                    <p className="line-clamp-2 text-small font-bold">{item.title}</p>
+                    <p className="num mt-1 text-tiny text-muted">
+                      {item.size_mb} MB · {item.created_at ? formatDate(item.created_at) : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      tone="brand"
+                      onClick={() => setActiveRender(item)}
+                      className="flex-1"
+                    >
+                      Xem & Đăng bài
+                    </Button>
+                    <Button
+                      size="sm"
+                      tone="ghost"
+                      onClick={() => setDeletingRender(item)}
+                      aria-label={`Xóa video ${item.title}`}
+                    >
+                      Xóa
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Modal 9:16 Player + Publish.txt Copy + Download + Delete */}
+      <Dialog
+        open={Boolean(activeRender)}
+        onClose={() => setActiveRender(null)}
+        title={activeRender ? activeRender.title : 'Chi tiết video đã xuất'}
+        className="!max-w-[760px]"
+      >
+        {activeRender && (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr]">
+            <div className="mx-auto aspect-[9/16] w-full max-w-[240px] overflow-hidden rounded-inner border border-line bg-black">
+              <video
+                src={activeRender.video_url}
+                controls
+                autoPlay
+                playsInline
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div className="flex flex-col justify-between gap-4">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-pill border px-2.5 py-0.5 text-tiny font-extrabold uppercase ${ENGINE_BADGE_STYLE[activeRender.engine]}`}
+                  >
+                    {ENGINE_LABELS[activeRender.engine]}
+                  </span>
+                  <span className="num text-small text-muted">
+                    {activeRender.size_mb} MB
+                    {activeRender.duration_sec > 0
+                      ? ` · ${formatDuration(activeRender.duration_sec)}`
+                      : ''}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-small font-bold">Nội dung đăng bài (`publish.txt`)</span>
+                    {activeRender.publish_text && (
+                      <Button
+                        size="sm"
+                        tone="accent"
+                        onClick={() => void handleCopyPublishText(activeRender.publish_text)}
+                      >
+                        Sao chép nội dung đăng bài
+                      </Button>
+                    )}
+                  </div>
+                  <pre className="max-h-52 overflow-y-auto rounded-inner border border-line bg-soft p-3 font-sans text-small whitespace-pre-wrap">
+                    {activeRender.publish_text || 'Chưa có nội dung publish.txt đính kèm.'}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={activeRender.video_url}
+                    download={`${activeRender.slug || 'video'}.mp4`}
+                    className="ui-btn ui-btn-brand ui-btn-sm"
+                  >
+                    Tải video.mp4
+                  </a>
+                  {activeRender.slug && (
+                    <Link
+                      to={
+                        activeRender.engine === 'chatting'
+                          ? `/chatting/${activeRender.slug}`
+                          : activeRender.engine === 'postv'
+                            ? `/postv/${activeRender.slug}`
+                            : `/p/${activeRender.slug}`
+                      }
+                      className="ui-btn ui-btn-soft ui-btn-sm"
+                      onClick={() => setActiveRender(null)}
+                    >
+                      Mở dự án gốc
+                    </Link>
+                  )}
+                </div>
+                <Button size="sm" tone="danger" onClick={() => setDeletingRender(activeRender)}>
+                  Xóa video
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {deleting && (
+        <ConfirmDialog
+          title={vi.projects.deleteTitle}
+          message={vi.projects.confirmDelete(deleting.title)}
+          confirmLabel={vi.projects.delete}
+          danger
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(deleting.slug)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
+
+      {deletingRender && (
+        <ConfirmDialog
+          title="Xóa video đã xuất?"
+          message={`Bạn có chắc muốn xóa vĩnh viễn video "${deletingRender.title}" khỏi ổ cứng?`}
+          confirmLabel="Xóa vĩnh viễn"
+          danger
+          busy={deleteRenderMut.isPending}
+          onConfirm={() => deleteRenderMut.mutate(deletingRender)}
+          onCancel={() => setDeletingRender(null)}
+        />
       )}
     </main>
   );

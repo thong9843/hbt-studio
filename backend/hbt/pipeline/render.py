@@ -128,6 +128,7 @@ class RenderOptions:
     whisper_timeout: int | None = None  # giây; None → mặc định
     job_id: str | None = None  # tên thư mục renders/<job_id>; None → thời điểm dựng
     aspect_mode: str | None = None  # "fill" | "fit" | None → theo settings.aspect_mode
+    watermark_enabled: bool | None = None  # None → theo app.json watermark.enabled
 
 
 @dataclass

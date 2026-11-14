@@ -78,7 +78,7 @@ def bg_key(
     fps: int,
     preset: str,
     crf: int,
-    aspect_mode: AspectMode = "fill",
+    aspect_mode: AspectMode = "fit",
 ) -> str:
     """Khoá cache `bg.mp4`: mảnh (kèm kích thước + giờ sửa file nguồn), kích thước, fps, mã hoá."""
     sources = []
@@ -107,7 +107,7 @@ def build_background(
     preset: str,
     crf: int,
     out: Path,
-    aspect_mode: AspectMode = "fill",
+    aspect_mode: AspectMode = "fit",
 ) -> None:
     """Một lệnh ffmpeg: cắt từng mảnh, đưa về `width×height` `fps`, nối, không tiếng."""
     args: list[str | Path] = []

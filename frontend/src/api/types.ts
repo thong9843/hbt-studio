@@ -247,12 +247,22 @@ export interface RenderOptions {
   aspect_mode?: AspectMode;
 }
 
+export interface WatermarkSettings {
+  enabled: boolean;
+  mode: 'text' | 'logo' | 'both';
+  text: string;
+  logo_path: string;
+  position: 'top-left' | 'top-right' | 'center-subtle';
+  opacity: number;
+}
+
 export interface AppSettings {
   default_fps: Fps;
   theme: Theme;
   whisper_model: 'auto' | 'small' | 'medium' | 'large-v3';
   whisper_timeout_seconds: number;
   advanced_mode?: boolean;
+  watermark?: WatermarkSettings;
 }
 
 export interface SensitiveCategory {
@@ -844,7 +854,7 @@ export interface HbtCoreRenderResponse {
   script?: HbtCoreScript;
 }
 
-export type AssetHubCategory = 'stickers' | 'memes' | 'backgrounds' | 'renders';
+export type AssetHubCategory = 'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks';
 
 export interface AssetHubItem {
   name: string;
@@ -853,4 +863,17 @@ export interface AssetHubItem {
   size: number;
   modified_at: string;
   url: string;
+}
+
+export interface UnifiedRenderItem {
+  id: string;
+  slug: string;
+  title: string;
+  engine: 'core' | 'postv' | 'chatting';
+  duration_sec: number;
+  size_mb: number;
+  publish_text: string;
+  created_at: string;
+  video_url: string;
+  cover_url?: string | null;
 }

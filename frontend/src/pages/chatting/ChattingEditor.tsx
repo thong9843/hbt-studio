@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../../components/SafeZoneOverlay';
-import { AspectModeToggle } from '../../components/AspectModeToggle';
-import type { AspectMode, ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
+import { WatermarkControl } from '../../components/WatermarkControl';
+import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
@@ -44,7 +44,6 @@ export function ChattingEditor() {
   const [isRendering, setIsRendering] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
-  const [aspectMode, setAspectMode] = useState<AspectMode>('fill');
   const [autoProgress, setAutoProgress] = useState<{
     percent: number;
     phase: string;
@@ -371,7 +370,7 @@ export function ChattingEditor() {
     setIsRendering(true);
     setNotice(null);
     try {
-      const res = await api.renderChattingProject(slug, preview, aspectMode);
+      const res = await api.renderChattingProject(slug, preview);
       setRenderJobId(res.job_id);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -722,10 +721,10 @@ export function ChattingEditor() {
         </div>
 
         {/* Nút hành động */}
-        <div className="mt-6 flex w-full flex-col gap-2.5">
-          <div className="flex justify-center">
-            <AspectModeToggle value={aspectMode} onChange={setAspectMode} disabled={isRendering} />
-          </div>
+        <div className="mt-4 w-full">
+          <WatermarkControl />
+        </div>
+        <div className="mt-4 flex w-full flex-col gap-2.5">
           {isRendering && (
             <div className="mb-2 text-center text-tiny font-bold text-accent">
               Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}
