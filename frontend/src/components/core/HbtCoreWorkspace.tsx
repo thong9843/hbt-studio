@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
+import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../SafeZoneOverlay';
 import type {
   HbtCoreGeminiModel,
   HbtCoreScript,
@@ -72,6 +73,7 @@ export function HbtCoreWorkspace({
   const toast = useToast();
   const queryClient = useQueryClient();
   const shared = useStudioWorkspace();
+  const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   const [localTitle, setLocalTitle] = useState(SAMPLE_V1_SCRIPT.title);
   const [localTopic, setLocalTopic] = useState<HbtCoreTopic>('history');
@@ -879,7 +881,11 @@ export function HbtCoreWorkspace({
           </div>
 
           {/* Khung giả lập video dọc 9:16 */}
+          <div className="mb-2 flex justify-center">
+            <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
+          </div>
           <div className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-[22px] border border-line-input bg-gradient-to-b from-[#131b2e] via-[#0d1322] to-[#090d16] shadow-lg">
+            <SafeZoneOverlay platform={safeZone} />
             {activeImageSrc ? (
               <img
                 src={activeImageSrc}

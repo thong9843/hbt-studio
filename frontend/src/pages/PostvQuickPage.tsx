@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
+import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
 import type {
   PostvPickComment,
   PostvPickData,
@@ -68,6 +69,7 @@ interface CompletedOutput {
 
 export function PostvQuickPage() {
   const navigate = useNavigate();
+  const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   // Danh sách các dự án để hiện ở cột trái
   const { data: projectsData, refetch: refetchProjects } = useQuery({
@@ -1248,7 +1250,11 @@ export function PostvQuickPage() {
               </div>
 
               {/* Trình phát video 9:16 nhỏ gọn đặt trung tâm */}
-              <div className="mx-auto w-full max-w-[240px] sm:max-w-[260px] overflow-hidden rounded-2xl border border-line bg-black shadow-xl">
+              <div className="mb-2 flex justify-center">
+                <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
+              </div>
+              <div className="relative mx-auto w-full max-w-[240px] sm:max-w-[260px] overflow-hidden rounded-2xl border border-line bg-black shadow-xl">
+                <SafeZoneOverlay platform={safeZone} />
                 {output.video ? (
                   <video
                     src={fileUrl(output.video)}

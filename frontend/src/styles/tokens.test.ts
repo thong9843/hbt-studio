@@ -96,13 +96,13 @@ describe('tokens.css v2', () => {
     ]);
     expect([d('--bg'), d('--card'), d('--soft'), d('--line'), d('--text')]).toEqual([
       '#090d16',
-      '#111726',
-      '#172033',
-      '#1f293d',
-      '#f1f5f9',
+      '#111827',
+      '#1a2234',
+      'rgba(255, 255, 255, 0.08)',
+      '#f8fafc',
     ]);
-    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#f4b630', '#b22228', '#b3261e']);
-    expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#f4b630', '#b22228', '#ff6b6b']);
+    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#f4b630', '#e11d48', '#b3261e']);
+    expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#f4b630', '#e11d48', '#ff6b6b']);
   });
 
   it('has radii and shadows from section 4', () => {
