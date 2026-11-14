@@ -720,6 +720,9 @@ export interface ChatMessage {
   from: string;
   text: string;
   sticker?: string | null;
+  media_type?: 'none' | 'image' | 'video';
+  media_path?: string | null;
+  media_hint?: string | null;
 }
 
 export interface ChatDoc {

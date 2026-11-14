@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
+import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../../components/SafeZoneOverlay';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
@@ -49,6 +50,7 @@ export function ChattingEditor() {
     llmSeconds?: number;
   } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   // 1. Lấy dữ liệu dự án
   const { data, refetch: refetchProject } = useQuery({
@@ -282,6 +284,40 @@ export function ChattingEditor() {
   const handleStickerChange = (sticker: string | null) => {
     const newMsgs = [...doc.messages];
     newMsgs[selectedMsgIndex] = { ...activeMsg, sticker };
+    saveDoc({ ...doc, messages: newMsgs });
+  };
+
+  const handleMediaUpload = async (file: File) => {
+    if (!slug) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`/api/chatting/${encodeURIComponent(slug)}/media`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const newMsgs = [...doc.messages];
+        newMsgs[selectedMsgIndex] = {
+          ...activeMsg,
+          media_type: data.media_type,
+          media_path: data.media_path,
+        };
+        saveDoc({ ...doc, messages: newMsgs });
+      }
+    } catch {
+      setNotice('Không thể tải ảnh/video minh họa.');
+    }
+  };
+
+  const handleMediaClear = () => {
+    const newMsgs = [...doc.messages];
+    newMsgs[selectedMsgIndex] = {
+      ...activeMsg,
+      media_type: 'none',
+      media_path: null,
+    };
     saveDoc({ ...doc, messages: newMsgs });
   };
 
@@ -583,6 +619,47 @@ export function ChattingEditor() {
             />
           </div>
 
+          {/* Ảnh / Video minh họa trong luồng chat */}
+          <div className="mt-4 rounded-xl border border-line bg-soft-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-tiny font-semibold text-muted">Ảnh / Video minh họa:</span>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80">
+                  Đính kèm Ảnh / Video
+                  <input
+                    type="file"
+                    accept="image/*,video/mp4,video/quicktime,.gif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleMediaUpload(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {activeMsg.media_path && (
+                  <button
+                    type="button"
+                    onClick={handleMediaClear}
+                    className="rounded-full bg-danger/15 px-3 py-1 text-tiny font-bold text-danger"
+                  >
+                    Xóa media
+                  </button>
+                )}
+              </div>
+            </div>
+            {activeMsg.media_hint && (
+              <p className="mt-1.5 text-tiny text-muted">
+                💡 Gợi ý AI: <span className="text-text">{activeMsg.media_hint}</span>
+              </p>
+            )}
+            {activeMsg.media_path && (
+              <p className="mt-1 text-tiny font-mono text-emerald-400">
+                Đã đính kèm ({activeMsg.media_type}): {activeMsg.media_path}
+              </p>
+            )}
+          </div>
+
           {/* Chọn Sticker */}
           <div className="mt-4">
             <label className="text-tiny font-semibold text-muted">{vi.chatting.sticker}:</label>
@@ -619,7 +696,10 @@ export function ChattingEditor() {
 
       {/* CỘT PHẢI (360px): Xem trước 9:16 + Nút Xuất */}
       <aside className="flex w-[360px] shrink-0 flex-col items-center border-l border-line bg-card p-6">
-        <h2 className="text-small font-extrabold text-text">Xem trước</h2>
+        <div className="flex w-full flex-col items-center gap-2">
+          <h2 className="text-small font-extrabold text-text">Xem trước</h2>
+          <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
+        </div>
 
         {/* Khung xem trước 9:16 */}
         <div className="relative mt-3 flex aspect-[9/16] w-full max-w-[260px] items-center justify-center overflow-hidden rounded-[28px] border border-line bg-black shadow-md">
@@ -636,6 +716,7 @@ export function ChattingEditor() {
               Chưa có video xem nhanh. Bấm "Xem nhanh" để dựng.
             </div>
           )}
+          <SafeZoneOverlay platform={safeZone} />
         </div>
 
         {/* Nút hành động */}

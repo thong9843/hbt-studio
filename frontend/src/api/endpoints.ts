@@ -68,6 +68,7 @@ export const api = {
       gemini_configured: boolean;
       model_available: boolean;
       model_name: string;
+      models?: { id: string; name: string }[];
       stickers: Record<string, number>;
       total_stickers: number;
     }>('/chatting/status'),
@@ -78,6 +79,7 @@ export const api = {
     background: string;
     direct_script?: boolean;
     target_duration_s?: number | null;
+    model?: string;
   }) => apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
   getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
   getChattingJob: (slug: string) => apiGet<ChattingJobInfo>(`/chatting/${enc(slug)}/job`),

@@ -10,6 +10,7 @@ Luật:
 - 12 đến 60 tin nhắn tùy theo thời lượng mục tiêu. Mỗi tin ngắn gọn dễ đọc, tổng dưới 5000 ký tự.
 - Tin đầu tiên phải gây tò mò ngay. Có cao trào và một cú twist hoặc câu chốt hài ở cuối.
 - Gắn sticker/meme vào tin có cảm xúc mạnh. Chỉ dùng tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok.
+- Có thể gợi ý `media_hint` (chuỗi tiếng Việt ngắn mô tả ảnh/clip minh họa, hoặc `null`) ở tối đa 2-3 tin nhắn cao trào/bằng chứng (vd: "Ảnh chụp màn hình chuyển khoản", "Clip phản ứng bất ngờ").
 - Không có: rượu bia, máu me, bạo lực, thuốc, chính trị, tình dục, chửi thề nặng, thông tin cá nhân thật.
 - Chỉ trả về JSON đúng schema."""
 
