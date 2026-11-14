@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api/endpoints';
 import type { AssetHubCategory, AssetHubItem } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { DownloadIcon, FolderIcon, PlayIcon, TrashIcon } from '../components/icons';
+import { DownloadIcon, FolderIcon, PlayIcon, PlusIcon, TrashIcon } from '../components/icons';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Dialog } from '../components/ui/Dialog';
@@ -15,11 +15,16 @@ import { Dropzone } from '../shared';
 
 const T = vi.assetHub;
 
-const CATEGORIES: { id: AssetHubCategory; emoji: string; label: string }[] = [
-  { id: 'stickers', emoji: '🎭', label: T.tabs.stickers },
-  { id: 'memes', emoji: '🐸', label: T.tabs.memes },
-  { id: 'backgrounds', emoji: '🎮', label: T.tabs.backgrounds },
-  { id: 'renders', emoji: '🎬', label: T.tabs.renders },
+const CATEGORIES: {
+  id: AssetHubCategory;
+  emoji: string;
+  label: string;
+  cta: string;
+}[] = [
+  { id: 'music', emoji: '🎵', label: T.tabs.music, cta: '+ Thêm nhạc nền' },
+  { id: 'backgrounds', emoji: '🎮', label: T.tabs.backgrounds, cta: '+ Thêm video nền' },
+  { id: 'stickers', emoji: '🎭', label: T.tabs.stickers, cta: '+ Thêm Sticker / Meme' },
+  { id: 'watermarks', emoji: '🏷️', label: T.tabs.watermarks, cta: '+ Tải lên Watermark' },
 ];
 
 function formatBytes(bytes: number): string {
@@ -31,6 +36,7 @@ function formatBytes(bytes: number): string {
 export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<AssetHubCategory>('stickers');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -63,28 +69,56 @@ export function AssetHubPage() {
   });
 
   const items = data?.items ?? [];
+  const activeCat = CATEGORIES.find((c) => c.id === activeTab) ?? CATEGORIES[0];
 
   return (
     <main className="mx-auto max-w-[1360px] space-y-6 px-6 py-8">
-      {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
+      {/* Header với nút + Import tài nguyên Vàng Nghệ nổi bật */}
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[#131720] p-6 shadow-lg">
+        <div className="space-y-1.5">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-inner bg-gradient-to-br from-indigo-500 via-violet-500 to-amber-500 text-white shadow-sm">
-              <FolderIcon size={20} />
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#D9232E] to-[#B91C1C] text-white shadow-md">
+              <FolderIcon size={22} />
             </span>
-            <h1 className="text-h1 font-extrabold uppercase tracking-tight">{T.title}</h1>
-            <Badge tone="neutral">{T.count(items.length)}</Badge>
+            <h1 className="text-h1 font-extrabold uppercase tracking-tight text-white">
+              {T.title}
+            </h1>
+            <Badge tone="yel">{T.count(items.length)}</Badge>
           </div>
-          <p className="text-small text-muted">{T.lead}</p>
+          <p className="text-small text-[#94A3B8]">{T.lead}</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const selected = Array.from(e.target.files ?? []);
+              if (selected.length > 0) {
+                upload.mutate(selected);
+              }
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            disabled={upload.isPending}
+            onClick={() => fileInputRef.current?.click()}
+            className="ui-btn-gold inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#FACC15] to-[#F59E0B] px-5 py-3 text-small font-extrabold text-[#0B0D12] shadow-[0_6px_20px_rgba(245,158,11,0.35)] transition hover:-translate-y-0.5 active:scale-95"
+          >
+            <PlusIcon size={18} />
+            <span>{activeCat.cta || T.importCta}</span>
+          </button>
         </div>
       </header>
 
-      {/* Tabs chuyển danh mục */}
+      {/* 4 Tabs nguyên liệu đầu vào */}
       <div
         role="tablist"
         aria-label={T.title}
-        className="flex flex-wrap gap-2 rounded-card border border-line bg-card p-2"
+        className="grid grid-cols-2 gap-2.5 rounded-2xl border border-white/10 bg-[#131720] p-2 sm:grid-cols-4"
       >
         {CATEGORIES.map((cat) => {
           const selected = activeTab === cat.id;
@@ -96,10 +130,10 @@ export function AssetHubPage() {
               aria-selected={selected}
               onClick={() => setActiveTab(cat.id)}
               className={cx(
-                'flex items-center gap-2 rounded-inner px-4 py-2.5 text-small font-bold transition duration-150',
+                'flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-small font-extrabold transition duration-150',
                 selected
-                  ? 'bg-gradient-to-r from-indigo-600 via-violet-600 to-amber-500 text-white shadow-sm'
-                  : 'text-muted hover:bg-soft hover:text-ink',
+                  ? 'bg-gradient-to-r from-[#D9232E] to-[#B91C1C] text-white shadow-[0_6px_18px_rgba(217,35,46,0.35)]'
+                  : 'text-[#94A3B8] hover:bg-white/5 hover:text-white',
               )}
             >
               <span aria-hidden="true">{cat.emoji}</span>
@@ -135,7 +169,7 @@ export function AssetHubPage() {
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-card border border-line bg-card p-10 text-center text-small text-muted">
+        <div className="rounded-2xl border border-dashed border-white/15 bg-[#131720] p-12 text-center text-small text-[#94A3B8]">
           {T.empty}
         </div>
       ) : (
@@ -143,14 +177,14 @@ export function AssetHubPage() {
           {items.map((item) => (
             <li
               key={item.name}
-              className="group flex flex-col overflow-hidden rounded-card border border-line bg-card transition duration-150 hover:border-indigo-500/50"
+              className="group flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#131720] transition duration-150 hover:-translate-y-0.5 hover:border-[#FACC15]/60"
             >
-              <div className="relative aspect-square w-full overflow-hidden bg-soft-2">
+              <div className="relative aspect-square w-full overflow-hidden bg-[#0B0D12]">
                 {item.kind === 'image' ? (
                   <img
                     src={item.url}
                     alt={item.name}
-                    className="h-full w-full object-contain p-2 transition duration-200 group-hover:scale-105"
+                    className="h-full w-full object-contain p-3 transition duration-200 group-hover:scale-105"
                   />
                 ) : item.kind === 'video' ? (
                   <video
@@ -160,6 +194,11 @@ export function AssetHubPage() {
                     preload="metadata"
                     className="h-full w-full object-cover"
                   />
+                ) : item.kind === 'audio' ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+                    <span className="text-4xl">🎵</span>
+                    <audio src={item.url} controls preload="none" className="w-full max-w-[200px]" />
+                  </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-tiny text-muted">
                     {item.name}
@@ -167,21 +206,21 @@ export function AssetHubPage() {
                 )}
               </div>
 
-              <div className="flex flex-1 flex-col gap-2 p-3">
-                <p className="truncate text-small font-bold" title={item.name}>
+              <div className="flex flex-1 flex-col gap-2 p-3.5">
+                <p className="truncate text-small font-bold text-white" title={item.name}>
                   {item.name}
                 </p>
-                <p className="text-tiny text-muted">{formatBytes(item.size)}</p>
+                <p className="text-tiny text-[#94A3B8]">{formatBytes(item.size)}</p>
 
                 <div className="mt-auto flex items-center justify-between gap-1.5 pt-1">
                   <div className="flex items-center gap-1">
-                    {(item.kind === 'video' || item.kind === 'image') && (
+                    {(item.kind === 'video' || item.kind === 'image' || item.kind === 'audio') && (
                       <button
                         type="button"
                         aria-label={`${T.preview}: ${item.name}`}
                         title={T.preview}
                         onClick={() => setPreviewItem(item)}
-                        className="flex h-8 w-8 items-center justify-center rounded-inner bg-soft text-ink transition hover:bg-indigo-600 hover:text-white"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-[#FACC15] hover:text-[#0B0D12]"
                       >
                         <PlayIcon size={14} />
                       </button>
@@ -191,7 +230,7 @@ export function AssetHubPage() {
                       download={item.name}
                       aria-label={`${T.download}: ${item.name}`}
                       title={T.download}
-                      className="flex h-8 w-8 items-center justify-center rounded-inner bg-soft text-ink transition hover:bg-indigo-600 hover:text-white"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-[#FACC15] hover:text-[#0B0D12]"
                     >
                       <DownloadIcon size={14} />
                     </a>
@@ -203,7 +242,7 @@ export function AssetHubPage() {
                     title={T.delete}
                     disabled={remove.isPending}
                     onClick={() => remove.mutate(item.name)}
-                    className="flex h-8 w-8 items-center justify-center rounded-inner bg-soft text-danger transition hover:bg-danger hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-[#EF4444] transition hover:bg-[#D9232E] hover:text-white"
                   >
                     <TrashIcon size={14} />
                   </button>
@@ -230,6 +269,8 @@ export function AssetHubPage() {
                 autoPlay
                 className="max-h-[70vh] w-full rounded-inner bg-black"
               />
+            ) : previewItem.kind === 'audio' ? (
+              <audio src={previewItem.url} controls autoPlay className="w-full" />
             ) : (
               <img
                 src={previewItem.url}

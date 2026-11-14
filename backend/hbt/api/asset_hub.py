@@ -1,10 +1,11 @@
-"""Router API cho Thư viện tài nguyên (Asset Hub) dựa trên hệ thống tệp cục bộ.
+"""Router API cho Thư viện tài nguyên (Asset Hub) và Kho Video đã xuất hợp nhất.
 
-Quản lý 4 danh mục:
+Quản lý nguyên liệu đầu vào:
+- assets/music
+- assets/backgrounds
 - assets/stickers
 - assets/memes
-- assets/backgrounds
-- assets/renders
+- assets/watermarks
 """
 
 from __future__ import annotations
@@ -19,11 +20,17 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
 
 from hbt.api.deps import State
+from hbt.shared.db.media_index import (
+    delete_render,
+    init_db,
+    list_renders,
+    sync_renders_dir,
+)
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
 
-VALID_CATEGORIES = ("stickers", "memes", "backgrounds", "renders")
+VALID_CATEGORIES = ("music", "backgrounds", "stickers", "memes", "watermarks")
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
@@ -144,3 +151,74 @@ def serve_asset_hub_file(category: str, filename: str, state: State) -> FileResp
     if target.parent != folder.resolve() or not target.is_file():
         raise NotFound(f"Không tìm thấy tệp '{clean_name}' trong '{category}'")
     return FileResponse(target)
+
+
+def _db_path(state: State) -> Path:
+    return state.settings.workspace_dir / "studio.db"
+
+
+@router.get("/renders")
+def list_unified_renders(state: State, engine: str | None = None) -> dict[str, Any]:
+    """Liệt kê hợp nhất toàn bộ Video đã xuất từ 3 động cơ (core, postv, chatting)."""
+    db = _db_path(state)
+    renders_root = state.settings.assets_dir / "renders"
+    sync_renders_dir(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
+    rows = list_renders(engine=engine if engine in ("core", "postv", "chatting") else None, db_path=db)
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        rid = str(r["id"])
+        enc_id = quote(rid, safe="")
+        has_cover = bool(r.get("cover_path")) and Path(str(r["cover_path"])).is_file()
+        items.append(
+            {
+                "id": rid,
+                "slug": r.get("slug", ""),
+                "title": r.get("title", ""),
+                "engine": r.get("engine", "core"),
+                "duration_sec": float(r.get("duration_sec") or 0.0),
+                "size_mb": float(r.get("size_mb") or 0.0),
+                "publish_text": r.get("source_credit") or "",
+                "created_at": r.get("created_at") or "",
+                "video_url": f"/api/renders/media/{enc_id}?kind=video",
+                "cover_url": f"/api/renders/media/{enc_id}?kind=cover" if has_cover else None,
+            }
+        )
+    return {"items": items}
+
+
+@router.get("/renders/media/{render_id:path}")
+def serve_unified_render_media(
+    render_id: str, state: State, kind: str = "video"
+) -> FileResponse:
+    db = _db_path(state)
+    conn = init_db(db)
+    try:
+        row = conn.execute("SELECT * FROM renders WHERE id = ?", (render_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise NotFound(f"Không tìm thấy bản xuất '{render_id}'")
+    target_str = str(row["cover_path"] if kind == "cover" else row["file_path"])
+    if not target_str:
+        raise NotFound("Không có tệp media tương ứng")
+    target = Path(target_str).resolve()
+    if not target.is_file():
+        raise NotFound("Tệp media không còn tồn tại trên ổ đĩa")
+    return FileResponse(target)
+
+
+@router.delete("/renders/{render_id:path}")
+def delete_unified_render(render_id: str, state: State) -> dict[str, Any]:
+    db = _db_path(state)
+    conn = init_db(db)
+    try:
+        row = conn.execute("SELECT * FROM renders WHERE id = ?", (render_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise NotFound(f"Không tìm thấy bản xuất '{render_id}'")
+    fp = Path(str(row["file_path"]))
+    if fp.is_file():
+        fp.unlink(missing_ok=True)
+    delete_render(render_id, db_path=db)
+    return {"ok": True, "deleted": render_id}

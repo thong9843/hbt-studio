@@ -854,7 +854,7 @@ export interface HbtCoreRenderResponse {
   script?: HbtCoreScript;
 }
 
-export type AssetHubCategory = 'stickers' | 'memes' | 'backgrounds' | 'renders';
+export type AssetHubCategory = 'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks';
 
 export interface AssetHubItem {
   name: string;
@@ -863,4 +863,17 @@ export interface AssetHubItem {
   size: number;
   modified_at: string;
   url: string;
+}
+
+export interface UnifiedRenderItem {
+  id: string;
+  slug: string;
+  title: string;
+  engine: 'core' | 'postv' | 'chatting';
+  duration_sec: number;
+  size_mb: number;
+  publish_text: string;
+  created_at: string;
+  video_url: string;
+  cover_url?: string | null;
 }

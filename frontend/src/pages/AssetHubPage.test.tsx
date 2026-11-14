@@ -9,7 +9,7 @@ import { AssetHubPage } from './AssetHubPage';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('AssetHubPage (Thư viện tài nguyên)', () => {
-  it('switches between the 4 categories, lists files, and deletes a file', async () => {
+  it('switches between the 4 resource categories (no renders tab), lists files, and deletes a file', async () => {
     let stickers = [
       {
         name: 'shock.png',
@@ -20,14 +20,14 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
         url: '/api/asset-hub/files/stickers/shock.png',
       },
     ];
-    const memes = [
+    const music = [
       {
-        name: 'cat-laugh.mp4',
-        category: 'memes',
-        kind: 'video',
+        name: 'chill-bgm.mp3',
+        category: 'music',
+        kind: 'audio',
         size: 102400,
         modified_at: '2026-11-12T08:00:00Z',
-        url: '/api/asset-hub/files/memes/cat-laugh.mp4',
+        url: '/api/asset-hub/files/music/chill-bgm.mp3',
       },
     ];
 
@@ -36,12 +36,12 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
         new Response(JSON.stringify({ category: 'stickers', items: stickers }), {
           headers: { 'Content-Type': 'application/json' },
         }),
-      'GET /api/asset-hub/memes': () =>
-        new Response(JSON.stringify({ category: 'memes', items: memes }), {
+      'GET /api/asset-hub/music': () =>
+        new Response(JSON.stringify({ category: 'music', items: music }), {
           headers: { 'Content-Type': 'application/json' },
         }),
       'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
-      'GET /api/asset-hub/renders': { category: 'renders', items: [] },
+      'GET /api/asset-hub/watermarks': { category: 'watermarks', items: [] },
       'DELETE /api/asset-hub/stickers/shock.png': () => {
         stickers = [];
         return new Response(JSON.stringify({ ok: true, deleted: 'shock.png' }), {
@@ -58,12 +58,14 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
     );
 
     expect(await screen.findByText('shock.png')).toBeVisible();
+    // Không còn tab "Video đã làm"
+    expect(screen.queryByRole('tab', { name: /Video đã làm/i })).toBeNull();
 
-    // Chuyển tab Memes
-    await user.click(screen.getByRole('tab', { name: /Memes/ }));
-    expect(await screen.findByText('cat-laugh.mp4')).toBeVisible();
+    // Chuyển tab Nhạc nền
+    await user.click(screen.getByRole('tab', { name: /Nhạc nền/ }));
+    expect(await screen.findByText('chill-bgm.mp3')).toBeVisible();
 
-    // Chuyển lại Sticker và xoá tệp
+    // Chuyển lại Sticker & Meme và xoá tệp
     await user.click(screen.getByRole('tab', { name: /Sticker/ }));
     expect(await screen.findByText('shock.png')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Xoá: shock.png' }));
