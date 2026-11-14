@@ -202,7 +202,7 @@ def build_watermark_overlay_filter(
     output_label: str = "v_wm",
     visible_until_s: float | None = None,
 ) -> str:
-    """Sinh chuỗi filter FFmpeg overlay lớp watermark (ẩn ở 4s outro cuối nếu có visible_until_s)."""
+    """Sinh chuỗi filter FFmpeg overlay lớp watermark (ẩn ở 4s outro cuối nếu có)."""
     enable_part = ""
     if visible_until_s is not None and visible_until_s > 0:
         enable_part = f":enable='between(t,0,{visible_until_s:.3f})'"

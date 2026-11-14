@@ -232,7 +232,11 @@ def sync_renders_dir(
             )
             job_id = rel_parts[1] if len(rel_parts) >= 3 else mp4.stem
             pub_file = mp4.parent / "publish.txt"
-            pub_txt = pub_file.read_text(encoding="utf-8", errors="ignore").strip() if pub_file.is_file() else ""
+            pub_txt = (
+                pub_file.read_text(encoding="utf-8", errors="ignore").strip()
+                if pub_file.is_file()
+                else ""
+            )
             dur = 0.0
             meta_file = mp4.parent / "meta.json"
             if meta_file.is_file():

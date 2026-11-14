@@ -256,38 +256,38 @@ describe('HomePage', () => {
     const user = userEvent.setup();
     stubFetch({
       'GET /api/projects': [],
-      'GET /api/renders': [
-        {
-          id: 'core-1',
-          filename: 'video.mp4',
-          title: 'Sự thật về Sao Hỏa',
-          engine: 'core',
-          project_slug: 'sao-hoa',
-          size: 4_200_000,
-          size_mb: 4.01,
-          duration: 62,
-          created_at: 1700000000,
-          url: '/api/renders/media/core-1',
-          publish_text: 'Sự thật về Sao Hỏa #HayBietTuot #KhoaHoc',
-        },
-        {
-          id: 'chatting-1',
-          filename: 'video.mp4',
-          title: 'Drama công sở',
-          engine: 'chatting',
-          project_slug: 'drama-1',
-          size: 3_100_000,
-          size_mb: 2.96,
-          duration: 45,
-          created_at: 1700000100,
-          url: '/api/renders/media/chatting-1',
-          publish_text: 'Drama công sở cực căng #Chatting',
-        },
-      ],
+      'GET /api/renders': {
+        items: [
+          {
+            id: 'core-1',
+            slug: 'sao-hoa',
+            title: 'Sự thật về Sao Hỏa',
+            engine: 'core',
+            duration_sec: 62,
+            size_mb: 4.01,
+            publish_text: 'Sự thật về Sao Hỏa #HayBietTuot #KhoaHoc',
+            created_at: '2026-10-22T10:00:00Z',
+            video_url: '/api/renders/media/core-1?kind=video',
+            cover_url: null,
+          },
+          {
+            id: 'chatting-1',
+            slug: 'drama-1',
+            title: 'Drama công sở',
+            engine: 'chatting',
+            duration_sec: 45,
+            size_mb: 2.96,
+            publish_text: 'Drama công sở cực căng #Chatting',
+            created_at: '2026-10-22T11:00:00Z',
+            video_url: '/api/renders/media/chatting-1?kind=video',
+            cover_url: null,
+          },
+        ],
+      },
     });
     page();
     const section = await screen.findByRole('region', { name: 'Video đã xuất gần đây' });
-    expect(within(section).getByText('Sự thật về Sao Hỏa')).toBeVisible();
+    expect(await within(section).findByText('Sự thật về Sao Hỏa')).toBeVisible();
     expect(within(section).getByText('Drama công sở')).toBeVisible();
 
     await user.click(within(section).getByRole('tab', { name: 'Chatting' }));
@@ -299,7 +299,7 @@ describe('HomePage', () => {
     expect(within(modal).getByText(/Drama công sở cực căng #Chatting/)).toBeVisible();
     expect(within(modal).getByRole('link', { name: 'Tải video.mp4' })).toHaveAttribute(
       'href',
-      '/api/renders/media/chatting-1',
+      '/api/renders/media/chatting-1?kind=video',
     );
   });
 });

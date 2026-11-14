@@ -163,7 +163,8 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
     db = _db_path(state)
     renders_root = state.settings.assets_dir / "renders"
     sync_renders_dir(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
-    rows = list_renders(engine=engine if engine in ("core", "postv", "chatting") else None, db_path=db)
+    valid_eng = engine if engine in ("core", "postv", "chatting") else None
+    rows = list_renders(engine=valid_eng, db_path=db)
     items: list[dict[str, Any]] = []
     for r in rows:
         rid = str(r["id"])
@@ -187,9 +188,7 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
 
 
 @router.get("/renders/media/{render_id:path}")
-def serve_unified_render_media(
-    render_id: str, state: State, kind: str = "video"
-) -> FileResponse:
+def serve_unified_render_media(render_id: str, state: State, kind: str = "video") -> FileResponse:
     db = _db_path(state)
     conn = init_db(db)
     try:

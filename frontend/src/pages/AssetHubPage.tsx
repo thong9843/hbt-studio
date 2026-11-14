@@ -197,7 +197,12 @@ export function AssetHubPage() {
                 ) : item.kind === 'audio' ? (
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
                     <span className="text-4xl">🎵</span>
-                    <audio src={item.url} controls preload="none" className="w-full max-w-[200px]" />
+                    <audio
+                      src={item.url}
+                      controls
+                      preload="none"
+                      className="w-full max-w-[200px]"
+                    />
                   </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-tiny text-muted">

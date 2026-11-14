@@ -24,7 +24,7 @@ export function WatermarkControl() {
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
+    queryFn: () => api.getAppSettings(),
   });
 
   const wm: WatermarkSettings = { ...DEFAULT_WM, ...(settings?.watermark ?? {}) };
@@ -37,7 +37,7 @@ export function WatermarkControl() {
         whisper_model: 'auto',
         whisper_timeout_seconds: 900,
       };
-      return api.saveSettings({ ...base, watermark: nextWm });
+      return api.saveAppSettings({ ...base, watermark: nextWm });
     },
     onSuccess: (saved) => {
       queryClient.setQueryData(['settings'], saved);
@@ -79,9 +79,7 @@ export function WatermarkControl() {
             <select
               aria-label="Kiểu Watermark"
               value={wm.mode}
-              onChange={(e) =>
-                updateWm({ mode: e.target.value as WatermarkSettings['mode'] })
-              }
+              onChange={(e) => updateWm({ mode: e.target.value as WatermarkSettings['mode'] })}
               className="w-full rounded-lg border border-white/15 bg-[#0B0D12] px-2 py-1 text-xs text-white"
             >
               <option value="both">Logo + Chữ (@HayBietTuot)</option>
