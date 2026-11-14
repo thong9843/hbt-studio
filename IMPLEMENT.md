@@ -1360,3 +1360,11 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
 - **Shared LLM (`hbt/shared/llm/__init__.py`):** Tái sử dụng `gemini_client.py` (`GEMINI_API_KEY`, fallback `MODELS`) qua `generate_structured_json()` với `responseMimeType: "application/json"`.
 - **Loại bỏ Ollama:** Xóa `OllamaClient` (`127.0.0.1:11434`, `qwen2.5:3b-instruct`, `keep_alive: 0`) thay bằng `GeminiChatClient`; `GET /api/chatting/status` trả về `gemini_configured`; giữ nguyên `sanitize_chat_raw` và `CHATTING_FAKE_LLM=1`.
 
+### 15.13 HBT Signature UI, Tự động 9:16, Watermark bản quyền & Kho Video hợp nhất (Mốc v4.0.0)
+
+- **Giao diện HBT Signature (`tokens.css`, `ui.css`, `HomePage.tsx`):** Bảng màu 4 sắc thái nhận diện thương hiệu Đen Carbon (`#0B0D12` / `#131720`), Trắng Tinh Khôi (`#FFFFFF` / `#F8FAFC`), Đỏ HBT Chủ Đạo (`#D9232E` $\to$ `#B91C1C`) và Vàng HBT Điểm Nhấn (`#FACC15` $\to$ `#F59E0B`, chữ `#0B0D12`); 3 thẻ Bento Động cơ trên Trang chủ (HBT Core Đỏ-Đen, PostV Trắng-Đỏ-Đen, Chatting Vàng-Đen).
+- **Tự động hóa 9:16 theo động cơ (`shared/pipeline/aspect.py`):** Loại bỏ công tắc Fill/Fit thủ công trên giao diện; áp cứng `HBT Core = fill` (full-bleed 1080×1920) và `PostV / Chatting = fit` (Smart Fit Blur `boxblur=40:5` giữ trọn khung hình gốc).
+- **Watermark bản quyền (`shared/pipeline/watermark.py`, `WatermarkControl.tsx`):** Vẽ lớp PNG 1080×1920 trong suốt bằng Pillow với bóng đổ mềm (`mode`: `both` / `text` / `logo`, mặc định `@HayBietTuot` + `brand/hbt-logo-mark.png`, góc `top-right` trong vùng an toàn Safe-Zone, `opacity: 0.35`, tự động ẩn ở 4 giây outro cuối), lưu trong `workspace/settings/app.json` và nối vào cả 3 động cơ (`core/render.py`, `postv/render.py`, `chatting/render.py`).
+- **Hợp nhất Kho Video đã xuất & Tinh gọn `/library` (`api/asset_hub.py`, `media_index.py`, `HomePage.tsx`, `AssetHubPage.tsx`):** Quét hợp nhất mọi thành phẩm `.mp4` cùng `publish.txt` từ cả 3 động cơ hiển thị trực tiếp tại mục **Video đã xuất gần đây** trên Trang chủ (`/`) kèm bộ lọc động cơ và Modal 9:16 Player (Xem video, Sao chép `publish.txt` 1 chạm, Tải `.mp4`, Xóa có xác nhận); trang `/library` giữ đúng 4 tab nguyên liệu đầu vào (`Nhạc nền`, `Video nền Gameplay`, `Sticker & Meme`, `Logo Watermark`).
+
+

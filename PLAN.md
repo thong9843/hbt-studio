@@ -124,5 +124,7 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 | **CH5** | ☑ | **`v1.18.1`** | **Cải tiến Chatting: Tách sạch lời thoại TTS (bỏ mốc giờ/mô tả), hybrid sub-frames 60fps mượt (typing sine wave, pop spring, cuộn mượt), UI Messenger chuẩn (header avatar active, grouped bubble)** |
 | **Phase 6** | ☑ | **`v2.1.0`** | **Creator Workstation: PostV video/gif & meme cap, SQLite Media Index (`workspace/studio.db`), Kanban 4 cột, Clipper 9:16, OpenCut-style Video Editor + Safe-Zone, Scheduler UI (CI run 43399203837 xanh)** |
 | **Chatting Gemini** | ☑ | **`v2.2.0`** | **Thay thế hoàn toàn Ollama (`qwen2.5:3b-instruct`) bằng Gemini API dùng chung `gemini_client.py` / `hbt.shared.llm` (CI run 43405425835 xanh)** |
+| **Redesign v3.0 & 3.1** | ☑ | **`v3.0.0`** | **Creator Dark Studio 5-item Sidebar, chuẩn 9:16 `aspect.py` (`fill`/`fit`), Safe-Zone overlay, Chatting chọn model Gemini & chèn ảnh/video trong bong bóng chat (CI run 43549579106 xanh)** |
+| **HBT Signature v4.0** | ☑ | **`v4.0.0`** | **Giao diện HBT Signature (Đỏ · Trắng · Vàng · Đen), tự động 9:16 fill/fit theo động cơ (bỏ nút Fill/Fit), đóng dấu Watermark bản quyền (`watermark.py`), hợp nhất kho Video đã xuất trên Trang chủ và tinh gọn `/library` 4 nhóm nguyên liệu (CI run 43556156829 xanh)** |
 | G4 | ☐ | `v1.19.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
 | GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |
