@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
+import { WatermarkControl } from '../components/WatermarkControl';
 import type {
   PostvPickComment,
   PostvPickData,
@@ -878,8 +879,9 @@ export function PostvQuickPage() {
                 </div>
               </div>
 
-              {/* Nút Tạo Video chính */}
-              <div className="flex justify-end">
+              {/* Watermark bản quyền & Nút Tạo Video chính */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <WatermarkControl />
                 <Button
                   size="lg"
                   tone="brand"

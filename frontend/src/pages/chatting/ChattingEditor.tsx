@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../../components/SafeZoneOverlay';
+import { WatermarkControl } from '../../components/WatermarkControl';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
@@ -720,7 +721,10 @@ export function ChattingEditor() {
         </div>
 
         {/* Nút hành động */}
-        <div className="mt-6 flex w-full flex-col gap-2.5">
+        <div className="mt-4 w-full">
+          <WatermarkControl />
+        </div>
+        <div className="mt-4 flex w-full flex-col gap-2.5">
           {isRendering && (
             <div className="mb-2 text-center text-tiny font-bold text-accent">
               Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}

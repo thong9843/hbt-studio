@@ -247,12 +247,22 @@ export interface RenderOptions {
   aspect_mode?: AspectMode;
 }
 
+export interface WatermarkSettings {
+  enabled: boolean;
+  mode: 'text' | 'logo' | 'both';
+  text: string;
+  logo_path: string;
+  position: 'top-left' | 'top-right' | 'center-subtle';
+  opacity: number;
+}
+
 export interface AppSettings {
   default_fps: Fps;
   theme: Theme;
   whisper_model: 'auto' | 'small' | 'medium' | 'large-v3';
   whisper_timeout_seconds: number;
   advanced_mode?: boolean;
+  watermark?: WatermarkSettings;
 }
 
 export interface SensitiveCategory {

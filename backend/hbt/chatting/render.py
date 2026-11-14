@@ -285,6 +285,21 @@ def render_chat_video(
     video_media_spans: dict[int, list[tuple[float, float, Path, int, int, int, int]]] = {}
     coord_scale = width / 1080.0
 
+    from hbt.app_settings import AppSettingsStore
+    from hbt.shared.pipeline.watermark import render_watermark_png
+
+    wm_cfg = AppSettingsStore(workspace_dir).load().watermark
+    wm_img: Image.Image | None = None
+    if wm_cfg.enabled:
+        wm_png = build_dir / "watermark_1080.png"
+        render_watermark_png(wm_png, wm_cfg, width=1080, height=1920, brand_dir=brand_dir)
+        if wm_png.is_file():
+            try:
+                with Image.open(wm_png) as raw_wm:
+                    wm_img = raw_wm.convert("RGBA")
+            except Exception:
+                wm_img = None
+
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
 
@@ -345,6 +360,8 @@ def render_chat_video(
         )
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
+        if wm_img is not None and not is_cutin:
+            img.alpha_composite(wm_img)
         img.save(fpath, format="PNG", compress_level=1)
         img.close()
         chunk_pngs.append(fpath)
@@ -785,6 +802,8 @@ def render_chat_video(
     for av in avatar_images.values():
         av.close()
     avatar_images.clear()
+    if wm_img is not None:
+        wm_img.close()
     gc.collect()
 
     # Lưu metadata của lần render

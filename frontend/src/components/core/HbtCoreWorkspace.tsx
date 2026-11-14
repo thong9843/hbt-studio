@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../SafeZoneOverlay';
+import { WatermarkControl } from '../WatermarkControl';
 import type {
   HbtCoreGeminiModel,
   HbtCoreScript,
@@ -922,6 +923,8 @@ export function HbtCoreWorkspace({
               </p>
             </div>
           </div>
+
+          <WatermarkControl />
 
           {/* Điều hướng nhanh cảnh trước / sau */}
           <div className="flex items-center justify-between gap-2">

@@ -272,6 +272,7 @@ def build_core_scene_layers_safe(
     theme: dict[str, str],
     *,
     aspect_mode: AspectMode = "fill",
+    watermark_png: Path | None = None,
 ) -> None:
     """Vẽ ảnh nền + thẻ kem + phụ đề tóm tắt bằng Pillow với quản lý bộ nhớ nghiêm ngặt:
     dùng context manager `with Image.open(...)`, gọi `.close()` cho mọi ảnh trung gian
@@ -393,6 +394,19 @@ def build_core_scene_layers_safe(
                     stroke_width=6,
                     stroke_fill=(15, 15, 25),
                 )
+
+        if watermark_png is not None and watermark_png.is_file():
+            try:
+                with Image.open(watermark_png) as wm_raw:
+                    wm_im = wm_raw.convert("RGBA")
+                    if wm_im.size != (W, H):
+                        wm_resized = wm_im.resize((W, H), Image.Resampling.LANCZOS)
+                        wm_im.close()
+                        wm_im = wm_resized
+                    lay.alpha_composite(wm_im)
+                    wm_im.close()
+            except Exception:
+                pass
 
         lay.save(card_out)
     finally:
@@ -724,6 +738,22 @@ def _render_hbt_core_auto_impl(
     segment_clips: list[Path] = []
     total_segs = len(script.segments)
 
+    from hbt.app_settings import AppSettingsStore
+    from hbt.shared.pipeline.watermark import render_watermark_png
+
+    wm_cfg = AppSettingsStore(settings.workspace_dir, settings.default_fps).load().watermark
+    wm_png: Path | None = None
+    if wm_cfg.enabled:
+        wm_png = build_dir / "watermark_1080.png"
+        render_watermark_png(
+            wm_png,
+            wm_cfg,
+            width=W,
+            height=H,
+            brand_dir=brand_dir or BRAND_DIR,
+            assets_dir=getattr(settings, "assets_dir", None),
+        )
+
     for idx, (seg, timing) in enumerate(zip(script.segments, timings, strict=False), start=1):
         cancel.check_current()
         seg_pct = round(50.0 + (idx / max(1, total_segs)) * 30.0, 1)
@@ -763,7 +793,13 @@ def _render_hbt_core_auto_impl(
         }
 
         build_core_scene_layers_safe(
-            scene_dict, img_src, base_png, card_png, theme_dict, aspect_mode=aspect_mode
+            scene_dict,
+            img_src,
+            base_png,
+            card_png,
+            theme_dict,
+            aspect_mode=aspect_mode,
+            watermark_png=wm_png,
         )
 
         # Thời lượng clip phân đoạn khớp với thời lượng giọng đọc + khoảng nghỉ

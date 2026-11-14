@@ -182,6 +182,7 @@ def compose_postv(
     out: Path,
     on_frac,
     memes: list[tuple[Any, ...]] | None = None,
+    watermark_png: Path | None = None,
 ) -> None:
     """Một lệnh ffmpeg: nền + thẻ + meme + phụ đề → thân; xfade 0,5 s với outro."""
     scale = width / 1080
@@ -232,7 +233,16 @@ def compose_postv(
     graph.append(
         f"[{prev}][cap]overlay=x=0:y={round(caption_y * scale)}:eof_action=pass:format=auto[ov]"
     )
-    graph.append(f"[ov]fps={fps},trim=end_frame={frames},setpts=PTS-STARTPTS,format=yuv420p[body]")
+    ov_label = "ov"
+    if watermark_png is not None and watermark_png.is_file():
+        inputs += ["-loop", "1", "-t", f"{out_seconds:.2f}", "-i", watermark_png]
+        graph.append(f"[{index}:v]fps={fps},format=rgba[wm]")
+        graph.append("[ov][wm]overlay=0:0:eof_action=pass:format=auto[ov_wm]")
+        ov_label = "ov_wm"
+        index += 1
+    graph.append(
+        f"[{ov_label}]fps={fps},trim=end_frame={frames},setpts=PTS-STARTPTS,format=yuv420p[body]"
+    )
     if outro_clip is not None:
         inputs += ["-i", outro_clip]
         graph.append(
@@ -737,6 +747,24 @@ def _render_postv(
     # ---- 9. Ghép cuối (60–98)
     rep.at(60, "Ghép cuối")
     gc.collect()
+    from hbt.app_settings import AppSettingsStore
+    from hbt.shared.pipeline.watermark import render_watermark_png
+
+    wm_cfg = AppSettingsStore(settings.workspace_dir, settings.default_fps).load().watermark
+    if opts.watermark_enabled is not None:
+        wm_cfg = wm_cfg.model_copy(update={"enabled": opts.watermark_enabled})
+    wm_png: Path | None = None
+    if wm_cfg.enabled:
+        wm_png = build / f"watermark_{q.width}.png"
+        render_watermark_png(
+            wm_png,
+            wm_cfg,
+            width=q.width,
+            height=q.height,
+            brand_dir=brand_dir,
+            assets_dir=assets_root,
+        )
+
     video = job_dir / "video.mp4"
     compose_preset = POSTV_FINAL_PRESET if not q.preview else q.final_preset
     compose_crf = POSTV_FINAL_CRF if not q.preview else q.final_crf
@@ -745,7 +773,7 @@ def _render_postv(
         fps=q.fps, width=q.width, height=q.height, frames=int(round(body_seconds * q.fps)),
         outro_clip=outro_clip, audio_wav=final_audio, out_seconds=out_total,
         preset=compose_preset, crf=compose_crf, audio_bitrate=q.audio_bitrate, out=video,
-        on_frac=lambda f: rep.tick(60 + 38 * f), memes=meme_items,
+        on_frac=lambda f: rep.tick(60 + 38 * f), memes=meme_items, watermark_png=wm_png,
     )  # fmt: skip
     gc.collect()
 
