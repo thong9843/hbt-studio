@@ -199,6 +199,9 @@ def run_chatting_auto_job(
                 display_text=m.get("display_text"),
                 spoken_text=m.get("spoken_text"),
                 sticker=m.get("sticker"),
+                media_type=m.get("media_type") or "none",
+                media_path=m.get("media_path"),
+                media_hint=m.get("media_hint"),
             )
         )
 

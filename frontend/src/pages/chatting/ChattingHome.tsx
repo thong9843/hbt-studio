@@ -31,6 +31,7 @@ export function ChattingHome() {
   const [platform, setPlatform] = useState<'messenger' | 'zalo'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
   const [targetDuration, setTargetDuration] = useState('');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [isDirectScript, setIsDirectScript] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function ChattingHome() {
         background,
         direct_script: isDirectScript,
         target_duration_s: targetDuration ? Number(targetDuration) : null,
+        model: selectedModel,
       });
       // Điều hướng ngay sang trang chi tiết để theo dõi tiến trình
       navigate(`/chatting/${res.slug}`);
@@ -196,6 +198,32 @@ export function ChattingHome() {
                 </option>
               ))}
             </Select>
+
+            {!isDirectScript && (
+              <>
+                <span className="ml-3 text-tiny font-semibold text-muted">Model Gemini:</span>
+                <Select
+                  aria-label="Model Gemini"
+                  variant="pill"
+                  autoWidth
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                >
+                  {(
+                    status?.models ?? [
+                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+                      { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+                      { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
+                      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+                    ]
+                  ).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </Select>
+              </>
+            )}
 
             <span className="ml-3 text-tiny font-semibold text-muted">Thời lượng:</span>
             <Select

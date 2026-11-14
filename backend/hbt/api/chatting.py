@@ -37,6 +37,7 @@ class CreateChatBody(BaseModel):
     background: str = "minecraft4-1080p60"
     direct_script: bool = False
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
+    model: str | None = Field(default=None)
 
 
 class RenderChatBody(BaseModel):
@@ -73,7 +74,7 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
 
     # 1. Kiểm tra Gemini API Key nếu dùng chế độ viết AI
     if not body.direct_script:
-        model_name = os.environ.get(
+        model_name = body.model or os.environ.get(
             "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
         )
         client = GeminiChatClient(model=model_name)
@@ -388,3 +389,37 @@ def serve_chatting_preview(slug: str, state: State):
     if not p_path.is_file():
         raise HTTPException(status_code=404, detail="Chưa có video xem nhanh")
     return FileResponse(str(p_path), media_type="video/mp4")
+
+
+@router.post("/chatting/{slug}/media")
+async def upload_chatting_media(
+    slug: str,
+    file: Annotated[UploadFile, File()],
+    state: State,
+) -> dict[str, Any]:
+    """Tải ảnh hoặc video minh họa vào workspace/chatting/<slug>/media/."""
+    from pathlib import Path
+
+    project_dir = get_project_dir(state.settings.workspace_dir, slug)
+    if not project_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
+
+    ext = Path(file.filename or "media.png").suffix.lower()
+    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+        media_type = "image"
+    elif ext in (".mp4", ".mov", ".gif"):
+        media_type = "video"
+    else:
+        raise HTTPException(status_code=422, detail=f"Định dạng media không hỗ trợ: {ext}")
+
+    media_dir = project_dir / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    target_name = f"{uuid.uuid4().hex[:8]}{ext}"
+    target_path = media_dir / target_name
+    content = await file.read()
+    target_path.write_bytes(content)
+
+    return {
+        "media_type": media_type,
+        "media_path": f"media/{target_name}",
+    }

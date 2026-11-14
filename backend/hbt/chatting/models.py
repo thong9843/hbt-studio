@@ -36,6 +36,9 @@ class Message(BaseModel):
     display_text: str | None = None
     spoken_text: str | None = None
     sticker: str | None = None
+    media_type: Literal["none", "image", "video"] = "none"
+    media_path: str | None = None
+    media_hint: str | None = None
 
     @model_validator(mode="after")
     def populate_display_and_spoken(self) -> Message:

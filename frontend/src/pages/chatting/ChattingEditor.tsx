@@ -285,6 +285,40 @@ export function ChattingEditor() {
     saveDoc({ ...doc, messages: newMsgs });
   };
 
+  const handleMediaUpload = async (file: File) => {
+    if (!slug) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`/api/chatting/${encodeURIComponent(slug)}/media`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const newMsgs = [...doc.messages];
+        newMsgs[selectedMsgIndex] = {
+          ...activeMsg,
+          media_type: data.media_type,
+          media_path: data.media_path,
+        };
+        saveDoc({ ...doc, messages: newMsgs });
+      }
+    } catch {
+      setNotice('Không thể tải ảnh/video minh họa.');
+    }
+  };
+
+  const handleMediaClear = () => {
+    const newMsgs = [...doc.messages];
+    newMsgs[selectedMsgIndex] = {
+      ...activeMsg,
+      media_type: 'none',
+      media_path: null,
+    };
+    saveDoc({ ...doc, messages: newMsgs });
+  };
+
   const handleAddMessage = () => {
     const newMsg: ChatMessage = {
       id: `m${doc.messages.length + 1}`,
@@ -581,6 +615,49 @@ export function ChattingEditor() {
               maxLength={300}
               className="mt-1.5 w-full resize-none rounded-xl border border-line bg-soft-2 p-3 text-body font-medium outline-none focus:border-text focus:ring-2 focus:ring-accent"
             />
+          </div>
+
+          {/* Ảnh / Video minh họa trong luồng chat */}
+          <div className="mt-4 rounded-xl border border-line bg-soft-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-tiny font-semibold text-muted">
+                Ảnh / Video minh họa:
+              </span>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80">
+                  Đính kèm Ảnh / Video
+                  <input
+                    type="file"
+                    accept="image/*,video/mp4,video/quicktime,.gif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleMediaUpload(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {activeMsg.media_path && (
+                  <button
+                    type="button"
+                    onClick={handleMediaClear}
+                    className="rounded-full bg-danger/15 px-3 py-1 text-tiny font-bold text-danger"
+                  >
+                    Xóa media
+                  </button>
+                )}
+              </div>
+            </div>
+            {activeMsg.media_hint && (
+              <p className="mt-1.5 text-tiny text-muted">
+                💡 Gợi ý AI: <span className="text-text">{activeMsg.media_hint}</span>
+              </p>
+            )}
+            {activeMsg.media_path && (
+              <p className="mt-1 text-tiny font-mono text-emerald-400">
+                Đã đính kèm ({activeMsg.media_type}): {activeMsg.media_path}
+              </p>
+            )}
           </div>
 
           {/* Chọn Sticker */}

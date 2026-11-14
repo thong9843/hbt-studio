@@ -168,6 +168,12 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             msg_entry["display_text"] = str(m["display_text"])
         if m.get("spoken_text") is not None:
             msg_entry["spoken_text"] = str(m["spoken_text"])
+        if m.get("media_type") in ("none", "image", "video"):
+            msg_entry["media_type"] = m["media_type"]
+        if m.get("media_path"):
+            msg_entry["media_path"] = str(m["media_path"])
+        if m.get("media_hint"):
+            msg_entry["media_hint"] = str(m["media_hint"])[:120]
         clean_msgs.append(msg_entry)
 
     cut_msgs_count = 0
@@ -253,6 +259,7 @@ class GeminiChatClient:
             "model_available": has_key,
             "model_name": self.model,
             "available_models": [m["id"] for m in AVAILABLE_GEMINI_MODELS],
+            "models": AVAILABLE_GEMINI_MODELS,
         }
 
     def generate_chat(
