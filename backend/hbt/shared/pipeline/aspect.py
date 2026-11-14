@@ -8,6 +8,19 @@ DEFAULT_WIDTH = 1080
 DEFAULT_HEIGHT = 1920
 
 AspectMode = Literal["fill", "fit"]
+EngineName = Literal["core", "postv", "chatting"]
+
+
+def default_aspect_mode_for_engine(engine: EngineName) -> AspectMode:
+    """Quy tắc chuẩn hóa 9:16 tự động theo động cơ:
+    - HBT Core: luôn 'fill' (ảnh minh họa phủ kín toàn màn hình 1080x1920).
+    - PostV & Chatting: luôn 'fit' (nền mờ boxblur=25:5 + nội dung gốc căn giữa 1080x1920).
+    """
+    if engine == "core":
+        return "fill"
+    if engine in ("postv", "chatting"):
+        return "fit"
+    raise ValueError(f"Động cơ không hợp lệ: {engine}")
 
 
 def build_simple_vf(
@@ -28,7 +41,7 @@ def build_simple_vf(
         f"split=2[bg_src][fg_src];"
         f"[bg_src]scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},boxblur=25:5,setsar=1[bg_blur];"
-        f"[fg_src]scale={width}:-2:force_original_aspect_ratio=decrease,setsar=1[fg_fit];"
+        f"[fg_src]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[fg_fit];"
         f"[bg_blur][fg_fit]overlay=(W-w)/2:(H-h)/2"
     )
 
@@ -49,10 +62,11 @@ def build_aspect_filter(
             f"[{input_label}]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},setsar=1[{output_label}]"
         )
+    pfx = output_label
     return (
-        f"[{input_label}]split=2[bg_src][fg_src];"
-        f"[bg_src]scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},boxblur=25:5,setsar=1[bg_blur];"
-        f"[fg_src]scale={width}:-2:force_original_aspect_ratio=decrease,setsar=1[fg_fit];"
-        f"[bg_blur][fg_fit]overlay=(W-w)/2:(H-h)/2[{output_label}]"
+        f"[{input_label}]split=2[{pfx}_bg_src][{pfx}_fg_src];"
+        f"[{pfx}_bg_src]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},boxblur=25:5,setsar=1[{pfx}_bg_blur];"
+        f"[{pfx}_fg_src]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[{pfx}_fg_fit];"
+        f"[{pfx}_bg_blur][{pfx}_fg_fit]overlay=(W-w)/2:(H-h)/2[{output_label}]"
     )

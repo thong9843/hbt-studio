@@ -225,11 +225,7 @@ def render_chat_video(
     aspect_mode: AspectMode | None = None,
 ) -> Path:
     """Dựng video Chatting (preview 540x960 30fps hoặc full 1080x1920 60fps)."""
-    effective_aspect: AspectMode = (
-        aspect_mode
-        if aspect_mode in ("fill", "fit")
-        else (doc.aspect_mode if getattr(doc, "aspect_mode", "fill") in ("fill", "fit") else "fill")
-    )
+    effective_aspect: AspectMode = "fit" if aspect_mode is None else aspect_mode
 
     def tick(pct: int, msg: str) -> None:
         if progress:

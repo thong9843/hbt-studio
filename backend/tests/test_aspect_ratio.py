@@ -9,12 +9,16 @@ from hbt.shared.pipeline.aspect import (
     DEFAULT_WIDTH,
     build_aspect_filter,
     build_simple_vf,
+    default_aspect_mode_for_engine,
 )
 
 
 def test_aspect_defaults_are_1080x1920() -> None:
     assert DEFAULT_WIDTH == 1080
     assert DEFAULT_HEIGHT == 1920
+    assert default_aspect_mode_for_engine("core") == "fill"
+    assert default_aspect_mode_for_engine("postv") == "fit"
+    assert default_aspect_mode_for_engine("chatting") == "fit"
 
 
 def test_build_aspect_filter_fill() -> None:
@@ -25,7 +29,7 @@ def test_build_aspect_filter_fill() -> None:
 
 def test_build_aspect_filter_fit_with_boxblur() -> None:
     flt = build_aspect_filter("fit", input_label="1:v", output_label="out")
-    assert "split=2[bg_src][fg_src]" in flt
+    assert "split=2[out_bg_src][out_fg_src]" in flt
     assert "boxblur=25:5" in flt
     assert "overlay=(W-w)/2:(H-h)/2[out]" in flt
 
@@ -73,9 +77,9 @@ def test_engines_support_aspect_mode(tmp_path, monkeypatch) -> None:
     render_core_segment_clip(base_fit, card_fit, 1.0, 1, tmp_path / "seg.mp4", aspect_mode="fit")
     assert any("boxblur=25:5" in " ".join(c) for c in captured_cmds)
 
-    # 2. PostV: PostvSettings + bgbuild.bg_key + bgbuild.build_background
-    assert PostvSettings().aspect_mode == "fill"
-    assert PostvSettings(aspect_mode="fit").aspect_mode == "fit"
+    # 2. PostV: PostvSettings + bgbuild.bg_key + bgbuild.build_background mặc định fit
+    assert PostvSettings().aspect_mode == "fit"
+    assert PostvSettings(aspect_mode="fill").aspect_mode == "fill"
 
     clip = tmp_path / "bg_clip.mp4"
     clip.write_bytes(b"clip")
@@ -96,10 +100,9 @@ def test_engines_support_aspect_mode(tmp_path, monkeypatch) -> None:
     )
     assert any("boxblur=25:5" in " ".join(c) for c in pv_cmds)
 
-    # 3. Chatting: ChatDoc.aspect_mode
+    # 3. Chatting: ChatDoc.aspect_mode mặc định fit
     doc = ChatDoc(
         title="Test",
-        aspect_mode="fit",
         characters=[
             Character(id="me", name="A", side="right"),
             Character(id="o", name="B", side="left"),

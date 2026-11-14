@@ -6,6 +6,7 @@ from hbt.shared.pipeline.aspect import (
     AspectMode,
     build_aspect_filter,
     build_simple_vf,
+    default_aspect_mode_for_engine,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "AspectMode",
     "build_aspect_filter",
     "build_simple_vf",
+    "default_aspect_mode_for_engine",
 ]

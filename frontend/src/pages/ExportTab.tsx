@@ -3,8 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
 import { api, projectFileUrl } from '../api/endpoints';
-import type { AspectMode, Fps, Job, RenderOptions, RenderRecord } from '../api/types';
-import { AspectModeToggle } from '../components/AspectModeToggle';
+import type { Fps, Job, RenderOptions, RenderRecord } from '../api/types';
 import { ImagesReminder } from '../components/draft/ImagesReminder';
 import { ChecksCard } from '../components/export/ChecksCard';
 import { CleanCard } from '../components/export/CleanCard';
@@ -99,7 +98,6 @@ export function ExportTab() {
   const finished = mine ? rj.finished : null;
   const connectionError = mine ? rj.connectionError : null;
   const [finalFps, setFinalFps] = useState<Fps>(projectFps(project));
-  const [aspectMode, setAspectMode] = useState<AspectMode>('fill');
   const [played, setPlayed] = useState<RenderRecord | null>(null);
   const [toDelete, setToDelete] = useState<RenderRecord | null>(null);
   // Đang xoá lần xuất này: gỡ `src` của <video> để Windows nhả file.
@@ -165,7 +163,7 @@ export function ExportTab() {
   const headKind: RenderKind = { kind: 'head', seconds: HEAD_PREVIEW_SECONDS };
   const launchHead = () =>
     start.mutate({
-      options: { preview: true, preview_seconds: HEAD_PREVIEW_SECONDS, aspect_mode: aspectMode },
+      options: { preview: true, preview_seconds: HEAD_PREVIEW_SECONDS },
       kind: headKind,
     });
 
@@ -272,10 +270,6 @@ export function ExportTab() {
               }
             />
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-bold">Khung hình 9:16</span>
-            <AspectModeToggle value={aspectMode} onChange={setAspectMode} />
-          </div>
           <div className="space-y-2">
             <Button
               tone="ink"
@@ -296,10 +290,7 @@ export function ExportTab() {
               disabled={cannotStart}
               reason={reason}
               onClick={() =>
-                start.mutate({
-                  options: { preview: false, fps: finalFps, aspect_mode: aspectMode },
-                  kind: finalKind,
-                })
+                start.mutate({ options: { preview: false, fps: finalFps }, kind: finalKind })
               }
             >
               {X.finalLabel(finalFps)}
