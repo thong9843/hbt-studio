@@ -28,6 +28,7 @@ class RenderRequest(BaseModel):
     # Xem nhanh chỉ dựng chừng này giây đầu; None = cả video (UI gửi 10)
     preview_seconds: float | None = Field(default=None, gt=0, le=60)
     allow_long_trim: bool = False  # chỉ sau khi đã nghe và xác nhận phần giọng bị cắt (> 8 s)
+    aspect_mode: Literal["fill", "fit"] | None = None
 
 
 class JobCreated(BaseModel):
@@ -68,6 +69,7 @@ def start_render(slug: str, state: State, body: RenderRequest | None = None):
         outro=body.outro,
         allow_long_trim=body.allow_long_trim,
         preview_seconds=body.preview_seconds,
+        aspect_mode=body.aspect_mode,
     )
     return {"job_id": job.id}
 

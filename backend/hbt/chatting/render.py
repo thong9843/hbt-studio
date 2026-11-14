@@ -35,6 +35,7 @@ from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
+from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 
 logger = logging.getLogger(__name__)
 
@@ -221,8 +222,14 @@ def render_chat_video(
     brand_dir: Path,
     preview: bool = False,
     progress: ProgressCallback | None = None,
+    aspect_mode: AspectMode | None = None,
 ) -> Path:
     """Dựng video Chatting (preview 540x960 30fps hoặc full 1080x1920 60fps)."""
+    effective_aspect: AspectMode = (
+        aspect_mode
+        if aspect_mode in ("fill", "fit")
+        else (doc.aspect_mode if getattr(doc, "aspect_mode", "fill") in ("fill", "fit") else "fill")
+    )
 
     def tick(pct: int, msg: str) -> None:
         if progress:
@@ -277,8 +284,10 @@ def render_chat_video(
                 except Exception:
                     pass
 
-    renderer = ChatFrameRenderer(theme, doc.characters, avatar_images)
+    renderer = ChatFrameRenderer(theme, doc.characters, avatar_images, project_dir=project_dir)
     content_area_h = renderer.theme.frame_max_height - renderer.theme.header_height
+    video_media_spans: dict[int, list[tuple[float, float, Path, int, int, int, int]]] = {}
+    coord_scale = width / 1080.0
 
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
@@ -379,6 +388,18 @@ def render_chat_video(
                 show_seen=state.show_seen,
             )
             target_scroll_y = float(max(0, total_content_h - content_area_h))
+
+            if not state.show_typing:
+                for m_idx, m_path, cx, cy, mw, mh in renderer.compute_video_media_rects(
+                    visible_msgs, target_scroll_y
+                ):
+                    sx = int(round(cx * coord_scale))
+                    sy = int(round(cy * coord_scale))
+                    sw = max(16, (int(round(mw * coord_scale)) // 2) * 2)
+                    sh = max(16, (int(round(mh * coord_scale)) // 2) * 2)
+                    video_media_spans.setdefault(m_idx, []).append(
+                        (state.start_time, state.start_time + frame_dur, m_path, sx, sy, sw, sh)
+                    )
 
             # 1. Typing 60fps: 18 sub-frames + Cubic Ease-Out cuộn dạng float
             if state.show_typing:
@@ -513,9 +534,16 @@ def render_chat_video(
             chunk_cmd.extend(["-f", "lavfi", "-i", f"color=c=#1A1A24:s={width}x{height}:r={fps}"])
 
         chunk_cmd.extend(["-f", "concat", "-safe", "0", "-i", str(chunk_concat_file)])
+        bg_aspect = build_aspect_filter(
+            effective_aspect,
+            width=width,
+            height=height,
+            input_label="0:v",
+            output_label="bg_norm",
+        )
         chunk_filter = (
-            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setsar=1,fps={fps}[bg];"
+            f"{bg_aspect};"
+            f"[bg_norm]fps={fps}[bg];"
             f"[1:v]scale={width}:{height}[fg];"
             "[bg][fg]overlay=0:0[v]"
         )
@@ -641,25 +669,54 @@ def render_chat_video(
         str(final_audio),
     ]
 
-    if meme_clips:
-        meme_input_start = 2
-        for m_path, _m_start, m_dur, ss_start in meme_clips:
-            cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
-
+    if meme_clips or video_media_spans:
+        next_inp_idx = 2
         filter_parts: list[str] = ["[0:v]null[v_base]"]
         prev_v = "v_base"
-        m_w = 720 if not preview else 360
 
-        for k, (_m_path, m_start, m_dur, _ss_start) in enumerate(meme_clips):
-            inp_idx = meme_input_start + k
+        if meme_clips:
+            m_w = 720 if not preview else 360
+            for k, (m_path, m_start, m_dur, ss_start) in enumerate(meme_clips):
+                cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
+                inp_idx = next_inp_idx
+                next_inp_idx += 1
+                filter_parts.append(
+                    f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
+                    f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+                )
+                next_v = f"v_meme{k}"
+                filter_parts.append(
+                    f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
+                    f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})'"
+                    f":eof_action=pass[{next_v}]"
+                )
+                prev_v = next_v
+
+        for v_idx, (_msg_idx, spans) in enumerate(sorted(video_media_spans.items())):
+            first_t = spans[0][0]
+            last_t = spans[-1][1]
+            m_path = spans[0][2]
+            sx, sw, sh = spans[0][3], spans[0][5], spans[0][6]
+            vis_dur = max(0.2, last_t - first_t)
+            cmd.extend(["-stream_loop", "-1", "-t", f"{vis_dur:.3f}", "-i", str(m_path)])
+            inp_idx = next_inp_idx
+            next_inp_idx += 1
             filter_parts.append(
-                f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
-                f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+                f"[{inp_idx}:v]scale={sw}:{sh}:flags=lanczos,setsar=1,"
+                f"setpts=PTS-STARTPTS+{first_t:.4f}/TB[vm{v_idx}]"
             )
-            next_v = f"v_meme{k}"
+            distinct_ys = list(dict.fromkeys(sp[4] for sp in spans))
+            if len(distinct_ys) == 1:
+                y_expr = str(distinct_ys[0])
+            else:
+                y_expr = str(spans[-1][4])
+                for s_t, e_t, _p, _x, sy, _w, _h in reversed(spans[:-1]):
+                    y_expr = f"if(between(t,{s_t:.4f},{e_t:.4f}),{sy},{y_expr})"
+            enable_expr = "+".join(f"between(t,{s_t:.4f},{e_t:.4f})" for s_t, e_t, *_ in spans)
+            next_v = f"v_media{v_idx}"
             filter_parts.append(
-                f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
-                f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})':eof_action=pass[{next_v}]"
+                f"[{prev_v}][vm{v_idx}]overlay=x={sx}:y='{y_expr}':"
+                f"enable='{enable_expr}':eof_action=pass[{next_v}]"
             )
             prev_v = next_v
 

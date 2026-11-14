@@ -135,6 +135,7 @@ class PostvSettings(_Model):
     captions: bool = True
     aligner: Literal["auto", "whisper", "silence"] = "auto"
     outro: bool = True
+    aspect_mode: Literal["fill", "fit"] = "fill"
     card_animation: Literal["smooth", "bounce"] = "smooth"
     count_up: bool = True  # số like, bình luận, chia sẻ trên thẻ đếm từ 0 (D20)
     censor: Censor = Field(default_factory=Censor)

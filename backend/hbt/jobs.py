@@ -77,6 +77,7 @@ class Job:
     outro: bool | None
     allow_long_trim: bool
     preview_seconds: float | None = None
+    aspect_mode: str | None = None
     status: str = QUEUED
     progress: float = 0.0
     step: str = ""
@@ -324,6 +325,7 @@ class JobManager:
         outro: bool | None = None,
         allow_long_trim: bool = False,
         preview_seconds: float | None = None,
+        aspect_mode: str | None = None,
     ) -> Job:
         project = self.storage.load_any(slug)  # NotFound / BadRequest nếu project hỏng
         if fps is not None and fps not in ALLOWED_FPS:
@@ -351,7 +353,14 @@ class JobManager:
         if self._tool_check is not None:
             self._tool_check()
         job = Job(
-            uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim, preview_seconds
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            outro,
+            allow_long_trim,
+            preview_seconds,
+            aspect_mode=aspect_mode,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -541,6 +550,7 @@ class JobManager:
                 whisper_model=cfg.whisper_model if cfg else None,
                 whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
                 job_id=job.id,
+                aspect_mode=job.aspect_mode,
             )
             timing_before = _timing_mtime(folder)
             try:
@@ -871,11 +881,21 @@ class JobManager:
         self,
         slug: str,
         preview: bool = False,
+        aspect_mode: str | None = None,
     ) -> Job:
         """Job dựng video Chatting (preview hoặc full)."""
         if self.is_busy(slug):
             raise Conflict("Dự án đang bận (đang dựng), hãy đợi xong hoặc huỷ")
-        job = Job(uuid.uuid4().hex[:12], slug, preview, None, None, False, kind="chatting_render")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="chatting_render",
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -968,6 +988,7 @@ class JobManager:
                 brand_dir=brand_dir,
                 preview=job.preview,
                 progress=on_progress,
+                aspect_mode=getattr(job, "aspect_mode", None),
             )
 
             output = {
@@ -990,13 +1011,23 @@ class JobManager:
         voice_id: str | None = None,
         fps: int = 30,
         preview: bool = False,
+        aspect_mode: str = "fill",
     ) -> Job:
         """Job chạy chuỗi tự động HBT Core (V1 Bán tự động / V2 1-Click Prompt)."""
         if self.is_busy(slug):
             raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
         if self._tool_check is not None:
             self._tool_check()
-        job = Job(uuid.uuid4().hex[:12], slug, preview, fps, None, False, kind="hbt_core_auto")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="hbt_core_auto",
+        )
         job.core_script = script  # type: ignore[attr-defined]
         job.core_voice_id = voice_id  # type: ignore[attr-defined]
         with self._lock:
@@ -1023,6 +1054,7 @@ class JobManager:
                 brand_dir=self.brand_dir,
                 fps=job.fps or 30,
                 preview=job.preview,
+                aspect_mode=getattr(job, "aspect_mode", None) or "fill",
                 job_id=job.id,
                 progress=job._progress,
                 cancel_token=job.token,

@@ -537,12 +537,26 @@ def _render_postv(
     )
     if sum(e.duration for e in chosen) < body_seconds:
         warn("Nền ngắn hơn video nên phải nối lặp clip")
-    bg = build / f"bg_{q.width}_{q.fps}.mp4"
-    key = bgbuild.bg_key(pieces, q.width, q.height, q.fps, q.clip_preset, q.clip_crf)
+    aspect_mode = opts.aspect_mode or getattr(project.settings, "aspect_mode", "fill")
+    if aspect_mode not in ("fill", "fit"):
+        aspect_mode = "fill"
+    bg = build / f"bg_{q.width}_{q.fps}_{aspect_mode}.mp4"
+    key = bgbuild.bg_key(
+        pieces, q.width, q.height, q.fps, q.clip_preset, q.clip_crf, aspect_mode=aspect_mode
+    )
     if cache.is_fresh(bg, key):
         rep.say("Nền: dùng bản đã có")
     else:
-        bgbuild.build_background(pieces, q.width, q.height, q.fps, q.clip_preset, q.clip_crf, bg)
+        bgbuild.build_background(
+            pieces,
+            q.width,
+            q.height,
+            q.fps,
+            q.clip_preset,
+            q.clip_crf,
+            bg,
+            aspect_mode=aspect_mode,
+        )
         cache.mark(bg, key)
     rep.tick(45)
 

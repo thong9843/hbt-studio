@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -74,6 +74,7 @@ class CoreV1RenderBody(BaseModel):
     voice_id: str | None = None
     fps: int = Field(default=30)
     preview: bool = False
+    aspect_mode: Literal["fill", "fit"] = "fill"
 
 
 class CoreV2PromptBody(BaseModel):
@@ -87,6 +88,7 @@ class CoreV2PromptBody(BaseModel):
     voice_id: str | None = None
     fps: int = Field(default=30)
     preview: bool = False
+    aspect_mode: Literal["fill", "fit"] = "fill"
     auto_render: bool = True
 
 
@@ -241,6 +243,7 @@ def start_v1_render(body: CoreV1RenderBody, state: State) -> Any:
             voice_id=body.voice_id,
             fps=body.fps,
             preview=body.preview,
+            aspect_mode=body.aspect_mode,
         )
         return {
             "ok": True,
@@ -286,6 +289,7 @@ def run_v2_one_click_prompt(body: CoreV2PromptBody, state: State) -> Any:
                 voice_id=body.voice_id,
                 fps=body.fps,
                 preview=body.preview,
+                aspect_mode=body.aspect_mode,
             )
             job_id = job.id
 
