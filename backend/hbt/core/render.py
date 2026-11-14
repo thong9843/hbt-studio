@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from hbt.config import BRAND_DIR, REPO_ROOT, load_settings
 from hbt.core.audio import (
@@ -44,6 +44,7 @@ from hbt.pipeline.publish import build_publish_text
 from hbt.pipeline.visual import CARD_Y, CREAM, SIZES, H, W, color_of, font
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
+from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 from hbt.shared.sse_manager import SSEProgressEmitter
 
 logger = logging.getLogger(__name__)
@@ -269,6 +270,8 @@ def build_core_scene_layers_safe(
     base_out: Path,
     card_out: Path,
     theme: dict[str, str],
+    *,
+    aspect_mode: AspectMode = "fill",
 ) -> None:
     """Vẽ ảnh nền + thẻ kem + phụ đề tóm tắt bằng Pillow với quản lý bộ nhớ nghiêm ngặt:
     dùng context manager `with Image.open(...)`, gọi `.close()` cho mọi ảnh trung gian
@@ -281,11 +284,23 @@ def build_core_scene_layers_safe(
     with Image.open(img_src) as raw_im:
         rgb_im = raw_im.convert("RGB")
         try:
-            fitted = ImageOps.fit(rgb_im, (W, H), Image.LANCZOS)
-            try:
-                fitted.save(base_out)
-            finally:
-                fitted.close()
+            if aspect_mode == "fit":
+                bg_blur = ImageOps.fit(rgb_im, (W, H), Image.LANCZOS).filter(
+                    ImageFilter.GaussianBlur(radius=25)
+                )
+                fg_fit = ImageOps.contain(rgb_im, (W, H), Image.LANCZOS)
+                try:
+                    bg_blur.paste(fg_fit, ((W - fg_fit.width) // 2, (H - fg_fit.height) // 2))
+                    bg_blur.save(base_out)
+                finally:
+                    fg_fit.close()
+                    bg_blur.close()
+            else:
+                fitted = ImageOps.fit(rgb_im, (W, H), Image.LANCZOS)
+                try:
+                    fitted.save(base_out)
+                finally:
+                    fitted.close()
         finally:
             rgb_im.close()
 
@@ -396,6 +411,7 @@ def render_core_segment_clip(
     width: int = 1080,
     height: int = 1920,
     punch: bool = False,
+    aspect_mode: AspectMode = "fill",
 ) -> Path:
     """Dựng video clip cho 1 phân đoạn với kẹp chuẩn tài nguyên FFmpeg:
     `-threads 2`, `-filter_threads 2`, `-preset veryfast`, `-crf 22`, `-max_muxing_queue_size 512`.
@@ -411,9 +427,16 @@ def render_core_segment_clip(
     else:
         z_expr = "1.06-0.06*(on/" + str(n_frames) + ")"
 
+    aspect_fc = build_aspect_filter(
+        aspect_mode,
+        width=width,
+        height=height,
+        input_label="0:v",
+        output_label="bg_norm",
+    )
     fc = (
-        f"[0:v]scale={width}:{height}:flags=lanczos,"
-        f"zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f"{aspect_fc};"
+        f"[bg_norm]zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         f":d={n_frames}:s={width}x{height}:fps={fps}[bg];"
         f"[1:v]scale={width}:{height},format=rgba,fade=t=in:st=0.10:d=0.30:alpha=1[card];"
         f"[bg][card]overlay=0:0:shortest=1,format=yuv420p[v]"
@@ -538,6 +561,7 @@ def render_hbt_core_auto(
     brand_dir: Path | None = None,
     fps: int = 30,
     preview: bool = False,
+    aspect_mode: AspectMode = "fill",
     job_id: str | None = None,
     progress: Callable[..., None] | None = None,
     cancel_token: cancel.CancelToken | None = None,
@@ -555,6 +579,7 @@ def render_hbt_core_auto(
             brand_dir=brand_dir,
             fps=fps,
             preview=preview,
+            aspect_mode=aspect_mode,
             job_id=job_id,
             progress=progress,
         )
@@ -570,6 +595,7 @@ def _render_hbt_core_auto_impl(
     brand_dir: Path | None,
     fps: int,
     preview: bool,
+    aspect_mode: AspectMode,
     job_id: str | None,
     progress: Callable[..., None] | None,
 ) -> CoreRenderResult:
@@ -736,7 +762,9 @@ def _render_hbt_core_auto_impl(
             "labels": [],
         }
 
-        build_core_scene_layers_safe(scene_dict, img_src, base_png, card_png, theme_dict)
+        build_core_scene_layers_safe(
+            scene_dict, img_src, base_png, card_png, theme_dict, aspect_mode=aspect_mode
+        )
 
         # Thời lượng clip phân đoạn khớp với thời lượng giọng đọc + khoảng nghỉ
         seg_dur_s = timing.duration_s + (0.22 if idx < total_segs else 0.30)
@@ -752,6 +780,7 @@ def _render_hbt_core_auto_impl(
             width=width,
             height=height,
             punch=bool(seg.punch or seg.sfx == "impact"),
+            aspect_mode=aspect_mode,
         )
         segment_clips.append(clip_path)
         gc.collect()

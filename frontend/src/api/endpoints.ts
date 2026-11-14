@@ -90,12 +90,12 @@ export const api = {
       'POST',
       `/chatting/${enc(slug)}/regen`,
     ),
-  renderChattingProject: (slug: string, preview: boolean) =>
+  renderChattingProject: (slug: string, preview: boolean, aspect_mode?: 'fill' | 'fit') =>
     apiRequest<{ job_id: string; slug: string; preview: boolean }>(
       'POST',
       `/chatting/${enc(slug)}/render`,
       {
-        json: { preview },
+        json: { preview, ...(aspect_mode ? { aspect_mode } : {}) },
       },
     ),
   deleteChattingProject: (slug: string) =>
@@ -377,6 +377,7 @@ export const api = {
     voice_id?: string | null;
     fps?: number;
     preview?: boolean;
+    aspect_mode?: 'fill' | 'fit';
   }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v1/render', { json: body }),
   promptHbtCoreV2: (body: {
     prompt: string;
@@ -387,6 +388,7 @@ export const api = {
     voice_id?: string | null;
     fps?: number;
     preview?: boolean;
+    aspect_mode?: 'fill' | 'fit';
     auto_render?: boolean;
   }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v2/prompt', { json: body }),
 

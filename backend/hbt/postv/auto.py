@@ -842,6 +842,9 @@ def _step_script(
     fps_val = options.get("fps", 60)
     if fps_val in (30, 50, 60):
         project.settings.fps = fps_val
+    aspect_val = options.get("aspect_mode", "fill")
+    if aspect_val in ("fill", "fit"):
+        project.settings.aspect_mode = aspect_val
     project.settings.outro = bool(options.get("outro", True))
     project.publish.hook = hook_text
 
@@ -987,6 +990,7 @@ def _step_render(
         whisper_model=cfg.whisper_model if cfg else None,
         whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
         job_id=job.id,
+        aspect_mode=getattr(project.settings, "aspect_mode", "fill"),
     )
 
     words = job_manager.postv_words.load() if job_manager.postv_words else None

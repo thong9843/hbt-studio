@@ -235,6 +235,8 @@ export interface ActiveJob {
   step: string;
 }
 
+export type AspectMode = 'fill' | 'fit';
+
 export interface RenderOptions {
   preview?: boolean;
   /** Xem nhanh chỉ dựng chừng này giây đầu; bỏ trống = cả video. */
@@ -242,6 +244,7 @@ export interface RenderOptions {
   fps?: Fps;
   outro?: boolean;
   allow_long_trim?: boolean;
+  aspect_mode?: AspectMode;
 }
 
 export interface AppSettings {
@@ -638,6 +641,7 @@ export interface PostvQuickOptions {
   max_comments?: number;
   target_seconds?: number;
   pick_mode?: 'auto' | 'manual';
+  aspect_mode?: AspectMode;
 }
 
 export interface PostvPickComment {
@@ -730,6 +734,7 @@ export interface ChatDoc {
   slug?: string;
   title: string;
   platform: 'messenger' | 'zalo';
+  aspect_mode?: AspectMode;
   target_duration_s?: number | null;
   characters: ChatCharacter[];
   messages: ChatMessage[];

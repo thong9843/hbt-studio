@@ -35,3 +35,75 @@ def test_build_simple_vf_and_invalid_mode() -> None:
     assert "boxblur=25:5" in build_simple_vf("fit")
     with pytest.raises(ValueError, match="aspect_mode"):
         build_aspect_filter("stretch")  # type: ignore[arg-type]
+
+
+def test_engines_support_aspect_mode(tmp_path, monkeypatch) -> None:
+    from PIL import Image
+
+    from hbt.chatting.models import Character, ChatDoc, Message
+    from hbt.core.render import build_core_scene_layers_safe, render_core_segment_clip
+    from hbt.postv import bgbuild
+    from hbt.postv.models import PostvSettings
+
+    # 1. HBT Core: build_core_scene_layers_safe + render_core_segment_clip với fit/fill
+    src_img = tmp_path / "src.png"
+    Image.new("RGB", (1920, 1080), (10, 120, 200)).save(src_img)
+    base_fit = tmp_path / "base_fit.png"
+    card_fit = tmp_path / "card_fit.png"
+    build_core_scene_layers_safe(
+        {"card": {"y": "top", "lines": [{"text": "Test", "size": "m", "color": "ink"}]}},
+        src_img,
+        base_fit,
+        card_fit,
+        {"primary": "#e11d48", "ink": "#111827"},
+        aspect_mode="fit",
+    )
+    with Image.open(base_fit) as im:
+        assert im.size == (1080, 1920)
+
+    captured_cmds: list[list[str]] = []
+
+    def fake_run_ffmpeg(cmd, **_kwargs):
+        captured_cmds.append([str(x) for x in cmd])
+        # Tạo file đích giả để publish_atomic hoạt động
+        out_p = tmp_path / "seg.tmp.mp4"
+        out_p.write_bytes(b"mp4")
+
+    monkeypatch.setattr("hbt.core.render.run_ffmpeg", fake_run_ffmpeg)
+    render_core_segment_clip(base_fit, card_fit, 1.0, 1, tmp_path / "seg.mp4", aspect_mode="fit")
+    assert any("boxblur=25:5" in " ".join(c) for c in captured_cmds)
+
+    # 2. PostV: PostvSettings + bgbuild.bg_key + bgbuild.build_background
+    assert PostvSettings().aspect_mode == "fill"
+    assert PostvSettings(aspect_mode="fit").aspect_mode == "fit"
+
+    clip = tmp_path / "bg_clip.mp4"
+    clip.write_bytes(b"clip")
+    pieces = [bgbuild.Piece("c1", clip, 0.0, 2.0)]
+    k_fill = bgbuild.bg_key(pieces, 1080, 1920, 60, "veryfast", 20, aspect_mode="fill")
+    k_fit = bgbuild.bg_key(pieces, 1080, 1920, 60, "veryfast", 20, aspect_mode="fit")
+    assert k_fill != k_fit
+
+    pv_cmds: list[list[str]] = []
+
+    def fake_pv_ffmpeg(cmd):
+        pv_cmds.append([str(x) for x in cmd])
+        (tmp_path / "bg.part.mp4").write_bytes(b"bg")
+
+    monkeypatch.setattr(bgbuild, "run_ffmpeg", fake_pv_ffmpeg)
+    bgbuild.build_background(
+        pieces, 1080, 1920, 60, "veryfast", 20, tmp_path / "bg.mp4", aspect_mode="fit"
+    )
+    assert any("boxblur=25:5" in " ".join(c) for c in pv_cmds)
+
+    # 3. Chatting: ChatDoc.aspect_mode
+    doc = ChatDoc(
+        title="Test",
+        aspect_mode="fit",
+        characters=[
+            Character(id="me", name="A", side="right"),
+            Character(id="o", name="B", side="left"),
+        ],
+        messages=[Message(from_="me", text=f"Tin {i}") for i in range(8)],
+    )
+    assert doc.aspect_mode == "fit"

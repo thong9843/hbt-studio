@@ -4,7 +4,9 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../SafeZoneOverlay';
+import { AspectModeToggle } from '../AspectModeToggle';
 import type {
+  AspectMode,
   HbtCoreGeminiModel,
   HbtCoreScript,
   HbtCoreSegment,
@@ -119,6 +121,7 @@ export function HbtCoreWorkspace({
 
   // Render & SSE state
   const [rendering, setRendering] = useState(false);
+  const [aspectMode, setAspectMode] = useState<AspectMode>('fill');
   const [progressPct, setProgressPct] = useState(0);
   const [progressStep, setProgressStep] = useState('');
   const [voiceDetail, setVoiceDetail] = useState<VoiceProgressDetail | null>(null);
@@ -416,6 +419,7 @@ export function HbtCoreWorkspace({
       const res = await api.renderHbtCoreV1({
         script: validScript,
         slug: resultSlug ?? initialSlug ?? null,
+        aspect_mode: aspectMode,
       });
       if (res.success === false || res.ok === false || !res.slug) {
         const msg = res.message || res.detail || res.error || vi.export.failed;
@@ -457,6 +461,7 @@ export function HbtCoreWorkspace({
         topic: v2Topic,
         selectedModel,
         slug: resultSlug ?? initialSlug ?? null,
+        aspect_mode: aspectMode,
         auto_render: true,
       });
       if (res.fallback_v1 || res.success === false || res.ok === false || !res.script) {
@@ -605,6 +610,11 @@ export function HbtCoreWorkspace({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <AspectModeToggle
+                value={aspectMode}
+                onChange={setAspectMode}
+                disabled={rendering || v2Loading}
+              />
               {onClose && (
                 <Button tone="soft" size="sm" disabled={rendering || v2Loading} onClick={onClose}>
                   {vi.common.close}

@@ -12,6 +12,11 @@ from PIL import Image, ImageDraw, ImageFont
 from hbt.chatting.models import Character, Message
 from hbt.chatting.sources import format_scene_transition, is_scene_transition
 from hbt.chatting.themes.base import ChatTheme
+from hbt.pipeline.ffutil import probe
+
+MEDIA_MAX_WIDTH = 560
+MEDIA_MAX_HEIGHT = 720
+MEDIA_CORNER_RADIUS = 20
 
 FONTS_DIR = Path(__file__).resolve().parents[1] / "fonts"
 FONT_REGULAR = FONTS_DIR / "BeVietnamPro-Medium.ttf"
@@ -239,10 +244,13 @@ class ChatFrameRenderer:
         theme: ChatTheme,
         characters: list[Character],
         avatar_images: dict[str, Image.Image] | None = None,
+        project_dir: Path | None = None,
     ):
         self.theme = theme
         self.characters = {c.id: c for c in characters}
         self.avatar_images = avatar_images or {}
+        self.project_dir = project_dir
+        self._media_size_cache: dict[str, tuple[int, int] | None] = {}
         self.font_msg = get_font(theme.font_size)
         self.font_emoji = get_emoji_font(int(theme.font_size * 0.95))
         self.font_header_title = get_font(34, bold=True)
@@ -262,11 +270,66 @@ class ChatFrameRenderer:
             return self.char_colors[char_id]
         return GROUP_CHAR_COLORS[0]
 
+    def _resolve_media_path(self, msg: Message) -> Path | None:
+        mtype = getattr(msg, "media_type", None)
+        mpath_raw = getattr(msg, "media_path", None)
+        if mtype not in ("image", "video") or not mpath_raw:
+            return None
+        p = Path(mpath_raw)
+        if not p.is_absolute():
+            if self.project_dir is None:
+                return None
+            p = self.project_dir / p
+        return p if p.is_file() else None
+
+    def resolve_message_media_size(self, msg: Message) -> tuple[int, int] | None:
+        """Tính kích thước (w, h) của media đính kèm (rộng <= 560px, giữ tỷ lệ)."""
+        mtype = getattr(msg, "media_type", None)
+        mpath = self._resolve_media_path(msg)
+        if mpath is None or mtype not in ("image", "video"):
+            return None
+        cache_key = f"{mtype}:{mpath}"
+        if cache_key in self._media_size_cache:
+            return self._media_size_cache[cache_key]
+
+        iw, ih = 560, 315
+        if mtype == "image":
+            try:
+                with Image.open(mpath) as im:
+                    iw, ih = im.size
+            except Exception:
+                self._media_size_cache[cache_key] = None
+                return None
+        else:
+            try:
+                info = probe(mpath)
+                vs = next(
+                    (s for s in info.get("streams", []) if s.get("codec_type") == "video"),
+                    None,
+                )
+                if vs and int(vs.get("width", 0)) > 0 and int(vs.get("height", 0)) > 0:
+                    iw, ih = int(vs["width"]), int(vs["height"])
+            except Exception:
+                iw, ih = 560, 315
+
+        max_w = min(MEDIA_MAX_WIDTH, self.theme.bubble_max_width - 32)
+        scale = min(max_w / max(1, iw), MEDIA_MAX_HEIGHT / max(1, ih), 1.0)
+        disp_w = max(80, int(round(iw * scale)))
+        disp_h = max(80, int(round(ih * scale)))
+        if mtype == "video":
+            disp_w = max(80, (disp_w // 2) * 2)
+            disp_h = max(80, (disp_h // 2) * 2)
+        res = (disp_w, disp_h)
+        self._media_size_cache[cache_key] = res
+        return res
+
     def measure_message(self, msg: Message) -> tuple[int, int, list[str]]:
-        """Tính (chiều rộng bubble, chiều cao bubble, các dòng chữ) hỗ trợ đầy đủ emoji."""
-        raw_text = getattr(msg, "display_text", None) or msg.text
-        lines = wrap_text(
-            raw_text, self.font_msg, self.theme.bubble_max_width - 48, self.font_emoji
+        """Tính (chiều rộng, chiều cao, các dòng chữ) hỗ trợ emoji & media đính kèm."""
+        raw_text = (getattr(msg, "display_text", None) or msg.text).strip()
+        lines = (
+            wrap_text(raw_text, self.font_msg, self.theme.bubble_max_width - 48, self.font_emoji)
+            if raw_text
+            else []
         )
         max_line_w = 0
         for line in lines:
@@ -274,9 +337,18 @@ class ChatFrameRenderer:
             if line_w > max_line_w:
                 max_line_w = line_w
 
-        bubble_w = max(100, max_line_w + 48)
+        media_size = self.resolve_message_media_size(msg)
         line_h = self.theme.line_spacing
-        bubble_h = len(lines) * line_h + 32
+        if media_size is not None:
+            mw, mh = media_size
+            bubble_w = max(100, max_line_w + 48, mw + 32)
+            if lines:
+                bubble_h = 16 + len(lines) * line_h + 12 + mh + 16
+            else:
+                bubble_h = 16 + mh + 16
+        else:
+            bubble_w = max(100, max_line_w + 48)
+            bubble_h = max(1, len(lines)) * line_h + 32
         return bubble_w, bubble_h, lines
 
     def draw_header(self, other_char: Character) -> Image.Image:
@@ -656,6 +728,34 @@ class ChatFrameRenderer:
                 )
                 text_y += self.theme.line_spacing
 
+            media_size = self.resolve_message_media_size(msg)
+            if media_size is not None:
+                mw, mh = media_size
+                media_x = (bubble_w - mw) // 2
+                media_y = text_y + (12 if lines else 0)
+                mtype = getattr(msg, "media_type", None)
+                mpath = self._resolve_media_path(msg)
+                if mtype == "image" and mpath is not None:
+                    try:
+                        with Image.open(mpath) as raw_m:
+                            rgba_m = raw_m.convert("RGBA")
+                            resized_m = rgba_m.resize((mw, mh), Image.Resampling.LANCZOS)
+                            rgba_m.close()
+                            rmask = draw_rounded_mask((mw, mh), MEDIA_CORNER_RADIUS)
+                            b_img.paste(resized_m, (media_x, media_y), rmask)
+                            resized_m.close()
+                            rmask.close()
+                    except Exception:
+                        pass
+                elif mtype == "video":
+                    b_draw.rounded_rectangle(
+                        [(media_x, media_y), (media_x + mw, media_y + mh)],
+                        radius=MEDIA_CORNER_RADIUS,
+                        fill=(15, 23, 42, 255),
+                        outline=(51, 65, 85, 255),
+                        width=2,
+                    )
+
             if scale != 1.0 and scale > 0.1:
                 sw = max(10, int(bubble_w * scale))
                 sh = max(10, int(bubble_h * scale))
@@ -760,3 +860,77 @@ class ChatFrameRenderer:
         mask.close()
 
         return canvas
+
+    def compute_video_media_rects(
+        self,
+        visible_messages: list[Message],
+        scroll_offset: float = 0.0,
+    ) -> list[tuple[int, Path, int, int, int, int]]:
+        """Trả về danh sách (msg_idx, video_path, canvas_x, canvas_y, w, h) đang hiển thị."""
+        frame_w = self.theme.frame_width
+        frame_max_h = self.theme.frame_max_height
+        top_y = self.theme.top_y
+        frame_x = (CANVAS_WIDTH - frame_w) // 2
+        content_top_y = top_y + self.theme.header_height
+        content_area_h = frame_max_h - self.theme.header_height
+
+        rects: list[tuple[int, Path, int, int, int, int]] = []
+        cur_y = 20
+        num_msgs = len(visible_messages)
+        if num_msgs > 0:
+            cur_y += 36
+
+        for idx, msg in enumerate(visible_messages):
+            if num_msgs >= 8 and idx == num_msgs // 2:
+                cur_y += 36
+            disp_text = getattr(msg, "display_text", None) or msg.text
+            if is_scene_transition(disp_text):
+                cur_y += 36 + 20
+                continue
+
+            char = self.characters.get(msg.from_)
+            is_right = (char.side == "right") if char else False
+            prev_is_trans = idx > 0 and is_scene_transition(
+                getattr(visible_messages[idx - 1], "display_text", None)
+                or visible_messages[idx - 1].text
+            )
+            same_prev = (
+                idx > 0 and visible_messages[idx - 1].from_ == msg.from_ and not prev_is_trans
+            )
+            show_sender_name = self.is_group and not is_right and not same_prev
+            if show_sender_name and char:
+                cur_y += 26
+
+            bubble_w, bubble_h, lines = self.measure_message(msg)
+            draw_y = round(cur_y - scroll_offset)
+
+            if getattr(msg, "media_type", None) == "video":
+                mpath = self._resolve_media_path(msg)
+                media_size = self.resolve_message_media_size(msg)
+                if mpath is not None and media_size is not None:
+                    mw, mh = media_size
+                    if is_right:
+                        bx = frame_w - 28 - bubble_w
+                    else:
+                        av_size = self.theme.bubble_left_avatar_size
+                        bx = 24 + av_size + 14
+                    bx = max(0, min(frame_w - bubble_w, bx))
+                    media_x = bx + (bubble_w - mw) // 2
+                    media_y = (
+                        draw_y + 16 + len(lines) * self.theme.line_spacing + (12 if lines else 0)
+                    )
+                    if media_y >= 0 and (media_y + mh) <= content_area_h:
+                        rects.append(
+                            (
+                                idx,
+                                mpath,
+                                frame_x + media_x,
+                                content_top_y + media_y,
+                                mw,
+                                mh,
+                            )
+                        )
+
+            cur_y += bubble_h + 16
+
+        return rects

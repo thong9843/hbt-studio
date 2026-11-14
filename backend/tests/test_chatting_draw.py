@@ -115,3 +115,54 @@ def test_grouped_bubbles_and_content_height():
         scroll_offset_override=50,
     )
     assert img.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
+    img.close()
+
+
+def test_draw_message_with_image_and_video_media(tmp_path):
+    from PIL import Image
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir(parents=True)
+    img_path = media_dir / "photo.png"
+    # Tạo ảnh ngang 1200x600 -> phải thu về rộng tối đa 560px, cao 280px (tỉ lệ 2:1)
+    Image.new("RGB", (1200, 600), (220, 40, 80)).save(img_path)
+
+    vid_path = media_dir / "clip.mp4"
+    vid_path.write_bytes(b"dummy-mp4")
+
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="other", name="Lan", side="left"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars, project_dir=tmp_path)
+
+    msg_img = Message(
+        from_="other",
+        text="Xem ảnh này đi",
+        media_type="image",
+        media_path="media/photo.png",
+    )
+    msg_vid = Message(
+        from_="me",
+        text="Còn đây là clip",
+        media_type="video",
+        media_path="media/clip.mp4",
+    )
+
+    img_size = renderer.resolve_message_media_size(msg_img)
+    assert img_size == (560, 280)
+
+    bw_img, bh_img, _ = renderer.measure_message(msg_img)
+    assert bw_img >= 560 + 32
+    assert bh_img > 280
+
+    rects = renderer.compute_video_media_rects([msg_img, msg_vid], scroll_offset=0.0)
+    assert len(rects) == 1
+    m_idx, m_p, cx, cy, mw, mh = rects[0]
+    assert m_idx == 1
+    assert m_p == vid_path
+    assert mw <= 560 and mh > 0 and cx >= 0 and cy >= 0
+
+    frame = renderer.render_chat_view([msg_img, msg_vid])
+    assert frame.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
+    frame.close()

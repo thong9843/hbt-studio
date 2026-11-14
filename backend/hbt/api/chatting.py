@@ -42,6 +42,7 @@ class CreateChatBody(BaseModel):
 
 class RenderChatBody(BaseModel):
     preview: bool = False
+    aspect_mode: Literal["fill", "fit"] | None = None
 
 
 @router.get("/chatting/status")
@@ -342,7 +343,9 @@ def render_chatting_project_api(slug: str, body: RenderChatBody, state: State) -
         raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
 
     try:
-        job = state.jobs.submit_chatting_render(slug=slug, preview=body.preview)
+        job = state.jobs.submit_chatting_render(
+            slug=slug, preview=body.preview, aspect_mode=body.aspect_mode
+        )
     except Exception as e:
         raise HTTPException(status_code=409, detail=f"Không thể bắt đầu dựng: {e}") from e
 

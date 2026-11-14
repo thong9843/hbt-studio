@@ -17,6 +17,7 @@ from hbt.pipeline import cache
 from hbt.pipeline.ffutil import run_ffmpeg
 from hbt.pipeline.render import PIPELINE_VERSION
 from hbt.postv.backgrounds import BackgroundEntry
+from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 
 PIECE_SECONDS = (7.5, 15.0)  # mỗi clip được dùng 7,5 s hoặc 15 s
 PAD = 0.5  # dựng dư để cắt lại đúng số khung
@@ -71,7 +72,13 @@ def pick_pieces(
 
 
 def bg_key(
-    pieces: Sequence[Piece], width: int, height: int, fps: int, preset: str, crf: int
+    pieces: Sequence[Piece],
+    width: int,
+    height: int,
+    fps: int,
+    preset: str,
+    crf: int,
+    aspect_mode: AspectMode = "fill",
 ) -> str:
     """Khoá cache `bg.mp4`: mảnh (kèm kích thước + giờ sửa file nguồn), kích thước, fps, mã hoá."""
     sources = []
@@ -79,7 +86,16 @@ def bg_key(
         st = p.file.stat()
         sources.append([p.clip_id, p.start, p.seconds, st.st_size, st.st_mtime_ns])
     return cache.digest(
-        "pv-bg", sources, width, height, fps, preset, crf, BG_VERSION, PIPELINE_VERSION
+        "pv-bg",
+        sources,
+        width,
+        height,
+        fps,
+        preset,
+        crf,
+        aspect_mode,
+        BG_VERSION,
+        PIPELINE_VERSION,
     )
 
 
@@ -91,16 +107,24 @@ def build_background(
     preset: str,
     crf: int,
     out: Path,
+    aspect_mode: AspectMode = "fill",
 ) -> None:
     """Một lệnh ffmpeg: cắt từng mảnh, đưa về `width×height` `fps`, nối, không tiếng."""
     args: list[str | Path] = []
     chains = []
     for i, p in enumerate(pieces):
         args += ["-ss", f"{p.start:.2f}", "-t", f"{p.seconds:.3f}", "-i", p.file]
+        chains.append(f"[{i}:v]fps={fps}[fps{i}]")
         chains.append(
-            f"[{i}:v]fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase:"
-            f"flags=lanczos,crop={width}:{height},setsar=1,format=yuv420p[v{i}]"
+            build_aspect_filter(
+                aspect_mode,
+                width=width,
+                height=height,
+                input_label=f"fps{i}",
+                output_label=f"asp{i}",
+            )
         )
+        chains.append(f"[asp{i}]format=yuv420p[v{i}]")
     labels = "".join(f"[v{i}]" for i in range(len(pieces)))
     fc = ";".join([*chains, f"{labels}concat=n={len(pieces)}:v=1:a=0[bg]"])
     partial = out.with_name(out.stem + ".part.mp4")

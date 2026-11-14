@@ -75,6 +75,7 @@ class ChatDoc(BaseModel):
     platform: Literal["messenger", "zalo"] = "messenger"
     source: SourceInfo = Field(default_factory=SourceInfo)
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
+    aspect_mode: Literal["fill", "fit"] = "fill"
     music: str | None = "chill_02"
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     characters: list[Character]
