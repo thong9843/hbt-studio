@@ -537,7 +537,7 @@ class ChatFrameRenderer:
         active_sticker_img: Image.Image | None = None,
         show_seen: bool = True,
     ) -> list[Message]:
-        """Phân trang kiểu Fill & Reset: lấp đầy khung chat từ trên xuống, hết chỗ thì reset trang mới."""
+        """Phân trang Fill & Reset: lấp đầy khung chat từ trên xuống, hết chỗ thì reset."""
         if not visible_messages:
             return []
 
@@ -614,7 +614,7 @@ class ChatFrameRenderer:
         header_img = self.draw_header(other_char)
         content_area_h = frame_max_h - self.theme.header_height
 
-        # Phân trang Fill & Reset: chỉ hiển thị các tin thuộc trang hiện tại, không cuộn đẩy tạo khoảng trắng
+        # Phân trang Fill & Reset: chỉ hiển thị trang hiện tại, không cuộn đẩy khoảng trắng
         sticker_for_layout = active_sticker_img if not is_meme_cutin else None
         visible_messages = self.paginate_messages(
             visible_messages,

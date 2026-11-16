@@ -114,7 +114,7 @@ def test_sanitize_chat_raw_excess_stickers():
     sticker_indices = [i for i, m in enumerate(clean["messages"]) if m["sticker"] is not None]
     # Giới hạn cứng tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
     assert 1 <= len(sticker_indices) <= 3
-    for a, b in zip(sticker_indices, sticker_indices[1:]):
+    for a, b in zip(sticker_indices, sticker_indices[1:], strict=False):
         assert b - a >= 4
     assert any("lược bỏ" in w for w in clean["warnings"])
 

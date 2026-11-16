@@ -266,7 +266,8 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
         )
     if dropped_stickers > 0:
         warnings.append(
-            f"Đã lược bỏ {dropped_stickers} sticker/meme thừa để giữ tối đa {MAX_STICKERS} điểm cao trào."
+            f"Đã lược bỏ {dropped_stickers} sticker/meme thừa "
+            f"để giữ tối đa {MAX_STICKERS} điểm cao trào."
         )
 
     data["messages"] = clean_msgs

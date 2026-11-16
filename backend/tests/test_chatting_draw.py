@@ -204,7 +204,10 @@ def test_paginate_messages_fill_and_reset():
     long_msgs = [
         Message(
             from_="a" if i % 2 == 0 else "me",
-            text=f"Tin nhắn số {i + 1} khá dài để kiểm tra phân trang lấp đầy khung chat rồi tự reset.",
+            text=(
+                f"Tin nhắn số {i + 1} khá dài để kiểm tra phân trang "
+                "lấp đầy khung chat rồi tự reset."
+            ),
         )
         for i in range(20)
     ]
