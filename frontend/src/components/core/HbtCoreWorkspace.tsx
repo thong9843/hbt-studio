@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
-import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../SafeZoneOverlay';
-import { WatermarkControl } from '../WatermarkControl';
+import { useSafeZone } from '../SafeZoneOverlay';
+import { PhonePreviewStage } from '../studio/PhonePreviewStage';
 import type {
   HbtCoreGeminiModel,
   HbtCoreScript,
@@ -623,7 +623,7 @@ export function HbtCoreWorkspace({
                 type="button"
                 disabled={v2Loading || rendering || !prompt.trim()}
                 onClick={() => void handleRunV2Prompt()}
-                className="inline-flex items-center gap-2 rounded-pill bg-gradient-to-r from-indigo-600 via-violet-600 to-amber-500 px-4 py-2 text-small font-bold text-white transition duration-150 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-45"
+                className="ui-btn ui-btn-magic ui-btn-sm"
               >
                 <SparklesIcon size={16} />
                 <span>{v2Loading ? T.studio.generatingBtn : T.studio.generateBtn}</span>
@@ -868,84 +868,72 @@ export function HbtCoreWorkspace({
 
       {/* KHU VỰC PHẢI: LIVE VERTICAL PREVIEW 9:16 & TIẾN TRÌNH */}
       <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-        <section
-          aria-label={T.studio.previewTitle}
-          className="space-y-3 rounded-card border border-line bg-card p-4"
+        <PhonePreviewStage
+          title={T.studio.previewTitle}
+          badgeText={T.studio.segmentLabel(safeIndex + 1, segments.length)}
+          safeZone={safeZone}
+          onSafeZoneChange={setSafeZone}
+          exportBusy={rendering}
+          exportDisabled={rendering || v2Loading}
+          exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
+          onExport={() => void handleStartV1Render()}
+          footer={
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <Button
+                tone="soft"
+                size="sm"
+                disabled={safeIndex <= 0}
+                onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
+              >
+                ← Trước
+              </Button>
+              <Button
+                tone="soft"
+                size="sm"
+                disabled={safeIndex >= segments.length - 1}
+                onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
+              >
+                Sau →
+              </Button>
+            </div>
+          }
         >
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-small font-extrabold uppercase tracking-wide text-muted">
-              {T.studio.previewTitle}
-            </h2>
-            <span className="text-tiny font-bold text-indigo-300">
-              {T.studio.segmentLabel(safeIndex + 1, segments.length)}
+          {activeImageSrc ? (
+            <img
+              src={activeImageSrc}
+              alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
+              <span className="text-3xl opacity-60">🖼️</span>
+              <p className="mt-2 line-clamp-3 text-tiny text-muted-on-dark">
+                {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+              </p>
+            </div>
+          )}
+
+          {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
+          <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
+            <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
+              {activeSegment?.title || title}
+            </p>
+          </div>
+
+          {/* Sticker biểu cảm */}
+          <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
+            <span aria-hidden="true">
+              {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
             </span>
           </div>
 
-          {/* Khung giả lập video dọc 9:16 */}
-          <div className="mb-2 flex justify-center">
-            <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
+          {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
+          <div className="absolute inset-x-4 bottom-8 text-center">
+            <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
+              {activeSegment?.text || '…'}
+            </p>
           </div>
-          <div className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-[22px] border border-line-input bg-gradient-to-b from-[#131b2e] via-[#0d1322] to-[#090d16] shadow-lg">
-            <SafeZoneOverlay platform={safeZone} />
-            {activeImageSrc ? (
-              <img
-                src={activeImageSrc}
-                alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
-                <span className="text-3xl opacity-60">🖼️</span>
-                <p className="mt-2 line-clamp-3 text-tiny text-muted">
-                  {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
-                </p>
-              </div>
-            )}
-
-            {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
-            <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
-              <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
-                {activeSegment?.title || title}
-              </p>
-            </div>
-
-            {/* Sticker biểu cảm */}
-            <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
-              <span aria-hidden="true">
-                {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
-              </span>
-            </div>
-
-            {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
-            <div className="absolute inset-x-4 bottom-8 text-center">
-              <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
-                {activeSegment?.text || '…'}
-              </p>
-            </div>
-          </div>
-
-          <WatermarkControl />
-
-          {/* Điều hướng nhanh cảnh trước / sau */}
-          <div className="flex items-center justify-between gap-2">
-            <Button
-              tone="soft"
-              size="sm"
-              disabled={safeIndex <= 0}
-              onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
-            >
-              ← Trước
-            </Button>
-            <Button
-              tone="soft"
-              size="sm"
-              disabled={safeIndex >= segments.length - 1}
-              onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
-            >
-              Sau →
-            </Button>
-          </div>
-        </section>
+        </PhonePreviewStage>
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
         {(v2Loading || rendering || resultVideoUrl || renderError) &&
