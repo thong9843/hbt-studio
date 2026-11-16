@@ -174,7 +174,7 @@ def render_watermark_png(
     a_scaled = a.point(lambda p: int(round(p * clamped_opacity)))
     combined.putalpha(a_scaled)
 
-    # Định vị trong vùng an toàn Safe-Zone 9:16 (mặc định bottom-right: cách đáy 260px, lề phải 48px)
+    # Định vị Safe-Zone 9:16 (mặc định bottom-right: cách đáy 260px, lề phải 48px)
     margin_x = int(round(48 * scale))
     margin_top = int(round(92 * scale))
     margin_bottom = int(round(260 * scale))
