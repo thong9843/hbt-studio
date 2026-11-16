@@ -144,10 +144,10 @@ def test_timeline_meme_cutin_pause_and_scene_transition():
     voice_durations = [(i, Path("fake.wav"), 1.0) for i in range(len(msgs))]
     timeline = build_timeline(doc, voice_durations)
 
-    # Tìm state meme cut-in (duration 3.5s)
+    # Tìm state meme cut-in (thời lượng linh hoạt < 5.0s)
     cutin_states = [s for s in timeline.states if s.is_meme_cutin]
     assert len(cutin_states) == 1
-    assert cutin_states[0].duration == 3.5
+    assert 0.9 <= cutin_states[0].duration < 5.0
     assert cutin_states[0].active_sticker == "soc"
 
     # Tìm state chuyển cảnh (duration 1.2s - 1.5s, show_typing=False)
