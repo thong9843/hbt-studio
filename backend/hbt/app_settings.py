@@ -40,6 +40,25 @@ class AppSettings(BaseModel):
     whisper_timeout_seconds: int = Field(default=900, ge=30, le=7200)
     advanced_mode: bool = False
     watermark: WatermarkSettings = Field(default_factory=WatermarkSettings)
+    pixabay_api_key: str = ""
+    giphy_api_key: str = ""
+
+
+def resolve_online_api_key(
+    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY"],
+    workspace_dir: Path | None = None,
+) -> str:
+    """Đọc API key từ biến môi trường (.env) trước, sau đó fallback sang workspace/settings/app.json."""
+    val = os.environ.get(env_name, "").strip()
+    if val:
+        return val
+    if workspace_dir is not None:
+        s = AppSettingsStore(workspace_dir).load()
+        if env_name == "PIXABAY_API_KEY" and s.pixabay_api_key.strip():
+            return s.pixabay_api_key.strip()
+        if env_name == "GIPHY_API_KEY" and s.giphy_api_key.strip():
+            return s.giphy_api_key.strip()
+    return ""
 
 
 class AppSettingsStore:

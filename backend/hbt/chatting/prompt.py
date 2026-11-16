@@ -21,6 +21,7 @@ def build_user_prompt(
     comments: list[str] | None = None,
     platform: str = "messenger",
     target_duration_s: float | None = None,
+    memes_summary: list[dict[str, object]] | None = None,
 ) -> str:
     """Tạo user prompt chuẩn cho Gemini API."""
     comment_text = "\n".join(f"- {c}" for c in (comments or [])) if comments else "Không có"
@@ -30,8 +31,18 @@ def build_user_prompt(
         dur_hint = (
             f"\nThời lượng mục tiêu: ~{int(target_duration_s)} giây (khoảng {est_msgs} tin nhắn)."
         )
+    meme_hint = ""
+    if memes_summary:
+        lines = [
+            f"- {m.get('id')}: {m.get('title')} | tags={m.get('tags')} | topic={m.get('topic')}"
+            for m in memes_summary[:25]
+        ]
+        meme_hint = (
+            "\nKho Meme có sẵn (chỉ chọn `meme_id` tối đa 1-3 lần khi đúng câu cao trào khớp `topic`, "
+            "không chọn trùng):\n" + "\n".join(lines)
+        )
     return (
-        f"Nền tảng: {platform}{dur_hint}\n"
+        f"Nền tảng: {platform}{dur_hint}{meme_hint}\n"
         f"Tiêu đề gốc: {title}\n"
         f"Nội dung:\n{body}\n"
         f"Bình luận nổi bật:\n{comment_text}"

@@ -275,6 +275,44 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def select_memes_for_chat(
+    messages: list[dict[str, Any]],
+    memes_index: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Chọn/chuẩn hóa `meme_id` khớp ngữ cảnh cho kịch bản Chatting (tối đa 3 meme, không trùng)."""
+    if not memes_index:
+        return messages
+    from hbt.shared.online_sources.meme_tagging import match_meme_by_context
+
+    valid_ids = {str(it.get("id") or it.get("file") or "") for it in memes_index}
+    used_ids: set[str] = set()
+    assigned = 0
+
+    for m in messages:
+        if assigned >= 3:
+            m["meme_id"] = None
+            continue
+        raw_mid = str(m.get("meme_id") or "").strip()
+        if raw_mid and raw_mid in valid_ids and raw_mid not in used_ids:
+            used_ids.add(raw_mid)
+            assigned += 1
+            continue
+        if m.get("sticker"):
+            matched = match_meme_by_context(
+                str(m.get("text") or ""), memes_index, used_ids=used_ids
+            )
+            if matched:
+                mid = str(matched.get("id") or matched.get("file") or "")
+                if mid:
+                    m["meme_id"] = mid
+                    used_ids.add(mid)
+                    assigned += 1
+                    continue
+        m["meme_id"] = None
+
+    return messages
+
+
 class GeminiChatClient:
     """Client sinh kịch bản Chatting bằng Gemini API dùng chung cấu hình HBT Core."""
 

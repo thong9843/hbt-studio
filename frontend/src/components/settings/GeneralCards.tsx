@@ -194,3 +194,34 @@ export function StudioEnginesCard({ health }: { health: { vieneu?: boolean } | u
     </Card>
   );
 }
+
+/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Pixabay, Giphy). */
+export function OnlineApiKeysCard({ value, onChange }: Props) {
+  return (
+    <Card as="section" aria-label="API Kho Tài Nguyên Trực Tuyến" className="space-y-4">
+      <div>
+        <h2 className="text-h2 font-bold">API Kho Tài Nguyên Trực Tuyến</h2>
+        <p className="mt-1 text-small text-muted">
+          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm nhạc Pixabay và
+          sticker động Giphy ngay trong Thư viện.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label="PIXABAY_API_KEY (Nhạc & SFX)"
+          type="password"
+          placeholder="Nhập Pixabay API Key..."
+          value={value.pixabay_api_key ?? ''}
+          onChange={(e) => onChange({ pixabay_api_key: e.target.value })}
+        />
+        <Input
+          label="GIPHY_API_KEY (Giphy Stickers)"
+          type="password"
+          placeholder="Nhập Giphy API Key..."
+          value={value.giphy_api_key ?? ''}
+          onChange={(e) => onChange({ giphy_api_key: e.target.value })}
+        />
+      </div>
+    </Card>
+  );
+}

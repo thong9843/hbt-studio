@@ -14,19 +14,32 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Query, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from hbt.api.deps import State
+from hbt.app_settings import resolve_online_api_key
 from hbt.config import BRAND_DIR, REPO_ROOT
 from hbt.shared.db.media_index import (
     delete_render,
     init_db,
     list_renders,
     sync_renders_dir,
+)
+from hbt.shared.online_sources import (
+    batch_auto_tag_memes,
+    import_giphy_sticker,
+    import_greenmeme,
+    import_pixabay_audio,
+    import_sigstick_pack,
+    search_giphy_stickers,
+    search_greenmeme,
+    search_pixabay_audio,
+    update_meme_metadata,
 )
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
@@ -123,6 +136,7 @@ def _serialize_item(
         url = f"/api/asset-hub/file/{quote(source)}/{quote(category)}/{quote(rel, safe='/')}"
     m = meta or {}
     return {
+        "id": str(m.get("id") or path.stem),
         "name": path.name,
         "category": category,
         "kind": _file_kind(path),
@@ -134,7 +148,10 @@ def _serialize_item(
         "title": str(m.get("title") or path.stem),
         "artist": str(m.get("artist") or ""),
         "moods": list(m.get("moods") or []),
-        "duration": float(m.get("duration") or 0.0),
+        "tags": list(m.get("tags") or []),
+        "topic": str(m.get("topic") or ""),
+        "duration": float(m.get("duration") or m.get("duration_sec") or 0.0),
+        "duration_sec": float(m.get("duration_sec") or m.get("duration") or 0.0),
         "thumb_url": thumb_url,
     }
 
@@ -188,6 +205,129 @@ def _collect_dir_items(
             )
         )
     return out
+
+
+class PixabayImportBody(BaseModel):
+    item_id: str
+    title: str
+    artist: str = "Pixabay Creator"
+    download_url: str
+    kind: Literal["music", "sfx"] = "music"
+    tags: list[str] = []
+
+
+class GreenMemeImportBody(BaseModel):
+    meme_id: str
+    title: str
+    video_url: str
+    poster_url: str = ""
+
+
+class GiphyImportBody(BaseModel):
+    sticker_id: str
+    title: str
+    download_url: str
+
+
+class SigStickImportBody(BaseModel):
+    url: str
+
+
+class MemePatchBody(BaseModel):
+    tags: list[str] | None = None
+    topic: str | None = None
+    title: str | None = None
+
+
+@router.get("/asset-hub/online/pixabay")
+async def online_search_pixabay(
+    state: State,
+    q: str = Query(default=""),
+    kind: Literal["music", "sfx"] = Query(default="music"),
+) -> dict[str, Any]:
+    api_key = resolve_online_api_key("PIXABAY_API_KEY", state.settings.workspace_dir)
+    if not api_key:
+        return {"items": [], "missing_key": True}
+    items = await search_pixabay_audio(q, kind=kind, api_key=api_key)
+    return {"items": items, "missing_key": False}
+
+
+@router.post("/asset-hub/online/pixabay/import")
+async def online_import_pixabay(body: PixabayImportBody, state: State) -> dict[str, Any]:
+    return await import_pixabay_audio(
+        item_id=body.item_id,
+        title=body.title,
+        artist=body.artist,
+        download_url=body.download_url,
+        kind=body.kind,
+        tags=body.tags,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.get("/asset-hub/online/greenmeme")
+async def online_search_greenmeme(q: str = Query(default="")) -> dict[str, Any]:
+    items = await search_greenmeme(q)
+    return {"items": items}
+
+
+@router.post("/asset-hub/online/greenmeme/import")
+async def online_import_greenmeme(body: GreenMemeImportBody, state: State) -> dict[str, Any]:
+    return await import_greenmeme(
+        meme_id=body.meme_id,
+        title=body.title,
+        video_url=body.video_url,
+        poster_url=body.poster_url,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.get("/asset-hub/online/giphy")
+async def online_search_giphy(state: State, q: str = Query(default="")) -> dict[str, Any]:
+    api_key = resolve_online_api_key("GIPHY_API_KEY", state.settings.workspace_dir)
+    if not api_key:
+        return {"items": [], "missing_key": True}
+    items = await search_giphy_stickers(q, api_key=api_key)
+    return {"items": items, "missing_key": False}
+
+
+@router.post("/asset-hub/online/giphy/import")
+async def online_import_giphy(body: GiphyImportBody, state: State) -> dict[str, Any]:
+    return await import_giphy_sticker(
+        sticker_id=body.sticker_id,
+        title=body.title,
+        download_url=body.download_url,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.post("/asset-hub/online/sigstick/import")
+async def online_import_sigstick(body: SigStickImportBody, state: State) -> dict[str, Any]:
+    try:
+        return await import_sigstick_pack(body.url, library_dir=state.settings.library_dir)
+    except ValueError as e:
+        raise Unprocessable(str(e)) from e
+
+
+@router.post("/asset-hub/memes/auto-tag")
+def auto_tag_memes_endpoint(state: State) -> dict[str, Any]:
+    memes_dir = state.settings.library_dir / "memes"
+    return batch_auto_tag_memes(memes_dir)
+
+
+@router.patch("/asset-hub/memes/{meme_id}")
+def patch_meme_endpoint(meme_id: str, body: MemePatchBody, state: State) -> dict[str, Any]:
+    memes_dir = state.settings.library_dir / "memes"
+    updated = update_meme_metadata(
+        memes_dir,
+        meme_id,
+        tags=body.tags,
+        topic=body.topic,
+        title=body.title,
+    )
+    if updated is None:
+        raise NotFound(f"Không tìm thấy meme '{meme_id}'")
+    return {"ok": True, "item": updated}
 
 
 @router.get("/asset-hub/{category}")

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/endpoints';
 import type { AssetHubCategory, AssetHubItem, UnifiedRenderItem } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
@@ -10,10 +10,13 @@ import {
   FolderIcon,
   PlayIcon,
   PlusIcon,
+  SearchIcon,
+  SparklesIcon,
   TrashIcon,
 } from '../components/icons';
 import { AudioTrackRow } from '../components/library/AudioTrackRow';
 import { GameplayCard } from '../components/library/GameplayCard';
+import { OnlineAssetDrawer } from '../components/library/OnlineAssetDrawer';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -56,11 +59,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const MEME_TAG_FILTERS = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'hai_huoc', label: 'Hài hước' },
+  { id: 'bat_ngo', label: 'Bất ngờ / Sốc' },
+  { id: 'ca_khia', label: 'Cà khịa' },
+  { id: 'that_vong', label: 'Thất vọng' },
+  { id: 'meo', label: 'Mèo' },
+  { id: 'drama', label: 'Drama' },
+] as const;
+
 export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<LibraryTab>('renders');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
   const [previewRender, setPreviewRender] = useState<UnifiedRenderItem | null>(null);
   const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
+  const [memeSearch, setMemeSearch] = useState('');
+  const [memeTagFilter, setMemeTagFilter] = useState<string>('all');
+  const [onlineOpen, setOnlineOpen] = useState(false);
   const [playingAudioUrl, setPlayingAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -149,7 +165,31 @@ export function AssetHubPage() {
     onError: (e) => toast.error(e),
   });
 
-  const items = activeAssetQuery?.data?.items ?? [];
+  const autoTagMut = useMutation({
+    mutationFn: () => api.autoTagMemes(),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'memes'] });
+      toast.info(`Đã tự gắn tag cho ${res.updated}/${res.total} meme!`);
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  const items = useMemo(() => activeAssetQuery?.data?.items ?? [], [activeAssetQuery?.data?.items]);
+  const filteredMemeItems = useMemo(() => {
+    if (activeTab !== 'memes') return items;
+    const q = memeSearch.trim().toLowerCase();
+    return items.filter((it) => {
+      if (memeTagFilter !== 'all') {
+        const tags = (it.tags ?? []).map((t) => t.toLowerCase());
+        if (!tags.includes(memeTagFilter)) return false;
+      }
+      if (!q) return true;
+      const hay =
+        `${it.title ?? ''} ${it.name} ${it.topic ?? ''} ${(it.tags ?? []).join(' ')}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [activeTab, items, memeSearch, memeTagFilter]);
+  const supportsOnline = activeTab === 'music' || activeTab === 'memes' || activeTab === 'stickers';
   const allRenders = rendersQuery.data?.items ?? [];
   const filteredRenders =
     engineFilter === 'all' ? allRenders : allRenders.filter((r) => r.engine === engineFilter);
@@ -199,7 +239,12 @@ export function AssetHubPage() {
         </div>
 
         {!isRendersTab && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {supportsOnline && (
+              <Button tone="postv" onClick={() => setOnlineOpen(true)}>
+                🌐 Tìm &amp; Tải Online
+              </Button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -528,12 +573,135 @@ export function AssetHubPage() {
             </ul>
           )}
         </div>
+      ) : activeTab === 'memes' ? (
+        /* 5a. Tab Meme với tìm kiếm tức thì, chip Tag & Tự gắn tag AI */
+        <section aria-label="Kho Meme theo tag và chủ đề" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-card p-4 shadow-card">
+            <div className="relative min-w-[240px] flex-1">
+              <SearchIcon
+                size={16}
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+              />
+              <input
+                type="search"
+                value={memeSearch}
+                onChange={(e) => setMemeSearch(e.target.value)}
+                placeholder="Tìm meme theo tên, tag hoặc chủ đề..."
+                aria-label="Tìm meme theo tên, tag hoặc chủ đề"
+                className="ui-input !pl-10 text-small"
+              />
+            </div>
+            <Button
+              tone="magic"
+              size="sm"
+              busy={autoTagMut.isPending}
+              icon={<SparklesIcon size={15} />}
+              onClick={() => autoTagMut.mutate()}
+            >
+              ✨ Tự gắn tag AI
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {MEME_TAG_FILTERS.map((tg) => {
+              const active = memeTagFilter === tg.id;
+              return (
+                <button
+                  key={tg.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setMemeTagFilter(tg.id)}
+                  className={`ui-chip ui-chip-sm ${active ? '!bg-primary !text-on-primary' : ''}`}
+                >
+                  {tg.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {filteredMemeItems.length === 0 ? (
+            <Card className="py-12 text-center">
+              <p className="text-body font-bold text-text">{T.empty}</p>
+            </Card>
+          ) : (
+            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              {filteredMemeItems.map((item) => (
+                <Card
+                  key={`${item.source}-${item.name}`}
+                  as="li"
+                  padded={false}
+                  className="group flex flex-col overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPreviewItem(item)}
+                    className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-soft"
+                    aria-label={`Xem ${item.name}`}
+                  >
+                    {item.kind === 'video' ? (
+                      <video
+                        src={item.url}
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                        onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                        onMouseLeave={(e) => e.currentTarget.pause()}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <img
+                        src={item.url}
+                        alt={item.name}
+                        className="h-full w-full object-contain p-2"
+                        loading="lazy"
+                      />
+                    )}
+                  </button>
+                  <div className="flex flex-1 flex-col justify-between gap-2 p-3">
+                    <div>
+                      <p className="truncate text-tiny font-bold text-text">
+                        {item.title || item.name}
+                      </p>
+                      {item.topic && (
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{item.topic}</p>
+                      )}
+                      {item.tags && item.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {item.tags.slice(0, 3).map((tg) => (
+                            <span
+                              key={tg}
+                              className="rounded-pill bg-soft px-2 py-0.5 text-[10px] font-bold text-text-2"
+                            >
+                              #{tg}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="num text-[11px] text-muted">{formatBytes(item.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAsset.mutate(item)}
+                        aria-label={`Xóa ${item.name}`}
+                        className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </ul>
+          )}
+        </section>
       ) : items.length === 0 ? (
         <Card className="py-12 text-center">
           <p className="text-body font-bold text-text">{T.empty}</p>
         </Card>
       ) : (
-        /* 5. Tab Meme & Sticker */
+        /* 5b. Tab Sticker */
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {items.map((item) => (
             <Card
@@ -583,6 +751,15 @@ export function AssetHubPage() {
             </Card>
           ))}
         </ul>
+      )}
+
+      {/* Drawer Tìm & Tải Online */}
+      {supportsOnline && (
+        <OnlineAssetDrawer
+          open={onlineOpen}
+          category={activeTab as 'music' | 'memes' | 'stickers'}
+          onClose={() => setOnlineOpen(false)}
+        />
       )}
 
       {/* Modal xem trước Video đã xuất */}
