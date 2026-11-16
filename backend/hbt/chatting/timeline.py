@@ -50,7 +50,7 @@ def compute_meme_duration(stk_file: Path | None, seed: int = 0, msg_idx: int = 0
         if stk_file.suffix.lower() in VIDEO_MEME_EXTS:
             real_dur: float | None = None
             try:
-                from hbt.media import media_duration
+                from hbt.pipeline.ffutil import media_duration
 
                 real_dur = media_duration(stk_file)
             except Exception:

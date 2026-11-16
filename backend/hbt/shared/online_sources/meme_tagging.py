@@ -9,7 +9,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from hbt.media import media_duration
+from hbt.pipeline.ffutil import media_duration
 
 # Bộ từ khóa ánh xạ tag chuẩn hóa -> (từ khóa tiếng Anh/Việt, mô tả chủ đề mặc định)
 TAG_RULES: list[tuple[str, tuple[str, ...], str]] = [

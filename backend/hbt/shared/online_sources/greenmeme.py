@@ -9,8 +9,7 @@ from typing import Any
 
 import httpx
 
-from hbt.media import media_duration
-from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.shared.online_sources.meme_tagging import (
     auto_tag_meme,
     load_memes_index,

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import httpx
 
-from hbt.media import media_duration
+from hbt.pipeline.ffutil import media_duration
 
 PIXABAY_AUDIO_API = "https://pixabay.com/api/"
 DEFAULT_HEADERS = {
