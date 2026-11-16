@@ -126,5 +126,6 @@ Quy trình sản xuất nội dung video ngắn chuyển từ thủ công phân 
 | **Chatting Gemini** | ☑ | **`v2.2.0`** | **Thay thế hoàn toàn Ollama (`qwen2.5:3b-instruct`) bằng Gemini API dùng chung `gemini_client.py` / `hbt.shared.llm` (CI run 43405425835 xanh)** |
 | **Redesign v3.0 & 3.1** | ☑ | **`v3.0.0`** | **Creator Dark Studio 5-item Sidebar, chuẩn 9:16 `aspect.py` (`fill`/`fit`), Safe-Zone overlay, Chatting chọn model Gemini & chèn ảnh/video trong bong bóng chat (CI run 43549579106 xanh)** |
 | **HBT Signature v4.0** | ☑ | **`v4.0.0`** | **Giao diện HBT Signature (Đỏ · Trắng · Vàng · Đen), tự động 9:16 fill/fit theo động cơ (bỏ nút Fill/Fit), đóng dấu Watermark bản quyền (`watermark.py`), hợp nhất kho Video đã xuất trên Trang chủ và tinh gọn `/library` 4 nhóm nguyên liệu (CI run 43556156829 xanh)** |
+| **Creator Workstation v5.0** | ☑ | **`v5.0.0`** | **Tái thiết kế Dual-Theme Daylight Studio & Midnight Aurora, Global SSE Job Dock, PhonePreviewStage 9:16, Watermark trong suốt `bottom-right`, Chatting iOS Messenger/Instagram DM phân trang Fill & Reset + meme `<5s`, Kho tài nguyên trực tuyến (Pixabay, GreenScreenMemes, Giphy, SigStick) & AI auto-tag meme (CI run 43832163147 xanh)** |
 | G4 | ☐ | `v1.19.0` | ComfyUI SDXL local (chờ setup trên máy mới có GPU) |
 | GĐ4 | ☐ | — | Threads Graph API chính thức, mở rộng xuất video đa kênh |

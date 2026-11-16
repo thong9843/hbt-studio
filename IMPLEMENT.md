@@ -1367,4 +1367,12 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
 - **Watermark bản quyền (`shared/pipeline/watermark.py`, `WatermarkControl.tsx`):** Vẽ lớp PNG 1080×1920 trong suốt bằng Pillow với bóng đổ mềm (`mode`: `both` / `text` / `logo`, mặc định `@HayBietTuot` + `brand/hbt-logo-mark.png`, góc `top-right` trong vùng an toàn Safe-Zone, `opacity: 0.35`, tự động ẩn ở 4 giây outro cuối), lưu trong `workspace/settings/app.json` và nối vào cả 3 động cơ (`core/render.py`, `postv/render.py`, `chatting/render.py`).
 - **Hợp nhất Kho Video đã xuất & Tinh gọn `/library` (`api/asset_hub.py`, `media_index.py`, `HomePage.tsx`, `AssetHubPage.tsx`):** Quét hợp nhất mọi thành phẩm `.mp4` cùng `publish.txt` từ cả 3 động cơ hiển thị trực tiếp tại mục **Video đã xuất gần đây** trên Trang chủ (`/`) kèm bộ lọc động cơ và Modal 9:16 Player (Xem video, Sao chép `publish.txt` 1 chạm, Tải `.mp4`, Xóa có xác nhận); trang `/library` giữ đúng 4 tab nguyên liệu đầu vào (`Nhạc nền`, `Video nền Gameplay`, `Sticker & Meme`, `Logo Watermark`).
 
+### 15.14 Creator Workstation v5.0, Chatting iOS, Watermark `bottom-right` & Kho Trực Tuyến (Mốc v5.0.0)
+
+- **Giao diện Creator Workstation v5.0 (`tokens.css`, `Sidebar.tsx`, `HomePage.tsx`, `PhonePreviewStage.tsx`):** Hệ thống Dual-Theme Daylight Studio & Midnight Aurora, màu định danh 3 động cơ, `QuickCreateDrawer`, `GlobalJobDock` (SSE toàn cục), khung `main` full-width và `PhonePreviewStage` Xanh Chàm Hoàng Gia.
+- **Watermark trong suốt vùng an toàn dưới (`watermark.py`, `WatermarkControl.tsx`):** Mặc định `bottom-right` (cách đáy `260px`, lề phải `48px`), không nền hộp, đồng bộ lớp phủ xem trước trực tiếp trên `PhonePreviewStage`.
+- **Chatting iOS (`templates/messenger_ios.html`, `instagram_ios.html`, `draw.py`, `timeline.py`, `llm.py`):** 2 theme iOS (`messenger`, `instagram`, tương thích ngược `zalo`), phân trang Fill & Reset không khoảng trắng thừa, siết tối đa 3 meme/video cách nhau $\ge 3$ tin và thời lượng linh hoạt `< 5.0s`.
+- **Kho Tài nguyên Trực tuyến & Smart Meme Tagging (`shared/online_sources/`, `AssetHubPage.tsx`, `OnlineAssetDrawer.tsx`):** Tìm & tải Pixabay Music/SFX, GreenScreenMemes, Giphy Stickers & SigStick Pack; tự gắn `tags`/`topic` cho meme và chọn `meme_id` khớp ngữ cảnh.
+
+
 
