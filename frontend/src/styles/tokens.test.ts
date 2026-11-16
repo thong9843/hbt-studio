@@ -101,7 +101,7 @@ describe('tokens.css v2', () => {
       'rgba(255, 255, 255, 0.08)',
       '#f8fafc',
     ]);
-    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#dc2626']);
+    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#b91c1c']);
     expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#facc15', '#d9232e', '#f87171']);
   });
 

@@ -128,7 +128,7 @@ describe('ProjectsPage', () => {
     expect(img('Có bìa')).toHaveAttribute('loading', 'lazy');
     expect(img('Có bìa')).toHaveAttribute('decoding', 'async');
     expect(img('Chỉ ảnh')).toHaveAttribute('src', '/api/files/b/1.png');
-    expect(img('Trống')).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
+    expect(img('Trống')).toHaveAttribute('src', '/brand/hay-biet-tuot_avatar.png');
     expect(within(card('Trống')).getByText('Chưa có ảnh')).toBeInTheDocument();
   });
 
@@ -144,7 +144,7 @@ describe('ProjectsPage', () => {
     expect(img).toHaveAttribute('src', '/api/files/projects/a/images/x.png');
     fireEvent.error(img);
     const after = card('Ảnh hỏng').querySelector('img') as HTMLImageElement;
-    expect(after).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
+    expect(after).toHaveAttribute('src', '/brand/hay-biet-tuot_avatar.png');
     expect(within(card('Ảnh hỏng')).getByText('Chưa có ảnh')).toBeInTheDocument();
     // Lỗi của ô HBT không làm vòng lặp: vẫn là ô HBT.
     fireEvent.error(after);

@@ -64,9 +64,7 @@ export function AudioTrackRow({
         onClick={() => onTogglePlay(item.url)}
         aria-label={isPlaying ? `Tạm dừng ${item.name}` : `Nghe thử ${item.name}`}
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-transform active:scale-95 ${
-          isPlaying
-            ? 'bg-engine-postv text-white shadow-sm'
-            : 'bg-soft text-text hover:bg-soft-2'
+          isPlaying ? 'bg-engine-postv text-white shadow-sm' : 'bg-soft text-text hover:bg-soft-2'
         }`}
       >
         {isPlaying ? <StopIcon size={16} /> : <PlayIcon size={16} />}
@@ -79,7 +77,9 @@ export function AudioTrackRow({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-tiny text-muted">
           <Badge>{item.source === 'library' ? 'Thư viện' : 'Assets'}</Badge>
-          {item.mood && <Badge tone="postv">{item.mood}</Badge>}
+          {item.moods && item.moods.length > 0 && (
+            <Badge tone="postv">{item.moods.slice(0, 2).join(', ')}</Badge>
+          )}
           <span className="num">{formatBytes(item.size)}</span>
           {duration > 0 && isPlaying && (
             <span className="num font-semibold text-engine-postv">

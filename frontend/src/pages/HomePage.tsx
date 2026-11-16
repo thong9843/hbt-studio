@@ -133,7 +133,12 @@ function Continue({
             Mở lại dự án
           </Link>
           {video && (
-            <a href={video} target="_blank" rel="noreferrer" className="ui-btn ui-btn-soft ui-btn-sm">
+            <a
+              href={video}
+              target="_blank"
+              rel="noreferrer"
+              className="ui-btn ui-btn-soft ui-btn-sm"
+            >
               <PlayIcon size={14} />
               {t.watch}
             </a>
@@ -218,7 +223,6 @@ function RenderCoverPreview({ item }: { item: UnifiedRenderItem }) {
 }
 
 export function HomePage() {
-  const t = vi.home;
   const { open: openNew } = useNewProject();
   const [searchQuery, setSearchQuery] = useState('');
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
@@ -291,11 +295,12 @@ export function HomePage() {
   const latest = filteredProjects[0];
   const recent = filteredProjects.slice(1, 1 + RECENT);
 
-  const allRenders = rendersQuery.data?.items ?? [];
+  const allRenders = useMemo(() => rendersQuery.data?.items ?? [], [rendersQuery.data?.items]);
   const filteredRenders = useMemo(() => {
     return allRenders.filter((r) => {
       if (engineFilter !== 'all' && r.engine !== engineFilter) return false;
-      if (q && !r.title.toLowerCase().includes(q) && !r.slug.toLowerCase().includes(q)) return false;
+      if (q && !r.title.toLowerCase().includes(q) && !r.slug.toLowerCase().includes(q))
+        return false;
       return true;
     });
   }, [allRenders, engineFilter, q]);
@@ -367,7 +372,12 @@ export function HomePage() {
       <EngineShowcaseCards />
 
       {error && (
-        <ErrorNote message={(error as Error).message} onRetry={() => void refetch()} />
+        <div className="space-y-2">
+          <ErrorNote error={error} />
+          <Button size="sm" tone="soft" onClick={() => void refetch()}>
+            {vi.common.retry}
+          </Button>
+        </div>
       )}
 
       {/* Khu vực Tiếp tục dự án dở */}
@@ -385,7 +395,7 @@ export function HomePage() {
             <Skeleton height={220} className="!rounded-card" />
           </div>
         ) : filteredProjects.length === 0 ? (
-          <EmptyProjects onNew={openNew} />
+          <EmptyProjects onCreate={() => openNew()} />
         ) : (
           <div className="space-y-5">
             {latest && <Continue project={latest} onDelete={setDeleting} />}

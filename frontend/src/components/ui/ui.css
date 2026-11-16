@@ -88,7 +88,11 @@
   box-shadow: 0 6px 20px rgba(59, 130, 246, 0.26);
 }
 .ui-btn-chatting {
-  background: linear-gradient(135deg, var(--engine-chatting) 0%, var(--engine-chatting-strong) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--engine-chatting) 0%,
+    var(--engine-chatting-strong) 100%
+  );
   color: #ffffff;
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.26);
 }

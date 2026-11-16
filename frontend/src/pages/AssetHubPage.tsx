@@ -4,7 +4,14 @@ import { api } from '../api/endpoints';
 import type { AssetHubCategory, AssetHubItem, UnifiedRenderItem } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
 import { RenderPlayerModal } from '../components/home/RenderPlayerModal';
-import { CopyIcon, DownloadIcon, FolderIcon, PlayIcon, PlusIcon, TrashIcon } from '../components/icons';
+import {
+  CopyIcon,
+  DownloadIcon,
+  FolderIcon,
+  PlayIcon,
+  PlusIcon,
+  TrashIcon,
+} from '../components/icons';
 import { AudioTrackRow } from '../components/library/AudioTrackRow';
 import { GameplayCard } from '../components/library/GameplayCard';
 import { Badge } from '../components/ui/Badge';
@@ -489,9 +496,18 @@ export function AssetHubPage() {
           {items.length > 0 && (
             <ul className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
               {items.map((item) => (
-                <Card key={`${item.source}-${item.name}`} as="li" padded={false} className="overflow-hidden">
+                <Card
+                  key={`${item.source}-${item.name}`}
+                  as="li"
+                  padded={false}
+                  className="overflow-hidden"
+                >
                   <div className="flex aspect-square items-center justify-center bg-soft p-4">
-                    <img src={item.url} alt={item.name} className="max-h-full max-w-full object-contain" />
+                    <img
+                      src={item.url}
+                      alt={item.name}
+                      className="max-h-full max-w-full object-contain"
+                    />
                   </div>
                   <div className="flex items-center justify-between gap-2 p-3">
                     <div className="min-w-0 flex-1">
@@ -532,7 +548,7 @@ export function AssetHubPage() {
                 className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-soft"
                 aria-label={`Xem ${item.name}`}
               >
-                {item.type === 'video' ? (
+                {item.kind === 'video' ? (
                   <video
                     src={item.url}
                     muted
@@ -585,7 +601,7 @@ export function AssetHubPage() {
       >
         {previewItem && (
           <div className="flex flex-col items-center gap-4">
-            {previewItem.type === 'video' ? (
+            {previewItem.kind === 'video' ? (
               <video
                 src={previewItem.url}
                 controls

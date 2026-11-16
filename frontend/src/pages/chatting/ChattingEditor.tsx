@@ -698,8 +698,8 @@ export function ChattingEditor() {
       {/* CỘT PHẢI (360px): Xem trước 9:16 + Nút Xuất */}
       <aside className="w-[360px] shrink-0 overflow-y-auto border-l border-line bg-bg/50 p-4">
         <PhonePreviewStage
-          title="Xem trước 9:16"
-          badgeText={doc.platform === 'zalo' ? 'Zalo · 60fps' : 'Messenger · 60fps'}
+          title="Xem trước"
+          badgeText={doc.platform === 'zalo' ? '9:16 · Zalo · 60fps' : '9:16 · Messenger · 60fps'}
           safeZone={safeZone}
           onSafeZoneChange={setSafeZone}
           previewBusy={isRendering}

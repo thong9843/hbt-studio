@@ -20,8 +20,7 @@ export function GlobalJobDock() {
 
   return (
     <aside
-      aria-label={vi.nav.renderProgress}
-      role="status"
+      aria-label="Tiến trình dựng toàn cục"
       className="fixed bottom-5 right-5 z-30 w-[340px] max-w-[calc(100vw-2rem)] rounded-card border border-line bg-card/95 p-4 shadow-pop backdrop-blur-md"
     >
       <div className="flex items-start justify-between gap-3">
@@ -46,9 +45,10 @@ export function GlobalJobDock() {
           size="sm"
           onClick={() => void job.cancel()}
           icon={<StopIcon size={14} />}
+          aria-label="Hủy dựng toàn cục"
           title={vi.nav.cancelRender}
         >
-          {vi.nav.cancelRender}
+          Dừng
         </Button>
       </div>
 
