@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
-import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../../components/SafeZoneOverlay';
-import { WatermarkControl } from '../../components/WatermarkControl';
+import { useSafeZone } from '../../components/SafeZoneOverlay';
+import { PhonePreviewStage } from '../../components/studio/PhonePreviewStage';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
@@ -696,14 +696,39 @@ export function ChattingEditor() {
       </main>
 
       {/* CỘT PHẢI (360px): Xem trước 9:16 + Nút Xuất */}
-      <aside className="flex w-[360px] shrink-0 flex-col items-center border-l border-line bg-card p-6">
-        <div className="flex w-full flex-col items-center gap-2">
-          <h2 className="text-small font-extrabold text-text">Xem trước</h2>
-          <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
-        </div>
-
-        {/* Khung xem trước 9:16 */}
-        <div className="relative mt-3 flex aspect-[9/16] w-full max-w-[260px] items-center justify-center overflow-hidden rounded-[28px] border border-line bg-black shadow-md">
+      <aside className="w-[360px] shrink-0 overflow-y-auto border-l border-line bg-bg/50 p-4">
+        <PhonePreviewStage
+          title="Xem trước 9:16"
+          badgeText={doc.platform === 'zalo' ? 'Zalo · 60fps' : 'Messenger · 60fps'}
+          safeZone={safeZone}
+          onSafeZoneChange={setSafeZone}
+          previewBusy={isRendering}
+          exportBusy={isRendering}
+          previewDisabled={isRendering}
+          exportDisabled={isRendering}
+          previewLabel={vi.chatting.exportFast}
+          exportLabel={vi.chatting.exportFinal}
+          onPreview={() => handleRender(true)}
+          onExport={() => handleRender(false)}
+          footer={
+            <div className="space-y-2 text-center">
+              {isRendering && (
+                <p className="num text-tiny font-bold text-engine-chatting">
+                  Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}
+                </p>
+              )}
+              {videoUrl && (
+                <a
+                  href={videoUrl}
+                  download
+                  className="inline-block text-tiny font-bold text-engine-postv hover:underline"
+                >
+                  {vi.chatting.download}
+                </a>
+              )}
+            </div>
+          }
+        >
           {videoUrl ? (
             <video
               key={videoUrl}
@@ -713,54 +738,11 @@ export function ChattingEditor() {
               className="h-full w-full object-cover"
             />
           ) : (
-            <div className="text-center p-4 text-tiny text-muted">
-              Chưa có video xem nhanh. Bấm "Xem nhanh" để dựng.
+            <div className="flex h-full w-full items-center justify-center p-4 text-center text-tiny text-muted-on-dark">
+              Chưa có video xem nhanh. Bấm &quot;Xem nhanh&quot; để dựng.
             </div>
           )}
-          <SafeZoneOverlay platform={safeZone} />
-        </div>
-
-        {/* Nút hành động */}
-        <div className="mt-4 w-full">
-          <WatermarkControl />
-        </div>
-        <div className="mt-4 flex w-full flex-col gap-2.5">
-          {isRendering && (
-            <div className="mb-2 text-center text-tiny font-bold text-accent">
-              Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}
-            </div>
-          )}
-
-          <Button
-            tone="soft"
-            size="md"
-            disabled={isRendering}
-            onClick={() => handleRender(true)}
-            className="w-full font-bold"
-          >
-            {vi.chatting.exportFast}
-          </Button>
-
-          <Button
-            tone="accent"
-            size="lg"
-            disabled={isRendering}
-            onClick={() => handleRender(false)}
-            className="w-full rounded-full font-extrabold shadow-md"
-          >
-            {vi.chatting.exportFinal}
-          </Button>
-
-          {videoUrl && (
-            <a
-              href={videoUrl}
-              download
-              className="mt-2 text-center text-tiny font-bold text-muted hover:text-text"
-            >
-              {vi.chatting.download}
-            </a>
-          )}
-        </div>
+        </PhonePreviewStage>
       </aside>
     </div>
   );

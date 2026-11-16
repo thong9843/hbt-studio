@@ -89,10 +89,10 @@ export function ChattingHome() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-8 text-center">
-        <h1 className="flex items-center justify-center gap-3 text-3xl font-extrabold tracking-tight">
-          <MessagesSquareIcon size={32} />
-          {vi.chatting.title}
-        </h1>
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-chatting-soft text-engine-chatting shadow-sm">
+          <MessagesSquareIcon size={28} />
+        </div>
+        <h1 className="text-h1 font-extrabold tracking-tight text-text">{vi.chatting.title}</h1>
         <p className="mt-2 text-muted">Tạo video dạng tin nhắn Messenger / Zalo nhanh chóng</p>
       </div>
 
@@ -242,7 +242,7 @@ export function ChattingHome() {
           </div>
 
           <Button
-            tone="brand"
+            tone="chatting"
             size="lg"
             onClick={handleCreate}
             disabled={!inputText.trim() || isSubmitting}
