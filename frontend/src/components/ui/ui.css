@@ -65,7 +65,32 @@
 .ui-btn-primary {
   background: linear-gradient(135deg, #d9232e 0%, #b91c1c 100%);
   color: var(--on-brand);
-  box-shadow: 0 6px 20px rgba(217, 35, 46, 0.35);
+  box-shadow: 0 6px 20px rgba(217, 35, 46, 0.28);
+}
+.ui-btn-magic {
+  background: linear-gradient(135deg, var(--magic-from) 0%, var(--magic-to) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.28);
+}
+.ui-btn-export {
+  background: linear-gradient(135deg, var(--export-from) 0%, var(--export-to) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.28);
+}
+.ui-btn-core {
+  background: linear-gradient(135deg, var(--engine-core) 0%, var(--engine-core-strong) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(244, 63, 94, 0.26);
+}
+.ui-btn-postv {
+  background: linear-gradient(135deg, var(--engine-postv) 0%, var(--engine-postv-strong) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.26);
+}
+.ui-btn-chatting {
+  background: linear-gradient(135deg, var(--engine-chatting) 0%, var(--engine-chatting-strong) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.26);
 }
 .ui-btn-soft {
   background: var(--soft);
@@ -333,6 +358,18 @@
 .ui-badge-danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+.ui-badge-core {
+  background: var(--engine-core-soft);
+  color: var(--on-engine-core-soft);
+}
+.ui-badge-postv {
+  background: var(--engine-postv-soft);
+  color: var(--on-engine-postv-soft);
+}
+.ui-badge-chatting {
+  background: var(--engine-chatting-soft);
+  color: var(--on-engine-chatting-soft);
 }
 
 /* ---- Ô nhập ---- */

@@ -84,33 +84,32 @@ describe('tokens.css v2', () => {
     }
   });
 
-  it('uses the exact light and dark values of DESIGN-HBT.md', () => {
+  it('uses the exact light and dark values of v5.0 Creator Workstation', () => {
     const l = resolver('light');
     const d = resolver('dark');
     expect([l('--bg'), l('--card'), l('--soft'), l('--line'), l('--text')]).toEqual([
-      '#f5f5f7',
+      '#f6f8fc',
       '#ffffff',
-      '#f0f0f3',
-      '#ececf0',
-      '#0b0d12',
+      '#f1f5f9',
+      '#e2e8f0',
+      '#0f172a',
     ]);
     expect([d('--bg'), d('--card'), d('--soft'), d('--line'), d('--text')]).toEqual([
-      '#0b0d12',
-      '#131720',
-      '#1a202c',
-      'rgba(255, 255, 255, 0.1)',
+      '#0b0f19',
+      '#131a2a',
+      '#1e293b',
+      'rgba(255, 255, 255, 0.08)',
       '#f8fafc',
     ]);
-    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#b3261e']);
-    expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#facc15', '#d9232e', '#ff6b6b']);
+    expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#dc2626']);
+    expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#facc15', '#d9232e', '#f87171']);
   });
 
-  it('has radii and shadows from section 4', () => {
-    expect(light['--radius-card']).toBe('24px');
-    expect(light['--radius-dialog']).toBe('28px');
-    expect(light['--radius-input']).toBe('14px');
+  it('has radii and shadows for v5.0 cards', () => {
+    expect(light['--radius-card']).toBe('20px');
+    expect(light['--radius-dialog']).toBe('24px');
+    expect(light['--radius-input']).toBe('12px');
     expect(light['--radius-pill']).toBe('999px');
-    expect(darkAttr['--shadow-card']).toBe('none');
     expect(darkAttr['--card-border']).toBe('var(--line)');
   });
 
@@ -161,6 +160,9 @@ const PAIRS: [string, string][] = [
   ['--on-tint-red', '--tint-red'],
   ['--on-tint-yel', '--tint-yel'],
   ['--on-ok-soft', '--ok-soft'],
+  ['--on-engine-core-soft', '--engine-core-soft'],
+  ['--on-engine-postv-soft', '--engine-postv-soft'],
+  ['--on-engine-chatting-soft', '--engine-chatting-soft'],
   ['--on-danger', '--danger'],
   ['--danger', '--bg'],
   ['--danger', '--card'],

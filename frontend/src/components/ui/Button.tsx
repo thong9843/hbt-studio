@@ -3,7 +3,19 @@ import { vi } from '../../i18n/vi';
 import { cx } from './cx';
 import './ui.css';
 
-export type ButtonTone = 'ink' | 'accent' | 'brand' | 'primary' | 'soft' | 'danger' | 'ghost';
+export type ButtonTone =
+  | 'ink'
+  | 'accent'
+  | 'brand'
+  | 'primary'
+  | 'soft'
+  | 'danger'
+  | 'ghost'
+  | 'magic'
+  | 'export'
+  | 'core'
+  | 'postv'
+  | 'chatting';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: ButtonTone;

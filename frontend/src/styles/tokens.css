@@ -1,52 +1,77 @@
-/* Token giao diện v4 HBT Signature (Đỏ · Trắng · Vàng · Đen).
-   Sáng/tối theo hệ thống; `data-theme="light|dark"` trên <html> ép một chế độ (trang /dev/ui).
-   Khối tối được khai hai lần (media query và data-theme) vì CSS thuần không dùng chung được;
-   tokens.test.ts kiểm hai khối khớp nhau. */
+/* Token giao diện v5.0 Next-Gen Creator Workstation (Daylight Studio & Midnight Aurora).
+   Sáng/tối theo hệ thống hoặc `data-theme="light|dark"` trên <html>.
+   Khối tối được khai hai lần (media query và data-theme) để tokens.test.ts kiểm tra đồng bộ. */
 :root {
-  /* Màu (mục 2) */
-  --bg: #f5f5f7;
+  /* Bề mặt Daylight Studio */
+  --bg: #f6f8fc;
   --card: #ffffff;
   --nav: #ffffff;
-  --soft: #f0f0f3;
-  --soft-2: #f5f5f7;
-  --line: #ececf0;
-  --line-input: #d9d9de;
-  --text: #0b0d12;
-  --text-2: #3a3540;
-  --muted: #6e6a72;
-  --primary: #0b0d12;
+  --soft: #f1f5f9;
+  --soft-2: #e2e8f0;
+  --line: #e2e8f0;
+  --line-input: #cbd5e1;
+
+  /* Chữ tương phản cao (Slate) */
+  --text: #0f172a;
+  --text-2: #334155;
+  --muted: #475569;
+
+  /* Điểm nhấn thương hiệu & Hành động */
+  --primary: #0f172a;
   --on-primary: #ffffff;
   --accent: #facc15;
-  --on-accent: #0b0d12;
+  --on-accent: #0f172a;
   --brand: #d9232e;
   --on-brand: #ffffff;
-  --engine-core: #d9232e;
-  --engine-postv: #ffffff;
-  --engine-chatting: #facc15;
-  --tint-red: #fdecec;
-  --on-tint-red: #9c1d22;
-  --tint-yel: #fff3d1;
-  --on-tint-yel: #6b4a00;
-  --ok: #22a55b;
-  --ok-soft: #e6f5ec;
-  --on-ok-soft: #187a42;
-  --danger: #b3261e;
+
+  /* Bảng màu Định danh Động cơ (Color-Coded Affordance) */
+  --engine-core: #f43f5e;
+  --engine-core-strong: #e11d48;
+  --engine-core-soft: #fff1f2;
+  --on-engine-core-soft: #be123c;
+
+  --engine-postv: #3b82f6;
+  --engine-postv-strong: #4f46e5;
+  --engine-postv-soft: #eff6ff;
+  --on-engine-postv-soft: #1d4ed8;
+
+  --engine-chatting: #10b981;
+  --engine-chatting-strong: #059669;
+  --engine-chatting-soft: #ecfdf5;
+  --on-engine-chatting-soft: #047857;
+
+  /* Gradient đặc biệt: Magic AI & Final Export */
+  --magic-from: #8b5cf6;
+  --magic-to: #ec4899;
+  --export-from: #f59e0b;
+  --export-to: #ea580c;
+
+  /* Ngữ nghĩa trạng thái */
+  --tint-red: #fff1f2;
+  --on-tint-red: #be123c;
+  --tint-yel: #fef3c7;
+  --on-tint-yel: #92400e;
+  --ok: #16a34a;
+  --ok-soft: #dcfce7;
+  --on-ok-soft: #15803d;
+  --danger: #dc2626;
   --on-danger: #ffffff;
-  --danger-soft: #fdecea;
-  --focus: #facc15;
-  /* Thẻ nền tối cố định ở cả hai chế độ ("Lần xuất gần nhất", Hero & Bento); không đảo theo --primary */
-  --hero: #0b0d12;
+  --danger-soft: #fee2e2;
+  --focus: #3b82f6;
+
+  /* Bề mặt tối chuyên dụng cho khung xem trước video 9:16 */
+  --hero: #0b0f19;
   --on-hero: #ffffff;
-  --surface-dark: #11141d;
+  --surface-dark: #131a2a;
   --text-on-dark: #f8fafc;
   --muted-on-dark: #94a3b8;
 
-  /* Bóng (mục 4); chế độ tối bỏ bóng, dùng viền --line */
-  --shadow-card: 0 1px 2px rgba(11, 13, 18, 0.04), 0 8px 24px rgba(11, 13, 18, 0.05);
-  --shadow-card-hover: 0 2px 4px rgba(11, 13, 18, 0.06), 0 16px 40px rgba(11, 13, 18, 0.1);
-  --shadow-pop: 0 24px 64px rgba(11, 13, 18, 0.25);
-  --card-border: transparent;
-  --scrim: rgba(11, 13, 18, 0.5);
+  /* Đổ bóng đa tầng mềm mại */
+  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: 0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+  --shadow-pop: 0 24px 64px -12px rgba(15, 23, 42, 0.22);
+  --card-border: #e2e8f0;
+  --scrim: rgba(15, 23, 42, 0.45);
 
   /* Khoảng cách: thang 4 px */
   --space-1: 4px;
@@ -60,56 +85,65 @@
   --space-16: 64px;
   --space-24: 96px;
 
-  /* Bo góc (mục 4) */
-  --radius-card: 24px;
-  --radius-dialog: 28px;
+  /* Bo góc */
+  --radius-card: 20px;
+  --radius-dialog: 24px;
   --radius-preview: 28px;
-  --radius-inner: 16px;
-  --radius-input: 14px;
+  --radius-inner: 14px;
+  --radius-input: 12px;
   --radius-pill: 999px;
 
   /* Bố cục */
-  --nav-w: 232px;
+  --nav-w: 248px;
   --nav-w-mini: 72px;
 
-  /* Chuyển động (luật 13.B3.2): 90-200 ms, một đường cong */
+  /* Chuyển động xúc giác */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-press: 90ms;
-  --dur: 160ms;
-  --dur-pop: 180ms;
-  --dur-slow: 200ms;
+  --dur: 180ms;
+  --dur-pop: 200ms;
+  --dur-slow: 240ms;
 
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0b0d12;
-    --card: #131720;
-    --nav: #0b0d12;
-    --soft: #1a202c;
-    --soft-2: #1e2533;
-    --line: rgba(255, 255, 255, 0.1);
+    --bg: #0b0f19;
+    --card: #131a2a;
+    --nav: #0f1523;
+    --soft: #1e293b;
+    --soft-2: #283548;
+    --line: rgba(255, 255, 255, 0.08);
     --line-input: rgba(255, 255, 255, 0.16);
     --text: #f8fafc;
     --text-2: #cbd5e1;
     --muted: #94a3b8;
     --primary: #f8fafc;
-    --on-primary: #0b0d12;
-    --ok: #3ccb7f;
-    --ok-soft: #172033;
-    --on-ok-soft: #3ccb7f;
-    --tint-red: #172033;
-    --on-tint-red: #ff8a8f;
-    --tint-yel: #172033;
-    --on-tint-yel: #facc15;
-    --danger: #ff6b6b;
-    --on-danger: #0b0d12;
-    --danger-soft: #172033;
-    --shadow-card: none;
-    --shadow-card-hover: none;
-    --shadow-pop: none;
-    --card-border: var(--line);
+    --on-primary: #0f172a;
+
+    --engine-core-soft: #2d121d;
+    --on-engine-core-soft: #fda4af;
+    --engine-postv-soft: #13203c;
+    --on-engine-postv-soft: #93c5fd;
+    --engine-chatting-soft: #0c2922;
+    --on-engine-chatting-soft: #6ee7b7;
+
+    --ok: #22c55e;
+    --ok-soft: #102a1d;
+    --on-ok-soft: #4ade80;
+    --tint-red: #2d121d;
+    --on-tint-red: #fda4af;
+    --tint-yel: #2b210e;
+    --on-tint-yel: #fde047;
+    --danger: #f87171;
+    --on-danger: #0f172a;
+    --danger-soft: #2e1518;
+
+    --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.45);
+    --shadow-card-hover: 0 12px 36px -6px rgba(0, 0, 0, 0.6);
+    --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.65);
+    --card-border: rgba(255, 255, 255, 0.08);
     --scrim: rgba(4, 7, 15, 0.76);
 
     color-scheme: dark;
@@ -117,32 +151,41 @@
 }
 
 :root[data-theme='dark'] {
-  --bg: #0b0d12;
-  --card: #131720;
-  --nav: #0b0d12;
-  --soft: #1a202c;
-  --soft-2: #1e2533;
-  --line: rgba(255, 255, 255, 0.1);
+  --bg: #0b0f19;
+  --card: #131a2a;
+  --nav: #0f1523;
+  --soft: #1e293b;
+  --soft-2: #283548;
+  --line: rgba(255, 255, 255, 0.08);
   --line-input: rgba(255, 255, 255, 0.16);
   --text: #f8fafc;
   --text-2: #cbd5e1;
   --muted: #94a3b8;
   --primary: #f8fafc;
-  --on-primary: #0b0d12;
-  --ok: #3ccb7f;
-  --ok-soft: #172033;
-  --on-ok-soft: #3ccb7f;
-  --tint-red: #172033;
-  --on-tint-red: #ff8a8f;
-  --tint-yel: #172033;
-  --on-tint-yel: #facc15;
-  --danger: #ff6b6b;
-  --on-danger: #0b0d12;
-  --danger-soft: #172033;
-  --shadow-card: none;
-  --shadow-card-hover: none;
-  --shadow-pop: none;
-  --card-border: var(--line);
+  --on-primary: #0f172a;
+
+  --engine-core-soft: #2d121d;
+  --on-engine-core-soft: #fda4af;
+  --engine-postv-soft: #13203c;
+  --on-engine-postv-soft: #93c5fd;
+  --engine-chatting-soft: #0c2922;
+  --on-engine-chatting-soft: #6ee7b7;
+
+  --ok: #22c55e;
+  --ok-soft: #102a1d;
+  --on-ok-soft: #4ade80;
+  --tint-red: #2d121d;
+  --on-tint-red: #fda4af;
+  --tint-yel: #2b210e;
+  --on-tint-yel: #fde047;
+  --danger: #f87171;
+  --on-danger: #0f172a;
+  --danger-soft: #2e1518;
+
+  --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.45);
+  --shadow-card-hover: 0 12px 36px -6px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.65);
+  --card-border: rgba(255, 255, 255, 0.08);
   --scrim: rgba(4, 7, 15, 0.76);
 
   color-scheme: dark;
