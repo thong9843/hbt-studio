@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, NavLink, useMatch } from 'react-router-dom';
 import { fetchHealth, type Health } from '../../api/client';
 import { api } from '../../api/endpoints';
@@ -28,6 +28,7 @@ import {
 import { Button } from '../ui/Button';
 import { Progress } from '../ui/Progress';
 import { cx } from '../ui/cx';
+import { QuickCreateDrawer } from './QuickCreateDrawer';
 import '../ui/ui.css';
 
 const ENV_ITEMS = [
@@ -247,6 +248,7 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
  */
 export function Sidebar({ mini, render }: SidebarProps) {
   const { open: openNew } = useNewProject();
+  const [quickOpen, setQuickOpen] = useState(false);
   const openVideo = useMatch('/p/:slug/*');
   const openPostv = useMatch('/postv/:slug/*');
   const videoSlug = openVideo?.params.slug;
@@ -269,8 +271,8 @@ export function Sidebar({ mini, render }: SidebarProps) {
   return (
     <aside
       className={cx(
-        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-line bg-nav',
-        mini ? 'w-[72px] px-2' : 'w-[232px] px-3',
+        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-line bg-nav/95 backdrop-blur-md transition-[width] duration-200',
+        mini ? 'w-[72px] px-2' : 'w-[248px] px-3.5',
       )}
     >
       <Link
@@ -278,29 +280,62 @@ export function Sidebar({ mini, render }: SidebarProps) {
         aria-label={vi.appName}
         className={cx('ui-nav-item mt-4 min-h-[52px]', mini && 'justify-center px-0')}
       >
-        <img src="/brand/hbt-logo-mark.png" alt="" className="h-9 w-auto shrink-0" />
-        {!mini && <span className="text-body font-extrabold">{vi.appName}</span>}
+        <img src="/brand/hbt-logo-mark.png" alt="" className="h-9 w-auto shrink-0 rounded-lg" />
+        {!mini && (
+          <div className="min-w-0">
+            <span className="block truncate text-body font-extrabold tracking-tight">
+              {vi.appName}
+            </span>
+            <span className="block text-[11px] font-semibold text-muted">Creator Workstation</span>
+          </div>
+        )}
       </Link>
 
-      <button
-        type="button"
-        className={cx('ui-btn ui-btn-brand mt-3', mini && 'mx-auto !h-11 !w-11 !min-h-0 !p-0')}
-        aria-label={vi.nav.newVideo}
-        title={mini ? vi.nav.newVideo : undefined}
-        onClick={() => openNew()}
-      >
-        <PlusIcon />
-        {!mini && vi.nav.newVideo}
-      </button>
+      <div className={cx('mt-3 flex gap-2', mini ? 'flex-col items-center' : 'items-center')}>
+        <button
+          type="button"
+          className={cx(
+            'ui-btn ui-btn-brand flex-1',
+            mini && 'mx-auto !h-11 !w-11 !min-h-0 !flex-none !p-0',
+          )}
+          aria-label={vi.nav.newVideo}
+          title={mini ? vi.nav.newVideo : 'Tạo dự án HBT / PostV thủ công'}
+          onClick={() => openNew()}
+        >
+          <PlusIcon />
+          {!mini && vi.nav.newVideo}
+        </button>
+        {!mini && (
+          <button
+            type="button"
+            className="ui-btn ui-btn-magic !min-h-[48px] !px-3.5"
+            aria-label="Tạo nhanh"
+            title="Mở bảng chọn nhanh 3 động cơ AI"
+            onClick={() => setQuickOpen(true)}
+          >
+            <ZapIcon size={16} />
+          </button>
+        )}
+      </div>
 
       <nav aria-label={vi.nav.main} className="mt-4 flex-1 overflow-y-auto">
         <div className="space-y-1">
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
-          <NavItem to="/core" icon={<ZapIcon />} label={vi.nav.hbtCore} mini={mini} />
-          <NavItem to="/postv" icon={<SmartphoneIcon />} label={vi.nav.postv} mini={mini} />
+          <NavItem
+            to="/core"
+            icon={<ZapIcon className="text-engine-core" />}
+            label={vi.nav.hbtCore}
+            mini={mini}
+          />
+          <NavItem
+            to="/postv"
+            icon={<SmartphoneIcon className="text-engine-postv" />}
+            label={vi.nav.postv}
+            mini={mini}
+          />
           <NavItem
             to="/chatting"
-            icon={<MessagesSquareIcon />}
+            icon={<MessagesSquareIcon className="text-engine-chatting" />}
             label={vi.nav.chatting}
             mini={mini}
           />
@@ -316,6 +351,7 @@ export function Sidebar({ mini, render }: SidebarProps) {
         <ThemeToggle mini={mini} />
       </div>
       <Environment mini={mini} />
+      <QuickCreateDrawer open={quickOpen} onClose={() => setQuickOpen(false)} />
     </aside>
   );
 }

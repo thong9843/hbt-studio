@@ -5,6 +5,7 @@ import { useRemainingText } from '../../hooks/useRemaining';
 import { NewProjectProvider } from '../NewProjectDialog';
 import { RenderJobProvider } from '../RenderJobProvider';
 import { Sidebar, type RenderProgress } from './Sidebar';
+import { GlobalJobDock } from './GlobalJobDock';
 import { StudioWorkspaceProvider } from './StudioWorkspaceContext';
 
 /** Điểm gãy: từ 1280 px thanh trái đầy đủ, dưới đó chỉ còn biểu tượng. */
@@ -41,11 +42,12 @@ export function AppLayout({ render }: AppLayoutProps) {
     <NewProjectProvider>
       <RenderJobProvider>
         <StudioWorkspaceProvider>
-          <div className="flex min-h-screen bg-bg text-ink">
+          <div className="flex min-h-screen bg-bg text-text">
             <Nav mini={!wide} render={render} />
             <div className="min-w-0 flex-1">
               <Outlet />
             </div>
+            <GlobalJobDock />
           </div>
         </StudioWorkspaceProvider>
       </RenderJobProvider>
