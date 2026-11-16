@@ -178,7 +178,7 @@ export function AssetHubPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1320px] space-y-6 px-6 py-7">
+    <main className="w-full max-w-full space-y-6 px-6 py-7 lg:px-8">
       <audio ref={audioRef} onEnded={() => setPlayingAudioUrl(null)} className="hidden" />
 
       {/* Header Visual Asset Hub — Light/Dark Adaptive */}

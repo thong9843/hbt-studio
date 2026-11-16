@@ -534,7 +534,7 @@ export function HbtCoreWorkspace({
   })();
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
       {/* KHU VỰC TRÁI: WORKSPACE & PROMPT-FIRST INPUT */}
       <div className="min-w-0 space-y-6">
         {/* Thanh Prompt thông minh trung tâm */}

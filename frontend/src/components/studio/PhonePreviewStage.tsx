@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { PlayIcon, UploadIcon } from '../icons';
 import { SafeZoneOverlay, SafeZoneToolbar, type SafeZonePlatform } from '../SafeZoneOverlay';
-import { WatermarkControl } from '../WatermarkControl';
+import { useWatermarkSettings, WatermarkControl } from '../WatermarkControl';
 import { Button } from '../ui/Button';
 
 export interface PhonePreviewStageProps {
@@ -25,8 +25,8 @@ export interface PhonePreviewStageProps {
 
 /**
  * Khung mô phỏng màn hình điện thoại 9:16 dùng chung cho 3 động cơ:
- * Tích hợp Safe-Zone (TikTok / Shorts / Reels), Watermark HBT Studio,
- * ước tính thời gian và 2 nút phân cấp Xem nhanh (Preview) vs Xuất bản đẹp (Final).
+ * Tích hợp Safe-Zone (TikTok / Shorts / Reels), lớp phủ xem trước Watermark trực quan,
+ * nền Xanh Chàm Hoàng Gia dịu mắt và 2 nút phân cấp Xem nhanh vs Xuất bản đẹp.
  */
 export function PhonePreviewStage({
   title = 'Xem trước 9:16',
@@ -46,6 +46,20 @@ export function PhonePreviewStage({
   footer,
   children,
 }: PhonePreviewStageProps) {
+  const { wm } = useWatermarkSettings();
+  const logoSrc = wm.logo_path
+    ? wm.logo_path.startsWith('/')
+      ? wm.logo_path
+      : `/${wm.logo_path}`
+    : '/brand/hbt-logo-mark.png';
+
+  const wmPosClass =
+    wm.position === 'top-left'
+      ? 'top-[13%] left-3'
+      : wm.position === 'center-subtle'
+        ? 'inset-0 flex items-center justify-center'
+        : 'top-[13%] right-3';
+
   return (
     <section
       aria-label={title}
@@ -64,9 +78,36 @@ export function PhonePreviewStage({
         <SafeZoneToolbar platform={safeZone} onChange={onSafeZoneChange} />
       </div>
 
-      <div className="relative mx-auto aspect-[9/16] w-full max-w-[290px] overflow-hidden rounded-[24px] border-2 border-line-input bg-hero shadow-lg">
+      <div
+        className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-[24px]"
+        style={{
+          background: 'linear-gradient(160deg, #1E1B4B 0%, #312E81 55%, #1E293B 100%)',
+          border: '2px solid rgba(129, 140, 248, 0.35)',
+          boxShadow: '0 16px 36px -8px rgba(49, 46, 129, 0.28)',
+        }}
+      >
         <SafeZoneOverlay platform={safeZone} />
         {children}
+
+        {/* Lớp phủ xem trước Watermark đồng bộ trực tiếp theo cài đặt */}
+        {wm.enabled && (
+          <div
+            aria-hidden="true"
+            style={{ opacity: wm.opacity }}
+            className={`pointer-events-none absolute z-20 ${wmPosClass}`}
+          >
+            <div className="inline-flex items-center gap-1.5 rounded-lg bg-black/25 px-2 py-1 backdrop-blur-[2px]">
+              {(wm.mode === 'logo' || wm.mode === 'both') && (
+                <img src={logoSrc} alt="" className="h-5 w-auto object-contain drop-shadow" />
+              )}
+              {(wm.mode === 'text' || wm.mode === 'both') && (
+                <span className="text-[11px] font-extrabold tracking-tight text-white drop-shadow">
+                  {wm.text || '@HayBietTuot'}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {showWatermarkControl && <WatermarkControl />}
@@ -80,6 +121,7 @@ export function PhonePreviewStage({
           {onExport && (
             <Button
               tone="export"
+              size="lg"
               busy={exportBusy}
               disabled={exportDisabled}
               icon={<UploadIcon size={16} />}
@@ -92,7 +134,6 @@ export function PhonePreviewStage({
           {onPreview && (
             <Button
               tone="soft"
-              size="sm"
               busy={previewBusy}
               disabled={previewDisabled}
               icon={<PlayIcon size={14} />}

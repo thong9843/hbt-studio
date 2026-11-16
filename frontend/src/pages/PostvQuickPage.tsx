@@ -681,8 +681,8 @@ export function PostvQuickPage() {
   return (
     <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
       {/* Khu vực giữa chính */}
-      <main className="flex flex-1 flex-col items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-2xl">
+      <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
+        <div className="w-full max-w-4xl">
           {/* TRƯỜNG HỢP 1: TRẠNG THÁI TRỐNG HOẶC ĐANG NHẬP */}
           {!jobId && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">

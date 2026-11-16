@@ -9,7 +9,7 @@ export function HbtCorePage() {
   const slugParam = searchParams.get('slug') ?? undefined;
 
   return (
-    <main className="mx-auto max-w-[1440px] space-y-6 px-6 py-8">
+    <main className="w-full max-w-full space-y-6 px-6 py-7 lg:px-8">
       <header className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-line bg-card/85 p-5 shadow-card backdrop-blur-sm">
         <div className="flex items-center gap-3.5">
           <span className="flex h-11 w-11 items-center justify-center rounded-inner bg-gradient-to-br from-[#F43F5E] to-[#E11D48] text-white shadow-sm">

@@ -318,7 +318,7 @@ export function HomePage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1240px] space-y-8 px-6 py-7">
+    <main className="w-full max-w-full space-y-8 px-6 py-7 lg:px-8">
       {/* Header Chào mừng Sáng tạo — Thoáng đãng, không dùng hộp đen */}
       <header className="flex flex-col gap-5 rounded-card border border-line bg-card/80 p-6 shadow-card backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">

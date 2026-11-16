@@ -87,7 +87,7 @@ export function ChattingHome() {
     !isDirectScript && !isStatusLoading && status && !status.gemini_configured;
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
+    <main className="w-full max-w-full px-6 py-7 lg:px-8">
       <div className="mb-8 text-center">
         <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-chatting-soft text-engine-chatting shadow-sm">
           <MessagesSquareIcon size={28} />
