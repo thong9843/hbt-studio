@@ -38,6 +38,30 @@ class ChatTimeline:
 
 
 MAX_VIDEO_DURATION_S = 300.0  # Trần thời lượng tối đa 5 phút
+VIDEO_MEME_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".gif"}
+
+
+def compute_meme_duration(stk_file: Path | None, seed: int = 0, msg_idx: int = 0) -> float:
+    """Tính thời lượng hiển thị meme/sticker linh hoạt, luôn nhỏ hơn 5.0s:
+    - Video/GIF động: đọc thời lượng thực tế và giới hạn trong [1.2s, 4.2s].
+    - Ảnh/sticker tĩnh: nhịp dừng tự nhiên theo cảm xúc trong [0.9s, 1.8s].
+    """
+    if stk_file is not None and stk_file.is_file():
+        if stk_file.suffix.lower() in VIDEO_MEME_EXTS:
+            real_dur: float | None = None
+            try:
+                from hbt.pipeline.ffutil import media_duration
+
+                real_dur = media_duration(stk_file)
+            except Exception:
+                real_dur = None
+            if real_dur is not None and real_dur > 0:
+                return round(max(1.2, min(4.2, float(real_dur))), 2)
+            return 2.4
+        # Ảnh tĩnh: biến thiên tự nhiên 0.9s - 1.8s
+        variants = (1.0, 1.25, 1.5, 1.7)
+        return variants[(abs(seed) + msg_idx) % len(variants)]
+    return 1.4
 
 
 def build_timeline(
@@ -162,8 +186,9 @@ def build_timeline(
         )
         cur_time += wav_dur
 
-        # Nếu có sticker/meme: Meme Cut-in Pause 3.5s phóng to giữa khung hình
+        # Nếu có sticker/meme: Meme Cut-in Pause linh hoạt (< 5.0s)
         if msg.sticker:
+            stk_file: Path | None = None
             has_valid_meme = True
             if library_dir is not None:
                 from hbt.chatting.stickers import pick_sticker
@@ -172,7 +197,7 @@ def build_timeline(
                 has_valid_meme = stk_file is not None and stk_file.is_file()
 
             if has_valid_meme:
-                meme_dur = 3.5
+                meme_dur = compute_meme_duration(stk_file, seed=doc.background.seed, msg_idx=idx)
                 states.append(
                     TimelineState(
                         start_time=cur_time,

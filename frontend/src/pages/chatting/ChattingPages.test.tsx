@@ -36,8 +36,8 @@ describe('Chatting Pages (Vitest)', () => {
 
     expect(await screen.findByText('Chatting')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Dán link Reddit hoặc dán câu chuyện…')).toBeInTheDocument();
-    expect(screen.getByText('Messenger')).toBeInTheDocument();
-    expect(screen.getByText('Zalo')).toBeInTheDocument();
+    expect(screen.getByText('Messenger (iOS)')).toBeInTheDocument();
+    expect(screen.getByText('Instagram (iOS)')).toBeInTheDocument();
     expect(screen.getByText('Tạo video')).toBeInTheDocument();
     expect(await screen.findByText('Dự án chat mẫu')).toBeInTheDocument();
   });

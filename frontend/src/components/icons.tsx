@@ -137,3 +137,9 @@ export const CpuIcon = make(
     <path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4" />
   </>,
 );
+export const SearchIcon = make(
+  <>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m21 21-4.3-4.3" />
+  </>,
+);

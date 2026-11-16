@@ -166,3 +166,64 @@ def test_draw_message_with_image_and_video_media(tmp_path):
     frame = renderer.render_chat_view([msg_img, msg_vid])
     assert frame.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
     frame.close()
+
+
+def test_ios_templates_and_html_state():
+    from hbt.chatting.html_renderer import TEMPLATES_DIR
+
+    assert (TEMPLATES_DIR / "messenger_ios.html").is_file()
+    assert (TEMPLATES_DIR / "instagram_ios.html").is_file()
+
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    ig_theme = get_theme("instagram")
+    assert ig_theme.name == "instagram"
+    assert ig_theme.bubble_right_bg == "#833AB4"
+
+    renderer = ChatFrameRenderer(ig_theme, chars)
+    state = renderer.build_html_state(
+        visible_messages=[Message(from_="a", text="Chào bạn"), Message(from_="me", text="Ok nhé")],
+        show_typing=True,
+        show_seen=True,
+    )
+    assert state["header"]["name"] == "Linh"
+    assert len(state["messages"]) == 2
+    assert state["showTyping"] is True
+    assert state["seenText"] == "Đã xem"
+
+
+def test_paginate_messages_fill_and_reset():
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars)
+    # Tạo 20 tin nhắn dài để vượt quá 1 trang
+    long_msgs = [
+        Message(
+            from_="a" if i % 2 == 0 else "me",
+            text=(
+                f"Tin nhắn số {i + 1} khá dài để kiểm tra phân trang "
+                "lấp đầy khung chat rồi tự reset."
+            ),
+        )
+        for i in range(20)
+    ]
+    page_msgs = renderer.paginate_messages(long_msgs)
+    assert 1 <= len(page_msgs) < len(long_msgs)
+    assert page_msgs[-1].text == long_msgs[-1].text
+
+
+def test_meme_duration_always_under_5s(tmp_path: Path):
+    from hbt.chatting.timeline import compute_meme_duration
+
+    static_png = tmp_path / "stk.png"
+    static_png.write_bytes(b"png")
+    d_static = compute_meme_duration(static_png, seed=7, msg_idx=2)
+    assert 0.9 <= d_static <= 1.8
+    assert d_static < 5.0
+
+    d_fallback = compute_meme_duration(None)
+    assert 1.0 <= d_fallback < 5.0

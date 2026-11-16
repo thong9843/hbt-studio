@@ -91,11 +91,11 @@ describe('AppShell, wide (>= 1280 px)', () => {
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
-  it('is 232 px wide and fixed in place', () => {
+  it('is 248 px wide and fixed in place', () => {
     stubFetch(routes());
     shell();
     const side = screen.getByRole('complementary');
-    expect(side).toHaveClass('w-[232px]', 'sticky', 'h-screen');
+    expect(side).toHaveClass('w-[248px]', 'sticky', 'h-screen');
   });
 
   it('hides the open-project block outside a project', () => {
@@ -237,6 +237,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const order = [
       'HBT Studio',
       'Tạo video',
+      'Tạo nhanh',
       'Trang chủ',
       'HBT Core',
       'PostV',

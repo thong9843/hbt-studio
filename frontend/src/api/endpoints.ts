@@ -51,6 +51,9 @@ import type {
   HbtCoreScript,
   AssetHubCategory,
   AssetHubItem,
+  OnlineGiphyItem,
+  OnlineGreenMemeItem,
+  OnlinePixabayItem,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -415,4 +418,48 @@ export const api = {
     ),
   deleteUnifiedRender: (renderId: string) =>
     apiRequest<{ ok: boolean; deleted: string }>('DELETE', `/renders/${enc(renderId)}`),
+
+  searchPixabayOnline: (q: string, kind: 'music' | 'sfx' = 'music') =>
+    apiGet<{ items: OnlinePixabayItem[]; missing_key?: boolean }>(
+      `/asset-hub/online/pixabay?q=${enc(q)}&kind=${enc(kind)}`,
+    ),
+  importPixabayOnline: (body: {
+    item_id: string;
+    title: string;
+    artist: string;
+    download_url: string;
+    kind: 'music' | 'sfx';
+    tags: string[];
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/pixabay/import', { json: body }),
+
+  searchGreenMemeOnline: (q: string) =>
+    apiGet<{ items: OnlineGreenMemeItem[] }>(`/asset-hub/online/greenmeme?q=${enc(q)}`),
+  importGreenMemeOnline: (body: {
+    meme_id: string;
+    title: string;
+    video_url: string;
+    poster_url?: string;
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/greenmeme/import', { json: body }),
+
+  searchGiphyOnline: (q: string) =>
+    apiGet<{ items: OnlineGiphyItem[]; missing_key?: boolean }>(
+      `/asset-hub/online/giphy?q=${enc(q)}`,
+    ),
+  importGiphyOnline: (body: { sticker_id: string; title: string; download_url: string }) =>
+    apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/giphy/import', { json: body }),
+
+  importSigStickOnline: (url: string) =>
+    apiRequest<{ ok: boolean; pack_slug: string; count: number }>(
+      'POST',
+      '/asset-hub/online/sigstick/import',
+      { json: { url } },
+    ),
+
+  autoTagMemes: () =>
+    apiRequest<{ ok: boolean; total: number; updated: number }>(
+      'POST',
+      '/asset-hub/memes/auto-tag',
+    ),
+  patchMemeMetadata: (memeId: string, body: { tags?: string[]; topic?: string; title?: string }) =>
+    apiRequest<{ ok: boolean }>('PATCH', `/asset-hub/memes/${enc(memeId)}`, { json: body }),
 };

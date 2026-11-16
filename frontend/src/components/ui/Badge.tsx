@@ -2,7 +2,7 @@ import type { HTMLAttributes } from 'react';
 import { cx } from './cx';
 import './ui.css';
 
-export type BadgeTone = 'neutral' | 'red' | 'yel' | 'ok' | 'danger';
+export type BadgeTone = 'neutral' | 'red' | 'yel' | 'ok' | 'danger' | 'core' | 'postv' | 'chatting';
 
 interface Props extends HTMLAttributes<HTMLSpanElement> {
   tone?: BadgeTone;

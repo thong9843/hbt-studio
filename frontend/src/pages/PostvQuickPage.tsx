@@ -681,16 +681,19 @@ export function PostvQuickPage() {
   return (
     <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
       {/* Khu vực giữa chính */}
-      <main className="flex flex-1 flex-col items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-2xl">
+      <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
+        <div className="w-full max-w-4xl">
           {/* TRƯỜNG HỢP 1: TRẠNG THÁI TRỐNG HOẶC ĐANG NHẬP */}
           {!jobId && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
               <div className="text-center">
-                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-postv-soft text-engine-postv shadow-sm">
                   <PlusIcon size={28} />
                 </div>
-                <h1 className="text-h1 font-extrabold text-ink">{T.greeting}</h1>
+                <div className="mb-2 flex justify-center">
+                  <Badge tone="postv">PostV · 60fps</Badge>
+                </div>
+                <h1 className="text-h1 font-extrabold text-text">{T.greeting}</h1>
                 <p className="mx-auto mt-2 max-w-md text-small text-muted">{T.greetingSub}</p>
               </div>
 
@@ -746,7 +749,7 @@ export function PostvQuickPage() {
               )}
 
               {/* Khung nhập liệu kiểu Chat */}
-              <div className="rounded-2xl border-2 border-line bg-card p-3 shadow-md transition-all focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <div className="rounded-card border-2 border-line bg-card p-3.5 shadow-card transition-all focus-within:border-engine-postv focus-within:ring-2 focus-within:ring-engine-postv/20">
                 <textarea
                   ref={textareaRef}
                   value={input}

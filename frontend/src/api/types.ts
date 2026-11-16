@@ -252,7 +252,7 @@ export interface WatermarkSettings {
   mode: 'text' | 'logo' | 'both';
   text: string;
   logo_path: string;
-  position: 'top-left' | 'top-right' | 'center-subtle';
+  position: 'bottom-right' | 'bottom-left' | 'top-left' | 'top-right' | 'center-subtle';
   opacity: number;
 }
 
@@ -263,6 +263,8 @@ export interface AppSettings {
   whisper_timeout_seconds: number;
   advanced_mode?: boolean;
   watermark?: WatermarkSettings;
+  pixabay_api_key?: string;
+  giphy_api_key?: string;
 }
 
 export interface SensitiveCategory {
@@ -743,7 +745,7 @@ export interface ChatDoc {
   hbt_chat: number;
   slug?: string;
   title: string;
-  platform: 'messenger' | 'zalo';
+  platform: 'messenger' | 'instagram' | 'zalo';
   aspect_mode?: AspectMode;
   target_duration_s?: number | null;
   characters: ChatCharacter[];
@@ -857,6 +859,7 @@ export interface HbtCoreRenderResponse {
 export type AssetHubCategory = 'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks';
 
 export interface AssetHubItem {
+  id?: string;
   name: string;
   category: AssetHubCategory;
   kind: 'image' | 'video' | 'audio' | 'other';
@@ -868,8 +871,39 @@ export interface AssetHubItem {
   title?: string;
   artist?: string;
   moods?: string[];
+  tags?: string[];
+  topic?: string;
   duration?: number;
+  duration_sec?: number;
   thumb_url?: string | null;
+}
+
+export interface OnlinePixabayItem {
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  tags: string[];
+  preview_url: string;
+  download_url: string;
+  kind: 'music' | 'sfx';
+}
+
+export interface OnlineGreenMemeItem {
+  id: string;
+  title: string;
+  video_url: string;
+  poster_url: string;
+  source: string;
+}
+
+export interface OnlineGiphyItem {
+  id: string;
+  title: string;
+  preview_url: string;
+  download_url: string;
+  ext: string;
+  source: string;
 }
 
 export interface UnifiedRenderItem {

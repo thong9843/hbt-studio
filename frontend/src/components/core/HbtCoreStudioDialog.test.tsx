@@ -83,7 +83,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa.');
 
     // Bấm "Dựng video"
-    await user.click(screen.getByRole('button', { name: 'Dựng video' }));
+    await user.click(screen.getAllByRole('button', { name: 'Dựng video' })[0]);
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     expect(FakeEventSource.instances).toHaveLength(1);

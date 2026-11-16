@@ -9,18 +9,18 @@ export function HbtCorePage() {
   const slugParam = searchParams.get('slug') ?? undefined;
 
   return (
-    <main className="mx-auto max-w-[1440px] space-y-6 px-6 py-8">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-inner bg-gradient-to-br from-indigo-500 via-violet-500 to-amber-500 text-white shadow-sm">
-            <ZapIcon size={20} />
+    <main className="w-full max-w-full space-y-6 px-6 py-7 lg:px-8">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-line bg-card/85 p-5 shadow-card backdrop-blur-sm">
+        <div className="flex items-center gap-3.5">
+          <span className="flex h-11 w-11 items-center justify-center rounded-inner bg-gradient-to-br from-[#F43F5E] to-[#E11D48] text-white shadow-sm">
+            <ZapIcon size={22} />
           </span>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-h1 font-extrabold uppercase tracking-tight">
+              <h1 className="text-h1 font-extrabold tracking-tight text-text">
                 {vi.hbtCore.title}
               </h1>
-              <Badge tone="yel">{vi.nav.hbtCore}</Badge>
+              <Badge tone="core">{vi.nav.hbtCore}</Badge>
             </div>
             <p className="text-small text-muted">{vi.hbtCore.lead}</p>
           </div>

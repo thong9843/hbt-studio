@@ -530,6 +530,59 @@ class ChatFrameRenderer:
 
         return cur_y + 20
 
+    def paginate_messages(
+        self,
+        visible_messages: list[Message],
+        show_typing: bool = False,
+        active_sticker_img: Image.Image | None = None,
+        show_seen: bool = True,
+    ) -> list[Message]:
+        """Phân trang Fill & Reset: lấp đầy khung chat từ trên xuống, hết chỗ thì reset."""
+        if not visible_messages:
+            return []
+
+        max_page_h = max(320, self.theme.frame_max_height - self.theme.header_height - 116)
+        extra_tail = 20
+        if show_typing:
+            extra_tail += 80
+        if active_sticker_img is not None:
+            sw, sh = active_sticker_img.size
+            stk_h = int(sh * (360.0 / max(sw, sh))) if (sw > 360 or sh > 360) else sh
+            extra_tail += stk_h + 16
+        if show_seen and not show_typing:
+            extra_tail += 28
+
+        page_msgs: list[Message] = []
+        cur_y = 20 + 36  # Top padding + header timestamp divider
+
+        for idx, msg in enumerate(visible_messages):
+            disp_text = getattr(msg, "display_text", None) or msg.text
+            if is_scene_transition(disp_text):
+                item_h = 36 + 20
+            else:
+                char = self.characters.get(msg.from_)
+                is_right = (char.side == "right") if char else False
+                prev_is_trans = bool(page_msgs) and is_scene_transition(
+                    getattr(page_msgs[-1], "display_text", None) or page_msgs[-1].text
+                )
+                same_prev = (
+                    bool(page_msgs) and page_msgs[-1].from_ == msg.from_ and not prev_is_trans
+                )
+                label_h = 26 if (self.is_group and not is_right and not same_prev) else 0
+                _, bubble_h, _ = self.measure_message(msg)
+                item_h = label_h + bubble_h + (6 if same_prev else 16)
+
+            tail_reserve = extra_tail if idx == len(visible_messages) - 1 else 20
+            if page_msgs and (cur_y + item_h + tail_reserve) > max_page_h:
+                # Reset làm mới vùng tin nhắn từ ngay dưới thanh Header
+                page_msgs = [msg]
+                cur_y = 20 + 36 + item_h
+            else:
+                page_msgs.append(msg)
+                cur_y += item_h
+
+        return page_msgs
+
     def render_chat_view(
         self,
         visible_messages: list[Message],
@@ -561,20 +614,17 @@ class ChatFrameRenderer:
         header_img = self.draw_header(other_char)
         content_area_h = frame_max_h - self.theme.header_height
 
-        # Tính tổng chiều cao nội dung và giữ toạ độ cuộn dạng float đến bước vẽ cuối
+        # Phân trang Fill & Reset: chỉ hiển thị trang hiện tại, không cuộn đẩy khoảng trắng
         sticker_for_layout = active_sticker_img if not is_meme_cutin else None
-        total_content_h = self.get_content_height(
+        visible_messages = self.paginate_messages(
             visible_messages,
             show_typing=show_typing,
             active_sticker_img=sticker_for_layout,
             show_seen=show_seen,
         )
-        if scroll_offset_override is not None:
-            scroll_f = max(0.0, float(scroll_offset_override))
-        elif total_content_h > content_area_h:
-            scroll_f = float(total_content_h - content_area_h)
-        else:
-            scroll_f = 0.0
+        scroll_f = (
+            max(0.0, float(scroll_offset_override)) if scroll_offset_override is not None else 0.0
+        )
 
         # Chỉ cấp phát canvas vùng nhìn thấy (viewport) để tiết kiệm RAM tối đa
         visible_content = Image.new("RGBA", (frame_w, content_area_h), (0, 0, 0, 0))
@@ -934,3 +984,74 @@ class ChatFrameRenderer:
             cur_y += bubble_h + 16
 
         return rects
+
+    def build_html_state(
+        self,
+        *,
+        visible_messages: list[Message],
+        show_typing: bool = False,
+        typing_pulse_step: int = 0,
+        scale_last_msg: float = 1.0,
+        show_seen: bool = True,
+        scroll_offset_override: float | None = None,
+    ) -> dict[str, object]:
+        """Chuyển trạng thái khung chat sang JSON cho template HTML iOS (Messenger / Instagram)."""
+        import base64
+        import io
+
+        def img_to_uri(im: Image.Image | None) -> str | None:
+            if im is None:
+                return None
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+        main_left = self.left_chars[0] if self.left_chars else None
+        hdr_name = "Nhóm Chat" if self.is_group else (main_left.name if main_left else "Chat")
+        hdr_av = img_to_uri(self.avatar_images.get(main_left.id)) if main_left else None
+        hdr_color = self.get_char_color(main_left.id)[0] if main_left else "#0084FF"
+
+        from hbt.chatting.html_renderer import file_to_data_uri
+
+        page_messages = self.paginate_messages(
+            visible_messages,
+            show_typing=show_typing,
+            show_seen=show_seen,
+        )
+
+        msgs_out: list[dict[str, object]] = []
+        for msg in page_messages:
+            ch = self.characters.get(msg.from_)
+            side = ch.side if ch else "left"
+            mpath = self._resolve_media_path(msg)
+            mtype = getattr(msg, "media_type", "none")
+            media_uri = file_to_data_uri(mpath) if mtype == "image" and mpath else None
+            av_uri = img_to_uri(self.avatar_images.get(msg.from_)) if side == "left" else None
+            msgs_out.append(
+                {
+                    "from": msg.from_,
+                    "side": side,
+                    "senderName": ch.name if ch else msg.from_,
+                    "color": self.get_char_color(msg.from_)[0],
+                    "avatarUrl": av_uri,
+                    "text": (getattr(msg, "display_text", None) or msg.text).strip(),
+                    "mediaType": mtype,
+                    "mediaUrl": media_uri,
+                }
+            )
+
+        return {
+            "header": {
+                "name": hdr_name,
+                "status": self.theme.header_status_text,
+                "avatarUrl": hdr_av,
+                "color": hdr_color,
+            },
+            "isGroup": self.is_group,
+            "messages": msgs_out,
+            "showTyping": show_typing,
+            "typingPulse": typing_pulse_step,
+            "popupScale": scale_last_msg,
+            "scrollY": 0.0,
+            "seenText": self.theme.seen_text if show_seen else "",
+        }

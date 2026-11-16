@@ -78,20 +78,20 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
       </ToastProvider>,
     );
 
-    // Mặc định mở tab Nhạc nền dạng danh sách
+    // Mặc định mở tab Video đã xuất, kiểm tra có Video Demo 9:16
+    const section = await screen.findByRole('region', { name: 'Video đã xuất trên hệ thống' });
+    expect(await within(section).findByText('Video Demo 9:16')).toBeVisible();
+
+    // Chuyển tab Nhạc nền dạng danh sách
+    await user.click(screen.getByRole('tab', { name: /Nhạc nền/ }));
     expect(await screen.findByText('Lo-Fi Chill')).toBeVisible();
     expect(screen.getByText('Kulakovka')).toBeVisible();
 
     // Chuyển tab Sticker và xoá tệp
     await user.click(screen.getByRole('tab', { name: /Sticker/ }));
     expect(await screen.findByText('shock.png')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Xoá: shock.png' }));
+    await user.click(screen.getByRole('button', { name: 'Xóa shock.png' }));
     await waitFor(() => expect(screen.queryByText('shock.png')).toBeNull());
     expect(screen.getByText('Chưa có tệp nào trong mục này.')).toBeVisible();
-
-    // Chuyển tab Video đã xuất
-    await user.click(screen.getByRole('tab', { name: /Video đã xuất/ }));
-    const section = await screen.findByRole('region', { name: 'Video đã xuất trên hệ thống' });
-    expect(await within(section).findByText('Video Demo 9:16')).toBeVisible();
   });
 });

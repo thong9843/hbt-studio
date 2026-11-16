@@ -218,11 +218,45 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Giữ nguyên mọi sticker/meme hợp lệ của kịch bản (không giới hạn cứng)
-    for m in clean_msgs:
-        if m.get("sticker") is not None:
-            st = str(m.get("sticker")).strip().lower()
-            m["sticker"] = st if st in VALID_STICKER_TAGS else None
+    # 3. Siết mật độ sticker/meme: tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    MAX_STICKERS = 3
+    MIN_STICKER_GAP = 4  # cách nhau ít nhất 3 tin ở giữa (idx_b - idx_a >= 4)
+    candidates: list[tuple[float, int]] = []
+    n_msgs = len(clean_msgs)
+    for idx, m in enumerate(clean_msgs):
+        raw_st = m.get("sticker")
+        if raw_st is None:
+            continue
+        st = str(raw_st).strip().lower()
+        if st not in VALID_STICKER_TAGS:
+            m["sticker"] = None
+            continue
+        m["sticker"] = st
+        txt = str(m.get("text", ""))
+        # Ưu tiên tin cao trào/twist/punchline (nửa sau, có dấu cảm xúc)
+        score = (idx / max(1, n_msgs)) * 2.0
+        if "!" in txt or "?" in txt:
+            score += 1.0
+        if st in ("soc", "cuoi", "gian", "khoc"):
+            score += 0.5
+        if idx >= n_msgs - 2:
+            score += 1.0
+        candidates.append((score, idx))
+
+    # Chọn tối đa 3 vị trí điểm cao nhất mà vẫn cách nhau >= MIN_STICKER_GAP
+    chosen_indices: list[int] = []
+    for _score, idx in sorted(candidates, key=lambda x: (-x[0], x[1])):
+        if len(chosen_indices) >= MAX_STICKERS:
+            break
+        if all(abs(idx - prev) >= MIN_STICKER_GAP for prev in chosen_indices):
+            chosen_indices.append(idx)
+
+    chosen_set = set(chosen_indices)
+    dropped_stickers = 0
+    for idx, m in enumerate(clean_msgs):
+        if m.get("sticker") is not None and idx not in chosen_set:
+            m["sticker"] = None
+            dropped_stickers += 1
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
@@ -230,10 +264,53 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
             "để kịch bản không vượt quá 5.000 ký tự."
         )
+    if dropped_stickers > 0:
+        warnings.append(
+            f"Đã lược bỏ {dropped_stickers} sticker/meme thừa "
+            f"để giữ tối đa {MAX_STICKERS} điểm cao trào."
+        )
 
     data["messages"] = clean_msgs
     data["warnings"] = warnings
     return data
+
+
+def select_memes_for_chat(
+    messages: list[dict[str, Any]],
+    memes_index: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Chọn/chuẩn hóa `meme_id` khớp ngữ cảnh cho kịch bản Chatting (tối đa 3 meme, không trùng)."""
+    if not memes_index:
+        return messages
+    from hbt.shared.online_sources.meme_tagging import match_meme_by_context
+
+    valid_ids = {str(it.get("id") or it.get("file") or "") for it in memes_index}
+    used_ids: set[str] = set()
+    assigned = 0
+
+    for m in messages:
+        if assigned >= 3:
+            m["meme_id"] = None
+            continue
+        raw_mid = str(m.get("meme_id") or "").strip()
+        if raw_mid and raw_mid in valid_ids and raw_mid not in used_ids:
+            used_ids.add(raw_mid)
+            assigned += 1
+            continue
+        if m.get("sticker"):
+            matched = match_meme_by_context(
+                str(m.get("text") or ""), memes_index, used_ids=used_ids
+            )
+            if matched:
+                mid = str(matched.get("id") or matched.get("file") or "")
+                if mid:
+                    m["meme_id"] = mid
+                    used_ids.add(mid)
+                    assigned += 1
+                    continue
+        m["meme_id"] = None
+
+    return messages
 
 
 class GeminiChatClient:

@@ -1,25 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchHealth } from '../api/client';
 import { api } from '../api/endpoints';
-import type { ProjectSummary, RenderSummary, UnifiedRenderItem } from '../api/types';
+import type { ProjectSummary, UnifiedRenderItem } from '../api/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
+import { EngineShowcaseCards } from '../components/home/EngineShowcaseCards';
+import { RenderPlayerModal } from '../components/home/RenderPlayerModal';
 import {
   CheckIcon,
-  MessagesSquareIcon,
+  CopyIcon,
+  DownloadIcon,
   MoreIcon,
   PlayIcon,
-  SmartphoneIcon,
-  ZapIcon,
+  SearchIcon,
+  TrashIcon,
 } from '../components/icons';
 import { CardImage } from '../components/ProjectCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { Dialog } from '../components/ui/Dialog';
 import { Menu } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
@@ -28,7 +29,7 @@ import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
 import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus } from '../utils/projectStatus';
-import { latestExport, readiness } from '../utils/readiness';
+import { readiness } from '../utils/readiness';
 
 const RECENT = 4;
 const TONE = { final: 'red', preview: 'yel', none: 'neutral', broken: 'danger' } as const;
@@ -40,11 +41,12 @@ const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting', string> = {
   chatting: 'Chatting',
 };
 
-const ENGINE_BADGE_STYLE: Record<'core' | 'postv' | 'chatting', string> = {
-  core: 'bg-[#D9232E] text-white border-[#F87171]/40',
-  postv: 'bg-white text-[#0B0D12] border-white/80',
-  chatting: 'bg-[#FACC15] text-[#0B0D12] border-[#FACC15]',
-};
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Chào buổi sáng';
+  if (hour < 18) return 'Chào buổi chiều';
+  return 'Chào buổi tối';
+}
 
 function Dot({ on, label }: { on: boolean; label: string }) {
   const t = vi.home.dot;
@@ -66,7 +68,7 @@ function Dot({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-/** Thẻ "Tiếp tục làm": dự án sửa gần nhất. Chấm nguyên liệu lấy bằng một lần GET project, không poll. */
+/** Thẻ "Tiếp tục dự án dở": dự án sửa gần nhất. */
 function Continue({
   project,
   onDelete,
@@ -79,53 +81,21 @@ function Continue({
   const brief = useQuery({
     queryKey: ['project-brief', project.slug],
     queryFn: () => api.getProject(project.slug),
-    enabled: project.kind !== 'postv', // PostV chưa có chấm nguyên liệu (PV6)
+    enabled: project.kind !== 'postv',
   });
   const ready = brief.data ? readiness(brief.data) : null;
   const series = brief.data?.series;
   const video = project.last_final?.video ?? project.last_render?.video ?? null;
+  const fallbackKind = project.kind === 'postv' ? 'postv' : 'core';
+
   return (
-    <Card as="section" aria-label={t.continue} className="flex gap-6">
-      <div className="aspect-[9/16] w-[132px] shrink-0 overflow-hidden rounded-inner bg-soft">
-        <CardImage src={projectImage(project)} />
+    <Card as="section" aria-label={t.continue} className="flex flex-col gap-5 sm:flex-row">
+      <div className="aspect-[9/16] w-[124px] shrink-0 overflow-hidden rounded-inner border border-line bg-soft">
+        <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <p className="text-tiny font-semibold text-muted">{t.continue}</p>
-        <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
-          <Badge tone={TONE[status.kind]}>{status.label}</Badge>
-          {series && <span className="text-small text-muted">{series}</span>}
-        </div>
-        {ready ? (
-          <ul className="flex flex-wrap gap-x-4 gap-y-2" aria-label={t.dot.label}>
-            <Dot
-              on={ready.images.total > 0 && ready.images.done === ready.images.total}
-              label={t.dot.images(ready.images.done, ready.images.total)}
-            />
-            <Dot on={ready.voice} label={t.dot.voice} />
-            <Dot on={ready.music} label={t.dot.music} />
-            <Dot on={ready.cover} label={t.dot.cover} />
-          </ul>
-        ) : (
-          project.kind !== 'postv' && !brief.isError && <Skeleton width={260} height={20} />
-        )}
-        <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-          <Link to={projectHref(project)} className="ui-btn ui-btn-ink">
-            {t.open}
-          </Link>
-          {video && (
-            <a
-              href={video}
-              target="_blank"
-              rel="noreferrer"
-              className="ui-btn ui-btn-soft"
-              aria-label={`${t.watch}: ${project.title}`}
-            >
-              <PlayIcon size={18} />
-              {t.watch}
-            </a>
-          )}
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-tiny font-bold uppercase tracking-wider text-muted">{t.continue}</p>
           <Menu
             label={vi.projects.menu(project.title)}
             icon={<MoreIcon />}
@@ -139,55 +109,43 @@ function Continue({
             ]}
           />
         </div>
+        <h2 className="line-clamp-2 text-title font-extrabold text-text">{project.title}</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
+          <Badge tone={TONE[status.kind]}>{status.label}</Badge>
+          {series && <span className="text-small text-muted">{series}</span>}
+        </div>
+        {ready ? (
+          <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5" aria-label={t.dot.label}>
+            <Dot
+              on={ready.images.total > 0 && ready.images.done === ready.images.total}
+              label={t.dot.images(ready.images.done, ready.images.total)}
+            />
+            <Dot on={ready.voice} label={t.dot.voice} />
+            <Dot on={ready.music} label={t.dot.music} />
+            <Dot on={ready.cover} label={t.dot.cover} />
+          </ul>
+        ) : (
+          project.kind !== 'postv' && !brief.isError && <Skeleton width={240} height={20} />
+        )}
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
+          <Link to={projectHref(project)} className="ui-btn ui-btn-ink ui-btn-sm">
+            Mở lại dự án
+          </Link>
+          {video && (
+            <a
+              href={video}
+              target="_blank"
+              rel="noreferrer"
+              className="ui-btn ui-btn-soft ui-btn-sm"
+            >
+              <PlayIcon size={14} />
+              {t.watch}
+            </a>
+          )}
+        </div>
       </div>
     </Card>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="py-1">
-      <dt className="text-tiny font-semibold opacity-80">{label}</dt>
-      <dd className="num mt-1 text-h2 font-bold">{value}</dd>
-    </div>
-  );
-}
-
-/** Thẻ tối "Lần xuất gần nhất": số liệu lấy từ `last_final`/`last_render`, không gọi thêm /renders. */
-function LastExport({ project, render }: { project: ProjectSummary; render: RenderSummary }) {
-  const t = vi.home.last;
-  return (
-    <section
-      aria-label={t.title}
-      className="flex flex-col gap-4 rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
-    >
-      <p className="text-tiny font-semibold opacity-80">{vi.home.lastExport}</p>
-      <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
-      <dl className="grid grid-cols-3 gap-2">
-        <Stat label={t.fps} value={render.fps ? `${render.fps}` : '—'} />
-        <Stat label={t.duration} value={render.duration ? formatDuration(render.duration) : '—'} />
-        <Stat
-          label={t.renderTime}
-          value={render.render_seconds ? formatDuration(render.render_seconds) : '—'}
-        />
-      </dl>
-      <p className="text-small opacity-80">
-        {render.preview ? t.preview : t.final} ·{' '}
-        <span className="num">{formatDate(render.created_at)}</span>
-      </p>
-      {render.video && (
-        <a
-          href={render.video}
-          target="_blank"
-          rel="noreferrer"
-          className="ui-btn ui-btn-accent mt-auto self-start"
-          aria-label={`${vi.home.watch}: ${project.title}`}
-        >
-          <PlayIcon size={18} />
-          {vi.home.watch}
-        </a>
-      )}
-    </section>
   );
 }
 
@@ -200,22 +158,23 @@ function RecentCard({
 }) {
   const status = projectStatus(project);
   const href = projectHref(project);
+  const fallbackKind = project.kind === 'postv' ? 'postv' : 'core';
   return (
-    <Card as="li" padded={false} className="ui-card-link">
+    <Card as="li" padded={false} className="ui-card-link flex flex-col overflow-hidden">
       <Link to={href} aria-label={`${vi.projects.open}: ${project.title}`} className="block">
-        <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
-          <CardImage src={projectImage(project)} />
+        <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
+          <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
         </div>
       </Link>
-      <div className="flex items-start justify-between gap-2 p-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <p className="line-clamp-2 text-small font-bold">
+      <div className="flex flex-1 items-start justify-between gap-2 p-3.5">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <p className="line-clamp-2 text-small font-bold text-text">
             <Link to={href} className="hover:underline">
               {project.title}
             </Link>
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
-            {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
+            <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
             <Badge tone={TONE[status.kind]}>{status.label}</Badge>
           </div>
         </div>
@@ -236,38 +195,42 @@ function RecentCard({
   );
 }
 
-function HomeSkeleton() {
+function RenderCoverPreview({ item }: { item: UnifiedRenderItem }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (item.cover_url && !imgFailed) {
+    return (
+      <img
+        src={item.cover_url}
+        alt={item.title}
+        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        loading="lazy"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-6" aria-busy="true">
-      <div className="grid grid-cols-1 gap-6 min-[1024px]:grid-cols-[3fr_2fr]">
-        <Skeleton height={236} className="!rounded-card" />
-        <Skeleton height={236} className="!rounded-card" />
-      </div>
-    </div>
+    <video
+      src={`${item.video_url}#t=0.5`}
+      muted
+      playsInline
+      preload="metadata"
+      poster="/brand/hay-biet-tuot_avatar.png"
+      className="h-full w-full object-cover"
+    />
   );
 }
 
 export function HomePage() {
-  const t = vi.home;
   const { open: openNew } = useNewProject();
+  const [searchQuery, setSearchQuery] = useState('');
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
   const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
   const [activeRender, setActiveRender] = useState<UnifiedRenderItem | null>(null);
   const [deletingRender, setDeletingRender] = useState<UnifiedRenderItem | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
-
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => fetchHealth(),
-    retry: false,
-  });
-
-  const { data: coreAssets } = useQuery({
-    queryKey: ['hbt-core-assets', ''],
-    queryFn: () => api.getHbtCoreAssets(),
-    retry: false,
-  });
 
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
@@ -277,6 +240,18 @@ export function HomePage() {
   const rendersQuery = useQuery({
     queryKey: ['unified-renders'],
     queryFn: () => api.listUnifiedRenders(),
+    retry: false,
+  });
+
+  const musicHubQuery = useQuery({
+    queryKey: ['asset-hub', 'music'],
+    queryFn: () => api.listAssetHub('music'),
+    retry: false,
+  });
+
+  const bgHubQuery = useQuery({
+    queryKey: ['asset-hub', 'backgrounds'],
+    queryFn: () => api.listAssetHub('backgrounds'),
     retry: false,
   });
 
@@ -307,13 +282,31 @@ export function HomePage() {
     },
   });
 
-  const latest = data?.[0];
-  const recent = data?.slice(1, 1 + RECENT) ?? [];
-  const last = data ? latestExport(data) : null;
+  const q = searchQuery.trim().toLowerCase();
 
-  const allRenders = rendersQuery.data?.items ?? [];
-  const filteredRenders =
-    engineFilter === 'all' ? allRenders : allRenders.filter((r) => r.engine === engineFilter);
+  const filteredProjects = useMemo(() => {
+    const list = data ?? [];
+    if (!q) return list;
+    return list.filter(
+      (p) => p.title.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q),
+    );
+  }, [data, q]);
+
+  const latest = filteredProjects[0];
+  const recent = filteredProjects.slice(1, 1 + RECENT);
+
+  const allRenders = useMemo(() => rendersQuery.data?.items ?? [], [rendersQuery.data?.items]);
+  const filteredRenders = useMemo(() => {
+    return allRenders.filter((r) => {
+      if (engineFilter !== 'all' && r.engine !== engineFilter) return false;
+      if (q && !r.title.toLowerCase().includes(q) && !r.slug.toLowerCase().includes(q))
+        return false;
+      return true;
+    });
+  }, [allRenders, engineFilter, q]);
+
+  const totalAssets =
+    (musicHubQuery.data?.items.length ?? 0) + (bgHubQuery.data?.items.length ?? 0);
 
   const handleCopyPublishText = async (text: string) => {
     try {
@@ -325,187 +318,117 @@ export function HomePage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1160px] space-y-6">
-      {/* HBT Signature Hero Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-white/10 bg-surface-dark p-6 text-on-dark">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 rounded-pill border border-[#D9232E]/40 bg-[#D9232E]/15 px-3 py-0.5 text-tiny font-bold tracking-wider text-[#FACC15] uppercase">
-            <span>HBT Signature Studio v4.0</span>
-            <span className="text-white/40">•</span>
-            <span className="text-on-dark">9:16 TikTok / Reels / Shorts</span>
+    <main className="w-full max-w-full space-y-8 px-6 py-7 lg:px-8">
+      {/* Header Chào mừng Sáng tạo — Thoáng đãng, không dùng hộp đen */}
+      <header className="flex flex-col gap-5 rounded-card border border-line bg-card/80 p-6 shadow-card backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 rounded-pill border border-line bg-soft px-3 py-1 text-tiny font-bold text-text-2">
+            <img src="/brand/hay-biet-tuot_avatar.png" alt="" className="h-4 w-4 rounded-full" />
+            <span>HBT Studio v5.0 · Next-Gen Creator Workstation</span>
           </div>
-          <h1 className="text-h1 font-extrabold text-on-dark">{t.title}</h1>
+          <h1 className="text-h1 font-extrabold text-text">
+            {getTimeGreeting()}, hôm nay làm video gì?
+          </h1>
+          <p className="text-small text-muted">
+            Chọn nhanh động cơ bên dưới hoặc tiếp tục dự án đang biên tập của kênh Hay Biết Tuốt.
+          </p>
         </div>
-        <div
-          aria-label="Trạng thái môi trường"
-          className="flex flex-wrap items-center gap-3 rounded-pill border border-white/10 bg-[#1a202c] px-3.5 py-1.5 text-tiny font-semibold text-muted-on-dark"
-        >
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`h-2 w-2 rounded-full ${health?.vieneu ? 'bg-ok' : 'bg-muted-on-dark'}`}
-              aria-hidden="true"
+
+        {/* Thanh tìm kiếm & 3 Chỉ số tổng quan từ API/DB */}
+        <div className="flex flex-col gap-3 sm:items-end">
+          <div className="relative w-full sm:w-[320px]">
+            <SearchIcon
+              size={16}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
             />
-            VieNeu-TTS
-          </span>
-          <span className="text-white/20">·</span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`h-2 w-2 rounded-full ${coreAssets?.gemini_configured ? 'bg-ok' : 'bg-muted-on-dark'}`}
-              aria-hidden="true"
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm dự án hoặc video đã xuất..."
+              aria-label="Tìm dự án hoặc video đã xuất"
+              className="ui-input !min-h-[42px] !pl-10 text-small"
             />
-            Gemini
-          </span>
-          <span className="text-white/20">·</span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`h-2 w-2 rounded-full ${health?.ffmpeg ? 'bg-ok' : 'bg-muted-on-dark'}`}
-              aria-hidden="true"
-            />
-            FFmpeg
-          </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
+              <div className="num text-title font-extrabold text-text">{allRenders.length}</div>
+              <div className="text-[11px] font-semibold text-muted">Video đã xuất</div>
+            </div>
+            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
+              <div className="num text-title font-extrabold text-text">{data?.length ?? 0}</div>
+              <div className="text-[11px] font-semibold text-muted">Dự án đang dở</div>
+            </div>
+            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
+              <div className="num text-title font-extrabold text-text">{totalAssets}</div>
+              <div className="text-[11px] font-semibold text-muted">Tài nguyên sẵn có</div>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
-      {/* Lối tắt tạo video nhanh (3 Động cơ Studio — HBT Signature Bento Cards) */}
-      <section aria-label={t.hub.title} className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">
-        {/* 1. HBT Core — Đỏ · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-[#D9232E]/40 bg-surface-dark p-5 text-on-dark">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#D9232E] text-white">
-                  <ZapIcon size={18} />
-                </span>
-                <h2 className="text-body font-extrabold text-on-dark">{t.hub.hbtCoreTitle}</h2>
-              </div>
-              <span className="rounded-pill bg-[#D9232E]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
-                9:16 Fill
-              </span>
-            </div>
-            <p className="text-small text-muted-on-dark">{t.hub.hbtCoreDesc}</p>
-          </div>
-          <Link to="/core" className="ui-btn ui-btn-brand ui-btn-sm self-start">
-            {t.hub.hbtCoreCta}
-          </Link>
-        </Card>
+      {/* 3 Thẻ Động cơ Sáng tạo tương tác */}
+      <EngineShowcaseCards />
 
-        {/* 2. PostV — Trắng · Đỏ · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-white/25 bg-surface-dark p-5 text-on-dark">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-white text-[#0B0D12]">
-                  <SmartphoneIcon size={18} />
-                </span>
-                <h2 className="text-body font-extrabold text-on-dark">{t.hub.postvTitle}</h2>
-              </div>
-              <span className="rounded-pill bg-white/15 px-2.5 py-0.5 text-tiny font-bold text-on-dark">
-                9:16 Smart Fit
-              </span>
-            </div>
-            <p className="text-small text-muted-on-dark">{t.hub.postvDesc}</p>
-          </div>
-          <Link
-            to="/postv"
-            className="ui-btn ui-btn-sm self-start bg-white text-[#0B0D12] hover:bg-white/90"
-          >
-            {t.hub.postvCta}
-          </Link>
-        </Card>
-
-        {/* 3. Chatting — Vàng · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-[#FACC15]/40 bg-surface-dark p-5 text-on-dark">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#FACC15] text-[#0B0D12]">
-                  <MessagesSquareIcon size={18} />
-                </span>
-                <h2 className="text-body font-extrabold text-on-dark">{t.hub.chattingTitle}</h2>
-              </div>
-              <span className="rounded-pill bg-[#FACC15]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
-                9:16 Smart Fit
-              </span>
-            </div>
-            <p className="text-small text-muted-on-dark">{t.hub.chattingDesc}</p>
-          </div>
-          <Link to="/chatting" className="ui-btn ui-btn-accent ui-btn-sm self-start">
-            {t.hub.chattingCta}
-          </Link>
-        </Card>
-      </section>
-
-      {isPending && <HomeSkeleton />}
       {error && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           <ErrorNote error={error} />
-          <Button tone="soft" onClick={() => void refetch()}>
+          <Button size="sm" tone="soft" onClick={() => void refetch()}>
             {vi.common.retry}
           </Button>
         </div>
       )}
-      {data && data.length === 0 && <EmptyProjects onCreate={openNew} />}
-      {latest && (
-        <>
-          <div className="grid grid-cols-1 gap-6 min-[1024px]:grid-cols-[3fr_2fr]">
-            <Continue project={latest} onDelete={(p) => setDeleting(p)} />
-            {last ? (
-              <LastExport project={last.project} render={last.render} />
-            ) : (
-              <section
-                aria-label={t.lastExport}
-                className="flex items-center justify-center rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
-              >
-                <p className="text-body font-semibold">{t.last.none}</p>
-              </section>
-            )}
-          </div>
 
-          {recent.length > 0 && (
-            <section aria-label={t.recent} className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-h2 font-bold">{t.recent}</h2>
-                <Link to="/projects" className="ui-btn ui-btn-soft ui-btn-sm">
-                  {t.seeAll}
-                </Link>
-              </div>
-              <ul className="grid grid-cols-2 gap-6 min-[1024px]:grid-cols-4">
+      {/* Khu vực Tiếp tục dự án dở */}
+      <section aria-label="Tiếp tục dự án dở" className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-title font-extrabold text-text">Tiếp tục dự án dở</h2>
+          <Link to="/projects" className="text-small font-bold text-engine-postv hover:underline">
+            Xem tất cả dự án →
+          </Link>
+        </div>
+
+        {isPending ? (
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <Skeleton height={220} className="!rounded-card" />
+            <Skeleton height={220} className="!rounded-card" />
+          </div>
+        ) : filteredProjects.length === 0 ? (
+          <EmptyProjects onCreate={() => openNew()} />
+        ) : (
+          <div className="space-y-5">
+            {latest && <Continue project={latest} onDelete={setDeleting} />}
+            {recent.length > 0 && (
+              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {recent.map((p) => (
-                  <RecentCard key={p.slug} project={p} onDelete={(p) => setDeleting(p)} />
+                  <RecentCard key={p.slug} project={p} onDelete={setDeleting} />
                 ))}
               </ul>
-            </section>
-          )}
-        </>
-      )}
+            )}
+          </div>
+        )}
+      </section>
 
-      {/* KHO VIDEO ĐÃ XUẤT HỢP NHẤT (Tất cả · HBT Core · PostV · Chatting) */}
-      <section aria-label="Video đã xuất gần đây" className="space-y-4 pt-2">
+      {/* Khu vực Video đã xuất gần đây (GET /api/renders) */}
+      <section aria-label="Video đã xuất gần đây" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-h2 font-extrabold">Video đã xuất gần đây</h2>
+            <h2 className="text-title font-extrabold text-text">Video đã xuất gần đây</h2>
             <p className="text-small text-muted">
-              Tất cả thành phẩm `.mp4` từ HBT Core, PostV và Chatting tập trung tại một nơi duy
-              nhất.
+              Đồng bộ trực tiếp từ thư viện thành phẩm 9:16 của HBT Core, PostV và Chatting.
             </p>
           </div>
-          <div
-            role="tablist"
-            aria-label="Lọc video theo động cơ"
-            className="flex flex-wrap items-center gap-1.5 rounded-inner border border-line bg-card p-1"
-          >
+          <div className="flex flex-wrap items-center gap-1.5">
             {(['all', 'core', 'postv', 'chatting'] as const).map((eng) => {
               const active = engineFilter === eng;
               return (
                 <button
                   key={eng}
                   type="button"
-                  role="tab"
-                  aria-selected={active}
                   onClick={() => setEngineFilter(eng)}
-                  className={`rounded-inner px-3 py-1.5 text-tiny font-bold transition-colors ${
-                    active ? 'bg-[#D9232E] text-white' : 'text-muted hover:bg-soft hover:text-text'
-                  }`}
+                  aria-pressed={active}
+                  className={`ui-chip ui-chip-sm ${active ? '!bg-primary !text-on-primary' : ''}`}
                 >
                   {ENGINE_LABELS[eng]}
                 </button>
@@ -514,71 +437,99 @@ export function HomePage() {
           </div>
         </div>
 
-        {filteredRenders.length === 0 ? (
-          <Card className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-            <p className="text-body font-bold">Chưa có video đã xuất trong mục này</p>
-            <p className="max-w-md text-small text-muted">
-              Khi bạn xuất video từ HBT Core, PostV hoặc Chatting, thành phẩm 9:16 và nội dung đăng
-              bài sẽ tự động hiện tại đây.
+        {rendersQuery.isPending ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} height={320} className="!rounded-card" />
+            ))}
+          </div>
+        ) : filteredRenders.length === 0 ? (
+          <Card className="py-10 text-center">
+            <p className="text-body font-bold text-text">Chưa có video nào được xuất ở mục này</p>
+            <p className="mt-1 text-small text-muted">
+              Chọn một động cơ phía trên để tạo và xuất video 9:16 đầu tiên.
             </p>
           </Card>
         ) : (
-          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {filteredRenders.map((item) => (
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {filteredRenders.slice(0, 8).map((item) => (
               <Card
                 key={item.id}
                 as="li"
                 padded={false}
-                className="flex flex-col overflow-hidden border border-line bg-card"
+                className="group flex flex-col overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
               >
                 <button
                   type="button"
                   onClick={() => setActiveRender(item)}
-                  className="group relative aspect-[9/16] w-full overflow-hidden bg-[#0B0D12] text-left"
-                  aria-label={`Xem thành phẩm: ${item.title}`}
+                  className="relative aspect-[9/16] w-full overflow-hidden bg-hero text-left"
+                  aria-label={`Xem video ${item.title}`}
                 >
-                  <video
-                    src={item.video_url}
-                    preload="metadata"
-                    muted
-                    playsInline
-                    className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
-                  />
-                  <span
-                    className={`absolute top-2.5 left-2.5 rounded-pill border px-2.5 py-0.5 text-tiny font-extrabold uppercase ${ENGINE_BADGE_STYLE[item.engine]}`}
-                  >
-                    {ENGINE_LABELS[item.engine]}
+                  <RenderCoverPreview item={item} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25 opacity-80 transition-opacity group-hover:opacity-100" />
+                  <span className="absolute left-2.5 top-2.5">
+                    <Badge tone={item.engine}>{ENGINE_LABELS[item.engine]}</Badge>
+                  </span>
+                  <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-lg">
+                      <PlayIcon size={20} />
+                    </span>
                   </span>
                   {item.duration_sec > 0 && (
-                    <span className="num absolute right-2.5 bottom-2.5 rounded bg-black/80 px-2 py-0.5 text-tiny font-bold text-white">
+                    <span className="num absolute bottom-2.5 right-2.5 rounded-md bg-black/75 px-2 py-0.5 text-tiny font-bold text-white backdrop-blur-sm">
                       {formatDuration(item.duration_sec)}
                     </span>
                   )}
                 </button>
-                <div className="flex flex-1 flex-col justify-between gap-2 p-3.5">
+
+                <div className="flex flex-1 flex-col justify-between gap-2.5 p-3.5">
                   <div>
-                    <p className="line-clamp-2 text-small font-bold">{item.title}</p>
+                    <p className="line-clamp-2 text-small font-bold text-text">{item.title}</p>
                     <p className="num mt-1 text-tiny text-muted">
-                      {item.size_mb} MB · {item.created_at ? formatDate(item.created_at) : ''}
+                      {item.size_mb} MB
+                      {item.created_at ? ` · ${formatDate(item.created_at)}` : ''}
                     </p>
                   </div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <Button
                       size="sm"
-                      tone="brand"
+                      tone="ink"
+                      icon={<PlayIcon size={13} />}
                       onClick={() => setActiveRender(item)}
                       className="flex-1"
                     >
-                      Xem & Đăng bài
+                      Xem video
                     </Button>
-                    <Button
-                      size="sm"
-                      tone="ghost"
-                      onClick={() => setDeletingRender(item)}
-                      aria-label={`Xóa video ${item.title}`}
+                    <a
+                      href={item.video_url}
+                      download={`${item.slug || 'video'}.mp4`}
+                      title="Tải .mp4"
+                      aria-label={`Tải ${item.title}`}
+                      className="ui-icon-btn ui-icon-btn-sm bg-soft"
                     >
-                      Xóa
-                    </Button>
+                      <DownloadIcon size={14} />
+                    </a>
+                    {item.publish_text && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyPublishText(item.publish_text)}
+                        title="Copy caption (publish.txt)"
+                        aria-label={`Copy caption ${item.title}`}
+                        className="ui-icon-btn ui-icon-btn-sm bg-soft"
+                      >
+                        <CopyIcon size={14} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDeletingRender(item)}
+                      title="Xóa video"
+                      aria-label={`Xóa video ${item.title}`}
+                      className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                    >
+                      <TrashIcon size={14} />
+                    </button>
                   </div>
                 </div>
               </Card>
@@ -587,92 +538,12 @@ export function HomePage() {
         )}
       </section>
 
-      {/* Modal 9:16 Player + Publish.txt Copy + Download + Delete */}
-      <Dialog
-        open={Boolean(activeRender)}
+      <RenderPlayerModal
+        item={activeRender}
         onClose={() => setActiveRender(null)}
-        title={activeRender ? activeRender.title : 'Chi tiết video đã xuất'}
-        className="!max-w-[760px]"
-      >
-        {activeRender && (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr]">
-            <div className="mx-auto aspect-[9/16] w-full max-w-[240px] overflow-hidden rounded-inner border border-line bg-black">
-              <video
-                src={activeRender.video_url}
-                controls
-                autoPlay
-                playsInline
-                className="h-full w-full object-contain"
-              />
-            </div>
-            <div className="flex flex-col justify-between gap-4">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`rounded-pill border px-2.5 py-0.5 text-tiny font-extrabold uppercase ${ENGINE_BADGE_STYLE[activeRender.engine]}`}
-                  >
-                    {ENGINE_LABELS[activeRender.engine]}
-                  </span>
-                  <span className="num text-small text-muted">
-                    {activeRender.size_mb} MB
-                    {activeRender.duration_sec > 0
-                      ? ` · ${formatDuration(activeRender.duration_sec)}`
-                      : ''}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-small font-bold">Nội dung đăng bài (`publish.txt`)</span>
-                    {activeRender.publish_text && (
-                      <Button
-                        size="sm"
-                        tone="accent"
-                        onClick={() => void handleCopyPublishText(activeRender.publish_text)}
-                      >
-                        Sao chép nội dung đăng bài
-                      </Button>
-                    )}
-                  </div>
-                  <pre className="max-h-52 overflow-y-auto rounded-inner border border-line bg-soft p-3 font-sans text-small whitespace-pre-wrap">
-                    {activeRender.publish_text || 'Chưa có nội dung publish.txt đính kèm.'}
-                  </pre>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <a
-                    href={activeRender.video_url}
-                    download={`${activeRender.slug || 'video'}.mp4`}
-                    className="ui-btn ui-btn-brand ui-btn-sm"
-                  >
-                    Tải video.mp4
-                  </a>
-                  {activeRender.slug && (
-                    <Link
-                      to={
-                        activeRender.engine === 'chatting'
-                          ? `/chatting/${activeRender.slug}`
-                          : activeRender.engine === 'postv'
-                            ? `/postv/${activeRender.slug}`
-                            : `/p/${activeRender.slug}`
-                      }
-                      className="ui-btn ui-btn-soft ui-btn-sm"
-                      onClick={() => setActiveRender(null)}
-                    >
-                      Mở dự án gốc
-                    </Link>
-                  )}
-                </div>
-                <Button size="sm" tone="danger" onClick={() => setDeletingRender(activeRender)}>
-                  Xóa video
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </Dialog>
+        onCopyPublish={(text) => void handleCopyPublishText(text)}
+        onRequestDelete={(item) => setDeletingRender(item)}
+      />
 
       {deleting && (
         <ConfirmDialog

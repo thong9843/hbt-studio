@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// Mọi màu lấy từ biến CSS trong src/styles/tokens.css (sáng/tối đổi theo hệ thống).
+// Mọi màu lấy từ biến CSS trong src/styles/tokens.css (Daylight Studio & Midnight Aurora).
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
@@ -22,6 +22,15 @@ export default {
         'on-accent': 'var(--on-accent)',
         brand: 'var(--brand)',
         'on-brand': 'var(--on-brand)',
+        'engine-core': 'var(--engine-core)',
+        'engine-core-soft': 'var(--engine-core-soft)',
+        'on-engine-core-soft': 'var(--on-engine-core-soft)',
+        'engine-postv': 'var(--engine-postv)',
+        'engine-postv-soft': 'var(--engine-postv-soft)',
+        'on-engine-postv-soft': 'var(--on-engine-postv-soft)',
+        'engine-chatting': 'var(--engine-chatting)',
+        'engine-chatting-soft': 'var(--engine-chatting-soft)',
+        'on-engine-chatting-soft': 'var(--on-engine-chatting-soft)',
         'tint-red': 'var(--tint-red)',
         'on-tint-red': 'var(--on-tint-red)',
         'tint-yel': 'var(--tint-yel)',
@@ -43,21 +52,21 @@ export default {
         sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'],
       },
       fontSize: {
-        hero: ['56px', { lineHeight: '62px', letterSpacing: '-0.02em' }],
-        display: ['40px', { lineHeight: '48px', letterSpacing: '-0.02em' }],
-        h1: ['32px', { lineHeight: '40px', letterSpacing: '-0.02em' }],
-        title: ['22px', { lineHeight: '28px' }],
+        hero: ['44px', { lineHeight: '52px', letterSpacing: '-0.025em' }],
+        display: ['36px', { lineHeight: '44px', letterSpacing: '-0.02em' }],
+        h1: ['28px', { lineHeight: '36px', letterSpacing: '-0.02em' }],
+        title: ['20px', { lineHeight: '28px', letterSpacing: '-0.01em' }],
         h2: ['16px', { lineHeight: '22px' }],
         body: ['15px', { lineHeight: '22px' }],
         small: ['14px', { lineHeight: '20px' }],
         tiny: ['12px', { lineHeight: '16px' }],
       },
       borderRadius: {
-        card: '24px',
-        dialog: '28px',
+        card: '20px',
+        dialog: '24px',
         preview: '28px',
-        inner: '16px',
-        input: '14px',
+        inner: '14px',
+        input: '12px',
       },
       boxShadow: {
         card: 'var(--shadow-card)',
@@ -68,7 +77,7 @@ export default {
         70: '280px',
         90: '360px',
       },
-      transitionTimingFunction: { hbt: 'cubic-bezier(0.2, 0, 0, 1)' },
+      transitionTimingFunction: { hbt: 'cubic-bezier(0.16, 1, 0.3, 1)' },
     },
   },
   plugins: [],

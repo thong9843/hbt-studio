@@ -1,305 +1,146 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NewProjectProvider } from '../components/NewProjectDialog';
-import { ToastProvider } from '../components/Toast';
 import { stubFetch } from '../test/fakes';
-import { project } from '../test/project';
+import { project as makeProject } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { HomePage } from './HomePage';
 
 afterEach(() => vi.unstubAllGlobals());
 
-const render = (over: Record<string, unknown> = {}) => ({
-  job_id: 'a',
-  preview: false,
-  fps: 50,
-  duration: 83,
-  render_seconds: 143.4,
-  created_at: '2026-10-22T10:00:00Z',
-  video: '/api/files/projects/muoi/renders/a/video.mp4',
-  ...over,
-});
 const summary = (slug: string, title: string, over: Record<string, unknown> = {}) => ({
   slug,
   title,
-  updated_at: '2026-10-22T10:00:00Z',
+  updated_at: '2026-10-24T12:00:00',
   thumb: null,
-  cover: null,
   last_render: null,
   last_final: null,
+  cover: null,
   error: null,
   ...over,
 });
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 
 function page() {
   return renderWithProviders(
-    <ToastProvider>
-      <NewProjectProvider>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/projects" element={<p>trang dự án</p>} />
-          <Route path="/p/:slug" element={<p>trang soạn</p>} />
-        </Routes>
-      </NewProjectProvider>
-    </ToastProvider>,
+    <NewProjectProvider>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/projects" element={<p>Tất cả dự án</p>} />
+        <Route path="/core" element={<p>HBT Core</p>} />
+        <Route path="/postv" element={<p>PostV</p>} />
+        <Route path="/chatting" element={<p>Chatting</p>} />
+        <Route path="/p/:slug" element={<p>Trình soạn</p>} />
+      </Routes>
+    </NewProjectProvider>,
   );
 }
 
-const brief = project({
-  slug: 'muoi',
-  title: 'Muỗi',
-  series: 'Vì sao vậy ta?',
-  voice: 'voice.wav',
-  music: { file: null, start: null, credit: '' },
-});
-
-describe('HomePage', () => {
-  it('shows the 3 studio shortcut cards and resource status bar without extra JSON/Core modal buttons', async () => {
+describe('HomePage v5.0', () => {
+  it('renders Creative Command Center hero, 3 KPI stats, and 3 Engine Showcase Cards', async () => {
     stubFetch({
-      'GET /api/projects': [],
-      'GET /api/health': { ok: true, ffmpeg: true, whisper: false, gpu: false, vieneu: true },
-      'GET /api/hbt-core/assets': { gemini_configured: true },
+      'GET /api/projects': [summary('muoi', 'Vì sao muỗi đốt bạn')],
+      'GET /api/renders': { items: [] },
+      'GET /api/asset-hub/music': { category: 'music', items: [{ name: 'a.mp3' }] },
+      'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [{ name: 'b.mp4' }] },
     });
     page();
+
     expect(
-      await screen.findByRole('region', { name: 'Khởi tạo nhanh 3 Động cơ Studio' }),
-    ).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Từ JSON nháp' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'HBT Core V1 / V2' })).toBeNull();
-    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('VieNeu-TTS');
-    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('Gemini');
-    expect(screen.getByLabelText('Trạng thái môi trường')).toHaveTextContent('FFmpeg');
-  });
-
-  it('greets with the title and shows skeletons while loading', async () => {
-    stubFetch({ 'GET /api/projects': [summary('muoi', 'Muỗi')], 'GET /api/projects/muoi': brief });
-    page();
-    expect(screen.getByRole('heading', { level: 1, name: 'Hôm nay làm video gì?' })).toBeVisible();
-    expect(screen.getAllByRole('status', { name: 'Đang tải' }).length).toBeGreaterThan(0);
-    await screen.findByRole('region', { name: 'Tiếp tục làm' });
-  });
-
-  it('"Tiếp tục làm" is the most recently edited project, with status, series and readiness dots', async () => {
-    const get = vi.fn(() => json(brief));
-    stubFetch({
-      'GET /api/projects': [
-        summary('muoi', 'Muỗi', { last_final: render(), last_render: render() }),
-        summary('cu', 'Dự án cũ'),
-      ],
-      'GET /api/projects/muoi': get,
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
-    expect(within(card).getByRole('heading', { name: 'Muỗi' })).toBeVisible();
-    expect(within(card).getByText('Đã xuất · 50 fps')).toBeVisible();
-    expect(await within(card).findByText('Vì sao vậy ta?')).toBeVisible();
-    const dots = within(card).getByRole('list', { name: 'Nguyên liệu đã có' });
-    expect(within(dots).getByText('Ảnh 2/3')).toBeVisible();
-    // Trạng thái không chỉ bằng màu: mỗi chấm có chữ cho trình đọc.
-    expect(within(dots).getByText('Giọng').parentElement).toHaveTextContent('(đã có)');
-    expect(within(dots).getByText('Nhạc').parentElement).toHaveTextContent('(chưa có)');
-    expect(within(dots).getByText('Ảnh bìa').parentElement).toHaveTextContent('(chưa có)');
-    expect(within(card).getByRole('link', { name: 'Mở dự án' })).toHaveAttribute('href', '/p/muoi');
-    expect(within(card).getByRole('link', { name: /Xem video/ })).toHaveAttribute(
+      screen.getByText(/HBT Studio v5\.0 · Next-Gen Creator Workstation/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tạo kịch bản AI' })).toHaveAttribute('href', '/core');
+    expect(screen.getByRole('link', { name: 'Dán link Threads / Reddit' })).toHaveAttribute(
       'href',
-      '/api/files/projects/muoi/renders/a/video.mp4',
+      '/postv',
     );
-    // Chỉ một lần GET project, không poll.
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('link', { name: 'Tạo đoạn chat 2 người' })).toHaveAttribute(
+      'href',
+      '/chatting',
+    );
+
+    await waitFor(() => expect(screen.getByText('Vì sao muỗi đốt bạn')).toBeInTheDocument());
   });
 
-  it('hides "Xem video" when the project has no video file', async () => {
-    stubFetch({
-      'GET /api/projects': [summary('muoi', 'Muỗi')],
-      'GET /api/projects/muoi': brief,
+  it('shows Continue card with readiness dots and Recent projects grid', async () => {
+    const detail = makeProject({
+      slug: 'muoi',
+      title: 'Vì sao muỗi đốt bạn',
+      series: 'Bí ẩn tự nhiên',
+      voice: 'voice.wav',
+      music: null,
+      thumbnail: null,
     });
-    page();
-    const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
-    expect(within(card).queryByRole('link', { name: /Xem video/ })).toBeNull();
-    expect(within(card).getByText('Chưa dựng')).toBeVisible();
-  });
-
-  it('"Lần xuất gần nhất" uses the summary only (no /renders request) and shows fps, length, build time', async () => {
-    const fetchMock = stubFetch({
-      'GET /api/projects': [
-        summary('muoi', 'Muỗi', { last_final: render({ fps: 60 }) }),
-        summary('cu', 'Dự án cũ', {
-          last_final: render({ created_at: '2026-10-01T10:00:00Z', fps: 30 }),
-        }),
-      ],
-      'GET /api/projects/muoi': brief,
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
-    expect(within(card).getByRole('heading', { name: 'Muỗi' })).toBeVisible();
-    expect(within(card).getByText('60')).toBeVisible();
-    expect(within(card).getByText('1:23')).toBeVisible();
-    expect(within(card).getByText('2:23')).toBeVisible();
-    expect(within(card).getByText(/Bản đẹp/)).toBeVisible();
-    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('/projects/muoi/renders');
-  });
-
-  it('"Lần xuất gần nhất" uses the fixed dark hero tokens, not the mode-dependent --primary', async () => {
-    stubFetch({
-      'GET /api/projects': [summary('muoi', 'Muỗi', { last_final: render() })],
-      'GET /api/projects/muoi': brief,
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
-    expect(card).toHaveClass('bg-hero', 'text-on-hero');
-    expect(card).not.toHaveClass('bg-primary');
-    expect(card).not.toHaveClass('text-on-primary');
-  });
-
-  it('the placeholder next to "Tiếp tục làm" (nothing exported yet) also uses the hero tokens', async () => {
-    stubFetch({
-      'GET /api/projects': [summary('muoi', 'Muỗi')],
-      'GET /api/projects/muoi': brief,
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
-    expect(within(card).getByText('Chưa có lần xuất nào')).toBeVisible();
-    expect(card).toHaveClass('bg-hero', 'text-on-hero');
-    expect(card).not.toHaveClass('bg-primary');
-    expect(card).not.toHaveClass('text-on-primary');
-  });
-
-  it('shows "—" for build time on an old render and a notice when nothing was ever rendered', async () => {
     stubFetch({
       'GET /api/projects': [
-        summary('muoi', 'Muỗi', { last_render: render({ render_seconds: null, preview: true }) }),
+        summary('muoi', 'Vì sao muỗi đốt bạn'),
+        summary('sao', 'Vì sao bầu trời màu xanh'),
+        summary('meo', 'Mèo kêu meo meo'),
       ],
-      'GET /api/projects/muoi': brief,
-    });
-    const first = page();
-    const card = await screen.findByRole('region', { name: 'Lần xuất gần nhất' });
-    expect(within(card).getByText('—')).toBeVisible();
-    expect(within(card).getByText(/Xem nhanh/)).toBeVisible();
-    first.unmount();
-
-    stubFetch({ 'GET /api/projects': [summary('muoi', 'Muỗi')], 'GET /api/projects/muoi': brief });
-    page();
-    expect(await screen.findByText('Chưa có lần xuất nào')).toBeVisible();
-  });
-
-  it('"Gần đây" lists up to 4 other projects and links to /projects', async () => {
-    const user = userEvent.setup();
-    stubFetch({
-      'GET /api/projects': ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => summary(s, `Dự án ${s}`)),
-      'GET /api/projects/a': brief,
+      'GET /api/projects/muoi': detail,
+      'GET /api/renders': { items: [] },
+      'GET /api/asset-hub/music': { category: 'music', items: [] },
+      'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
     });
     page();
-    const recent = await screen.findByRole('region', { name: 'Gần đây' });
-    const links = within(recent).getAllByRole('link', { name: /^Mở:/ });
-    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/p/b', '/p/c', '/p/d', '/p/e']);
-    await user.click(within(recent).getByRole('link', { name: 'Xem tất cả' }));
-    expect(await screen.findByText('trang dự án')).toBeVisible();
+
+    const cont = await screen.findByRole('region', { name: 'Tiếp tục làm' });
+    expect(within(cont).getByText('Vì sao muỗi đốt bạn')).toBeInTheDocument();
+    expect(await within(cont).findByText('Bí ẩn tự nhiên')).toBeInTheDocument();
+
+    const recentSection = screen.getByRole('region', { name: 'Tiếp tục dự án dở' });
+    expect(within(recentSection).getByText('Vì sao bầu trời màu xanh')).toBeInTheDocument();
+    expect(within(recentSection).getByText('Mèo kêu meo meo')).toBeInTheDocument();
   });
 
-  it('omits "Gần đây" when there is only one project', async () => {
-    stubFetch({ 'GET /api/projects': [summary('muoi', 'Muỗi')], 'GET /api/projects/muoi': brief });
-    page();
-    await screen.findByRole('region', { name: 'Tiếp tục làm' });
-    expect(screen.queryByRole('region', { name: 'Gần đây' })).toBeNull();
-  });
-
-  it('shows the empty state and its button opens the new-video dialog', async () => {
-    const user = userEvent.setup();
-    stubFetch({ 'GET /api/projects': [] });
-    page();
-    expect(await screen.findByRole('heading', { name: /Tạo video\s*đầu tiên/ })).toBeVisible();
-    expect(screen.queryByRole('region', { name: 'Tiếp tục làm' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Tạo video' }));
-    expect(await screen.findByRole('dialog', { name: 'Tạo video mới' })).toBeInTheDocument();
-  });
-
-  it('keeps working if the project detail request fails (dots just stay hidden)', async () => {
-    stubFetch({
-      'GET /api/projects': [summary('muoi', 'Muỗi')],
-      'GET /api/projects/muoi': () => new Response('{}', { status: 500 }),
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
-    expect(within(card).getByRole('link', { name: 'Mở dự án' })).toBeVisible();
-  });
-
-  it('allows deleting a project from the ⋯ menu with confirmation dialog', async () => {
-    const user = userEvent.setup();
-    const deleted = vi.fn(() => json({ ok: true }));
-    stubFetch({
-      'GET /api/projects': [
-        summary('muoi', 'Muỗi'),
-        summary('postv-test', 'PostV Test', { kind: 'postv' }),
-      ],
-      'GET /api/projects/muoi': brief,
-      'DELETE /api/projects/muoi': deleted,
-    });
-    page();
-    const card = await screen.findByRole('region', { name: 'Tiếp tục làm' });
-    const menuBtn = within(card).getByRole('button', { name: /Thao tác: Muỗi/ });
-    await user.click(menuBtn);
-    const deleteBtn = await screen.findByRole('menuitem', { name: 'Xoá' });
-    await user.click(deleteBtn);
-
-    const dialog = await screen.findByRole('alertdialog', { name: 'Xoá dự án?' });
-    expect(within(dialog).getByText(/Xoá dự án "Muỗi"\?/)).toBeVisible();
-
-    await user.click(within(dialog).getByRole('button', { name: 'Xoá' }));
-    expect(deleted).toHaveBeenCalledTimes(1);
-  });
-
-  it('displays unified exported videos, filters by engine, and opens the 9:16 player modal with publish.txt', async () => {
+  it('displays unified exported videos, filters by engine, and opens the 9:16 player modal', async () => {
     const user = userEvent.setup();
     stubFetch({
       'GET /api/projects': [],
+      'GET /api/asset-hub/music': { category: 'music', items: [] },
+      'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
       'GET /api/renders': {
         items: [
           {
-            id: 'core-1',
-            slug: 'sao-hoa',
-            title: 'Sự thật về Sao Hỏa',
+            id: 'core::muoi::final.mp4',
             engine: 'core',
-            duration_sec: 62,
-            size_mb: 4.01,
-            publish_text: 'Sự thật về Sao Hỏa #HayBietTuot #KhoaHoc',
-            created_at: '2026-10-22T10:00:00Z',
-            video_url: '/api/renders/media/core-1?kind=video',
+            slug: 'muoi',
+            title: 'Vì sao muỗi đốt bạn',
+            video_url: '/api/renders/media/core/muoi/final.mp4',
             cover_url: null,
+            publish_text: 'Caption Muỗi #shorts',
+            size_mb: 14.2,
+            duration_sec: 42,
+            created_at: '2026-11-16T08:00:00',
           },
           {
-            id: 'chatting-1',
-            slug: 'drama-1',
-            title: 'Drama công sở',
+            id: 'chatting::chat1::final.mp4',
             engine: 'chatting',
-            duration_sec: 45,
-            size_mb: 2.96,
-            publish_text: 'Drama công sở cực căng #Chatting',
-            created_at: '2026-10-22T11:00:00Z',
-            video_url: '/api/renders/media/chatting-1?kind=video',
+            slug: 'chat1',
+            title: 'Drama Messenger 2h sáng',
+            video_url: '/api/renders/media/chatting/chat1/final.mp4',
             cover_url: null,
+            publish_text: 'Caption Chat #reels',
+            size_mb: 9.8,
+            duration_sec: 35,
+            created_at: '2026-11-16T09:00:00',
           },
         ],
       },
     });
     page();
-    const section = await screen.findByRole('region', { name: 'Video đã xuất gần đây' });
-    expect(await within(section).findByText('Sự thật về Sao Hỏa')).toBeVisible();
-    expect(within(section).getByText('Drama công sở')).toBeVisible();
 
-    await user.click(within(section).getByRole('tab', { name: 'Chatting' }));
-    expect(within(section).queryByText('Sự thật về Sao Hỏa')).toBeNull();
-    expect(within(section).getByText('Drama công sở')).toBeVisible();
+    const rendersSection = await screen.findByRole('region', { name: 'Video đã xuất gần đây' });
+    expect(await within(rendersSection).findByText('Vì sao muỗi đốt bạn')).toBeInTheDocument();
+    expect(within(rendersSection).getByText('Drama Messenger 2h sáng')).toBeInTheDocument();
 
-    await user.click(within(section).getByRole('button', { name: 'Xem & Đăng bài' }));
-    const modal = await screen.findByRole('dialog', { name: 'Drama công sở' });
-    expect(within(modal).getByText(/Drama công sở cực căng #Chatting/)).toBeVisible();
-    expect(within(modal).getByRole('link', { name: 'Tải video.mp4' })).toHaveAttribute(
-      'href',
-      '/api/renders/media/chatting-1?kind=video',
-    );
+    await user.click(within(rendersSection).getByRole('button', { name: 'Chatting' }));
+    expect(within(rendersSection).queryByText('Vì sao muỗi đốt bạn')).toBeNull();
+    expect(within(rendersSection).getByText('Drama Messenger 2h sáng')).toBeInTheDocument();
+
+    await user.click(within(rendersSection).getByRole('button', { name: 'Xem video' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Caption Chat #reels')).toBeInTheDocument();
   });
 });

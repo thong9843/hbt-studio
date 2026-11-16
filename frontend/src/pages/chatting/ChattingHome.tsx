@@ -28,7 +28,7 @@ const DURATION_OPTIONS = [
 export function ChattingHome() {
   const navigate = useNavigate();
   const [inputText, setInputText] = useState('');
-  const [platform, setPlatform] = useState<'messenger' | 'zalo'>('messenger');
+  const [platform, setPlatform] = useState<'messenger' | 'instagram'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
   const [targetDuration, setTargetDuration] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
@@ -87,12 +87,12 @@ export function ChattingHome() {
     !isDirectScript && !isStatusLoading && status && !status.gemini_configured;
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
+    <main className="w-full max-w-full px-6 py-7 lg:px-8">
       <div className="mb-8 text-center">
-        <h1 className="flex items-center justify-center gap-3 text-3xl font-extrabold tracking-tight">
-          <MessagesSquareIcon size={32} />
-          {vi.chatting.title}
-        </h1>
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-chatting-soft text-engine-chatting shadow-sm">
+          <MessagesSquareIcon size={28} />
+        </div>
+        <h1 className="text-h1 font-extrabold tracking-tight text-text">{vi.chatting.title}</h1>
         <p className="mt-2 text-muted">Tạo video dạng tin nhắn Messenger / Zalo nhanh chóng</p>
       </div>
 
@@ -172,14 +172,14 @@ export function ChattingHome() {
             </button>
             <button
               type="button"
-              onClick={() => setPlatform('zalo')}
+              onClick={() => setPlatform('instagram')}
               className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
-                platform === 'zalo'
+                platform === 'instagram'
                   ? 'bg-primary text-on-primary'
                   : 'bg-soft text-text hover:bg-soft/80'
               }`}
             >
-              {vi.chatting.zalo}
+              {vi.chatting.instagram}
             </button>
 
             <span className="ml-4 text-tiny font-semibold text-muted">
@@ -242,7 +242,7 @@ export function ChattingHome() {
           </div>
 
           <Button
-            tone="brand"
+            tone="chatting"
             size="lg"
             onClick={handleCreate}
             disabled={!inputText.trim() || isSubmitting}
