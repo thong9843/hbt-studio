@@ -278,31 +278,35 @@ def sync_renders_dir(
                 for jdir in rdir.iterdir():
                     if not jdir.is_dir():
                         continue
-                    vmp4 = jdir / "video.mp4"
-                    if not vmp4.is_file():
-                        continue
-                    pub_file = jdir / "publish.txt"
-                    pub_txt = (
-                        pub_file.read_text(encoding="utf-8", errors="ignore").strip()
-                        if pub_file.is_file()
-                        else ""
-                    )
-                    dur = 0.0
-                    meta_file = jdir / "meta.json"
-                    if meta_file.is_file():
-                        try:
-                            mdata = json.loads(meta_file.read_text(encoding="utf-8"))
-                            dur = float(mdata.get("duration", 0.0) or 0.0)
-                        except Exception:
-                            pass
-                    _index_mp4(
-                        vmp4,
-                        engine=proj_engine,
-                        slug=pdir.name,
-                        title=proj_title,
-                        duration_sec=dur,
-                        publish_text=pub_txt,
-                    )
+                    for vmp4 in jdir.glob("*.mp4"):
+                        if (
+                            not vmp4.is_file()
+                            or vmp4.name.endswith(".part.mp4")
+                            or vmp4.name.endswith(".tmp.mp4")
+                        ):
+                            continue
+                        pub_file = jdir / "publish.txt"
+                        pub_txt = (
+                            pub_file.read_text(encoding="utf-8", errors="ignore").strip()
+                            if pub_file.is_file()
+                            else ""
+                        )
+                        dur = 0.0
+                        meta_file = jdir / "meta.json"
+                        if meta_file.is_file():
+                            try:
+                                mdata = json.loads(meta_file.read_text(encoding="utf-8"))
+                                dur = float(mdata.get("duration", 0.0) or 0.0)
+                            except Exception:
+                                pass
+                        _index_mp4(
+                            vmp4,
+                            engine=proj_engine,
+                            slug=pdir.name,
+                            title=proj_title,
+                            duration_sec=dur,
+                            publish_text=pub_txt,
+                        )
 
         # Quét workspace/chatting/<slug>/renders/render_*.mp4 (Chatting)
         chatting_dir = workspace_dir / "chatting"

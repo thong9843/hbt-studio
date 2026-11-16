@@ -327,38 +327,38 @@ export function HomePage() {
   return (
     <main className="mx-auto max-w-[1160px] space-y-6">
       {/* HBT Signature Hero Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-white/10 bg-[#131720] p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-white/10 bg-surface-dark p-6 text-on-dark">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 rounded-pill border border-[#D9232E]/40 bg-[#D9232E]/15 px-3 py-0.5 text-tiny font-bold tracking-wider text-[#FACC15] uppercase">
             <span>HBT Signature Studio v4.0</span>
             <span className="text-white/40">•</span>
-            <span className="text-white">9:16 TikTok / Reels / Shorts</span>
+            <span className="text-on-dark">9:16 TikTok / Reels / Shorts</span>
           </div>
-          <h1 className="text-h1 font-extrabold">{t.title}</h1>
+          <h1 className="text-h1 font-extrabold text-on-dark">{t.title}</h1>
         </div>
         <div
           aria-label="Trạng thái môi trường"
-          className="flex flex-wrap items-center gap-3 rounded-pill border border-line bg-card px-3.5 py-1.5 text-tiny font-semibold text-muted"
+          className="flex flex-wrap items-center gap-3 rounded-pill border border-white/10 bg-[#1a202c] px-3.5 py-1.5 text-tiny font-semibold text-muted-on-dark"
         >
           <span className="flex items-center gap-1.5">
             <span
-              className={`h-2 w-2 rounded-full ${health?.vieneu ? 'bg-ok' : 'bg-muted'}`}
+              className={`h-2 w-2 rounded-full ${health?.vieneu ? 'bg-ok' : 'bg-muted-on-dark'}`}
               aria-hidden="true"
             />
             VieNeu-TTS
           </span>
-          <span className="text-line">·</span>
+          <span className="text-white/20">·</span>
           <span className="flex items-center gap-1.5">
             <span
-              className={`h-2 w-2 rounded-full ${coreAssets?.gemini_configured ? 'bg-ok' : 'bg-muted'}`}
+              className={`h-2 w-2 rounded-full ${coreAssets?.gemini_configured ? 'bg-ok' : 'bg-muted-on-dark'}`}
               aria-hidden="true"
             />
             Gemini
           </span>
-          <span className="text-line">·</span>
+          <span className="text-white/20">·</span>
           <span className="flex items-center gap-1.5">
             <span
-              className={`h-2 w-2 rounded-full ${health?.ffmpeg ? 'bg-ok' : 'bg-muted'}`}
+              className={`h-2 w-2 rounded-full ${health?.ffmpeg ? 'bg-ok' : 'bg-muted-on-dark'}`}
               aria-hidden="true"
             />
             FFmpeg
@@ -369,20 +369,20 @@ export function HomePage() {
       {/* Lối tắt tạo video nhanh (3 Động cơ Studio — HBT Signature Bento Cards) */}
       <section aria-label={t.hub.title} className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-3">
         {/* 1. HBT Core — Đỏ · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-[#D9232E]/40 bg-[#131720] p-5">
+        <Card className="flex flex-col justify-between gap-4 border-[#D9232E]/40 bg-surface-dark p-5 text-on-dark">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#D9232E] text-white">
                   <ZapIcon size={18} />
                 </span>
-                <h2 className="text-body font-extrabold">{t.hub.hbtCoreTitle}</h2>
+                <h2 className="text-body font-extrabold text-on-dark">{t.hub.hbtCoreTitle}</h2>
               </div>
               <span className="rounded-pill bg-[#D9232E]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
                 9:16 Fill
               </span>
             </div>
-            <p className="text-small text-muted">{t.hub.hbtCoreDesc}</p>
+            <p className="text-small text-muted-on-dark">{t.hub.hbtCoreDesc}</p>
           </div>
           <Link to="/core" className="ui-btn ui-btn-brand ui-btn-sm self-start">
             {t.hub.hbtCoreCta}
@@ -390,41 +390,44 @@ export function HomePage() {
         </Card>
 
         {/* 2. PostV — Trắng · Đỏ · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-white/25 bg-[#131720] p-5">
+        <Card className="flex flex-col justify-between gap-4 border-white/25 bg-surface-dark p-5 text-on-dark">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-white text-[#0B0D12]">
                   <SmartphoneIcon size={18} />
                 </span>
-                <h2 className="text-body font-extrabold">{t.hub.postvTitle}</h2>
+                <h2 className="text-body font-extrabold text-on-dark">{t.hub.postvTitle}</h2>
               </div>
-              <span className="rounded-pill bg-white/15 px-2.5 py-0.5 text-tiny font-bold text-white">
+              <span className="rounded-pill bg-white/15 px-2.5 py-0.5 text-tiny font-bold text-on-dark">
                 9:16 Smart Fit
               </span>
             </div>
-            <p className="text-small text-muted">{t.hub.postvDesc}</p>
+            <p className="text-small text-muted-on-dark">{t.hub.postvDesc}</p>
           </div>
-          <Link to="/postv" className="ui-btn ui-btn-ink ui-btn-sm self-start">
+          <Link
+            to="/postv"
+            className="ui-btn ui-btn-sm self-start bg-white text-[#0B0D12] hover:bg-white/90"
+          >
             {t.hub.postvCta}
           </Link>
         </Card>
 
         {/* 3. Chatting — Vàng · Đen */}
-        <Card className="flex flex-col justify-between gap-4 border-[#FACC15]/40 bg-[#131720] p-5">
+        <Card className="flex flex-col justify-between gap-4 border-[#FACC15]/40 bg-surface-dark p-5 text-on-dark">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="flex h-8 w-8 items-center justify-center rounded-inner bg-[#FACC15] text-[#0B0D12]">
                   <MessagesSquareIcon size={18} />
                 </span>
-                <h2 className="text-body font-extrabold">{t.hub.chattingTitle}</h2>
+                <h2 className="text-body font-extrabold text-on-dark">{t.hub.chattingTitle}</h2>
               </div>
               <span className="rounded-pill bg-[#FACC15]/20 px-2.5 py-0.5 text-tiny font-bold text-[#FACC15]">
                 9:16 Smart Fit
               </span>
             </div>
-            <p className="text-small text-muted">{t.hub.chattingDesc}</p>
+            <p className="text-small text-muted-on-dark">{t.hub.chattingDesc}</p>
           </div>
           <Link to="/chatting" className="ui-btn ui-btn-accent ui-btn-sm self-start">
             {t.hub.chattingCta}

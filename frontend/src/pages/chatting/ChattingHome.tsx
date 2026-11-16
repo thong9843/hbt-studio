@@ -128,7 +128,7 @@ export function ChattingHome() {
             onClick={() => setIsDirectScript(true)}
             className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
               isDirectScript
-                ? 'bg-accent text-white shadow-sm'
+                ? 'bg-accent text-on-accent shadow-sm'
                 : 'bg-soft text-muted hover:text-text'
             }`}
           >

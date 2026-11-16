@@ -5,11 +5,11 @@ import type { AppSettings, WatermarkSettings } from '../api/types';
 
 const DEFAULT_WM: WatermarkSettings = {
   enabled: true,
-  mode: 'both',
+  mode: 'logo',
   text: '@HayBietTuot',
   logo_path: 'brand/hbt-logo-mark.png',
   position: 'top-right',
-  opacity: 0.35,
+  opacity: 0.4,
 };
 
 const POS_LABELS: Record<WatermarkSettings['position'], string> = {

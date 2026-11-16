@@ -21,11 +21,11 @@ class WatermarkSettings(BaseModel):
     """Cấu hình Watermark bản quyền lưu trong workspace/settings/app.json."""
 
     enabled: bool = True
-    mode: WatermarkMode = "both"
+    mode: WatermarkMode = "logo"
     text: str = Field(default="@HayBietTuot", max_length=64)
     logo_path: str = "brand/hbt-logo-mark.png"
     position: WatermarkPosition = "top-right"
-    opacity: float = Field(default=0.35, ge=0.15, le=0.80)
+    opacity: float = Field(default=0.40, ge=0.15, le=0.80)
 
 
 def _load_bold_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

@@ -19,10 +19,10 @@ def test_watermark_settings_defaults_and_persistence(tmp_path: Path) -> None:
     store = AppSettingsStore(tmp_path)
     loaded = store.load()
     assert loaded.watermark.enabled is True
-    assert loaded.watermark.mode == "both"
+    assert loaded.watermark.mode == "logo"
     assert loaded.watermark.text == "@HayBietTuot"
     assert loaded.watermark.position == "top-right"
-    assert loaded.watermark.opacity == 0.35
+    assert loaded.watermark.opacity == 0.40
 
     updated = AppSettings(
         watermark=WatermarkSettings(

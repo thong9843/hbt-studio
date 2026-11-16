@@ -402,11 +402,13 @@ export const api = {
       form,
     });
   },
-  deleteAssetHub: (category: AssetHubCategory, filename: string) =>
-    apiRequest<{ ok: boolean; deleted: string }>(
+  deleteAssetHub: (category: AssetHubCategory, filename: string, source?: string) => {
+    const q = source ? `?source=${enc(source)}` : '';
+    return apiRequest<{ ok: boolean; deleted: string }>(
       'DELETE',
-      `/asset-hub/${enc(category)}/${enc(filename)}`,
-    ),
+      `/asset-hub/${enc(category)}/${enc(filename)}${q}`,
+    );
+  },
   listUnifiedRenders: (engine?: string) =>
     apiGet<{ items: UnifiedRenderItem[] }>(
       engine && engine !== 'all' ? `/renders?engine=${enc(engine)}` : '/renders',

@@ -35,6 +35,9 @@ export default {
         focus: 'var(--focus)',
         hero: 'var(--hero)',
         'on-hero': 'var(--on-hero)',
+        'surface-dark': 'var(--surface-dark)',
+        'on-dark': 'var(--text-on-dark)',
+        'muted-on-dark': 'var(--muted-on-dark)',
       },
       fontFamily: {
         sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'],

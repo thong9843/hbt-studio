@@ -1,15 +1,16 @@
 """Router API cho Thư viện tài nguyên (Asset Hub) và Kho Video đã xuất hợp nhất.
 
-Quản lý nguyên liệu đầu vào:
-- assets/music
-- assets/backgrounds
-- assets/stickers
-- assets/memes
-- assets/watermarks
+Quản lý và quét kết hợp nguyên liệu thực tế từ `library/`, `assets/` và `brand/`:
+- music: library/music/ + assets/music/
+- backgrounds: library/backgrounds/ + assets/backgrounds/
+- stickers: library/stickers/ + backend/hbt/chatting/stickers/ + assets/stickers/
+- memes: library/memes/ + assets/memes/
+- watermarks: brand/hbt-logo-mark.png + assets/watermarks/
 """
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
 
 from hbt.api.deps import State
+from hbt.config import BRAND_DIR, REPO_ROOT
 from hbt.shared.db.media_index import (
     delete_render,
     init_db,
@@ -37,6 +39,7 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
 ALLOWED_EXTS = IMAGE_EXTS | VIDEO_EXTS | AUDIO_EXTS
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+CHATTING_STICKERS_DIR = REPO_ROOT / "backend" / "hbt" / "chatting" / "stickers"
 
 
 def _category_dir(state: State, category: str) -> Path:
@@ -84,28 +87,230 @@ def _file_kind(path: Path) -> str:
     return "other"
 
 
-def _serialize_item(category: str, path: Path) -> dict[str, Any]:
+def _read_index_map(folder: Path) -> dict[str, dict[str, Any]]:
+    idx_file = folder / "index.json"
+    if not idx_file.is_file():
+        return {}
+    try:
+        raw = json.loads(idx_file.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            return {
+                str(entry.get("file") or entry.get("filename") or ""): entry
+                for entry in raw
+                if isinstance(entry, dict) and (entry.get("file") or entry.get("filename"))
+            }
+    except Exception:
+        pass
+    return {}
+
+
+def _serialize_item(
+    category: str,
+    path: Path,
+    *,
+    source: str = "assets",
+    relpath: str | None = None,
+    meta: dict[str, Any] | None = None,
+    thumb_url: str | None = None,
+    readonly: bool = False,
+) -> dict[str, Any]:
     stat = path.stat()
     mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
+    rel = relpath or path.name
+    if source == "assets" and rel == path.name:
+        url = f"/api/asset-hub/files/{quote(category)}/{quote(path.name)}"
+    else:
+        url = f"/api/asset-hub/file/{quote(source)}/{quote(category)}/{quote(rel, safe='/')}"
+    m = meta or {}
     return {
         "name": path.name,
         "category": category,
         "kind": _file_kind(path),
         "size": stat.st_size,
         "modified_at": mtime,
-        "url": f"/api/asset-hub/files/{quote(category)}/{quote(path.name)}",
+        "url": url,
+        "source": source,
+        "readonly": readonly,
+        "title": str(m.get("title") or path.stem),
+        "artist": str(m.get("artist") or ""),
+        "moods": list(m.get("moods") or []),
+        "duration": float(m.get("duration") or 0.0),
+        "thumb_url": thumb_url,
     }
+
+
+def _collect_dir_items(
+    folder: Path,
+    category: str,
+    *,
+    source: str,
+    seen_paths: set[Path],
+    allowed_exts: set[str] | None = None,
+    recursive: bool = False,
+) -> list[dict[str, Any]]:
+    if not folder.is_dir():
+        return []
+    index_map = _read_index_map(folder)
+    out: list[dict[str, Any]] = []
+    iterator = folder.rglob("*") if recursive else folder.iterdir()
+    for p in iterator:
+        if not p.is_file() or p.name.startswith("."):
+            continue
+        if p.name == "index.json" or "thumbs" in p.relative_to(folder).parts:
+            continue
+        ext = p.suffix.lower()
+        if allowed_exts is not None and ext not in allowed_exts:
+            continue
+        if ext not in ALLOWED_EXTS:
+            continue
+        resolved = p.resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        rel = p.relative_to(folder).as_posix()
+        meta = index_map.get(p.name) or index_map.get(rel)
+        thumb_url: str | None = None
+        if category == "backgrounds":
+            thumb_file = folder / "thumbs" / f"{p.stem}.jpg"
+            if thumb_file.is_file():
+                thumb_url = (
+                    f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
+                    f"/thumbs/{quote(thumb_file.name)}"
+                )
+        out.append(
+            _serialize_item(
+                category,
+                p,
+                source=source,
+                relpath=rel,
+                meta=meta,
+                thumb_url=thumb_url,
+            )
+        )
+    return out
 
 
 @router.get("/asset-hub/{category}")
 def list_asset_hub_items(category: str, state: State) -> dict[str, Any]:
-    folder = _category_dir(state, category)
-    files = [p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")]
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return {
-        "category": category,
-        "items": [_serialize_item(category, p) for p in files],
-    }
+    assets_folder = _category_dir(state, category)
+    lib_dir = state.settings.library_dir
+    seen_paths: set[Path] = set()
+    items: list[dict[str, Any]] = []
+
+    if category == "music":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=AUDIO_EXTS,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "music",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=AUDIO_EXTS,
+            )
+        )
+    elif category == "backgrounds":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=VIDEO_EXTS,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "backgrounds",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=VIDEO_EXTS,
+            )
+        )
+    elif category == "memes":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "memes",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+            )
+        )
+    elif category == "stickers":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "stickers",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+                recursive=True,
+            )
+        )
+        if CHATTING_STICKERS_DIR.is_dir():
+            items.extend(
+                _collect_dir_items(
+                    CHATTING_STICKERS_DIR,
+                    category,
+                    source="chatting",
+                    seen_paths=seen_paths,
+                    allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+                    recursive=True,
+                )
+            )
+    elif category == "watermarks":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS,
+            )
+        )
+        brand_logo = BRAND_DIR / "hbt-logo-mark.png"
+        if brand_logo.is_file() and brand_logo.resolve() not in seen_paths:
+            seen_paths.add(brand_logo.resolve())
+            items.append(
+                _serialize_item(
+                    "watermarks",
+                    brand_logo,
+                    source="brand",
+                    relpath="hbt-logo-mark.png",
+                    meta={"title": "Logo HBT Studio (Mặc định)"},
+                    readonly=True,
+                )
+            )
+
+    items.sort(key=lambda x: str(x["modified_at"]), reverse=True)
+    return {"category": category, "items": items}
 
 
 @router.post("/asset-hub/{category}", status_code=201)
@@ -129,18 +334,34 @@ async def upload_asset_hub_item(
 
     content = await file.read()
     target.write_bytes(content)
-    return {"ok": True, "item": _serialize_item(category, target)}
+    return {"ok": True, "item": _serialize_item(category, target, source="assets")}
 
 
 @router.delete("/asset-hub/{category}/{filename}")
-def delete_asset_hub_item(category: str, filename: str, state: State) -> dict[str, Any]:
+def delete_asset_hub_item(
+    category: str,
+    filename: str,
+    state: State,
+    source: str | None = None,
+) -> dict[str, Any]:
+    if source == "brand":
+        raise Unprocessable("Không thể xóa Logo thương hiệu mặc định")
     folder = _category_dir(state, category)
     clean_name = _validate_existing_filename(filename)
-    target = (folder / clean_name).resolve()
-    if target.parent != folder.resolve() or not target.is_file():
-        raise NotFound(f"Không tìm thấy tệp '{clean_name}' trong '{category}'")
-    target.unlink()
-    return {"ok": True, "deleted": clean_name}
+    candidates: list[Path] = []
+    if source in (None, "assets"):
+        candidates.append(folder)
+    if source in (None, "library"):
+        candidates.append(state.settings.library_dir / category)
+
+    for base in candidates:
+        base_res = base.resolve()
+        target = (base / clean_name).resolve()
+        if target.parent == base_res and target.is_file():
+            target.unlink()
+            return {"ok": True, "deleted": clean_name}
+
+    raise NotFound(f"Không tìm thấy tệp '{clean_name}' trong '{category}'")
 
 
 @router.get("/asset-hub/files/{category}/{filename}")
@@ -150,6 +371,37 @@ def serve_asset_hub_file(category: str, filename: str, state: State) -> FileResp
     target = (folder / clean_name).resolve()
     if target.parent != folder.resolve() or not target.is_file():
         raise NotFound(f"Không tìm thấy tệp '{clean_name}' trong '{category}'")
+    return FileResponse(target)
+
+
+@router.get("/asset-hub/file/{source}/{category}/{relpath:path}")
+def serve_asset_hub_source_file(
+    source: str, category: str, relpath: str, state: State
+) -> FileResponse:
+    if category not in VALID_CATEGORIES:
+        raise Unprocessable(f"Danh mục không hợp lệ: '{category}'")
+    if not relpath or ".." in Path(relpath).parts:
+        raise Unprocessable("Đường dẫn tệp không hợp lệ")
+
+    if source == "assets":
+        root = (state.settings.assets_dir / category).resolve()
+    elif source == "library":
+        root = (state.settings.library_dir / category).resolve()
+    elif source == "brand":
+        root = BRAND_DIR.resolve()
+    elif source == "chatting":
+        root = CHATTING_STICKERS_DIR.resolve()
+    else:
+        raise Unprocessable(f"Nguồn tài nguyên không hợp lệ: '{source}'")
+
+    target = (root / relpath).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise Unprocessable("Đường dẫn tệp vượt khỏi phạm vi cho phép") from exc
+
+    if not target.is_file():
+        raise NotFound(f"Không tìm thấy tệp '{relpath}'")
     return FileResponse(target)
 
 

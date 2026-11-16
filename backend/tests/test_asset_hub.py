@@ -89,3 +89,40 @@ def test_unified_renders_sync_list_and_delete(tmp_path: Path) -> None:
     del_res = client.delete(f"/api/renders/{items[0]['id']}")
     assert del_res.status_code == 200
     assert client.get("/api/renders").json()["items"] == []
+
+
+def test_asset_hub_scans_library_with_index_json_and_brand_watermark(tmp_path: Path) -> None:
+    client = _make_client(tmp_path)
+    music_dir = tmp_path / "library" / "music"
+    music_dir.mkdir(parents=True)
+    (music_dir / "track1.mp3").write_bytes(b"ID3fake")
+    (music_dir / "index.json").write_text(
+        '[{"file": "track1.mp3", "title": "Nhạc kịch tính", "artist": "HBT", "moods": ["drama"]}]',
+        encoding="utf-8",
+    )
+
+    bg_dir = tmp_path / "library" / "backgrounds"
+    thumbs_dir = bg_dir / "thumbs"
+    thumbs_dir.mkdir(parents=True)
+    (bg_dir / "mc1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (thumbs_dir / "mc1.jpg").write_bytes(b"\xff\xd8\xff\xe0fake")
+
+    res_music = client.get("/api/asset-hub/music")
+    assert res_music.status_code == 200
+    m_items = res_music.json()["items"]
+    assert len(m_items) == 1
+    assert m_items[0]["title"] == "Nhạc kịch tính"
+    assert m_items[0]["artist"] == "HBT"
+    assert m_items[0]["moods"] == ["drama"]
+    assert client.get(m_items[0]["url"]).status_code == 200
+
+    res_bg = client.get("/api/asset-hub/backgrounds")
+    assert res_bg.status_code == 200
+    bg_items = res_bg.json()["items"]
+    assert len(bg_items) == 1
+    assert bg_items[0]["thumb_url"] == "/api/asset-hub/file/library/backgrounds/thumbs/mc1.jpg"
+    assert client.get(bg_items[0]["thumb_url"]).status_code == 200
+
+    res_wm = client.get("/api/asset-hub/watermarks")
+    assert res_wm.status_code == 200
+    assert any(it["name"] == "hbt-logo-mark.png" for it in res_wm.json()["items"])

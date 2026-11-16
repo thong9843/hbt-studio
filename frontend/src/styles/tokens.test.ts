@@ -154,6 +154,8 @@ const PAIRS: [string, string][] = [
   ['--muted', '--soft-2'],
   ['--on-primary', '--primary'],
   ['--on-hero', '--hero'],
+  ['--text-on-dark', '--surface-dark'],
+  ['--muted-on-dark', '--surface-dark'],
   ['--on-accent', '--accent'],
   ['--on-brand', '--brand'],
   ['--on-tint-red', '--tint-red'],

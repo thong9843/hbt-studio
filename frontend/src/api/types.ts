@@ -863,6 +863,13 @@ export interface AssetHubItem {
   size: number;
   modified_at: string;
   url: string;
+  source?: 'assets' | 'library' | 'brand' | 'chatting';
+  readonly?: boolean;
+  title?: string;
+  artist?: string;
+  moods?: string[];
+  duration?: number;
+  thumb_url?: string | null;
 }
 
 export interface UnifiedRenderItem {
