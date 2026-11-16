@@ -21,6 +21,7 @@ from PIL import Image
 
 from hbt.chatting.audio import mix_voice_and_bgm_playlist
 from hbt.chatting.draw import ChatFrameRenderer
+from hbt.chatting.html_renderer import HtmlChatSession
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
 from hbt.chatting.stickers import (
@@ -332,6 +333,9 @@ def render_chat_video(
     last_chunk_fname = ""
     spring_scales = spring_scale_curve(18)
 
+    html_session = HtmlChatSession(doc.platform)
+    html_session.start()
+
     def save_subframe(
         v_msgs: list[Message],
         s_typing: bool = False,
@@ -346,24 +350,46 @@ def render_chat_video(
         dur: float = 0.05,
     ) -> None:
         nonlocal frame_counter, last_chunk_fname
-        img = renderer.render_chat_view(
-            visible_messages=v_msgs,
-            show_typing=s_typing,
-            typing_char_id=t_char_id,
-            typing_pulse_step=t_pulse,
-            active_sticker_img=s_img,
-            sticker_from_right=s_right,
-            scale_last_msg=scale_msg,
-            show_seen=s_seen,
-            scroll_offset_override=s_scroll,
-            is_meme_cutin=is_cutin,
-        )
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
-        if wm_img is not None and not is_cutin:
-            img.alpha_composite(wm_img)
-        img.save(fpath, format="PNG", compress_level=1)
-        img.close()
+
+        used_html = False
+        if html_session.active and not is_cutin and s_img is None:
+            state = renderer.build_html_state(
+                visible_messages=v_msgs,
+                show_typing=s_typing,
+                typing_pulse_step=t_pulse,
+                scale_last_msg=scale_msg,
+                show_seen=s_seen,
+                scroll_offset_override=s_scroll,
+            )
+            used_html = html_session.render_frame(state, fpath)
+
+        if used_html:
+            if wm_img is not None and not is_cutin:
+                with Image.open(fpath) as rendered:
+                    rgba = rendered.convert("RGBA")
+                    rgba.alpha_composite(wm_img)
+                    rgba.save(fpath, format="PNG", compress_level=1)
+                    rgba.close()
+        else:
+            img = renderer.render_chat_view(
+                visible_messages=v_msgs,
+                show_typing=s_typing,
+                typing_char_id=t_char_id,
+                typing_pulse_step=t_pulse,
+                active_sticker_img=s_img,
+                sticker_from_right=s_right,
+                scale_last_msg=scale_msg,
+                show_seen=s_seen,
+                scroll_offset_override=s_scroll,
+                is_meme_cutin=is_cutin,
+            )
+            if wm_img is not None and not is_cutin:
+                img.alpha_composite(wm_img)
+            img.save(fpath, format="PNG", compress_level=1)
+            img.close()
+
         chunk_pngs.append(fpath)
         chunk_concat_lines.append(f"file '{fname}'\n")
         chunk_concat_lines.append(f"duration {dur:.4f}\n")
@@ -590,6 +616,8 @@ def render_chat_video(
             p.unlink(missing_ok=True)
         chunk_concat_file.unlink(missing_ok=True)
         gc.collect()
+
+    html_session.close()
 
     chunks_concat = frames_dir / "chunks.ffconcat"
     chunks_concat.write_text(

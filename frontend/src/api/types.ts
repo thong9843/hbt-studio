@@ -252,7 +252,7 @@ export interface WatermarkSettings {
   mode: 'text' | 'logo' | 'both';
   text: string;
   logo_path: string;
-  position: 'top-left' | 'top-right' | 'center-subtle';
+  position: 'bottom-right' | 'bottom-left' | 'top-left' | 'top-right' | 'center-subtle';
   opacity: number;
 }
 
@@ -743,7 +743,7 @@ export interface ChatDoc {
   hbt_chat: number;
   slug?: string;
   title: string;
-  platform: 'messenger' | 'zalo';
+  platform: 'messenger' | 'instagram' | 'zalo';
   aspect_mode?: AspectMode;
   target_duration_s?: number | null;
   characters: ChatCharacter[];

@@ -699,7 +699,11 @@ export function ChattingEditor() {
       <aside className="w-[376px] shrink-0 overflow-y-auto border-l border-line bg-bg/50 p-4">
         <PhonePreviewStage
           title="Xem trước"
-          badgeText={doc.platform === 'zalo' ? '9:16 · Zalo · 60fps' : '9:16 · Messenger · 60fps'}
+          badgeText={
+            doc.platform === 'instagram'
+              ? '9:16 · Instagram iOS · 60fps'
+              : '9:16 · Messenger iOS · 60fps'
+          }
           safeZone={safeZone}
           onSafeZoneChange={setSafeZone}
           previewBusy={isRendering}

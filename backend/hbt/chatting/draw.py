@@ -934,3 +934,68 @@ class ChatFrameRenderer:
             cur_y += bubble_h + 16
 
         return rects
+
+    def build_html_state(
+        self,
+        *,
+        visible_messages: list[Message],
+        show_typing: bool = False,
+        typing_pulse_step: int = 0,
+        scale_last_msg: float = 1.0,
+        show_seen: bool = True,
+        scroll_offset_override: float | None = None,
+    ) -> dict[str, object]:
+        """Chuyển trạng thái khung chat sang JSON cho template HTML iOS (Messenger / Instagram)."""
+        import base64
+        import io
+
+        def img_to_uri(im: Image.Image | None) -> str | None:
+            if im is None:
+                return None
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+        main_left = self.left_chars[0] if self.left_chars else None
+        hdr_name = "Nhóm Chat" if self.is_group else (main_left.name if main_left else "Chat")
+        hdr_av = img_to_uri(self.avatar_images.get(main_left.id)) if main_left else None
+        hdr_color = self.get_char_color(main_left.id)[0] if main_left else "#0084FF"
+
+        from hbt.chatting.html_renderer import file_to_data_uri
+
+        msgs_out: list[dict[str, object]] = []
+        for msg in visible_messages:
+            ch = self.characters.get(msg.from_)
+            side = ch.side if ch else "left"
+            mpath = self._resolve_media_path(msg)
+            mtype = getattr(msg, "media_type", "none")
+            media_uri = file_to_data_uri(mpath) if mtype == "image" and mpath else None
+            av_uri = img_to_uri(self.avatar_images.get(msg.from_)) if side == "left" else None
+            msgs_out.append(
+                {
+                    "from": msg.from_,
+                    "side": side,
+                    "senderName": ch.name if ch else msg.from_,
+                    "color": self.get_char_color(msg.from_)[0],
+                    "avatarUrl": av_uri,
+                    "text": (getattr(msg, "display_text", None) or msg.text).strip(),
+                    "mediaType": mtype,
+                    "mediaUrl": media_uri,
+                }
+            )
+
+        return {
+            "header": {
+                "name": hdr_name,
+                "status": self.theme.header_status_text,
+                "avatarUrl": hdr_av,
+                "color": hdr_color,
+            },
+            "isGroup": self.is_group,
+            "messages": msgs_out,
+            "showTyping": show_typing,
+            "typingPulse": typing_pulse_step,
+            "popupScale": scale_last_msg,
+            "scrollY": scroll_offset_override or 0.0,
+            "seenText": self.theme.seen_text if show_seen else "",
+        }

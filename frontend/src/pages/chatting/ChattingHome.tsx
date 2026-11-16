@@ -28,7 +28,7 @@ const DURATION_OPTIONS = [
 export function ChattingHome() {
   const navigate = useNavigate();
   const [inputText, setInputText] = useState('');
-  const [platform, setPlatform] = useState<'messenger' | 'zalo'>('messenger');
+  const [platform, setPlatform] = useState<'messenger' | 'instagram'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
   const [targetDuration, setTargetDuration] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
@@ -172,14 +172,14 @@ export function ChattingHome() {
             </button>
             <button
               type="button"
-              onClick={() => setPlatform('zalo')}
+              onClick={() => setPlatform('instagram')}
               className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
-                platform === 'zalo'
+                platform === 'instagram'
                   ? 'bg-primary text-on-primary'
                   : 'bg-soft text-text hover:bg-soft/80'
               }`}
             >
-              {vi.chatting.zalo}
+              {vi.chatting.instagram}
             </button>
 
             <span className="ml-4 text-tiny font-semibold text-muted">

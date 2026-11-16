@@ -72,7 +72,18 @@ class BackgroundInfo(BaseModel):
 class ChatDoc(BaseModel):
     hbt_chat: Literal[1] = 1
     title: str = Field(min_length=1, max_length=200)
-    platform: Literal["messenger", "zalo"] = "messenger"
+    platform: Literal["messenger", "instagram"] = "messenger"
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def normalize_platform(cls, v: object) -> str:
+        s = str(v or "messenger").strip().lower()
+        if s == "zalo":
+            return "messenger"
+        if s in ("messenger", "instagram"):
+            return s
+        return str(v)
+
     source: SourceInfo = Field(default_factory=SourceInfo)
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
     aspect_mode: Literal["fill", "fit"] = "fit"

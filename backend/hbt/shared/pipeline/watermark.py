@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from hbt.config import BRAND_DIR, REPO_ROOT
 
 WatermarkMode = Literal["text", "logo", "both"]
-WatermarkPosition = Literal["top-left", "top-right", "center-subtle"]
+WatermarkPosition = Literal["bottom-right", "bottom-left", "top-right", "top-left", "center-subtle"]
 
 FONTS_DIR = Path(__file__).resolve().parents[2] / "fonts"
 FONT_BOLD = FONTS_DIR / "BeVietnamPro-Bold.ttf"
@@ -24,7 +24,7 @@ class WatermarkSettings(BaseModel):
     mode: WatermarkMode = "logo"
     text: str = Field(default="@HayBietTuot", max_length=64)
     logo_path: str = "brand/hbt-logo-mark.png"
-    position: WatermarkPosition = "top-right"
+    position: WatermarkPosition = "bottom-right"
     opacity: float = Field(default=0.40, ge=0.15, le=0.80)
 
 
@@ -174,18 +174,25 @@ def render_watermark_png(
     a_scaled = a.point(lambda p: int(round(p * clamped_opacity)))
     combined.putalpha(a_scaled)
 
-    # Định vị trong vùng an toàn Safe-Zone 9:16
-    margin_x = int(round(44 * scale))
+    # Định vị trong vùng an toàn Safe-Zone 9:16 (mặc định bottom-right: cách đáy 260px, lề phải 48px)
+    margin_x = int(round(48 * scale))
     margin_top = int(round(92 * scale))
-    if settings.position == "top-left":
+    margin_bottom = int(round(260 * scale))
+    if settings.position == "bottom-left":
         pos_x = margin_x
+        pos_y = max(margin_top, height - badge_h - margin_bottom)
+    elif settings.position == "top-left":
+        pos_x = margin_x
+        pos_y = margin_top
+    elif settings.position == "top-right":
+        pos_x = max(margin_x, width - badge_w - margin_x)
         pos_y = margin_top
     elif settings.position == "center-subtle":
         pos_x = (width - badge_w) // 2
         pos_y = int(round(height * 0.46))
-    else:  # top-right
+    else:  # bottom-right (mặc định)
         pos_x = max(margin_x, width - badge_w - margin_x)
-        pos_y = margin_top
+        pos_y = max(margin_top, height - badge_h - margin_bottom)
 
     canvas.alpha_composite(combined, (pos_x, pos_y))
     combined.close()

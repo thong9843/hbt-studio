@@ -54,11 +54,15 @@ export function PhonePreviewStage({
     : '/brand/hbt-logo-mark.png';
 
   const wmPosClass =
-    wm.position === 'top-left'
-      ? 'top-[13%] left-3'
-      : wm.position === 'center-subtle'
-        ? 'inset-0 flex items-center justify-center'
-        : 'top-[13%] right-3';
+    wm.position === 'bottom-left'
+      ? 'bottom-[13.5%] left-3'
+      : wm.position === 'top-left'
+        ? 'top-[13%] left-3'
+        : wm.position === 'top-right'
+          ? 'top-[13%] right-3'
+          : wm.position === 'center-subtle'
+            ? 'inset-0 flex items-center justify-center'
+            : 'bottom-[13.5%] right-3';
 
   return (
     <section
@@ -89,19 +93,19 @@ export function PhonePreviewStage({
         <SafeZoneOverlay platform={safeZone} />
         {children}
 
-        {/* Lớp phủ xem trước Watermark đồng bộ trực tiếp theo cài đặt */}
+        {/* Lớp phủ xem trước Watermark trong suốt, chỉ có bóng đổ nhẹ */}
         {wm.enabled && (
           <div
             aria-hidden="true"
             style={{ opacity: wm.opacity }}
             className={`pointer-events-none absolute z-20 ${wmPosClass}`}
           >
-            <div className="inline-flex items-center gap-1.5 rounded-lg bg-black/25 px-2 py-1 backdrop-blur-[2px]">
+            <div className="inline-flex items-center gap-1.5 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]">
               {(wm.mode === 'logo' || wm.mode === 'both') && (
-                <img src={logoSrc} alt="" className="h-5 w-auto object-contain drop-shadow" />
+                <img src={logoSrc} alt="" className="h-5 w-auto object-contain" />
               )}
               {(wm.mode === 'text' || wm.mode === 'both') && (
-                <span className="text-[11px] font-extrabold tracking-tight text-white drop-shadow">
+                <span className="text-[11px] font-extrabold tracking-tight text-white">
                   {wm.text || '@HayBietTuot'}
                 </span>
               )}

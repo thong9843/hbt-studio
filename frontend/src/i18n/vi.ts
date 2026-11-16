@@ -1226,8 +1226,9 @@ export const vi = {
     inputPlaceholder: 'Dán link Reddit hoặc dán câu chuyện…',
     createBtn: 'Tạo video',
     platform: 'Nền tảng',
-    messenger: 'Messenger',
-    zalo: 'Zalo',
+    messenger: 'Messenger (iOS)',
+    instagram: 'Instagram (iOS)',
+    zalo: 'Messenger (iOS)',
     background: 'Nền gameplay',
     phases: {
       fetch: 'Lấy bài',

@@ -8,11 +8,13 @@ const DEFAULT_WM: WatermarkSettings = {
   mode: 'logo',
   text: '@HayBietTuot',
   logo_path: 'brand/hbt-logo-mark.png',
-  position: 'top-right',
+  position: 'bottom-right',
   opacity: 0.4,
 };
 
 const POS_LABELS: Record<WatermarkSettings['position'], string> = {
+  'bottom-right': 'Góc dưới phải',
+  'bottom-left': 'Góc dưới trái',
   'top-right': 'Góc trên phải',
   'top-left': 'Góc trên trái',
   'center-subtle': 'Giữa mờ',
@@ -119,7 +121,9 @@ export function WatermarkControl() {
               }
               className="w-full rounded-lg border border-indigo-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900 dark:border-indigo-400/30 dark:bg-slate-900 dark:text-white"
             >
-              <option value="top-right">Góc trên phải (Chuẩn)</option>
+              <option value="bottom-right">Góc dưới phải (Chuẩn)</option>
+              <option value="bottom-left">Góc dưới trái</option>
+              <option value="top-right">Góc trên phải</option>
               <option value="top-left">Góc trên trái</option>
               <option value="center-subtle">Giữa khung (Chìm)</option>
             </select>

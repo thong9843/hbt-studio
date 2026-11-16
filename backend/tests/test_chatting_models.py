@@ -171,3 +171,25 @@ def test_multiple_stickers_allowed():
         messages=make_valid_messages(8, with_stickers=4),
     )
     assert sum(1 for m in doc.messages if m.sticker is not None) == 4
+
+
+def test_instagram_and_zalo_backward_compat():
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    ig_doc = ChatDoc(
+        title="Instagram DM",
+        platform="instagram",
+        characters=chars,
+        messages=make_valid_messages(8),
+    )
+    assert ig_doc.platform == "instagram"
+
+    legacy_zalo_doc = ChatDoc(
+        title="Zalo cũ",
+        platform="zalo",
+        characters=chars,
+        messages=make_valid_messages(8),
+    )
+    assert legacy_zalo_doc.platform == "messenger"

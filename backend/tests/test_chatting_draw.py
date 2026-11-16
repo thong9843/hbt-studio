@@ -166,3 +166,29 @@ def test_draw_message_with_image_and_video_media(tmp_path):
     frame = renderer.render_chat_view([msg_img, msg_vid])
     assert frame.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
     frame.close()
+
+
+def test_ios_templates_and_html_state():
+    from hbt.chatting.html_renderer import TEMPLATES_DIR
+
+    assert (TEMPLATES_DIR / "messenger_ios.html").is_file()
+    assert (TEMPLATES_DIR / "instagram_ios.html").is_file()
+
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    ig_theme = get_theme("instagram")
+    assert ig_theme.name == "instagram"
+    assert ig_theme.bubble_right_bg == "#833AB4"
+
+    renderer = ChatFrameRenderer(ig_theme, chars)
+    state = renderer.build_html_state(
+        visible_messages=[Message(from_="a", text="Chào bạn"), Message(from_="me", text="Ok nhé")],
+        show_typing=True,
+        show_seen=True,
+    )
+    assert state["header"]["name"] == "Linh"
+    assert len(state["messages"]) == 2
+    assert state["showTyping"] is True
+    assert state["seenText"] == "Đã xem"

@@ -21,7 +21,7 @@ def test_watermark_settings_defaults_and_persistence(tmp_path: Path) -> None:
     assert loaded.watermark.enabled is True
     assert loaded.watermark.mode == "logo"
     assert loaded.watermark.text == "@HayBietTuot"
-    assert loaded.watermark.position == "top-right"
+    assert loaded.watermark.position == "bottom-right"
     assert loaded.watermark.opacity == 0.40
 
     updated = AppSettings(
@@ -46,7 +46,7 @@ def test_render_watermark_png_modes_and_positions(tmp_path: Path) -> None:
     assert logo_path is not None and logo_path.is_file()
 
     for mode in ("both", "text", "logo"):
-        for pos in ("top-right", "top-left", "center-subtle"):
+        for pos in ("bottom-right", "bottom-left", "top-right", "top-left", "center-subtle"):
             out_png = tmp_path / f"wm_{mode}_{pos}.png"
             cfg = WatermarkSettings(enabled=True, mode=mode, position=pos, opacity=0.40)
             res = render_watermark_png(out_png, cfg, width=540, height=960)
