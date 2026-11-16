@@ -218,17 +218,55 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Giữ nguyên mọi sticker/meme hợp lệ của kịch bản (không giới hạn cứng)
-    for m in clean_msgs:
-        if m.get("sticker") is not None:
-            st = str(m.get("sticker")).strip().lower()
-            m["sticker"] = st if st in VALID_STICKER_TAGS else None
+    # 3. Siết mật độ sticker/meme: tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    MAX_STICKERS = 3
+    MIN_STICKER_GAP = 4  # cách nhau ít nhất 3 tin ở giữa (idx_b - idx_a >= 4)
+    candidates: list[tuple[float, int]] = []
+    n_msgs = len(clean_msgs)
+    for idx, m in enumerate(clean_msgs):
+        raw_st = m.get("sticker")
+        if raw_st is None:
+            continue
+        st = str(raw_st).strip().lower()
+        if st not in VALID_STICKER_TAGS:
+            m["sticker"] = None
+            continue
+        m["sticker"] = st
+        txt = str(m.get("text", ""))
+        # Ưu tiên tin cao trào/twist/punchline (nửa sau, có dấu cảm xúc)
+        score = (idx / max(1, n_msgs)) * 2.0
+        if "!" in txt or "?" in txt:
+            score += 1.0
+        if st in ("soc", "cuoi", "gian", "khoc"):
+            score += 0.5
+        if idx >= n_msgs - 2:
+            score += 1.0
+        candidates.append((score, idx))
+
+    # Chọn tối đa 3 vị trí điểm cao nhất mà vẫn cách nhau >= MIN_STICKER_GAP
+    chosen_indices: list[int] = []
+    for _score, idx in sorted(candidates, key=lambda x: (-x[0], x[1])):
+        if len(chosen_indices) >= MAX_STICKERS:
+            break
+        if all(abs(idx - prev) >= MIN_STICKER_GAP for prev in chosen_indices):
+            chosen_indices.append(idx)
+
+    chosen_set = set(chosen_indices)
+    dropped_stickers = 0
+    for idx, m in enumerate(clean_msgs):
+        if m.get("sticker") is not None and idx not in chosen_set:
+            m["sticker"] = None
+            dropped_stickers += 1
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
         warnings.append(
             f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
             "để kịch bản không vượt quá 5.000 ký tự."
+        )
+    if dropped_stickers > 0:
+        warnings.append(
+            f"Đã lược bỏ {dropped_stickers} sticker/meme thừa để giữ tối đa {MAX_STICKERS} điểm cao trào."
         )
 
     data["messages"] = clean_msgs

@@ -282,7 +282,6 @@ def render_chat_video(
                     pass
 
     renderer = ChatFrameRenderer(theme, doc.characters, avatar_images, project_dir=project_dir)
-    content_area_h = renderer.theme.frame_max_height - renderer.theme.header_height
     video_media_spans: dict[int, list[tuple[float, float, Path, int, int, int, int]]] = {}
     coord_scale = width / 1080.0
 
@@ -416,21 +415,19 @@ def render_chat_video(
                     except Exception:
                         pass
 
-            visible_msgs = doc.messages[: state.visible_count]
-            frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
-            chunk_total_dur += frame_dur
-
-            total_content_h = renderer.get_content_height(
-                visible_msgs,
+            visible_msgs = renderer.paginate_messages(
+                doc.messages[: state.visible_count],
                 show_typing=state.show_typing,
                 active_sticker_img=stk_img,
                 show_seen=state.show_seen,
             )
-            target_scroll_y = float(max(0, total_content_h - content_area_h))
+            frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
+            chunk_total_dur += frame_dur
+            target_scroll_y = 0.0
 
             if not state.show_typing:
                 for m_idx, m_path, cx, cy, mw, mh in renderer.compute_video_media_rects(
-                    visible_msgs, target_scroll_y
+                    visible_msgs, 0.0
                 ):
                     sx = int(round(cx * coord_scale))
                     sy = int(round(cy * coord_scale))

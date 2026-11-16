@@ -111,9 +111,12 @@ def test_sanitize_chat_raw_excess_stickers():
     }
 
     clean = sanitize_chat_raw(raw)
-    stickers = [m["sticker"] for m in clean["messages"] if m["sticker"] is not None]
-    # Giữ nguyên toàn bộ 10 sticker hợp lệ theo kịch bản (không giới hạn cứng)
-    assert len(stickers) == 10
+    sticker_indices = [i for i, m in enumerate(clean["messages"]) if m["sticker"] is not None]
+    # Giới hạn cứng tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    assert 1 <= len(sticker_indices) <= 3
+    for a, b in zip(sticker_indices, sticker_indices[1:]):
+        assert b - a >= 4
+    assert any("lược bỏ" in w for w in clean["warnings"])
 
     # Và ChatDoc validate thành công mà không bị quăng lỗi
     doc = ChatDoc.model_validate(clean)
