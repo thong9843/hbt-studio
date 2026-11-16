@@ -150,7 +150,7 @@ describe('ProjectsPage', () => {
     fireEvent.error(after);
     expect(card('Ảnh hỏng').querySelector('img')).toHaveAttribute(
       'src',
-      '/brand/hbt-logo-mark.png',
+      '/brand/hay-biet-tuot_avatar.png',
     );
   });
 

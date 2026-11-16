@@ -110,7 +110,7 @@ describe('tokens.css v2', () => {
     expect(light['--radius-dialog']).toBe('24px');
     expect(light['--radius-input']).toBe('12px');
     expect(light['--radius-pill']).toBe('999px');
-    expect(darkAttr['--card-border']).toBe('var(--line)');
+    expect(darkAttr['--card-border']).toBe('rgba(255, 255, 255, 0.08)');
   });
 
   it('keeps the system-dark block and the data-theme=dark block identical', () => {

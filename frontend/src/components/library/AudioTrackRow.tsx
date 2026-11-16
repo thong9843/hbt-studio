@@ -73,7 +73,10 @@ export function AudioTrackRow({
       <div className="min-w-[180px] flex-1">
         <div className="flex items-center gap-2">
           <MusicIcon size={14} className="shrink-0 text-muted" />
-          <p className="truncate text-small font-bold text-text">{item.name}</p>
+          <p className="truncate text-small font-bold text-text">{item.title || item.name}</p>
+          {item.artist && (
+            <span className="truncate text-tiny font-medium text-muted">{item.artist}</span>
+          )}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-tiny text-muted">
           <Badge>{item.source === 'library' ? 'Thư viện' : 'Assets'}</Badge>
