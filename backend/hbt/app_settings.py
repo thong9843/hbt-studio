@@ -48,7 +48,7 @@ def resolve_online_api_key(
     env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY"],
     workspace_dir: Path | None = None,
 ) -> str:
-    """Đọc API key từ biến môi trường (.env) trước, sau đó fallback sang workspace/settings/app.json."""
+    """Đọc API key từ .env trước, sau đó fallback sang workspace/settings/app.json."""
     val = os.environ.get(env_name, "").strip()
     if val:
         return val
