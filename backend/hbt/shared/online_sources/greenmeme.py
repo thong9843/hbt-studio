@@ -198,7 +198,10 @@ async def import_greenmeme(
         except Exception:
             pass
 
-    dur = media_duration(video_path) or 0.0
+    try:
+        dur = media_duration(video_path) or 0.0
+    except Exception:
+        dur = 0.0
     tags, topic = auto_tag_meme(title or slug)
 
     items = load_memes_index(memes_dir)

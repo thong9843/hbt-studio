@@ -181,7 +181,10 @@ def batch_auto_tag_memes(memes_dir: Path, *, use_gemini: bool = False) -> dict[s
             by_file[p.name] = entry
 
         if not entry.get("duration_sec") and p.suffix.lower() in {".mp4", ".mov", ".webm", ".gif"}:
-            dur = media_duration(p)
+            try:
+                dur = media_duration(p)
+            except Exception:
+                dur = 0.0
             if dur:
                 entry["duration_sec"] = round(float(dur), 2)
 

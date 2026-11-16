@@ -115,7 +115,10 @@ async def import_pixabay_audio(
             raw_bytes = await _download(c)
 
     out_file.write_bytes(raw_bytes)
-    dur = media_duration(out_file) or 0.0
+    try:
+        dur = media_duration(out_file) or 0.0
+    except Exception:
+        dur = 0.0
 
     idx_path = target_dir / "index.json"
     entries: list[dict[str, Any]] = []
