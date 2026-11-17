@@ -23,6 +23,8 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
         "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
         "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
+        "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
+        "để tạo nhịp ngắt tự nhiên, không viết câu ghép dài.\n"
         f"pose: {pose_str}. "
         "motion: bounce|slide_left|slide_right|shake|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "

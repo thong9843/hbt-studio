@@ -26,7 +26,9 @@ from hbt.shared.pipeline.watermark import (
     render_watermark_png,
 )
 from hbt.stickv.audio import (
-    compute_word_timings,
+    LEAD_IN_SILENCE_S,
+    align_beat_karaoke,
+    compute_pause_after,
     extract_wav_rms_envelope,
     mix_stickv_audio,
     synth_stickv_beats_audio,
@@ -46,13 +48,21 @@ def _stream_beat_frames_to_ffmpeg(
     h: int,
     fps: int,
     aspect: str,
+    pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
     """Stream từng khung hình RGB (lip-sync + chớp mắt + karaoke) vào FFmpeg stdin, 0 PNG rác."""
     dur = max(1.0, float(beat.duration_sec or 2.0))
     n_frames = max(1, int(round(dur * fps)))
     rms_env = extract_wav_rms_envelope(wav_path, fps, dur)
-    word_timings = compute_word_timings(beat.narration, max(0.5, dur - 0.25))
+    pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
+    word_timings = align_beat_karaoke(
+        beat.narration,
+        wav_path,
+        dur,
+        lead_in_s=LEAD_IN_SILENCE_S * pause_scale,
+        pause_after_s=pause_after,
+    )
 
     cmd = [
         ffmpeg_exe(),
@@ -164,6 +174,7 @@ def _render_single_beat_clip(
     project_dir: Path,
     library_dir: Path,
     assets_dir: Path,
+    pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
     dur = max(1.0, float(beat.duration_sec or 2.0))
@@ -204,6 +215,7 @@ def _render_single_beat_clip(
         h=h,
         fps=fps,
         aspect=aspect,
+        pause_scale=pause_scale,
         cancel=cancel,
     )
 
@@ -332,11 +344,13 @@ def render_stickv(
     try:
         emit(8.0, "Đang tạo giọng đọc VieNeu-TTS theo từng beat...")
         check_cancel()
+        pause_scale = float(getattr(project, "pause_scale", 1.0) or 1.0)
         beat_wavs = synth_stickv_beats_audio(
             beats,
             audio_dir,
             voice_provider=voice_provider,
             voice_id=project.voice_id,
+            pause_scale=pause_scale,
         )
 
         emit(28.0, "Đang trộn SFX & nhạc nền (-14 LUFS)...")
@@ -381,6 +395,7 @@ def render_stickv(
                 project_dir=project_dir,
                 library_dir=library_dir,
                 assets_dir=assets_dir,
+                pause_scale=pause_scale,
                 cancel=cancel,
             )
             beat_clips.append(clip_mp4)

@@ -1,14 +1,16 @@
-"""Âm thanh StickV: VieNeu-TTS batch (Audio Anchoring), lip-sync RMS, karaoke & -14 LUFS."""
+"""Âm thanh StickV: VieNeu-TTS có nhịp ngắt tự nhiên, Karaoke khóa tiếng nói & -14 LUFS."""
 
 from __future__ import annotations
 
 import logging
+import re
 import wave
 from pathlib import Path
 
 import numpy as np
 
 from hbt.core.audio import build_topic_bgm_playlist
+from hbt.pipeline.align import align_silence
 from hbt.pipeline.ffutil import run_ffmpeg
 from hbt.postv.voice import SynthItem, VoiceProvider
 from hbt.shared.ffmpeg_utils import (
@@ -21,6 +23,11 @@ from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
 
+LEAD_IN_SILENCE_S = 0.10
+SENTENCE_GAP_S = 0.30
+PAUSE_END_SENTENCE_S = 0.45
+PAUSE_MID_CLAUSE_S = 0.25
+
 SFX_TAG_KEYWORDS: dict[str, tuple[str, ...]] = {
     "whoosh": ("swoosh", "whoosh", "swipe"),
     "pop": ("pop", "bubble", "click"),
@@ -31,9 +38,25 @@ SFX_TAG_KEYWORDS: dict[str, tuple[str, ...]] = {
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
 
 
+def split_beat_sentences(text: str) -> list[str]:
+    """Tách các câu trong cùng 1 beat theo dấu ngắt câu (. ? ! …) để VieNeu đọc có nhịp nghỉ."""
+    clean = (text or "").strip()
+    if not clean:
+        return []
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", clean) if p.strip()]
+    return parts or [clean]
+
+
+def compute_pause_after(text: str, *, pause_scale: float = 1.0) -> float:
+    """Tính khoảng nghỉ cuối beat: 0.45s cho kết câu (.?!…), 0.25s cho ngắt ý (,;:)."""
+    stripped = (text or "").rstrip()
+    base = PAUSE_END_SENTENCE_S if stripped.endswith((".", "?", "!", "…")) else PAUSE_MID_CLAUSE_S
+    return round(base * max(0.5, min(2.0, float(pause_scale))), 3)
+
+
 def _write_fallback_wav(dest: Path, text: str) -> None:
     """Tạo file WAV ước lượng theo độ dài chữ khi chạy unit test không có VieNeuProvider."""
-    dur_s = max(1.4, min(12.0, len(text.split()) * 0.38))
+    dur_s = max(1.0, min(12.0, len(text.split()) * 0.36))
     sr = 24000
     n_frames = int(dur_s * sr)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +65,57 @@ def _write_fallback_wav(dest: Path, text: str) -> None:
         wf.setsampwidth(2)
         wf.setframerate(sr)
         wf.writeframes(b"\x00\x00" * n_frames)
+
+
+def _assemble_padded_beat_wav(
+    sub_wavs: list[Path],
+    out_wav: Path,
+    *,
+    lead_s: float,
+    gap_s: float,
+    tail_s: float,
+) -> float:
+    """Ghép các câu con kèm khoảng lặng đầu (0.10s), giữa câu (0.30s) và cuối beat (0.25-0.45s)."""
+    chunks: list[bytes] = []
+    sr = 24000
+    ch = 1
+    sw = 2
+
+    valid_wavs = [p for p in sub_wavs if p.is_file() and p.stat().st_size > 44]
+    if valid_wavs:
+        try:
+            with wave.open(str(valid_wavs[0]), "rb") as wf0:
+                sr = wf0.getframerate()
+                ch = wf0.getnchannels()
+                sw = wf0.getsampwidth()
+        except (wave.Error, EOFError):
+            out_wav.parent.mkdir(parents=True, exist_ok=True)
+            out_wav.write_bytes(valid_wavs[0].read_bytes())
+            return round(lead_s + tail_s + 0.5, 3)
+
+    bytes_per_sec = sr * ch * sw
+
+    def _silence_bytes(sec: float) -> bytes:
+        n_samples = max(0, int(round(sec * sr)))
+        return b"\x00" * (n_samples * ch * sw)
+
+    chunks.append(_silence_bytes(lead_s))
+    for i, wp in enumerate(valid_wavs):
+        with wave.open(str(wp), "rb") as wf:
+            frames = wf.readframes(wf.getnframes())
+            chunks.append(frames)
+        if i < len(valid_wavs) - 1:
+            chunks.append(_silence_bytes(gap_s))
+    chunks.append(_silence_bytes(tail_s))
+
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    payload = b"".join(chunks)
+    with wave.open(str(out_wav), "wb") as out_wf:
+        out_wf.setnchannels(ch)
+        out_wf.setsampwidth(sw)
+        out_wf.setframerate(sr)
+        out_wf.writeframes(payload)
+    return round(len(payload) / max(1, bytes_per_sec), 3)
 
 
 def resolve_sfx_file(
@@ -101,22 +175,52 @@ def extract_wav_rms_envelope(wav_path: Path, fps: int, duration_sec: float) -> l
 
 
 def compute_word_timings(
-    narration: str, speech_duration_sec: float
+    narration: str,
+    speech_duration_sec: float,
+    *,
+    start_offset_s: float = 0.0,
 ) -> list[tuple[str, float, float]]:
-    """Chia mốc thời gian tương đối cho từng từ để tô sáng phụ đề Karaoke."""
+    """Chia mốc thời gian cho từng từ trong [start_offset_s, start_offset_s + dur]."""
     words = [w for w in (narration or "").split() if w]
     if not words:
         return []
-    dur = max(0.5, float(speech_duration_sec))
+    dur = max(0.3, float(speech_duration_sec))
     weights = [max(1, len(w)) for w in words]
     total_w = sum(weights)
     timings: list[tuple[str, float, float]] = []
-    cur = 0.0
+    cur = max(0.0, float(start_offset_s))
     for w, wt in zip(words, weights, strict=True):
         span = dur * (wt / total_w)
-        timings.append((w, cur, cur + span))
+        timings.append((w, round(cur, 3), round(cur + span, 3)))
         cur += span
     return timings
+
+
+def align_beat_karaoke(
+    narration: str,
+    wav_path: Path,
+    total_dur: float,
+    *,
+    lead_in_s: float = LEAD_IN_SILENCE_S,
+    pause_after_s: float = PAUSE_END_SENTENCE_S,
+) -> list[tuple[str, float, float]]:
+    """Khóa mốc Karaoke vào đúng vùng có tiếng nói thật bằng `align_silence`, bỏ khoảng lặng."""
+    words = [w for w in (narration or "").split() if w]
+    if not words:
+        return []
+    max_speech_end = max(lead_in_s + 0.3, float(total_dur) - max(0.0, pause_after_s))
+    if wav_path.is_file():
+        try:
+            spans = align_silence(words, wav_path, total_dur)
+            if spans and len(spans) == len(words) and all(s is not None for s in spans):
+                return [
+                    (w, round(float(s[0]), 3), round(min(max_speech_end, float(s[1])), 3))
+                    for w, s in zip(words, spans, strict=True)
+                ]
+        except Exception:
+            pass
+    speech_span = max(0.3, max_speech_end - lead_in_s)
+    return compute_word_timings(narration, speech_span, start_offset_s=lead_in_s)
 
 
 def synth_stickv_beats_audio(
@@ -126,9 +230,16 @@ def synth_stickv_beats_audio(
     voice_provider: VoiceProvider | None,
     voice_id: str,
     default_voice: str = DEFAULT_VIENEU_VOICE,
+    pause_scale: float = 1.0,
 ) -> list[tuple[Path, float]]:
-    """Sinh giọng từng beat bằng VieNeu-TTS theo lô (1 lần nạp model) & đo duration_sec."""
+    """Sinh giọng từng câu con trong beat, chèn khoảng nghỉ tự nhiên & đo duration."""
     audio_dir.mkdir(parents=True, exist_ok=True)
+    scale = max(0.5, min(2.0, float(pause_scale)))
+    lead_s = round(LEAD_IN_SILENCE_S * scale, 3)
+    gap_s = round(SENTENCE_GAP_S * scale, 3)
+
+    beat_sub_wavs: list[list[Path]] = []
+    synth_items: list[SynthItem] = []
 
     if voice_provider is not None:
         status = voice_provider.status()
@@ -145,31 +256,45 @@ def synth_stickv_beats_audio(
         chosen_voice = resolve_voice_id(
             voice_id, default_voice, available_voices=available_ids or None
         )
-        synth_items: list[SynthItem] = []
-        wav_paths: list[Path] = []
         for beat in beats:
-            wav_p = audio_dir / f"{beat.id}.wav"
-            wav_paths.append(wav_p)
-            spoken = (beat.narration or "").strip()
-            if spoken:
-                synth_items.append(SynthItem(text=spoken, voice_id=chosen_voice, out=wav_p))
+            sents = split_beat_sentences(beat.narration)
+            sub_paths: list[Path] = []
+            for s_idx, sent in enumerate(sents, start=1):
+                sp = audio_dir / f"{beat.id}_s{s_idx}.wav"
+                sub_paths.append(sp)
+                synth_items.append(SynthItem(text=sent, voice_id=chosen_voice, out=sp))
+            beat_sub_wavs.append(sub_paths)
         if synth_items:
             voice_provider.synthesize_many(synth_items)
     else:
-        wav_paths = []
         for beat in beats:
-            wav_p = audio_dir / f"{beat.id}.wav"
-            _write_fallback_wav(wav_p, beat.narration or "stickv")
-            wav_paths.append(wav_p)
+            sents = split_beat_sentences(beat.narration) or ["stickv"]
+            sub_paths = []
+            for s_idx, sent in enumerate(sents, start=1):
+                sp = audio_dir / f"{beat.id}_s{s_idx}.wav"
+                _write_fallback_wav(sp, sent)
+                sub_paths.append(sp)
+            beat_sub_wavs.append(sub_paths)
 
     results: list[tuple[Path, float]] = []
-    for beat, wav_p in zip(beats, wav_paths, strict=True):
-        if not wav_p.is_file() or wav_p.stat().st_size <= 44:
-            if voice_provider is not None:
-                raise RuntimeError(f"VieNeu-TTS không tạo được file giọng cho beat {beat.id}")
-            _write_fallback_wav(wav_p, beat.narration or "stickv")
-        raw_dur = measure_audio_duration(wav_p)
-        anchored_dur = round(max(1.2, raw_dur + 0.25), 3)
+    for beat, sub_paths in zip(beats, beat_sub_wavs, strict=True):
+        if voice_provider is not None and sub_paths:
+            for sp in sub_paths:
+                if not sp.is_file() or sp.stat().st_size <= 44:
+                    raise RuntimeError(f"VieNeu-TTS không tạo được file giọng cho beat {beat.id}")
+        wav_p = audio_dir / f"{beat.id}.wav"
+        tail_s = compute_pause_after(beat.narration, pause_scale=scale)
+        assembled_dur = _assemble_padded_beat_wav(
+            sub_paths,
+            wav_p,
+            lead_s=lead_s,
+            gap_s=gap_s,
+            tail_s=tail_s,
+        )
+        for sp in sub_paths:
+            sp.unlink(missing_ok=True)
+        probed_dur = measure_audio_duration(wav_p)
+        anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
         beat.duration_sec = anchored_dur
         results.append((wav_p, anchored_dur))
     return results

@@ -345,3 +345,77 @@ def test_append_outro_both_aspects_and_dynamic_pose_discovery(tmp_path: Path) ->
         fc_169 = cmds[-1][cmds[-1].index("-filter_complex") + 1]
         assert "#B22228" in fc_169
         assert "xfade=transition=fade:duration=0.5" in fc_169
+
+
+def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
+    import wave
+
+    import numpy as np
+    import pytest
+
+    from hbt.stickv.audio import (
+        align_beat_karaoke,
+        compute_pause_after,
+        split_beat_sentences,
+    )
+
+    assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một.", "Câu hai?"]
+    assert compute_pause_after("Kết thúc câu.") == pytest.approx(0.45)
+    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(0.25)
+
+    def _write_tone_wav(out_path: Path, dur_s: float = 0.80, sr: int = 24000) -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        n = int(dur_s * sr)
+        t = np.arange(n, dtype=np.float32) / sr
+        samples = (np.sin(2.0 * np.pi * 440.0 * t) * 12000.0).astype(np.int16)
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(samples.tobytes())
+
+    class _FakeVoiceProvider:
+        def status(self) -> SimpleNamespace:
+            return SimpleNamespace(ok=True, note="")
+
+        def list_voices(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(id="Thanh Bình")]
+
+        def synthesize_many(self, items) -> None:
+            for it in items:
+                _write_tone_wav(it.out, dur_s=0.80)
+
+    beats = [
+        StickvBeat(id="b1", narration="Câu một. Câu hai?"),
+        StickvBeat(id="b2", narration="Ý tiếp theo,"),
+    ]
+    audio_dir = tmp_path / "audio"
+    out_beats = synth_stickv_beats_audio(
+        beats,
+        audio_dir,
+        voice_provider=_FakeVoiceProvider(),
+        voice_id="Thanh Bình",
+        pause_scale=1.0,
+    )
+
+    # b1: 0.10 lead + 0.80 s1 + 0.30 gap + 0.80 s2 + 0.45 pause_after = 2.45s
+    assert beats[0].duration_sec == pytest.approx(2.45, abs=0.05)
+    assert out_beats[0][1] == pytest.approx(2.45, abs=0.05)
+    # b2: 0.10 lead + 0.80 s1 + 0.25 pause_after = 1.15s (clamped >= 1.2s)
+    assert beats[1].duration_sec >= 1.15
+
+    b1_wav = audio_dir / "b1.wav"
+    env = extract_wav_rms_envelope(b1_wav, fps=20, duration_sec=beats[0].duration_sec)
+    # Last 0.40s (8 frames at 20fps) are inside the 0.45s trailing pause -> silent
+    assert max(env[-8:]) == 0.0
+
+    timings = align_beat_karaoke(
+        "Câu một. Câu hai?",
+        b1_wav,
+        beats[0].duration_sec,
+        lead_in_s=0.10,
+        pause_after_s=0.45,
+    )
+    assert len(timings) == 4
+    assert timings[0][1] >= 0.08
+    assert timings[-1][2] <= beats[0].duration_sec - 0.45 + 0.02
