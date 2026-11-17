@@ -104,7 +104,15 @@ export function StickvPage() {
     queryFn: () => api.listAssetHub('stickman'),
   });
 
-  const models = listQuery.data?.gemini_models ?? [];
+  const models = useMemo(
+    () =>
+      (listQuery.data?.gemini_models ?? []).map((m) =>
+        typeof m === 'string'
+          ? { id: m, name: m }
+          : { id: String(m.id ?? ''), name: String(m.name || m.id || '') },
+      ),
+    [listQuery.data?.gemini_models],
+  );
   const projects = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
 
   useEffect(() => {
@@ -399,8 +407,8 @@ export function StickvPage() {
                   className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
                 >
                   {models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+                    <option key={m.id} value={m.id}>
+                      {m.name}
                     </option>
                   ))}
                 </select>

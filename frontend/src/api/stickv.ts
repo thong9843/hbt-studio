@@ -1,9 +1,14 @@
 import { apiRequest } from './client';
 import type { StickvAspect, StickvProject, StickvTheme } from './types';
 
+export interface GeminiModelOption {
+  id: string;
+  name: string;
+}
+
 export interface StickvListResponse {
   items: StickvProject[];
-  gemini_models: string[];
+  gemini_models: Array<string | GeminiModelOption>;
   default_model: string;
 }
 

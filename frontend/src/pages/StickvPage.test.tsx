@@ -41,8 +41,11 @@ vi.mock('../api/stickv', () => ({
           updated_at: '2026-11-17T00:00:00Z',
         },
       ],
-      gemini_models: ['gemini-2.5-flash', 'gemini-2.5-pro'],
-      default_model: 'gemini-2.5-flash',
+      gemini_models: [
+        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
+        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+      ],
+      default_model: 'gemini-3.8-flash',
     }),
     save: vi.fn(),
     generate: vi.fn(),
@@ -57,7 +60,21 @@ vi.mock('../api/endpoints', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      listAssetHub: vi.fn().mockResolvedValue({ category: 'stickman', items: [] }),
+      listAssetHub: vi.fn().mockResolvedValue({
+        category: 'stickman',
+        items: [
+          {
+            id: 'custom-flow',
+            name: 'flow_hero.png',
+            category: 'stickman',
+            kind: 'image',
+            size: 1200,
+            modified_at: '2026-11-17T00:00:00Z',
+            url: '/api/asset-hub/files/stickman/flow_hero.png',
+            title: 'Flow Hero',
+          },
+        ],
+      }),
     },
   };
 });
@@ -81,7 +98,11 @@ describe('StickvPage', () => {
     expect(await screen.findByDisplayValue('Đây là beat mở đầu.')).toBeInTheDocument();
 
     const modelSelect = screen.getByLabelText('Chọn model Gemini') as HTMLSelectElement;
-    expect(modelSelect.value).toBe('gemini-2.5-flash');
+    expect(modelSelect.value).toBe('gemini-3.8-flash');
+    expect(
+      screen.getByRole('option', { name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Dáng: Flow Hero' })).toBeInTheDocument();
 
     const toggle169 = screen.getByRole('button', { name: '16:9 Ngang' });
     fireEvent.click(toggle169);

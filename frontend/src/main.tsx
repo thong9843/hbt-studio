@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { App } from './app/App';
+import { RouteErrorFallback } from './components/RouteErrorFallback';
 import { ToastProvider } from './components/Toast';
 import { applyTheme, readStoredTheme } from './utils/theme';
 import './index.css';
@@ -26,6 +27,7 @@ const router = createBrowserRouter(
           <App />
         </ToastProvider>
       ),
+      errorElement: <RouteErrorFallback />,
     },
   ],
   {
