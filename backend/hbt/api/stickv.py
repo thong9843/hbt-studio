@@ -12,7 +12,12 @@ from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
 from hbt.shared.llm import AVAILABLE_GEMINI_MODELS, GEMINI_MODEL, GeminiClientError
-from hbt.stickv.llm import generate_stickv_script
+from hbt.stickv.llm import (
+    build_director_prompt,
+    generate_stickv_script,
+    parse_stickv_json_payload,
+    split_raw_narration_to_beats,
+)
 from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
 from hbt.stickv.storage import (
     create_stickv_project,
@@ -54,6 +59,21 @@ class StickvRenderBody(BaseModel):
     preview: bool = False
 
 
+class StickvImportJsonBody(BaseModel):
+    raw_json: str = Field(min_length=1)
+    topic: str = "science"
+    aspect: StickvAspect = "9:16"
+    theme: StickvTheme = "cream"
+
+
+class StickvImportScriptBody(BaseModel):
+    raw_text: str = Field(min_length=1)
+    title: str = ""
+    topic: str = "science"
+    aspect: StickvAspect = "9:16"
+    theme: StickvTheme = "cream"
+
+
 @router.get("/stickv")
 def list_stickv(state: State) -> dict[str, Any]:
     projects = list_stickv_projects(state.settings.workspace_dir)
@@ -61,6 +81,7 @@ def list_stickv(state: State) -> dict[str, Any]:
         "items": [p.model_dump(mode="json") for p in projects],
         "gemini_models": list(AVAILABLE_GEMINI_MODELS),
         "default_model": GEMINI_MODEL,
+        "director_prompt": build_director_prompt(),
     }
 
 
@@ -120,6 +141,40 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
             beats=beats,
         )
     return {"project": proj.model_dump(mode="json"), "meta": meta}
+
+
+@router.post("/stickv/import-json")
+def import_stickv_json(body: StickvImportJsonBody, state: State) -> dict[str, Any]:
+    try:
+        title, beats = parse_stickv_json_payload(body.raw_json)
+    except Exception as exc:
+        raise Unprocessable(f"JSON kịch bản không hợp lệ: {exc}") from exc
+    proj = create_stickv_project(
+        state.settings.workspace_dir,
+        title=title,
+        topic=body.topic,
+        aspect=body.aspect,
+        theme=body.theme,
+        beats=beats,
+    )
+    return {"project": proj.model_dump(mode="json")}
+
+
+@router.post("/stickv/import-script")
+def import_stickv_script(body: StickvImportScriptBody, state: State) -> dict[str, Any]:
+    try:
+        title, beats = split_raw_narration_to_beats(body.raw_text, title=body.title)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    proj = create_stickv_project(
+        state.settings.workspace_dir,
+        title=title,
+        topic=body.topic,
+        aspect=body.aspect,
+        theme=body.theme,
+        beats=beats,
+    )
+    return {"project": proj.model_dump(mode="json")}
 
 
 @router.get("/stickv/{slug}")

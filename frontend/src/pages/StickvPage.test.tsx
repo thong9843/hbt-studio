@@ -42,10 +42,11 @@ vi.mock('../api/stickv', () => ({
         },
       ],
       gemini_models: [
-        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
-        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite (Mặc định / 500 RPD)' },
+        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Nhanh)' },
       ],
-      default_model: 'gemini-3.8-flash',
+      default_model: 'gemini-3.1-flash-lite',
+      director_prompt: 'Prompt Đạo diễn 5 chặng',
     }),
     save: vi.fn(),
     generate: vi.fn(),
@@ -98,11 +99,16 @@ describe('StickvPage', () => {
     expect(await screen.findByDisplayValue('Đây là beat mở đầu.')).toBeInTheDocument();
 
     const modelSelect = screen.getByLabelText('Chọn model Gemini') as HTMLSelectElement;
-    expect(modelSelect.value).toBe('gemini-3.8-flash');
+    expect(modelSelect.value).toBe('gemini-3.1-flash-lite');
     expect(
-      screen.getByRole('option', { name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' }),
+      screen.getByRole('option', { name: 'Gemini 3.1 Flash Lite (Mặc định / 500 RPD)' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Dáng: Flow Hero' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Dán JSON (0 Token)' }));
+    expect(screen.getByRole('button', { name: /Copy Prompt Đạo diễn/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Dán Lời thoại' }));
+    expect(screen.getByRole('button', { name: /Tách lời thoại thành Beat/i })).toBeInTheDocument();
 
     const toggle169 = screen.getByRole('button', { name: '16:9 Ngang' });
     fireEvent.click(toggle169);

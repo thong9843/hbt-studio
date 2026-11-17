@@ -1,4 +1,4 @@
-"""Âm thanh StickV: VieNeu-TTS theo từng beat (Audio Anchoring), SFX & trộn BGM -14 LUFS."""
+"""Âm thanh StickV: VieNeu-TTS batch (Audio Anchoring), lip-sync RMS, karaoke & -14 LUFS."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ import logging
 import wave
 from pathlib import Path
 
+import numpy as np
+
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.ffutil import run_ffmpeg
-from hbt.postv.voice import VoiceProvider
+from hbt.postv.voice import SynthItem, VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_RESOURCE_CLAMP,
     build_acrossfade_filter_graph,
     measure_audio_duration,
 )
-from hbt.shared.tts_client import resolve_voice_id, synthesize_single_segment_sync
+from hbt.shared.tts_client import resolve_voice_id
 from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
 
 
 def _write_fallback_wav(dest: Path, text: str) -> None:
-    """Tạo file WAV im lặng ước lượng theo độ dài chữ khi thiếu VieNeu-TTS."""
+    """Tạo file WAV ước lượng theo độ dài chữ khi chạy unit test không có VieNeuProvider."""
     dur_s = max(1.4, min(12.0, len(text.split()) * 0.38))
     sr = 24000
     n_frames = int(dur_s * sr)
@@ -65,6 +67,58 @@ def resolve_sfx_file(
     return None
 
 
+def extract_wav_rms_envelope(wav_path: Path, fps: int, duration_sec: float) -> list[float]:
+    """Trích biên độ RMS theo từng khung hình (0.0..1.0) để đồng bộ nhép miệng (Lip-sync)."""
+    n_frames = max(1, int(round(duration_sec * fps)))
+    if not wav_path.is_file():
+        return [0.0] * n_frames
+    try:
+        with wave.open(str(wav_path), "rb") as wf:
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+        if not raw or sw != 2:
+            return [0.0] * n_frames
+        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+        if ch > 1:
+            samples = samples.reshape(-1, ch).mean(axis=1)
+        samples /= 32768.0
+        win = max(1, int(sr / fps))
+        out: list[float] = []
+        peak_ref = max(0.05, float(np.percentile(np.abs(samples), 95))) if len(samples) else 0.1
+        for f_idx in range(n_frames):
+            s0 = f_idx * win
+            s1 = s0 + win
+            if s0 >= len(samples):
+                out.append(0.0)
+            else:
+                rms = float(np.sqrt(np.mean(samples[s0:s1] ** 2)))
+                out.append(min(1.0, round(rms / peak_ref, 3)))
+        return out
+    except Exception:
+        return [0.0] * n_frames
+
+
+def compute_word_timings(
+    narration: str, speech_duration_sec: float
+) -> list[tuple[str, float, float]]:
+    """Chia mốc thời gian tương đối cho từng từ để tô sáng phụ đề Karaoke."""
+    words = [w for w in (narration or "").split() if w]
+    if not words:
+        return []
+    dur = max(0.5, float(speech_duration_sec))
+    weights = [max(1, len(w)) for w in words]
+    total_w = sum(weights)
+    timings: list[tuple[str, float, float]] = []
+    cur = 0.0
+    for w, wt in zip(words, weights, strict=True):
+        span = dur * (wt / total_w)
+        timings.append((w, cur, cur + span))
+        cur += span
+    return timings
+
+
 def synth_stickv_beats_audio(
     beats: list[StickvBeat],
     audio_dir: Path,
@@ -73,30 +127,44 @@ def synth_stickv_beats_audio(
     voice_id: str,
     default_voice: str = "Bình (nam miền Bắc)",
 ) -> list[tuple[Path, float]]:
-    """Sinh giọng từng beat bằng VieNeu-TTS và đo `duration_sec` chính xác bằng `ffprobe`."""
+    """Sinh giọng từng beat bằng VieNeu-TTS theo lô (1 lần nạp model) & đo duration_sec."""
     audio_dir.mkdir(parents=True, exist_ok=True)
     chosen_voice = resolve_voice_id(voice_id, default_voice)
-    tts_ok = voice_provider is not None and bool(
-        getattr(voice_provider, "available", lambda: False)()
-    )
+
+    if voice_provider is not None:
+        status = voice_provider.status()
+        if not status.ok:
+            raise RuntimeError(
+                status.note
+                or "VieNeu-TTS (.venv-tts hoặc models/hf_vieneu) chưa sẵn sàng để đọc lời thoại."
+            )
+        synth_items: list[SynthItem] = []
+        wav_paths: list[Path] = []
+        for beat in beats:
+            wav_p = audio_dir / f"{beat.id}.wav"
+            wav_paths.append(wav_p)
+            spoken = (beat.narration or "").strip()
+            if spoken:
+                synth_items.append(SynthItem(text=spoken, voice_id=chosen_voice, out=wav_p))
+        if synth_items:
+            voice_provider.synthesize_many(synth_items)
+    else:
+        wav_paths = []
+        for beat in beats:
+            wav_p = audio_dir / f"{beat.id}.wav"
+            _write_fallback_wav(wav_p, beat.narration or "stickv")
+            wav_paths.append(wav_p)
 
     results: list[tuple[Path, float]] = []
-    for idx, beat in enumerate(beats, start=1):
-        wav_path = audio_dir / f"{beat.id}.wav"
-        synthesize_single_segment_sync(
-            spoken=beat.narration,
-            chosen_voice=chosen_voice,
-            dest_wav=wav_path,
-            voice_provider=voice_provider,
-            tts_ok=tts_ok,
-            strict_tts=False,
-            index=idx,
-            fallback_fn=_write_fallback_wav,
-        )
-        raw_dur = measure_audio_duration(wav_path)
+    for beat, wav_p in zip(beats, wav_paths, strict=True):
+        if not wav_p.is_file() or wav_p.stat().st_size <= 44:
+            if voice_provider is not None:
+                raise RuntimeError(f"VieNeu-TTS không tạo được file giọng cho beat {beat.id}")
+            _write_fallback_wav(wav_p, beat.narration or "stickv")
+        raw_dur = measure_audio_duration(wav_p)
         anchored_dur = round(max(1.2, raw_dur + 0.25), 3)
         beat.duration_sec = anchored_dur
-        results.append((wav_path, anchored_dur))
+        results.append((wav_p, anchored_dur))
     return results
 
 
@@ -120,18 +188,16 @@ def mix_stickv_audio(
     inputs: list[str] = []
     filter_parts: list[str] = []
 
-    # 1. Đặt từng beat giọng vào đúng mốc thời gian tích lũy (Audio Anchoring)
     cur_t = 0.0
     voice_labels: list[str] = []
     sfx_events: list[tuple[float, Path]] = []
 
     for i, (beat, (wav_p, dur)) in enumerate(zip(beats, beat_wavs, strict=False)):
-        idx = i
         inputs.extend(["-i", str(wav_p)])
         delay_ms = int(round(cur_t * 1000))
         lbl = f"[v{i}]"
         filter_parts.append(
-            f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"adelay={delay_ms}|{delay_ms}{lbl}"
         )
         voice_labels.append(lbl)
@@ -145,7 +211,6 @@ def mix_stickv_audio(
         f"apad=whole_dur={total_dur:.3f}[voice_bus]"
     )
 
-    # 2. SFX bus
     next_idx = len(beat_wavs)
     sfx_labels: list[str] = []
     for s_i, (s_t, s_path) in enumerate(sfx_events[:40]):
@@ -166,14 +231,12 @@ def mix_stickv_audio(
     else:
         filter_parts.append("[voice_bus]acopy[fg_bus]")
 
-    # 3. Nhạc nền BGM (acrossfade + sidechaincompress ducking)
     bgm_tracks = build_topic_bgm_playlist(library_dir, total_dur, topic=topic)
     if bgm_tracks:
         bgm_start_idx = next_idx
         for t in bgm_tracks:
             inputs.extend(["-i", str(t)])
         bgm_fc, bgm_lbl = build_acrossfade_filter_graph(len(bgm_tracks), total_dur)
-        # Remap input indices [0:a], [1:a]... trong bgm_fc sang [bgm_start_idx + k:a]
         for k in range(len(bgm_tracks) - 1, -1, -1):
             bgm_fc = bgm_fc.replace(f"[{k}:a]", f"[{bgm_start_idx + k}:a]")
         filter_parts.append(bgm_fc)

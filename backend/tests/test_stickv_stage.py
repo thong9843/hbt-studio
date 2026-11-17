@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from PIL import Image
 
-from hbt.stickv.audio import mix_stickv_audio, synth_stickv_beats_audio
+from hbt.stickv.audio import (
+    compute_word_timings,
+    extract_wav_rms_envelope,
+    mix_stickv_audio,
+    synth_stickv_beats_audio,
+)
 from hbt.stickv.models import StickvBeat, StickvProject
 from hbt.stickv.render import render_stickv
-from hbt.stickv.stage import render_beat_layers
+from hbt.stickv.stage import render_animated_beat_frame, render_beat_layers
 
 
 def test_render_beat_layers_all_board_types_and_aspects(tmp_path: Path) -> None:
@@ -101,9 +108,15 @@ def test_synth_and_render_cleans_up_chunks_dir(tmp_path: Path) -> None:
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         Path(cmd[-1]).write_bytes(b"fake-media-bytes")
 
+    def fake_stream(*, out_mp4: Path, **kwargs):
+        out_mp4.parent.mkdir(parents=True, exist_ok=True)
+        out_mp4.write_bytes(b"fake-media-bytes")
+        return out_mp4
+
     with (
         patch("hbt.stickv.audio.run_ffmpeg", side_effect=fake_ffmpeg),
         patch("hbt.stickv.render.run_ffmpeg", side_effect=fake_ffmpeg),
+        patch("hbt.stickv.render._stream_beat_frames_to_ffmpeg", side_effect=fake_stream),
         patch("hbt.stickv.render.measure_audio_duration", return_value=3.2),
     ):
         res = render_stickv(
@@ -134,3 +147,35 @@ def test_synth_and_render_cleans_up_chunks_dir(tmp_path: Path) -> None:
             out_wav=pdir / "mixed.wav",
         )
     assert mixed.is_file()
+
+
+def test_lipsync_karaoke_and_vieneu_status_check(tmp_path: Path) -> None:
+    timings = compute_word_timings("Xin chào các bạn", 2.0)
+    assert len(timings) == 4
+    assert timings[0][0] == "Xin"
+
+    bg = Image.new("RGB", (1080, 1920), (250, 247, 240))
+    ch = Image.new("RGBA", (300, 400), (0, 0, 0, 0))
+    beat = StickvBeat(id="b1", narration="Xin chào các bạn", pose="explain")
+    frame = render_animated_beat_frame(
+        bg_img=bg,
+        char_img=ch,
+        beat=beat,
+        aspect="9:16",
+        t_sec=0.5,
+        mouth_open=0.8,
+        word_timings=timings,
+    )
+    assert frame.size == (1080, 1920)
+    frame.close()
+    bg.close()
+    ch.close()
+
+    env = extract_wav_rms_envelope(tmp_path / "missing.wav", 24, 1.0)
+    assert len(env) == 24
+
+    broken_provider = SimpleNamespace(status=lambda: SimpleNamespace(ok=False, note="Thiếu model"))
+    with pytest.raises(RuntimeError, match="Thiếu model"):
+        synth_stickv_beats_audio(
+            [beat], tmp_path / "aud", voice_provider=broken_provider, voice_id="vienneu_default"
+        )

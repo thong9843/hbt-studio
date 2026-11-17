@@ -75,6 +75,21 @@ def test_stickv_api_crud_generate_and_media_upload(tmp_path: Path) -> None:
         assert r_ren.status_code == 202
         assert "job_id" in r_ren.json()
 
-    # 5. Xóa dự án
+    # 5. Import JSON (0 Token) & Import Lời thoại (Không cần AI)
+    r_imp_json = client.post(
+        "/api/stickv/import-json",
+        json={"raw_json": '{"title":"Từ Web Gemini","beats":[{"narration":"Xin chào"}]}'},
+    )
+    assert r_imp_json.status_code == 200
+    assert r_imp_json.json()["project"]["title"] == "Từ Web Gemini"
+
+    r_imp_script = client.post(
+        "/api/stickv/import-script",
+        json={"raw_text": "Câu một.\nCâu hai rất hay."},
+    )
+    assert r_imp_script.status_code == 200
+    assert len(r_imp_script.json()["project"]["beats"]) == 2
+
+    # 6. Xóa dự án
     r_del = client.delete(f"/api/stickv/{slug}")
     assert r_del.status_code == 200

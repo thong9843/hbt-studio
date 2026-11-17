@@ -1,8 +1,8 @@
-"""Khởi tạo bộ 8 dáng nhân vật người que chuẩn HBT Studio (PNG nền trong suốt).
+"""Khởi tạo bộ 8 dáng nhân vật người que chuẩn HBT Studio (Supersampling 3x PNG nền trong suốt).
 
-Vẽ bằng Pillow ở độ phân giải 2x (1024x1280) rồi thu nhỏ LANCZOS về 512x640
-để nét vẽ vector sắc nét, có viền sáng nhẹ giúp nổi bật trên cả nền kem (#FAF7F0)
-và nền tối (#111827), kèm điểm nhấn thương hiệu Đỏ (#D9232E) / Vàng (#F59E0B).
+Vẽ bằng Pillow ở độ phân giải 3x (1536x1920) rồi thu nhỏ LANCZOS về 512x640
+để nét vẽ vector mịn mượt không răng cưa, đầy đủ khớp vai-khuỷu tay-bàn tay-đầu gối-bàn chân,
+mắt có tròng/lông mày biểu cảm, cà vạt đỏ HBT và đạo cụ vector sắc nét.
 """
 
 from __future__ import annotations
@@ -38,133 +38,155 @@ POSE_TITLES: Final[dict[str, str]] = {
     "angry": "Tức giận / Phản đối",
 }
 
-# Bảng màu chuẩn HBT Stickman (tương phản tốt trên cả nền sáng & tối)
-INK = (28, 36, 52, 255)
-RIM = (255, 255, 255, 225)
+INK = (24, 32, 48, 255)
+RIM = (255, 255, 255, 235)
 HEAD_FILL = (255, 253, 248, 255)
 HBT_RED = (217, 35, 46, 255)
 HBT_AMBER = (245, 158, 11, 255)
 HBT_GOLD = (250, 204, 21, 255)
 TEAR_BLUE = (56, 189, 248, 255)
 
-_SCALE = 2
+_SCALE = 3
 _W = 512 * _SCALE
 _H = 640 * _SCALE
 
 
-def _line(
+def _limb(
     draw: ImageDraw.ImageDraw,
     pts: list[tuple[float, float]],
-    width: int = 24,
+    width: int = 34,
     color: tuple[int, int, int, int] = INK,
     *,
     rim: bool = True,
+    hand_or_foot: str | None = None,
 ) -> None:
-    """Vẽ đoạn nét tròn đầu (joint/cap) kèm viền sáng nhẹ để nổi trên nền tối."""
+    """Vẽ chi có khớp tròn (vai/khuỷu/gối) và bàn tay/bàn chân ở điểm cuối."""
     if rim:
-        rim_w = width + 10
+        rim_w = width + 14
         draw.line(pts, fill=RIM, width=rim_w, joint="curve")
-        for x, y in (pts[0], pts[-1]):
+        for x, y in pts:
             r = rim_w / 2
             draw.ellipse((x - r, y - r, x + r, y + r), fill=RIM)
     draw.line(pts, fill=color, width=width, joint="curve")
-    for x, y in (pts[0], pts[-1]):
+    for x, y in pts:
         r = width / 2
         draw.ellipse((x - r, y - r, x + r, y + r), fill=color)
+
+    ex, ey = pts[-1]
+    if hand_or_foot == "hand":
+        hr = width * 0.72
+        draw.ellipse((ex - hr - 4, ey - hr - 4, ex + hr + 4, ey + hr + 4), fill=RIM)
+        draw.ellipse(
+            (ex - hr, ey - hr, ex + hr, ey + hr),
+            fill=HEAD_FILL,
+            outline=INK,
+            width=10,
+        )
+    elif hand_or_foot == "foot":
+        fx0, fy0 = ex - width * 0.55, ey - width * 0.35
+        fx1, fy1 = ex + width * 1.15, ey + width * 0.52
+        draw.rounded_rectangle((fx0 - 4, fy0 - 4, fx1 + 4, fy1 + 4), radius=18, fill=RIM)
+        draw.rounded_rectangle((fx0, fy0, fx1, fy1), radius=16, fill=INK)
 
 
 def _draw_head(
     draw: ImageDraw.ImageDraw,
     cx: float,
     cy: float,
-    r: float = 112,
+    r: float = 164,
     *,
     headband: bool = False,
 ) -> None:
-    # Viền ngoài nhẹ
-    draw.ellipse((cx - r - 6, cy - r - 6, cx + r + 6, cy + r + 6), fill=RIM)
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=HEAD_FILL, outline=INK, width=22)
+    draw.ellipse((cx - r - 9, cy - r - 9, cx + r + 9, cy + r + 9), fill=RIM)
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=HEAD_FILL, outline=INK, width=30)
     if headband:
         draw.arc(
-            (cx - r + 6, cy - r + 6, cx + r - 6, cy + r - 6),
-            start=205,
-            end=335,
+            (cx - r + 10, cy - r + 10, cx + r - 10, cy + r - 10),
+            start=204,
+            end=336,
             fill=HBT_RED,
-            width=26,
+            width=34,
         )
 
 
 def _draw_tie(draw: ImageDraw.ImageDraw, nx: float, ny: float, tilt: float = 0.0) -> None:
-    """Vẽ cà vạt Đỏ HBT ở cổ tạo điểm nhấn nhận diện."""
     pts = [
         (nx, ny),
-        (nx - 22 + tilt, ny + 76),
-        (nx + tilt * 1.3, ny + 128),
-        (nx + 22 + tilt, ny + 76),
+        (nx - 32 + tilt, ny + 114),
+        (nx + tilt * 1.3, ny + 190),
+        (nx + 32 + tilt, ny + 114),
     ]
-    draw.polygon(pts, fill=HBT_RED)
-    draw.ellipse((nx - 14, ny - 8, nx + 14, ny + 18), fill=HBT_AMBER)
+    draw.polygon(pts, fill=HBT_RED, outline=INK)
+    draw.ellipse((nx - 20, ny - 10, nx + 20, ny + 26), fill=HBT_AMBER, outline=INK, width=6)
 
 
 def _draw_eyes(
     draw: ImageDraw.ImageDraw,
     cx: float,
     cy: float,
-    dx: float = 38,
-    dy: float = -12,
+    dx: float = 56,
+    dy: float = -18,
     style: str = "normal",
 ) -> None:
     lx, rx, ey = cx - dx, cx + dx, cy + dy
     if style == "happy":
         for ex in (lx, rx):
-            draw.arc((ex - 20, ey - 14, ex + 20, ey + 18), start=190, end=350, fill=INK, width=12)
+            draw.arc((ex - 28, ey - 20, ex + 28, ey + 24), start=190, end=350, fill=INK, width=16)
     elif style == "shock":
         for ex in (lx, rx):
             draw.ellipse(
-                (ex - 22, ey - 22, ex + 22, ey + 22),
+                (ex - 32, ey - 32, ex + 32, ey + 32),
                 fill=(255, 255, 255, 255),
                 outline=INK,
-                width=10,
+                width=14,
             )
-            draw.ellipse((ex - 7, ey - 7, ex + 7, ey + 7), fill=INK)
+            draw.ellipse((ex - 10, ey - 10, ex + 10, ey + 10), fill=INK)
     elif style == "sad":
         for ex in (lx, rx):
-            draw.ellipse((ex - 11, ey - 11, ex + 11, ey + 11), fill=INK)
-        _line(draw, [(lx - 22, ey - 18), (lx + 14, ey - 32)], width=10, rim=False)
-        _line(draw, [(rx + 22, ey - 18), (rx - 14, ey - 32)], width=10, rim=False)
+            draw.ellipse((ex - 16, ey - 16, ex + 16, ey + 16), fill=INK)
+        _limb(draw, [(lx - 34, ey - 26), (lx + 20, ey - 46)], width=13, rim=False)
+        _limb(draw, [(rx + 34, ey - 26), (rx - 20, ey - 46)], width=13, rim=False)
     elif style == "angry":
         for ex in (lx, rx):
-            draw.ellipse((ex - 12, ey - 12, ex + 12, ey + 12), fill=HBT_RED)
-        _line(draw, [(lx - 24, ey - 32), (lx + 18, ey - 14)], width=12, rim=False)
-        _line(draw, [(rx + 24, ey - 32), (rx - 18, ey - 14)], width=12, rim=False)
+            draw.ellipse((ex - 18, ey - 18, ex + 18, ey + 18), fill=HBT_RED, outline=INK, width=6)
+        _limb(draw, [(lx - 36, ey - 46), (lx + 24, ey - 20)], width=16, rim=False)
+        _limb(draw, [(rx + 36, ey - 46), (rx - 24, ey - 20)], width=16, rim=False)
     else:
         for ex in (lx, rx):
-            draw.ellipse((ex - 13, ey - 15, ex + 13, ey + 15), fill=INK)
-            draw.ellipse((ex - 5, ey - 9, ex + 1, ey - 3), fill=(255, 255, 255, 255))
+            draw.ellipse(
+                (ex - 22, ey - 26, ex + 22, ey + 26),
+                fill=(255, 255, 255, 255),
+                outline=INK,
+                width=9,
+            )
+            draw.ellipse((ex - 11, ey - 12, ex + 11, ey + 12), fill=INK)
+            draw.ellipse((ex - 6, ey - 10, ex + 1, ey - 3), fill=(255, 255, 255, 255))
+        _limb(draw, [(lx - 24, ey - 42), (lx + 22, ey - 44)], width=11, rim=False)
+        _limb(draw, [(rx - 22, ey - 44), (rx + 24, ey - 42)], width=11, rim=False)
 
 
 def _draw_mouth(draw: ImageDraw.ImageDraw, cx: float, cy: float, style: str = "smile") -> None:
-    my = cy + 44
+    my = cy + 64
     if style == "smile":
-        draw.arc((cx - 34, my - 22, cx + 34, my + 24), start=15, end=165, fill=INK, width=12)
+        draw.arc((cx - 48, my - 30, cx + 48, my + 34), start=15, end=165, fill=INK, width=16)
     elif style == "open_happy":
         draw.chord(
-            (cx - 38, my - 18, cx + 38, my + 34),
+            (cx - 54, my - 24, cx + 54, my + 48),
             start=0,
             end=180,
             fill=HBT_RED,
             outline=INK,
-            width=10,
+            width=14,
         )
     elif style == "shock":
-        draw.ellipse((cx - 24, my - 14, cx + 24, my + 34), fill=HBT_RED, outline=INK, width=10)
+        draw.ellipse((cx - 34, my - 20, cx + 34, my + 48), fill=HBT_RED, outline=INK, width=14)
     elif style == "think":
-        _line(draw, [(cx - 24, my + 8), (cx + 22, my)], width=11, rim=False)
+        _limb(draw, [(cx - 34, my + 10), (cx + 32, my)], width=15, rim=False)
     elif style == "sad":
-        draw.arc((cx - 30, my + 2, cx + 30, my + 40), start=195, end=345, fill=INK, width=11)
+        draw.arc((cx - 44, my + 4, cx + 44, my + 58), start=195, end=345, fill=INK, width=15)
     elif style == "angry":
         draw.polygon(
-            [(cx - 32, my + 20), (cx - 12, my - 4), (cx + 12, my - 4), (cx + 32, my + 20)],
+            [(cx - 46, my + 28), (cx - 18, my - 6), (cx + 18, my - 6), (cx + 46, my + 28)],
             fill=(255, 255, 255, 255),
             outline=INK,
         )
@@ -182,7 +204,7 @@ def _draw_star(
 
 
 def render_pose_png(pose: str, out_path: Path) -> Path:
-    """Vẽ một dáng nhân vật người que chuẩn và lưu ra PNG trong suốt 512x640."""
+    """Vẽ một dáng nhân vật người que chuẩn (Supersampling 3x -> 512x640 RGBA)."""
     if pose not in DEFAULT_POSES:
         raise ValueError(f"Dáng không hợp lệ: {pose}")
 
@@ -193,137 +215,152 @@ def render_pose_png(pose: str, out_path: Path) -> Path:
     try:
         draw = ImageDraw.Draw(canvas)
         cx = _W * 0.48
-        head_y = 220.0
-        neck_y = 336.0
-        hip_y = 740.0
+        head_y = 330.0
+        neck_y = 504.0
+        hip_y = 1110.0
 
-        # Bóng đất mềm (2.5D grounding)
-        draw.ellipse((cx - 190, 1080, cx + 190, 1150), fill=(15, 23, 42, 48))
+        draw.ellipse((cx - 280, 1620, cx + 280, 1720), fill=(15, 23, 42, 52))
 
         if pose == "explain":
-            _line(draw, [(cx, hip_y), (cx - 95, 930), (cx - 115, 1100)])
-            _line(draw, [(cx, hip_y), (cx + 95, 930), (cx + 115, 1100)])
-            _line(draw, [(cx, neck_y), (cx, hip_y)])
-            _line(draw, [(cx, neck_y + 40), (cx - 120, 520), (cx - 75, 650)])
-            _line(draw, [(cx, neck_y + 40), (cx + 150, 410), (cx + 275, 340)])
-            # Que chỉ bảng HBT Amber
-            _line(draw, [(cx + 265, 345), (cx + 390, 235)], width=14, color=HBT_AMBER)
-            _draw_tie(draw, cx, neck_y + 12)
+            _limb(draw, [(cx, hip_y), (cx - 140, 1390), (cx - 165, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y), (cx + 140, 1390), (cx + 165, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y), (cx, hip_y)])
+            _limb(draw, [(cx, neck_y + 58), (cx - 175, 780), (cx - 110, 975)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 58), (cx + 225, 615), (cx + 410, 510)], hand_or_foot="hand")
+            _limb(draw, [(cx + 400, 515), (cx + 585, 345)], width=20, color=HBT_AMBER)
+            _draw_tie(draw, cx, neck_y + 18)
             _draw_head(draw, cx, head_y, headband=True)
-            _draw_eyes(draw, cx + 10, head_y, style="normal")
-            _draw_mouth(draw, cx + 10, head_y, style="smile")
+            _draw_eyes(draw, cx + 14, head_y, style="normal")
+            _draw_mouth(draw, cx + 14, head_y, style="smile")
 
         elif pose == "think":
-            _line(draw, [(cx, hip_y), (cx - 75, 930), (cx - 90, 1100)])
-            _line(draw, [(cx, hip_y), (cx + 85, 930), (cx + 70, 1100)])
-            _line(draw, [(cx, neck_y), (cx - 12, hip_y)])
-            _line(draw, [(cx, neck_y + 40), (cx - 110, 560), (cx + 10, 560)])
-            _line(draw, [(cx, neck_y + 40), (cx + 120, 480), (cx + 46, 330)])
-            _draw_tie(draw, cx, neck_y + 10)
-            _draw_head(draw, cx - 10, head_y)
-            _draw_eyes(draw, cx - 10, head_y, dy=-18, style="normal")
-            _draw_mouth(draw, cx - 10, head_y, style="think")
-            # Bóng đèn / dấu hỏi vàng
-            draw.ellipse((cx + 170, 88, cx + 266, 184), fill=HBT_GOLD, outline=INK, width=10)
-            draw.rectangle((cx + 200, 182, cx + 236, 212), fill=HBT_AMBER, outline=INK, width=6)
+            _limb(draw, [(cx, hip_y), (cx - 115, 1395), (cx - 135, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y), (cx + 125, 1395), (cx + 105, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y), (cx - 18, hip_y)])
+            _limb(draw, [(cx, neck_y + 58), (cx - 165, 840), (cx + 15, 840)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 58), (cx + 180, 720), (cx + 68, 495)], hand_or_foot="hand")
+            _draw_tie(draw, cx, neck_y + 14)
+            _draw_head(draw, cx - 14, head_y)
+            _draw_eyes(draw, cx - 14, head_y, dy=-26, style="normal")
+            _draw_mouth(draw, cx - 14, head_y, style="think")
+            draw.ellipse((cx + 255, 132, cx + 398, 276), fill=HBT_GOLD, outline=INK, width=14)
+            draw.rectangle((cx + 300, 272, cx + 354, 318), fill=HBT_AMBER, outline=INK, width=9)
 
         elif pose == "shock":
-            _line(draw, [(cx, hip_y), (cx - 135, 920), (cx - 155, 1100)])
-            _line(draw, [(cx, hip_y), (cx + 135, 920), (cx + 155, 1100)])
-            _line(draw, [(cx, neck_y), (cx, hip_y)])
-            _line(draw, [(cx, neck_y + 40), (cx - 170, 340), (cx - 210, 195)])
-            _line(draw, [(cx, neck_y + 40), (cx + 170, 340), (cx + 210, 195)])
-            _draw_tie(draw, cx, neck_y + 12)
+            _limb(draw, [(cx, hip_y), (cx - 200, 1380), (cx - 230, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y), (cx + 200, 1380), (cx + 230, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y), (cx, hip_y)])
+            _limb(draw, [(cx, neck_y + 58), (cx - 255, 510), (cx - 315, 290)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 58), (cx + 255, 510), (cx + 315, 290)], hand_or_foot="hand")
+            _draw_tie(draw, cx, neck_y + 18)
             _draw_head(draw, cx, head_y)
             _draw_eyes(draw, cx, head_y, style="shock")
             _draw_mouth(draw, cx, head_y, style="shock")
-            # Tia sét sốc Đỏ/Vàng
-            _line(draw, [(cx - 220, 90), (cx - 170, 145)], width=16, color=HBT_RED)
-            _line(draw, [(cx + 220, 90), (cx + 170, 145)], width=16, color=HBT_AMBER)
+            _limb(draw, [(cx - 330, 135), (cx - 255, 218)], width=22, color=HBT_RED)
+            _limb(draw, [(cx + 330, 135), (cx + 255, 218)], width=22, color=HBT_AMBER)
 
         elif pose == "happy":
-            _line(draw, [(cx, hip_y - 30), (cx - 120, 900), (cx - 165, 1040)])
-            _line(draw, [(cx, hip_y - 30), (cx + 120, 900), (cx + 165, 1040)])
-            _line(draw, [(cx, neck_y - 20), (cx, hip_y - 30)])
-            _line(draw, [(cx, neck_y + 20), (cx - 160, 260), (cx - 230, 140)])
-            _line(draw, [(cx, neck_y + 20), (cx + 160, 260), (cx + 230, 140)])
-            _draw_tie(draw, cx, neck_y - 8)
-            _draw_head(draw, cx, head_y - 20, headband=True)
-            _draw_eyes(draw, cx, head_y - 20, style="happy")
-            _draw_mouth(draw, cx, head_y - 20, style="open_happy")
-            _draw_star(draw, cx - 230, 270, 34, HBT_GOLD)
-            _draw_star(draw, cx + 235, 250, 38, HBT_AMBER)
+            _limb(draw, [(cx, hip_y - 45), (cx - 180, 1350), (cx - 245, 1560)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y - 45), (cx + 180, 1350), (cx + 245, 1560)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y - 30), (cx, hip_y - 45)])
+            _limb(draw, [(cx, neck_y + 30), (cx - 240, 390), (cx - 345, 210)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 30), (cx + 240, 390), (cx + 345, 210)], hand_or_foot="hand")
+            _draw_tie(draw, cx, neck_y - 12)
+            _draw_head(draw, cx, head_y - 30, headband=True)
+            _draw_eyes(draw, cx, head_y - 30, style="happy")
+            _draw_mouth(draw, cx, head_y - 30, style="open_happy")
+            _draw_star(draw, cx - 345, 405, 50, HBT_GOLD)
+            _draw_star(draw, cx + 352, 375, 56, HBT_AMBER)
 
         elif pose == "run":
-            rcx = cx + 40
-            _line(draw, [(rcx - 30, hip_y), (rcx - 190, 880), (rcx - 270, 1030)])
-            _line(draw, [(rcx - 30, hip_y), (rcx + 140, 870), (rcx + 110, 1085)])
-            _line(draw, [(rcx + 30, neck_y + 20), (rcx - 30, hip_y)])
-            _line(draw, [(rcx + 24, neck_y + 50), (rcx - 140, 440), (rcx - 190, 560)])
-            _line(draw, [(rcx + 24, neck_y + 50), (rcx + 185, 420), (rcx + 265, 320)])
-            _draw_tie(draw, rcx + 24, neck_y + 24, tilt=-28)
-            _draw_head(draw, rcx + 45, head_y + 15, headband=True)
-            _draw_eyes(draw, rcx + 60, head_y + 15, style="normal")
-            _draw_mouth(draw, rcx + 60, head_y + 15, style="smile")
-            # Vệt tốc độ
-            for sy in (260, 420, 590):
-                _line(draw, [(90, sy), (210, sy)], width=14, color=HBT_AMBER, rim=False)
+            rcx = cx + 60
+            _limb(
+                draw, [(rcx - 45, hip_y), (rcx - 285, 1320), (rcx - 405, 1545)], hand_or_foot="foot"
+            )
+            _limb(
+                draw, [(rcx - 45, hip_y), (rcx + 210, 1305), (rcx + 165, 1628)], hand_or_foot="foot"
+            )
+            _limb(draw, [(rcx + 45, neck_y + 30), (rcx - 45, hip_y)])
+            _limb(
+                draw,
+                [(rcx + 36, neck_y + 75), (rcx - 210, 660), (rcx - 285, 840)],
+                hand_or_foot="hand",
+            )
+            _limb(
+                draw,
+                [(rcx + 36, neck_y + 75), (rcx + 278, 630), (rcx + 398, 480)],
+                hand_or_foot="hand",
+            )
+            _draw_tie(draw, rcx + 36, neck_y + 36, tilt=-42)
+            _draw_head(draw, rcx + 68, head_y + 22, headband=True)
+            _draw_eyes(draw, rcx + 90, head_y + 22, style="normal")
+            _draw_mouth(draw, rcx + 90, head_y + 22, style="smile")
+            for sy in (390, 630, 885):
+                _limb(draw, [(135, sy), (315, sy)], width=20, color=HBT_AMBER, rim=False)
 
         elif pose == "rich":
-            _line(draw, [(cx, hip_y), (cx - 90, 930), (cx - 105, 1100)])
-            _line(draw, [(cx, hip_y), (cx + 90, 930), (cx + 105, 1100)])
-            _line(draw, [(cx, neck_y), (cx, hip_y)])
-            _line(draw, [(cx, neck_y + 40), (cx - 130, 500), (cx - 210, 400)])
-            _line(draw, [(cx, neck_y + 40), (cx + 130, 500), (cx + 210, 400)])
-            _draw_tie(draw, cx, neck_y + 12)
+            _limb(draw, [(cx, hip_y), (cx - 135, 1395), (cx - 158, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y), (cx + 135, 1395), (cx + 158, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y), (cx, hip_y)])
+            _limb(draw, [(cx, neck_y + 58), (cx - 195, 750), (cx - 315, 600)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 58), (cx + 195, 750), (cx + 315, 600)], hand_or_foot="hand")
+            _draw_tie(draw, cx, neck_y + 18)
             _draw_head(draw, cx, head_y)
-            # Kính râm HBT ngầu
-            draw.rounded_rectangle((cx - 86, head_y - 36, cx - 8, head_y + 12), radius=12, fill=INK)
-            draw.rounded_rectangle((cx + 8, head_y - 36, cx + 86, head_y + 12), radius=12, fill=INK)
-            _line(draw, [(cx - 10, head_y - 16), (cx + 10, head_y - 16)], width=10, rim=False)
+            draw.rounded_rectangle(
+                (cx - 128, head_y - 54, cx - 12, head_y + 18), radius=18, fill=INK
+            )
+            draw.rounded_rectangle(
+                (cx + 12, head_y - 54, cx + 128, head_y + 18), radius=18, fill=INK
+            )
+            _limb(draw, [(cx - 14, head_y - 24), (cx + 14, head_y - 24)], width=14, rim=False)
             _draw_mouth(draw, cx, head_y, style="open_happy")
-            # Đồng xu vàng
-            for mx, my in ((cx - 230, 300), (cx + 230, 290), (cx + 275, 410)):
+            for mx, my in ((cx - 345, 450), (cx + 345, 435), (cx + 412, 615)):
                 draw.ellipse(
-                    (mx - 42, my - 42, mx + 42, my + 42), fill=HBT_GOLD, outline=INK, width=10
+                    (mx - 62, my - 62, mx + 62, my + 62), fill=HBT_GOLD, outline=INK, width=14
                 )
 
         elif pose == "sad":
-            _line(draw, [(cx, hip_y + 20), (cx - 65, 940), (cx - 75, 1100)])
-            _line(draw, [(cx, hip_y + 20), (cx + 65, 940), (cx + 75, 1100)])
-            _line(draw, [(cx - 10, neck_y + 40), (cx, hip_y + 20)])
-            _line(draw, [(cx - 10, neck_y + 70), (cx - 95, 620), (cx - 70, 770)])
-            _line(draw, [(cx - 10, neck_y + 70), (cx + 95, 620), (cx + 70, 770)])
-            _draw_tie(draw, cx - 8, neck_y + 46)
-            _draw_head(draw, cx - 18, head_y + 45)
-            _draw_eyes(draw, cx - 18, head_y + 45, style="sad")
-            _draw_mouth(draw, cx - 18, head_y + 45, style="sad")
-            # Giọt nước mắt
-            draw.ellipse((cx - 72, head_y + 62, cx - 44, head_y + 102), fill=TEAR_BLUE)
+            _limb(draw, [(cx, hip_y + 30), (cx - 98, 1410), (cx - 112, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y + 30), (cx + 98, 1410), (cx + 112, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx - 15, neck_y + 60), (cx, hip_y + 30)])
+            _limb(
+                draw,
+                [(cx - 15, neck_y + 105), (cx - 142, 930), (cx - 105, 1155)],
+                hand_or_foot="hand",
+            )
+            _limb(
+                draw,
+                [(cx - 15, neck_y + 105), (cx + 142, 930), (cx + 105, 1155)],
+                hand_or_foot="hand",
+            )
+            _draw_tie(draw, cx - 12, neck_y + 69)
+            _draw_head(draw, cx - 27, head_y + 68)
+            _draw_eyes(draw, cx - 27, head_y + 68, style="sad")
+            _draw_mouth(draw, cx - 27, head_y + 68, style="sad")
+            draw.ellipse((cx - 108, head_y + 93, cx - 66, head_y + 153), fill=TEAR_BLUE)
 
         elif pose == "angry":
-            _line(draw, [(cx, hip_y), (cx - 115, 930), (cx - 135, 1100)])
-            _line(draw, [(cx, hip_y), (cx + 115, 930), (cx + 135, 1100)])
-            _line(draw, [(cx, neck_y), (cx, hip_y)])
-            _line(draw, [(cx, neck_y + 40), (cx - 165, 510), (cx - 95, 635)])
-            _line(draw, [(cx, neck_y + 40), (cx + 165, 510), (cx + 95, 635)])
-            _draw_tie(draw, cx, neck_y + 12)
+            _limb(draw, [(cx, hip_y), (cx - 172, 1395), (cx - 202, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, hip_y), (cx + 172, 1395), (cx + 202, 1650)], hand_or_foot="foot")
+            _limb(draw, [(cx, neck_y), (cx, hip_y)])
+            _limb(draw, [(cx, neck_y + 58), (cx - 248, 765), (cx - 142, 952)], hand_or_foot="hand")
+            _limb(draw, [(cx, neck_y + 58), (cx + 248, 765), (cx + 142, 952)], hand_or_foot="hand")
+            _draw_tie(draw, cx, neck_y + 18)
             _draw_head(draw, cx, head_y)
             _draw_eyes(draw, cx, head_y, style="angry")
             _draw_mouth(draw, cx, head_y, style="angry")
-            # Ký hiệu gân giận màu đỏ
-            vx, vy = cx + 96, head_y - 86
-            _line(
+            vx, vy = cx + 144, head_y - 129
+            _limb(
                 draw,
-                [(vx - 18, vy), (vx, vy + 18), (vx - 18, vy + 36)],
-                width=11,
+                [(vx - 26, vy), (vx, vy + 26), (vx - 26, vy + 54)],
+                width=16,
                 color=HBT_RED,
                 rim=False,
             )
-            _line(
+            _limb(
                 draw,
-                [(vx + 18, vy), (vx, vy + 18), (vx + 18, vy + 36)],
-                width=11,
+                [(vx + 26, vy), (vx, vy + 26), (vx + 26, vy + 54)],
+                width=16,
                 color=HBT_RED,
                 rim=False,
             )
@@ -370,4 +407,4 @@ def ensure_default_poses(poses_dir: Path | None = None) -> list[Path]:
 
 if __name__ == "__main__":
     paths = ensure_default_poses()
-    print(f"Đã khởi tạo {len(paths)} dáng người que tại {paths[0].parent}")
+    print(f"Đã khởi tạo {len(paths)} dáng người que 3x tại {paths[0].parent}")

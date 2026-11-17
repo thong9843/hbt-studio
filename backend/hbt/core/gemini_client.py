@@ -51,10 +51,10 @@ PLACEHOLDER_KEYS = {
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
-    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Mặc định / Nhanh)"},
-    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
+    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite (Mặc định / 500 RPD)"},
     {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)"},
-    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite"},
+    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
+    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Nhanh)"},
 ]
 MODELS: list[str] = [item["id"] for item in AVAILABLE_GEMINI_MODELS]
 GEMINI_MODEL = MODELS[0]

@@ -1,15 +1,18 @@
-"""Bộ dựng video StickV FFmpeg theo chương (Chunked Chapters) tối ưu CPU & RAM."""
+"""Bộ dựng video StickV v6.1: stream khung hình lip-sync/karaoke trực tiếp vào FFmpeg (nhẹ RAM)."""
 
 from __future__ import annotations
 
 import gc
 import shutil
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from hbt.pipeline.cancel import CancelToken
-from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_ENCODE_CLAMP,
@@ -21,37 +24,111 @@ from hbt.shared.pipeline.watermark import (
     build_watermark_overlay_filter,
     render_watermark_png,
 )
-from hbt.stickv.audio import mix_stickv_audio, synth_stickv_beats_audio
+from hbt.stickv.audio import (
+    compute_word_timings,
+    extract_wav_rms_envelope,
+    mix_stickv_audio,
+    synth_stickv_beats_audio,
+)
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject
-from hbt.stickv.stage import render_beat_layers
+from hbt.stickv.stage import render_animated_beat_frame, render_beat_layers
 
 
-def _overlay_expr(beat: StickvBeat, w: int, h: int, aspect: str) -> tuple[str, str]:
-    """Biểu thức chuyển động mượt FFmpeg (0 khung hình Pillow thừa -> tiết kiệm RAM)."""
-    if aspect == "9:16":
-        base_x = "(W-w)/2"
-        base_y = "H-h-240"
-    else:
-        base_x = "120"
-        base_y = "(H-h)/2+40"
+def _stream_beat_frames_to_ffmpeg(
+    *,
+    beat: StickvBeat,
+    wav_path: Path,
+    bg_png: Path,
+    char_png: Path | None,
+    out_mp4: Path,
+    w: int,
+    h: int,
+    fps: int,
+    aspect: str,
+    cancel: CancelToken | None = None,
+) -> Path:
+    """Stream từng khung hình RGB (lip-sync + chớp mắt + karaoke) vào FFmpeg stdin, 0 PNG rác."""
+    dur = max(1.0, float(beat.duration_sec or 2.0))
+    n_frames = max(1, int(round(dur * fps)))
+    rms_env = extract_wav_rms_envelope(wav_path, fps, dur)
+    word_timings = compute_word_timings(beat.narration, max(0.5, dur - 0.25))
 
-    m = beat.motion
-    if m == "slide_left":
-        return f"if(lt(t,0.35), W-(W-({base_x}))*(t/0.35), {base_x})", base_y
-    if m == "slide_right":
-        return f"if(lt(t,0.35), -w+(({base_x})+w)*(t/0.35), {base_x})", base_y
-    if m == "shake":
-        return f"({base_x})+sin(t*38)*10", base_y
-    if m == "float":
-        return base_x, f"({base_y})+sin(t*3.2)*14"
-    if m == "bounce":
-        return base_x, f"({base_y})-abs(sin(t*6.5))*18"
-    return base_x, base_y
+    cmd = [
+        ffmpeg_exe(),
+        "-y",
+        *FFMPEG_RESOURCE_CLAMP,
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{w}x{h}",
+        "-r",
+        str(fps),
+        "-i",
+        "pipe:0",
+        "-an",
+        *FFMPEG_ENCODE_CLAMP,
+        "-pix_fmt",
+        "yuv420p",
+        str(out_mp4),
+    ]
+
+    with Image.open(bg_png) as raw_bg:
+        bg_img = raw_bg.convert("RGB")
+        char_img: Image.Image | None = None
+        if char_png is not None and char_png.is_file():
+            with Image.open(char_png) as raw_char:
+                char_img = raw_char.convert("RGBA")
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            assert proc.stdin is not None
+            for f_idx in range(n_frames):
+                if cancel is not None and f_idx % 8 == 0:
+                    cancel.check()
+                t_sec = f_idx / fps
+                mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
+                frame = render_animated_beat_frame(
+                    bg_img=bg_img,
+                    char_img=char_img,
+                    beat=beat,
+                    aspect=aspect,  # type: ignore[arg-type]
+                    t_sec=t_sec,
+                    mouth_open=mouth,
+                    word_timings=word_timings,
+                )
+                try:
+                    proc.stdin.write(frame.tobytes())
+                finally:
+                    frame.close()
+            proc.stdin.close()
+            _, stderr_b = proc.communicate()
+            if proc.returncode != 0:
+                raise FFmpegError(
+                    f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
+                    f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
+                )
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            bg_img.close()
+            if char_img is not None:
+                char_img.close()
+    return out_mp4
 
 
 def _render_single_beat_clip(
     *,
     beat: StickvBeat,
+    wav_path: Path,
     bg_png: Path,
     char_png: Path | None,
     out_mp4: Path,
@@ -60,6 +137,7 @@ def _render_single_beat_clip(
     fps: int,
     aspect: str,
     project_dir: Path,
+    cancel: CancelToken | None = None,
 ) -> Path:
     dur = max(1.0, float(beat.duration_sec or 2.0))
     media_file = (project_dir / beat.media_path) if beat.media_path else None
@@ -69,7 +147,6 @@ def _render_single_beat_clip(
         and media_file.is_file()
         and media_file.suffix.lower() in {".mp4", ".mov", ".webm"}
     ):
-        # Chèn clip chuyển động điểm nhấn (.mp4 từ Google Flow / Veo)
         vf = (
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p"
@@ -91,48 +168,18 @@ def _render_single_beat_clip(
         run_ffmpeg(cmd)
         return out_mp4
 
-    if char_png is not None and char_png.is_file():
-        ox, oy = _overlay_expr(beat, w, h, aspect)
-        fc = f"[0:v][1:v]overlay=x='{ox}':y='{oy}':shortest=1,fps={fps},format=yuv420p[v]"
-        cmd = [
-            *FFMPEG_RESOURCE_CLAMP,
-            "-loop",
-            "1",
-            "-t",
-            f"{dur:.3f}",
-            "-i",
-            str(bg_png),
-            "-loop",
-            "1",
-            "-t",
-            f"{dur:.3f}",
-            "-i",
-            str(char_png),
-            "-filter_complex",
-            fc,
-            "-map",
-            "[v]",
-            "-an",
-            *FFMPEG_ENCODE_CLAMP,
-            str(out_mp4),
-        ]
-    else:
-        cmd = [
-            *FFMPEG_RESOURCE_CLAMP,
-            "-loop",
-            "1",
-            "-t",
-            f"{dur:.3f}",
-            "-i",
-            str(bg_png),
-            "-vf",
-            f"fps={fps},format=yuv420p",
-            "-an",
-            *FFMPEG_ENCODE_CLAMP,
-            str(out_mp4),
-        ]
-    run_ffmpeg(cmd)
-    return out_mp4
+    return _stream_beat_frames_to_ffmpeg(
+        beat=beat,
+        wav_path=wav_path,
+        bg_png=bg_png,
+        char_png=char_png,
+        out_mp4=out_mp4,
+        w=w,
+        h=h,
+        fps=fps,
+        aspect=aspect,
+        cancel=cancel,
+    )
 
 
 def render_stickv(
@@ -161,7 +208,7 @@ def render_stickv(
             cancel.check()
 
     beats = project.beats[:3] if preview else project.beats
-    fps = 24 if preview else project.fps
+    fps = 24 if preview else min(30, project.fps)
     w, h = STICKV_ASPECT_SIZES[project.aspect]
 
     audio_dir = project_dir / "audio"
@@ -195,10 +242,9 @@ def render_stickv(
             out_wav=mixed_wav,
         )
 
-        # Render từng beat & gom theo chương (2-3 phút) để nhẹ RAM
         beat_clips: list[Path] = []
         total_b = len(beats)
-        for idx, beat in enumerate(beats, start=1):
+        for idx, (beat, (wav_p, _dur)) in enumerate(zip(beats, beat_wavs, strict=True), start=1):
             check_cancel()
             pct = 35.0 + (idx / max(1, total_b)) * 45.0
             emit(pct, f"Đang dựng phân cảnh {idx}/{total_b} (Chương {beat.chapter})...")
@@ -215,6 +261,7 @@ def render_stickv(
             clip_mp4 = chunks_dir / f"beat_{idx:03d}.mp4"
             _render_single_beat_clip(
                 beat=beat,
+                wav_path=wav_p,
                 bg_png=bg_png,
                 char_png=char_png,
                 out_mp4=clip_mp4,
@@ -223,14 +270,14 @@ def render_stickv(
                 fps=fps,
                 aspect=project.aspect,
                 project_dir=project_dir,
+                cancel=cancel,
             )
             beat_clips.append(clip_mp4)
 
-            # Giải phóng file ảnh tạm & thu gom rác bộ nhớ ngay sau mỗi beat
             bg_png.unlink(missing_ok=True)
             if char_png is not None:
                 char_png.unlink(missing_ok=True)
-            if idx % 4 == 0:
+            if idx % 3 == 0:
                 gc.collect()
 
         emit(85.0, "Đang nối chương & gắn watermark HBT...")
@@ -325,6 +372,5 @@ def render_stickv(
             "preview": preview,
         }
     finally:
-        # Luôn giải phóng build/chunks/ để bảo vệ ổ đĩa & RAM máy cũ
         shutil.rmtree(chunks_dir, ignore_errors=True)
         gc.collect()

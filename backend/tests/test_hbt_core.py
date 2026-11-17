@@ -327,10 +327,10 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
     # 1. Đảm bảo URL endpoint sạch (không gắn ?key=), không lặp "models/models/..."
     # và danh sách model chỉ gồm các dòng Gemini thế hệ mới (không còn 1.x / 2.0-*)
     assert MODELS == [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.8-flash",
     ]
     assert [m["id"] for m in AVAILABLE_GEMINI_MODELS] == MODELS
     url1 = build_gemini_url("gemini-3.8-flash")
@@ -417,7 +417,7 @@ def test_gemini_client_url_normalization_and_404_model_fallback() -> None:
     )
     assert (
         called_urls[1]
-        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
     )
     assert (
         called_urls[2]
@@ -438,12 +438,12 @@ def test_hbt_core_v1_and_v2_api_endpoints(
     models_res = client.get("/api/hbt/core/models")
     assert models_res.status_code == 200
     models_data = models_res.json()
-    assert models_data["default"] == "gemini-3.8-flash"
+    assert models_data["default"] == "gemini-3.1-flash-lite"
     assert [m["id"] for m in models_data["models"]] == [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.8-flash",
     ]
 
     assets_res = client.get("/api/hbt-core/assets")

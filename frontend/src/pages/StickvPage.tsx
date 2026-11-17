@@ -12,7 +12,7 @@ import type {
   StickvTheme,
 } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from '../components/icons';
+import { CopyIcon, PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from '../components/icons';
 import type { SafeZonePlatform } from '../components/SafeZoneOverlay';
 import { PhonePreviewStage } from '../components/studio/PhonePreviewStage';
 import { Button } from '../components/ui/Button';
@@ -86,8 +86,12 @@ export function StickvPage() {
   const [renderProgress, setRenderProgress] = useState<{ pct: number; step: string } | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
-  // Form AI Generate
+  // 3 Chế độ kịch bản StickV
+  const [inputMode, setInputMode] = useState<'ai' | 'json' | 'script'>('ai');
   const [idea, setIdea] = useState('');
+  const [rawJson, setRawJson] = useState('');
+  const [rawScript, setRawScript] = useState('');
+  const [rawTitle, setRawTitle] = useState('');
   const [topic, setTopic] = useState('science');
   const [aspect, setAspect] = useState<StickvAspect>('9:16');
   const [theme, setTheme] = useState<StickvTheme>('cream');
@@ -173,6 +177,45 @@ export function StickvPage() {
       setDraft(project);
       setSelectedBeatId(project.beats[0]?.id ?? '');
       toast.info(`Đã sinh ${project.beats.length} beat kịch bản StickV`);
+    },
+    onError: (e: Error) => toast.error(e),
+  });
+
+  const importJsonMutation = useMutation({
+    mutationFn: () =>
+      stickvApi.importJson({
+        raw_json: rawJson.trim(),
+        topic,
+        aspect,
+        theme,
+      }),
+    onSuccess: ({ project }) => {
+      void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+      setSelectedSlug(project.slug);
+      setDraft(project);
+      setSelectedBeatId(project.beats[0]?.id ?? '');
+      setRawJson('');
+      toast.info(`Đã nạp ${project.beats.length} beat từ JSON (0 Token API)`);
+    },
+    onError: (e: Error) => toast.error(e),
+  });
+
+  const importScriptMutation = useMutation({
+    mutationFn: () =>
+      stickvApi.importScript({
+        raw_text: rawScript.trim(),
+        title: rawTitle.trim(),
+        topic,
+        aspect,
+        theme,
+      }),
+    onSuccess: ({ project }) => {
+      void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+      setSelectedSlug(project.slug);
+      setDraft(project);
+      setSelectedBeatId(project.beats[0]?.id ?? '');
+      setRawScript('');
+      toast.info(`Đã tách ${project.beats.length} beat từ lời thoại có sẵn`);
     },
     onError: (e: Error) => toast.error(e),
   });
@@ -327,22 +370,100 @@ export function StickvPage() {
         {/* Cột trái: Sinh kịch bản AI + Danh sách Beat */}
         <div className="space-y-5">
           <Card className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-title font-bold text-text">
-                1. Sinh kịch bản StickV bằng Gemini
-              </h2>
-              <span className="text-tiny font-semibold text-muted">
-                Tự chia lô nếu video dài 5–15 phút
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-title font-bold text-text">1. Kịch bản StickV (3 Chế độ)</h2>
+              <div
+                role="tablist"
+                aria-label="Chế độ đầu vào StickV"
+                className="inline-flex rounded-pill border border-line bg-soft p-0.5 text-tiny font-bold"
+              >
+                {(
+                  [
+                    { id: 'ai', label: 'Tạo tự động (API)' },
+                    { id: 'json', label: 'Dán JSON (0 Token)' },
+                    { id: 'script', label: 'Dán Lời thoại' },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={inputMode === t.id}
+                    onClick={() => setInputMode(t.id)}
+                    className={`rounded-pill px-3 py-1 transition-colors ${
+                      inputMode === t.id
+                        ? 'bg-card text-text shadow-sm'
+                        : 'text-muted hover:text-text'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <textarea
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              rows={2}
-              placeholder="Nhập ý tưởng video (vd: Tại sao 90% người mới đầu tư hay mất tiền?)"
-              className="w-full rounded-input border border-line-input bg-soft-2 p-3 text-small text-text focus:border-engine-stickv focus:outline-none"
-            />
+            {inputMode === 'ai' && (
+              <textarea
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+                rows={2}
+                placeholder="Nhập ý tưởng video (vd: Tại sao 90% người mới đầu tư hay mất tiền?)"
+                className="w-full rounded-input border border-line-input bg-soft-2 p-3 text-small text-text focus:border-engine-stickv focus:outline-none"
+              />
+            )}
+
+            {inputMode === 'json' && (
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-engine-stickv/30 bg-engine-stickv-soft/40 p-3">
+                  <span className="text-tiny font-semibold text-text-2">
+                    Copy Prompt Đạo diễn 5 chặng sang Web Gemini Pro rồi dán JSON vào đây (0 Token
+                    API):
+                  </span>
+                  <Button
+                    tone="soft"
+                    size="sm"
+                    icon={<CopyIcon size={14} />}
+                    onClick={() => {
+                      const prompt =
+                        listQuery.data?.director_prompt ||
+                        'Biên kịch StickV 5 chặng -> trả về JSON {title, beats}';
+                      void navigator.clipboard
+                        .writeText(prompt)
+                        .then(() => toast.info('Đã copy Prompt Đạo diễn!'))
+                        .catch((err) => toast.error(err));
+                    }}
+                  >
+                    Copy Prompt Đạo diễn
+                  </Button>
+                </div>
+                <textarea
+                  value={rawJson}
+                  onChange={(e) => setRawJson(e.target.value)}
+                  rows={4}
+                  placeholder='Dán JSON từ Web Gemini Pro (vd: {"title":"...","beats":[...]})'
+                  className="w-full rounded-input border border-line-input bg-soft-2 p-3 font-mono text-tiny text-text focus:border-engine-stickv focus:outline-none"
+                />
+              </div>
+            )}
+
+            {inputMode === 'script' && (
+              <div className="space-y-2.5">
+                <input
+                  type="text"
+                  value={rawTitle}
+                  onChange={(e) => setRawTitle(e.target.value)}
+                  placeholder="Tiêu đề video (không bắt buộc)..."
+                  className="w-full rounded-input border border-line-input bg-soft-2 px-3 py-2 text-small text-text focus:border-engine-stickv focus:outline-none"
+                />
+                <textarea
+                  value={rawScript}
+                  onChange={(e) => setRawScript(e.target.value)}
+                  rows={4}
+                  placeholder="Dán lời thoại có sẵn (mỗi câu hoặc mỗi dòng sẽ tự tách thành 1 beat + gắn dáng người que & bảng)..."
+                  className="w-full rounded-input border border-line-input bg-soft-2 p-3 text-small text-text focus:border-engine-stickv focus:outline-none"
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <label className="space-y-1 text-tiny font-bold text-muted">
@@ -416,15 +537,39 @@ export function StickvPage() {
             </div>
 
             <div className="flex justify-end">
-              <Button
-                tone="export"
-                busy={genMutation.isPending}
-                disabled={!idea.trim()}
-                icon={<SparklesIcon size={16} />}
-                onClick={() => genMutation.mutate()}
-              >
-                Sinh kịch bản StickV
-              </Button>
+              {inputMode === 'ai' && (
+                <Button
+                  tone="export"
+                  busy={genMutation.isPending}
+                  disabled={!idea.trim()}
+                  icon={<SparklesIcon size={16} />}
+                  onClick={() => genMutation.mutate()}
+                >
+                  Sinh kịch bản StickV
+                </Button>
+              )}
+              {inputMode === 'json' && (
+                <Button
+                  tone="export"
+                  busy={importJsonMutation.isPending}
+                  disabled={!rawJson.trim()}
+                  icon={<SparklesIcon size={16} />}
+                  onClick={() => importJsonMutation.mutate()}
+                >
+                  Nạp JSON (0 Token)
+                </Button>
+              )}
+              {inputMode === 'script' && (
+                <Button
+                  tone="export"
+                  busy={importScriptMutation.isPending}
+                  disabled={!rawScript.trim()}
+                  icon={<SparklesIcon size={16} />}
+                  onClick={() => importScriptMutation.mutate()}
+                >
+                  Tách lời thoại thành Beat
+                </Button>
+              )}
             </div>
           </Card>
 

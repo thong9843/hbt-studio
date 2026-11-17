@@ -1,8 +1,10 @@
-"""Sinh kịch bản StickV theo từng beat bằng Gemini (hỗ trợ chia lô cho video dài 5-15 phút)."""
+"""Sinh kịch bản StickV (Gemini API nén token, Import JSON Web Gemini 0 token & Tách lời thoại)."""
 
 from __future__ import annotations
 
+import json
 import math
+import re
 from typing import Any
 
 from hbt.shared.llm import GEMINI_MODEL, generate_structured_json
@@ -13,42 +15,62 @@ VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "shake", "float", "stati
 VALID_BOARD_TYPES = {"none", "bullets", "big_number", "comparison", "flow_steps"}
 VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
 
+# System prompt nén gọn (~40% ít token hơn) theo cấu trúc giữ chân 5 chặng
 _SYSTEM_PROMPT = (
-    "Bạn là biên kịch video giải thích kiến thức phong cách Người que (Stickman 2D/2.5D) "
-    "cho kênh Hay Biết Tuốt.\n"
-    "Nhiệm vụ: chia nội dung thành các beat ngắn "
-    "(mỗi beat 1-2 câu tiếng Việt tự nhiên, dễ đọc thành tiếng).\n"
-    "Trả về đúng JSON object theo schema yêu cầu, "
-    "KHÔNG thêm markdown hay giải thích ngoài JSON.\n\n"
-    "Quy tắc:\n"
-    "- pose chỉ chọn trong: explain, think, shock, happy, run, rich, sad, angry.\n"
-    "- motion chỉ chọn trong: bounce, slide_left, slide_right, shake, float, static.\n"
-    "- sfx_tag chỉ chọn trong: none, whoosh, pop, vine_boom, ding.\n"
-    "- board_type chỉ chọn trong: none, bullets, big_number, comparison, flow_steps.\n"
-    "- Cấu trúc board_data tương ứng:\n"
-    '  * bullets: {"items": ["ý 1 ngắn", "ý 2 ngắn", "ý 3 ngắn"]}\n'
-    '  * big_number: {"value": "85%", "label": "tiêu đề ngắn", "sub": "giải thích 1 dòng"}\n'
-    '  * comparison: {"left_title": "Cách cũ", "left_items": ["..."], '
-    '"right_title": "Cách mới", "right_items": ["..."]}\n'
-    '  * flow_steps: {"steps": ["Bước 1", "Bước 2", "Bước 3"]}\n'
-    "  * none: {}"
+    "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
+    "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
+    "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
+    "pose: explain|think|shock|happy|run|rich|sad|angry. "
+    "motion: bounce|slide_left|slide_right|shake|float|static. "
+    "sfx_tag: none|whoosh|pop|vine_boom|ding. "
+    "board_type: bullets|big_number|comparison|flow_steps|none.\n"
+    "board_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
+    "comparison={left_title,left_items,right_title,right_items,takeaway}, "
+    "flow_steps={steps:[...],takeaway}."
 )
+
+
+def build_director_prompt(
+    *,
+    idea: str = "<CHỦ ĐỀ VIDEO>",
+    topic: str = "science",
+    aspect: StickvAspect = "9:16",
+    target_minutes: float = 1.0,
+) -> str:
+    """Tạo Prompt Đạo diễn chuẩn 5 chặng để người dùng copy sang Web Gemini Pro (0 Token API)."""
+    beat_count = max(6, min(14, round(target_minutes * 7)))
+    return (
+        f"{_SYSTEM_PROMPT}\n\n"
+        f"Chủ đề: {idea}\n"
+        f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
+        'Schema JSON:\n{"title":"Tiêu đề","beats":[{"narration":"1-2 câu tiếng Việt",'
+        '"pose":"explain","facing":"right","motion":"bounce","sfx_tag":"whoosh",'
+        '"board_type":"bullets","board_title":"Tiêu đề bảng",'
+        '"board_data":{"items":["Ý 1","Ý 2"],"takeaway":"Chốt lại ngắn"}}]}'
+    )
 
 
 def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
+    takeaway = str(raw.get("takeaway") or "").strip()[:90]
     if board_type == "bullets":
         items = [str(x).strip()[:90] for x in (raw.get("items") or []) if str(x).strip()][:5]
-        return {"items": items or ["Điểm chính cần nhớ"]}
+        res: dict[str, Any] = {"items": items or ["Điểm chính cần nhớ"]}
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
     if board_type == "big_number":
-        return {
+        res = {
             "value": str(raw.get("value") or "100%").strip()[:24],
             "label": str(raw.get("label") or "").strip()[:60],
             "sub": str(raw.get("sub") or "").strip()[:90],
         }
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
     if board_type == "comparison":
-        return {
+        res = {
             "left_title": str(raw.get("left_title") or "Trước").strip()[:32],
             "left_items": [
                 str(x).strip()[:70] for x in (raw.get("left_items") or []) if str(x).strip()
@@ -58,9 +80,15 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
                 str(x).strip()[:70] for x in (raw.get("right_items") or []) if str(x).strip()
             ][:4],
         }
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
     if board_type == "flow_steps":
         steps = [str(x).strip()[:50] for x in (raw.get("steps") or []) if str(x).strip()][:4]
-        return {"steps": steps or ["Bước 1", "Bước 2"]}
+        res = {"steps": steps or ["Bước 1", "Bước 2"]}
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
     return {}
 
 
@@ -106,6 +134,101 @@ def sanitize_beats(raw_beats: Any, *, chapter: int = 1, start_idx: int = 1) -> l
     return out
 
 
+def parse_stickv_json_payload(raw_text: str) -> tuple[str, list[StickvBeat]]:
+    """Phân tích JSON dán từ Web Gemini Pro (0 Token API)."""
+    clean = (raw_text or "").strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:json)?\s*", "", clean)
+        clean = re.sub(r"\s*```$", "", clean).strip()
+    if not clean:
+        raise ValueError("Vui lòng dán nội dung JSON kịch bản")
+    parsed = json.loads(clean)
+    if isinstance(parsed, list):
+        title = "Kịch bản StickV (JSON)"
+        beats = sanitize_beats(parsed)
+    elif isinstance(parsed, dict):
+        title = str(parsed.get("title") or "Kịch bản StickV (JSON)").strip()[:160]
+        beats = sanitize_beats(parsed.get("beats"))
+    else:
+        raise ValueError("JSON phải là object {title, beats} hoặc mảng beats")
+    if not beats:
+        raise ValueError("Không tìm thấy beat hợp lệ trong JSON")
+    return title, beats
+
+
+def split_raw_narration_to_beats(raw_text: str, *, title: str = "") -> tuple[str, list[StickvBeat]]:
+    """Tách văn bản lời thoại có sẵn thành từng beat StickV (Không cần AI)."""
+    clean = (raw_text or "").strip()
+    if not clean:
+        raise ValueError("Vui lòng nhập hoặc dán lời thoại")
+
+    chunks: list[str] = []
+    for para in clean.splitlines():
+        para = para.strip()
+        if not para:
+            continue
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", para) if s.strip()]
+        buf = ""
+        for s in sentences:
+            if buf and len(buf) + len(s) > 170:
+                chunks.append(buf)
+                buf = s
+            else:
+                buf = f"{buf} {s}".strip() if buf else s
+        if buf:
+            chunks.append(buf)
+
+    if not chunks:
+        raise ValueError("Không tách được câu thoại nào hợp lệ")
+
+    beats: list[StickvBeat] = []
+    total = len(chunks)
+    for idx, line in enumerate(chunks, start=1):
+        low = line.lower()
+        num_match = re.search(r"\b(\d+(?:[.,]\d+)?%|\d+\s*(?:triệu|tỷ|nghìn|năm|ngày|lần))\b", low)
+        if idx == 1:
+            pose, motion, sfx = "shock", "slide_left", "vine_boom"
+        elif idx == total:
+            pose, motion, sfx = "happy", "bounce", "ding"
+        elif any(k in low for k in ("tại sao", "vì sao", "liệu", "?")):
+            pose, motion, sfx = "think", "float", "pop"
+        elif any(k in low for k in ("tiền", "giàu", "lương", "lãi")):
+            pose, motion, sfx = "rich", "bounce", "ding"
+        elif any(k in low for k in ("sai lầm", "mất", "nguy hiểm", "tức", "cảnh báo")):
+            pose, motion, sfx = "angry", "shake", "vine_boom"
+        else:
+            pose, motion, sfx = "explain", "bounce", "whoosh"
+
+        if num_match:
+            btype = "big_number"
+            bdata: dict[str, Any] = {
+                "value": num_match.group(1).upper(),
+                "label": line[:60],
+                "takeaway": "Con số đáng chú ý",
+            }
+        else:
+            btype = "bullets"
+            bdata = {"items": [line[:88]]}
+
+        beats.append(
+            StickvBeat(
+                id=f"b{idx:03d}",
+                chapter=1 + (idx - 1) // 8,
+                narration=line[:750],
+                pose=pose,
+                facing="right" if idx % 2 == 1 else "left",
+                motion=motion,  # type: ignore[arg-type]
+                sfx_tag=sfx,  # type: ignore[arg-type]
+                board_type=btype,  # type: ignore[arg-type]
+                board_title=f"Điểm #{idx}",
+                board_data=bdata,
+            )
+        )
+
+    final_title = (title or chunks[0][:60]).strip() or "Kịch bản StickV"
+    return final_title, beats
+
+
 def generate_stickv_script(
     *,
     idea: str,
@@ -123,13 +246,10 @@ def generate_stickv_script(
     if target_minutes <= 2.5:
         beat_count = max(5, min(14, round(target_minutes * 7)))
         user_prompt = (
-            f"Chủ đề: {clean_idea}\n"
-            f"Nhóm nội dung: {topic} | Khung hình: {aspect}\n"
-            f"Hãy viết kịch bản gồm {beat_count} beat.\n"
-            'Schema JSON: {"title": "Tiêu đề hấp dẫn", '
-            '"beats": [{"narration": "...", "pose": "explain", '
-            '"facing": "right", "motion": "bounce", "sfx_tag": "whoosh", "board_type": "bullets", '
-            '"board_title": "...", "board_data": {"items": ["..."]}}]}'
+            f"Chủ đề: {clean_idea} | Nhóm: {topic} | Khung: {aspect} | {beat_count} beat.\n"
+            'JSON: {"title":"...","beats":[{"narration":"...","pose":"explain","facing":"right",'
+            '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets","board_title":"...",'
+            '"board_data":{"items":["..."],"takeaway":"..."}}]}'
         )
         parsed, timings = generate_structured_json(
             _SYSTEM_PROMPT, user_prompt, model=chosen_model, timeout=60.0
@@ -138,13 +258,11 @@ def generate_stickv_script(
         beats = sanitize_beats(parsed.get("beats"), chapter=1, start_idx=1)
         return title, beats, {"chapters": 1, **timings}
 
-    # Longform 5-15 phút: chia thành các chương 2-3 phút để tránh quá tải token & RAM
     num_chapters = max(2, min(6, math.ceil(target_minutes / 2.5)))
     outline_prompt = (
-        f"Chủ đề video dài ({target_minutes:.0f} phút, {aspect}, nhóm {topic}): {clean_idea}\n"
-        f"Hãy lập dàn ý gồm đúng {num_chapters} chương mạch lạc.\n"
-        'Schema JSON: {"title": "Tiêu đề video", '
-        '"chapters": [{"chapter": 1, "heading": "...", "summary": "..."}]}'
+        f"Video {target_minutes:.0f}p ({aspect}, {topic}): {clean_idea}. "
+        f"Lập dàn ý {num_chapters} chương theo cấu trúc 5 chặng.\n"
+        'JSON: {"title":"...","chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
     )
     outline, t0 = generate_structured_json(
         _SYSTEM_PROMPT, outline_prompt, model=chosen_model, timeout=60.0
@@ -163,13 +281,11 @@ def generate_stickv_script(
         heading = str((ch or {}).get("heading") or f"Chương {ch_idx}")
         summary = str((ch or {}).get("summary") or clean_idea)
         ch_prompt = (
-            f"Video: {title}\n"
-            f"Chương {ch_idx}/{num_chapters}: {heading}\n"
-            f"Tóm tắt chương: {summary}\n"
-            "Hãy viết 7-9 beat cho riêng chương này.\n"
-            'Schema JSON: {"beats": [{"narration": "...", "pose": "explain", '
-            '"facing": "right", "motion": "bounce", "sfx_tag": "whoosh", '
-            '"board_type": "bullets", "board_title": "...", "board_data": {}}]}'
+            f"Video: {title} | Chương {ch_idx}/{num_chapters}: {heading} ({summary}). "
+            "Viết 7-9 beat.\n"
+            'JSON: {"beats":[{"narration":"...","pose":"explain","facing":"right",'
+            '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
+            '"board_title":"...","board_data":{}}]}'
         )
         ch_parsed, ch_t = generate_structured_json(
             _SYSTEM_PROMPT, ch_prompt, model=chosen_model, timeout=60.0

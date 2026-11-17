@@ -10,6 +10,7 @@ export interface StickvListResponse {
   items: StickvProject[];
   gemini_models: Array<string | GeminiModelOption>;
   default_model: string;
+  director_prompt?: string;
 }
 
 export const stickvApi = {
@@ -66,4 +67,19 @@ export const stickvApi = {
       `/stickv/${encodeURIComponent(slug)}/render`,
       { json: { preview } },
     ),
+
+  importJson: (body: {
+    raw_json: string;
+    topic?: string;
+    aspect?: StickvAspect;
+    theme?: StickvTheme;
+  }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-json', { json: body }),
+
+  importScript: (body: {
+    raw_text: string;
+    title?: string;
+    topic?: string;
+    aspect?: StickvAspect;
+    theme?: StickvTheme;
+  }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-script', { json: body }),
 };
