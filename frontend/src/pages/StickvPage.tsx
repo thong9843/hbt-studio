@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
 import type {
@@ -82,6 +82,9 @@ export function StickvPage() {
   const [draft, setDraft] = useState<StickvProject | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string>('');
   const [safeZone, setSafeZone] = useState<SafeZonePlatform>('none');
+  const [rendering, setRendering] = useState(false);
+  const [renderProgress, setRenderProgress] = useState<{ pct: number; step: string } | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   // Form AI Generate
   const [idea, setIdea] = useState('');
@@ -102,7 +105,7 @@ export function StickvPage() {
   });
 
   const models = listQuery.data?.gemini_models ?? [];
-  const projects = listQuery.data?.items ?? [];
+  const projects = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
 
   useEffect(() => {
     if (!geminiModel && listQuery.data?.default_model) {
@@ -161,9 +164,9 @@ export function StickvPage() {
       setSelectedSlug(project.slug);
       setDraft(project);
       setSelectedBeatId(project.beats[0]?.id ?? '');
-      toast.show(`Đã sinh ${project.beats.length} beat kịch bản StickV`);
+      toast.info(`Đã sinh ${project.beats.length} beat kịch bản StickV`);
     },
-    onError: (e: Error) => toast.show(e.message, { tone: 'danger' }),
+    onError: (e: Error) => toast.error(e),
   });
 
   const saveMutation = useMutation({
@@ -171,9 +174,9 @@ export function StickvPage() {
     onSuccess: ({ project }) => {
       setDraft(project);
       void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-      toast.show('Đã lưu dự án StickV');
+      toast.info('Đã lưu dự án StickV');
     },
-    onError: (e: Error) => toast.show(e.message, { tone: 'danger' }),
+    onError: (e: Error) => toast.error(e),
   });
 
   const deleteMutation = useMutation({
@@ -182,7 +185,7 @@ export function StickvPage() {
       setSelectedSlug('');
       setDraft(null);
       void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-      toast.show('Đã xóa dự án StickV');
+      toast.info('Đã xóa dự án StickV');
     },
   });
 
@@ -192,18 +195,58 @@ export function StickvPage() {
       await stickvApi.save(draft.slug, draft);
       return stickvApi.render(draft.slug, preview);
     },
-    onSuccess: ({ job_id, slug }) => {
-      job.start(job_id, slug);
-      toast.show('Đã đưa StickV vào hàng đợi dựng');
+    onSuccess: ({ job_id }) => {
+      setRendering(true);
+      setRenderProgress({ pct: 2, step: 'Đang khởi động...' });
+      toast.info('Đã đưa StickV vào hàng đợi dựng');
+      if (typeof EventSource !== 'undefined') {
+        esRef.current?.close();
+        const es = new EventSource(`/api/jobs/${encodeURIComponent(job_id)}/events`);
+        esRef.current = es;
+        es.addEventListener('progress', (ev) => {
+          try {
+            const d = JSON.parse((ev as MessageEvent).data) as {
+              progress?: number;
+              step?: string;
+              text?: string;
+            };
+            setRenderProgress({
+              pct: Math.round(d.progress ?? 0),
+              step: d.text || d.step || 'Đang dựng...',
+            });
+          } catch {
+            // ignore
+          }
+        });
+        es.addEventListener('end', (ev) => {
+          es.close();
+          esRef.current = null;
+          setRendering(false);
+          setRenderProgress(null);
+          try {
+            const d = JSON.parse((ev as MessageEvent).data) as { status?: string; error?: string };
+            if (d.status === 'done') {
+              void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+              void qc.invalidateQueries({ queryKey: ['unified-renders'] });
+              toast.info('Đã dựng xong video StickV!');
+            } else if (d.status === 'failed') {
+              toast.error(d.error || 'Dựng video StickV thất bại');
+            }
+          } catch {
+            void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+          }
+        });
+        es.onerror = () => {
+          es.close();
+          esRef.current = null;
+          setRendering(false);
+        };
+      }
     },
-    onError: (e: Error) => toast.show(e.message, { tone: 'danger' }),
+    onError: (e: Error) => toast.error(e),
   });
 
-  useEffect(() => {
-    if (!job.running && draft && job.slug === draft.slug) {
-      void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-    }
-  }, [job.running, job.slug, draft, qc]);
+  useEffect(() => () => esRef.current?.close(), []);
 
   const updateBeat = (beatId: string, patch: Partial<StickvBeat>) => {
     if (!draft) return;
@@ -218,9 +261,9 @@ export function StickvPage() {
     try {
       const res = await stickvApi.uploadBeatMedia(draft.slug, beatId, file);
       setDraft(res.project);
-      toast.show(`Đã đính kèm media cho ${beatId}`);
+      toast.info(`Đã đính kèm media cho ${beatId}`);
     } catch (e) {
-      toast.show((e as Error).message, { tone: 'danger' });
+      toast.error(e);
     }
   };
 
@@ -277,7 +320,9 @@ export function StickvPage() {
         <div className="space-y-5">
           <Card className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-title font-bold text-text">1. Sinh kịch bản StickV bằng Gemini</h2>
+              <h2 className="text-title font-bold text-text">
+                1. Sinh kịch bản StickV bằng Gemini
+              </h2>
               <span className="text-tiny font-semibold text-muted">
                 Tự chia lô nếu video dài 5–15 phút
               </span>
@@ -560,14 +605,16 @@ export function StickvPage() {
               if (draft) setDraft({ ...draft, aspect: nextAspect });
             }}
             estimateText={
-              draft
-                ? `${draft.beats.length} beat · ${draft.aspect} · ${draft.fps}fps`
-                : 'Chưa chọn dự án'
+              renderProgress
+                ? `${renderProgress.pct}% · ${renderProgress.step}`
+                : draft
+                  ? `${draft.beats.length} beat · ${draft.aspect} · ${draft.fps}fps`
+                  : 'Chưa chọn dự án'
             }
-            previewBusy={renderMutation.isPending || job.running}
-            exportBusy={renderMutation.isPending || job.running}
-            previewDisabled={!draft || draft.beats.length === 0 || job.running}
-            exportDisabled={!draft || draft.beats.length === 0 || job.running}
+            previewBusy={renderMutation.isPending || rendering || job.running}
+            exportBusy={renderMutation.isPending || rendering || job.running}
+            previewDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
+            exportDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
             onPreview={() => renderMutation.mutate(true)}
             onExport={() => renderMutation.mutate(false)}
             exportLabel={`Xuất bản đẹp (${(draft?.aspect ?? aspect) === '16:9' ? '1920×1080' : '1080×1920'})`}

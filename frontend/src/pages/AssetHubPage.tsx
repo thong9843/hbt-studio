@@ -75,9 +75,9 @@ export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<LibraryTab>('renders');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
   const [previewRender, setPreviewRender] = useState<UnifiedRenderItem | null>(null);
-  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting' | 'stickv'>(
-    'all',
-  );
+  const [engineFilter, setEngineFilter] = useState<
+    'all' | 'core' | 'postv' | 'chatting' | 'stickv'
+  >('all');
   const [memeSearch, setMemeSearch] = useState('');
   const [memeTagFilter, setMemeTagFilter] = useState<string>('all');
   const [onlineOpen, setOnlineOpen] = useState(false);

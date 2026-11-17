@@ -165,8 +165,7 @@ async def upload_beat_media(
     rel_path = f"media/{target.name}"
 
     updated_beats = [
-        b.model_copy(update={"media_path": rel_path}) if b.id == beat_id else b
-        for b in proj.beats
+        b.model_copy(update={"media_path": rel_path}) if b.id == beat_id else b for b in proj.beats
     ]
     saved = save_stickv_project(
         state.settings.workspace_dir, proj.model_copy(update={"beats": updated_beats})

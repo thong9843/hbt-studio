@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiRequest } from './client';
 import type { StickvAspect, StickvProject, StickvTheme } from './types';
 
 export interface StickvListResponse {
@@ -8,10 +8,10 @@ export interface StickvListResponse {
 }
 
 export const stickvApi = {
-  list: () => apiFetch<StickvListResponse>('/api/stickv'),
+  list: () => apiRequest<StickvListResponse>('GET', '/stickv'),
 
   get: (slug: string) =>
-    apiFetch<{ project: StickvProject }>(`/api/stickv/${encodeURIComponent(slug)}`),
+    apiRequest<{ project: StickvProject }>('GET', `/stickv/${encodeURIComponent(slug)}`),
 
   create: (body: {
     title: string;
@@ -20,11 +20,7 @@ export const stickvApi = {
     theme?: StickvTheme;
     target_minutes?: number;
     gemini_model?: string;
-  }) =>
-    apiFetch<{ project: StickvProject }>('/api/stickv', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  }) => apiRequest<{ project: StickvProject }>('POST', '/stickv', { json: body }),
 
   generate: (body: {
     idea: string;
@@ -35,42 +31,34 @@ export const stickvApi = {
     model?: string;
     slug?: string;
   }) =>
-    apiFetch<{ project: StickvProject; meta: Record<string, unknown> }>('/api/stickv/generate', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    apiRequest<{ project: StickvProject; meta: Record<string, unknown> }>(
+      'POST',
+      '/stickv/generate',
+      { json: body },
+    ),
 
   save: (slug: string, project: StickvProject) =>
-    apiFetch<{ project: StickvProject }>(`/api/stickv/${encodeURIComponent(slug)}`, {
-      method: 'PUT',
-      body: JSON.stringify(project),
+    apiRequest<{ project: StickvProject }>('PUT', `/stickv/${encodeURIComponent(slug)}`, {
+      json: project,
     }),
 
   remove: (slug: string) =>
-    apiFetch<{ ok: boolean }>(`/api/stickv/${encodeURIComponent(slug)}`, {
-      method: 'DELETE',
-    }),
+    apiRequest<{ ok: boolean }>('DELETE', `/stickv/${encodeURIComponent(slug)}`),
 
-  uploadBeatMedia: async (slug: string, beatId: string, file: File) => {
+  uploadBeatMedia: (slug: string, beatId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(
-      `/api/stickv/${encodeURIComponent(slug)}/beats/${encodeURIComponent(beatId)}/media`,
-      { method: 'POST', body: form },
+    return apiRequest<{ ok: boolean; media_path: string; project: StickvProject }>(
+      'POST',
+      `/stickv/${encodeURIComponent(slug)}/beats/${encodeURIComponent(beatId)}/media`,
+      { form },
     );
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { detail?: string };
-      throw new Error(err.detail || `Lỗi tải lên (${res.status})`);
-    }
-    return (await res.json()) as { ok: boolean; media_path: string; project: StickvProject };
   },
 
   render: (slug: string, preview: boolean) =>
-    apiFetch<{ job_id: string; slug: string; preview: boolean }>(
-      `/api/stickv/${encodeURIComponent(slug)}/render`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ preview }),
-      },
+    apiRequest<{ job_id: string; slug: string; preview: boolean }>(
+      'POST',
+      `/stickv/${encodeURIComponent(slug)}/render`,
+      { json: { preview } },
     ),
 };

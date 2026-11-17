@@ -18,6 +18,9 @@ def test_stickv_api_crud_generate_and_media_upload(tmp_path: Path) -> None:
             workspace_dir=tmp_path / "workspace",
             library_dir=tmp_path / "library",
             assets_dir=tmp_path / "assets",
+            whisper_model="small",
+            whisper_device="cpu",
+            default_fps=50,
         )
     )
     client = TestClient(app)

@@ -14,8 +14,7 @@ from hbt.shared.ffmpeg_utils import (
     build_acrossfade_filter_graph,
     measure_audio_duration,
 )
-from hbt.shared.tts import resolve_voice_id
-from hbt.shared.tts_client import synthesize_single_segment_sync
+from hbt.shared.tts_client import resolve_voice_id, synthesize_single_segment_sync
 from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
@@ -43,7 +42,9 @@ def _write_fallback_wav(dest: Path, text: str) -> None:
         wf.writeframes(b"\x00\x00" * n_frames)
 
 
-def resolve_sfx_file(sfx_tag: str, library_dir: Path, assets_dir: Path | None = None) -> Path | None:
+def resolve_sfx_file(
+    sfx_tag: str, library_dir: Path, assets_dir: Path | None = None
+) -> Path | None:
     """Tìm file SFX khớp `sfx_tag` trong `library/sfx/` hoặc `assets/sfx/`."""
     tag = (sfx_tag or "none").strip().lower()
     if tag == "none":
@@ -75,7 +76,9 @@ def synth_stickv_beats_audio(
     """Sinh giọng từng beat bằng VieNeu-TTS và đo `duration_sec` chính xác bằng `ffprobe`."""
     audio_dir.mkdir(parents=True, exist_ok=True)
     chosen_voice = resolve_voice_id(voice_id, default_voice)
-    tts_ok = voice_provider is not None and bool(getattr(voice_provider, "available", lambda: False)())
+    tts_ok = voice_provider is not None and bool(
+        getattr(voice_provider, "available", lambda: False)()
+    )
 
     results: list[tuple[Path, float]] = []
     for idx, beat in enumerate(beats, start=1):

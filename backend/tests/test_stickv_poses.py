@@ -32,7 +32,14 @@ def test_asset_hub_stickman_category_lists_and_uploads(tmp_path: Path) -> None:
     ensure_default_poses(lib / "stickman" / "poses")
 
     app = create_app(
-        Settings(workspace_dir=ws, library_dir=lib, assets_dir=assets),
+        Settings(
+            workspace_dir=ws,
+            library_dir=lib,
+            assets_dir=assets,
+            whisper_model="small",
+            whisper_device="cpu",
+            default_fps=50,
+        ),
     )
     client = TestClient(app)
 

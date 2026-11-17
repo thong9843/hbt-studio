@@ -120,7 +120,12 @@ def _draw_eyes(
             draw.arc((ex - 20, ey - 14, ex + 20, ey + 18), start=190, end=350, fill=INK, width=12)
     elif style == "shock":
         for ex in (lx, rx):
-            draw.ellipse((ex - 22, ey - 22, ex + 22, ey + 22), fill=(255, 255, 255, 255), outline=INK, width=10)
+            draw.ellipse(
+                (ex - 22, ey - 22, ex + 22, ey + 22),
+                fill=(255, 255, 255, 255),
+                outline=INK,
+                width=10,
+            )
             draw.ellipse((ex - 7, ey - 7, ex + 7, ey + 7), fill=INK)
     elif style == "sad":
         for ex in (lx, rx):
@@ -143,7 +148,14 @@ def _draw_mouth(draw: ImageDraw.ImageDraw, cx: float, cy: float, style: str = "s
     if style == "smile":
         draw.arc((cx - 34, my - 22, cx + 34, my + 24), start=15, end=165, fill=INK, width=12)
     elif style == "open_happy":
-        draw.chord((cx - 38, my - 18, cx + 38, my + 34), start=0, end=180, fill=HBT_RED, outline=INK, width=10)
+        draw.chord(
+            (cx - 38, my - 18, cx + 38, my + 34),
+            start=0,
+            end=180,
+            fill=HBT_RED,
+            outline=INK,
+            width=10,
+        )
     elif style == "shock":
         draw.ellipse((cx - 24, my - 14, cx + 24, my + 34), fill=HBT_RED, outline=INK, width=10)
     elif style == "think":
@@ -158,7 +170,9 @@ def _draw_mouth(draw: ImageDraw.ImageDraw, cx: float, cy: float, style: str = "s
         )
 
 
-def _draw_star(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float, color: tuple[int, int, int, int]) -> None:
+def _draw_star(
+    draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float, color: tuple[int, int, int, int]
+) -> None:
     pts: list[tuple[float, float]] = []
     for i in range(10):
         ang = math.radians(i * 36 - 90)
@@ -270,7 +284,9 @@ def render_pose_png(pose: str, out_path: Path) -> Path:
             _draw_mouth(draw, cx, head_y, style="open_happy")
             # Đồng xu vàng
             for mx, my in ((cx - 230, 300), (cx + 230, 290), (cx + 275, 410)):
-                draw.ellipse((mx - 42, my - 42, mx + 42, my + 42), fill=HBT_GOLD, outline=INK, width=10)
+                draw.ellipse(
+                    (mx - 42, my - 42, mx + 42, my + 42), fill=HBT_GOLD, outline=INK, width=10
+                )
 
         elif pose == "sad":
             _line(draw, [(cx, hip_y + 20), (cx - 65, 940), (cx - 75, 1100)])
@@ -297,8 +313,20 @@ def render_pose_png(pose: str, out_path: Path) -> Path:
             _draw_mouth(draw, cx, head_y, style="angry")
             # Ký hiệu gân giận màu đỏ
             vx, vy = cx + 96, head_y - 86
-            _line(draw, [(vx - 18, vy), (vx, vy + 18), (vx - 18, vy + 36)], width=11, color=HBT_RED, rim=False)
-            _line(draw, [(vx + 18, vy), (vx, vy + 18), (vx + 18, vy + 36)], width=11, color=HBT_RED, rim=False)
+            _line(
+                draw,
+                [(vx - 18, vy), (vx, vy + 18), (vx - 18, vy + 36)],
+                width=11,
+                color=HBT_RED,
+                rim=False,
+            )
+            _line(
+                draw,
+                [(vx + 18, vy), (vx, vy + 18), (vx + 18, vy + 36)],
+                width=11,
+                color=HBT_RED,
+                rim=False,
+            )
 
         resized = canvas.resize((512, 640), Image.Resampling.LANCZOS)
         try:
@@ -313,7 +341,9 @@ def render_pose_png(pose: str, out_path: Path) -> Path:
 
 def ensure_default_poses(poses_dir: Path | None = None) -> list[Path]:
     """Đảm bảo đủ 8 dáng người que chuẩn và index.json trong library/stickman/poses/."""
-    target_dir = Path(poses_dir) if poses_dir is not None else (REPO_ROOT / "library" / "stickman" / "poses")
+    target_dir = (
+        Path(poses_dir) if poses_dir is not None else (REPO_ROOT / "library" / "stickman" / "poses")
+    )
     target_dir.mkdir(parents=True, exist_ok=True)
 
     created: list[Path] = []

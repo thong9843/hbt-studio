@@ -213,7 +213,9 @@ export function EngineShowcaseCards() {
             <div className="min-w-0 flex-1 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-engine-stickv" />
-                <span className="text-[11px] font-bold text-text">8 dáng chuẩn + Bảng thông minh</span>
+                <span className="text-[11px] font-bold text-text">
+                  8 dáng chuẩn + Bảng thông minh
+                </span>
               </div>
               <div className="h-2 w-4/5 rounded bg-engine-stickv/20" />
               <div className="h-2 w-3/5 rounded bg-engine-stickv/10" />

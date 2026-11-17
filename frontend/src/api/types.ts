@@ -857,12 +857,7 @@ export interface HbtCoreRenderResponse {
 }
 
 export type AssetHubCategory =
-  | 'music'
-  | 'backgrounds'
-  | 'stickers'
-  | 'memes'
-  | 'watermarks'
-  | 'stickman';
+  'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks' | 'stickman';
 
 export interface AssetHubItem {
   id?: string;

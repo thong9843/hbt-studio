@@ -19,25 +19,25 @@ FONT_MEDIUM = FONTS_DIR / "BeVietnamPro-Medium.ttf"
 
 THEME_PALETTES: dict[StickvTheme, dict[str, tuple[int, int, int, int]]] = {
     "cream": {
-        "bg": (250, 247, 240, 255),          # #FAF7F0 Giấy kem ấm
+        "bg": (250, 247, 240, 255),  # #FAF7F0 Giấy kem ấm
         "grid": (235, 229, 216, 255),
         "card": (255, 255, 255, 245),
         "card_border": (224, 215, 198, 255),
         "text": (30, 41, 59, 255),
         "muted": (71, 85, 105, 255),
-        "accent": (217, 35, 46, 255),        # HBT Red
-        "amber": (245, 158, 11, 255),        # HBT Amber
+        "accent": (217, 35, 46, 255),  # HBT Red
+        "amber": (245, 158, 11, 255),  # HBT Amber
         "pill_bg": (254, 243, 199, 255),
         "pill_text": (146, 64, 14, 255),
     },
     "dark": {
-        "bg": (17, 24, 39, 255),             # #111827 Bảng tối hiện đại
+        "bg": (17, 24, 39, 255),  # #111827 Bảng tối hiện đại
         "grid": (31, 41, 55, 255),
         "card": (30, 41, 59, 245),
         "card_border": (51, 65, 85, 255),
         "text": (248, 250, 252, 255),
         "muted": (203, 213, 225, 255),
-        "accent": (245, 158, 11, 255),       # HBT Amber
+        "accent": (245, 158, 11, 255),  # HBT Amber
         "amber": (250, 204, 21, 255),
         "pill_bg": (51, 65, 85, 255),
         "pill_text": (253, 224, 71, 255),
@@ -197,9 +197,19 @@ def _draw_smart_board(
         ry = cur_y + 52
         col_chars = max(12, (bw // 2 - 70) // 18)
         for item in (data.get("left_items") or [])[:4]:
-            ly = _draw_wrapped_text(draw, f"• {item}", (x0 + 36, ly), f_sub, pal["text"], width_chars=col_chars) + 10
+            ly = (
+                _draw_wrapped_text(
+                    draw, f"• {item}", (x0 + 36, ly), f_sub, pal["text"], width_chars=col_chars
+                )
+                + 10
+            )
         for item in (data.get("right_items") or [])[:4]:
-            ry = _draw_wrapped_text(draw, f"✓ {item}", (mid_x + 28, ry), f_sub, pal["text"], width_chars=col_chars) + 10
+            ry = (
+                _draw_wrapped_text(
+                    draw, f"✓ {item}", (mid_x + 28, ry), f_sub, pal["text"], width_chars=col_chars
+                )
+                + 10
+            )
 
     elif beat.board_type == "flow_steps":
         steps = [str(s) for s in (data.get("steps") or []) if str(s).strip()][:4]
@@ -213,7 +223,9 @@ def _draw_smart_board(
                 outline=pal["amber"],
                 width=2,
             )
-            draw.text((x0 + 56, cur_y + 18), f"{idx}. {step[:42]}", font=f_body, fill=pal["pill_text"])
+            draw.text(
+                (x0 + 56, cur_y + 18), f"{idx}. {step[:42]}", font=f_body, fill=pal["pill_text"]
+            )
             cur_y += 92
 
 
@@ -250,7 +262,11 @@ def render_beat_layers(
 
         # Nếu beat có ảnh minh họa riêng (PNG/JPG/WEBP), vẽ lồng vào khung bảng
         beat_media = (project_dir / beat.media_path) if (project_dir and beat.media_path) else None
-        if beat_media and beat_media.is_file() and beat_media.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        if (
+            beat_media
+            and beat_media.is_file()
+            and beat_media.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ):
             with Image.open(beat_media) as raw_media:
                 media_rgba = raw_media.convert("RGBA")
                 try:

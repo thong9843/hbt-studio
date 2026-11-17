@@ -64,7 +64,11 @@ def _render_single_beat_clip(
     dur = max(1.0, float(beat.duration_sec or 2.0))
     media_file = (project_dir / beat.media_path) if beat.media_path else None
 
-    if media_file and media_file.is_file() and media_file.suffix.lower() in {".mp4", ".mov", ".webm"}:
+    if (
+        media_file
+        and media_file.is_file()
+        and media_file.suffix.lower() in {".mp4", ".mov", ".webm"}
+    ):
         # Chèn clip chuyển động điểm nhấn (.mp4 từ Google Flow / Veo)
         vf = (
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
@@ -263,7 +267,9 @@ def render_stickv(
                 brand_dir=brand_dir,
                 assets_dir=assets_dir,
             )
-            wm_fc = build_watermark_overlay_filter(video_label="0:v", wm_label="2:v", out_label="vout")
+            wm_fc = build_watermark_overlay_filter(
+                input_video="0:v", input_wm="2:v", output_label="vout"
+            )
             run_ffmpeg(
                 [
                     *FFMPEG_RESOURCE_CLAMP,

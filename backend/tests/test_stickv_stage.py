@@ -42,7 +42,12 @@ def test_render_beat_layers_all_board_types_and_aspects(tmp_path: Path) -> None:
             pose="think",
             board_type="comparison",
             board_title="Trước và Sau",
-            board_data={"left_title": "Cũ", "left_items": ["Chậm"], "right_title": "Mới", "right_items": ["Mượt"]},
+            board_data={
+                "left_title": "Cũ",
+                "left_items": ["Chậm"],
+                "right_title": "Mới",
+                "right_items": ["Mượt"],
+            },
         ),
         StickvBeat(
             id="b4",
@@ -60,7 +65,7 @@ def test_render_beat_layers_all_board_types_and_aspects(tmp_path: Path) -> None:
                 beats[0],
                 aspect=aspect,
                 theme=theme,
-                out_dir=out / f"{aspect}_{theme}",
+                out_dir=out / f"{aspect.replace(':', 'x')}_{theme}",
                 library_dir=lib,
                 assets_dir=assets,
             )
@@ -115,7 +120,9 @@ def test_synth_and_render_cleans_up_chunks_dir(tmp_path: Path) -> None:
     assert proj.beats[0].duration_sec >= 1.2
 
     # Kiểm tra synth_stickv_beats_audio & mix_stickv_audio độc lập
-    wavs = synth_stickv_beats_audio(proj.beats, pdir / "a2", voice_provider=None, voice_id="vienneu_default")
+    wavs = synth_stickv_beats_audio(
+        proj.beats, pdir / "a2", voice_provider=None, voice_id="vienneu_default"
+    )
     assert len(wavs) == 2
     with patch("hbt.stickv.audio.run_ffmpeg", side_effect=fake_ffmpeg):
         mixed = mix_stickv_audio(
