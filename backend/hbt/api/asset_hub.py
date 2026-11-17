@@ -45,7 +45,7 @@ from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
 
-VALID_CATEGORIES = ("music", "backgrounds", "stickers", "memes", "watermarks")
+VALID_CATEGORIES = ("music", "backgrounds", "stickers", "memes", "watermarks", "stickman")
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
@@ -448,6 +448,27 @@ def list_asset_hub_items(category: str, state: State) -> dict[str, Any]:
                     readonly=True,
                 )
             )
+    elif category == "stickman":
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS,
+                recursive=True,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "stickman",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS,
+                recursive=True,
+            )
+        )
 
     items.sort(key=lambda x: str(x["modified_at"]), reverse=True)
     return {"category": category, "items": items}
@@ -555,7 +576,7 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
     db = _db_path(state)
     renders_root = state.settings.assets_dir / "renders"
     sync_renders_dir(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
-    valid_eng = engine if engine in ("core", "postv", "chatting") else None
+    valid_eng = engine if engine in ("core", "postv", "chatting", "stickv") else None
     rows = list_renders(engine=valid_eng, db_path=db)
     items: list[dict[str, Any]] = []
     for r in rows:
