@@ -31,6 +31,29 @@ const DEFAULT_POSE_OPTIONS = [
   { id: 'angry', label: 'Tức giận' },
 ];
 
+const EXTRA_POSE_LABELS: Record<string, string> = {
+  idea: 'Ý tưởng / Sáng kiến',
+  confused: 'Bối rối / Khó hiểu',
+  detective: 'Thám tử / Điều tra',
+  nerd: 'Mọt sách / Phân tích',
+  secret: 'Bí mật / Suỵt',
+  facepalm: 'Vỗ trán / Bó tay',
+  laugh: 'Cười sảng khoái',
+  evil_grin: 'Cười nham hiểm',
+  cry: 'Khóc lóc',
+  scared: 'Hoảng sợ',
+  broke: 'Hết tiền / Cháy túi',
+  tired: 'Mệt mỏi',
+  sleepy: 'Buồn ngủ',
+  cool: 'Ngầu / Tự tin',
+  love: 'Yêu thích',
+  stop: 'Dừng lại / Cảnh báo',
+  present: 'Thuyết trình / Giới thiệu',
+  winner: 'Chiến thắng / Cúp',
+  pray: 'Cầu nguyện / Xin',
+  salute: 'Chào nghiêm / Đồng ý',
+};
+
 const MOTIONS: { id: StickvMotion; label: string }[] = [
   { id: 'bounce', label: 'Nhún nhịp' },
   { id: 'slide_left', label: 'Trượt từ phải' },
@@ -185,7 +208,7 @@ export function StickvPage() {
       if (!byId.has(p)) {
         byId.set(p, {
           id: p,
-          label: labelMap.get(p) ?? p,
+          label: labelMap.get(p) ?? EXTRA_POSE_LABELS[p] ?? p,
           url: `/api/stickv/poses/${encodeURIComponent(p)}`,
           isVideo: false,
         });

@@ -18,7 +18,7 @@ VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
 
 def _build_system_prompt(available_poses: list[str] | None = None) -> str:
     poses = available_poses or list(DEFAULT_POSES)
-    pose_str = "|".join(poses[:30])
+    pose_str = "|".join(poses[:40])
     return (
         "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
         "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
