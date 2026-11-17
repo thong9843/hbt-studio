@@ -11,7 +11,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DB_PATH = REPO_ROOT / "workspace" / "studio.db"
 PIPELINE_STAGES = ("draft", "rendered", "edited", "scheduled", "published")
-VALID_ENGINES = ("core", "postv", "chatting", "clipper", "editor")
+VALID_ENGINES = ("core", "postv", "chatting", "clipper", "editor", "stickv")
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

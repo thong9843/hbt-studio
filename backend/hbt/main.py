@@ -25,6 +25,7 @@ from hbt.api import (
     postv,
     projects,
     script,
+    stickv,
     voices,
 )
 from hbt.api import render as render_api
@@ -143,6 +144,7 @@ def create_app(
         memes,
         chatting,
         core,
+        stickv,
     ):
         app.include_router(module.router, prefix="/api")
     return app
