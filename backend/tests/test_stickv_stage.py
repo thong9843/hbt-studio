@@ -213,6 +213,11 @@ def test_lipsync_karaoke_and_vieneu_status_check(tmp_path: Path) -> None:
     user_shock.write_bytes(b"custom-shock")
     assert resolve_pose_png("shock", tmp_path / "library", tmp_path / "assets") == user_shock
 
+    # Kiểm tra nhận diện file có tiền tố {pose}. hoặc {pose}_ (Google Flow)
+    flow_happy = tmp_path / "assets" / "stickman" / "happy.png_Same_stickman_mascot_abc.png"
+    flow_happy.write_bytes(b"flow-happy")
+    assert resolve_pose_png("happy", tmp_path / "library", tmp_path / "assets") == flow_happy
+
     # Kiểm tra render_single_beat_clip khớp thời lượng Video Pose (lặp/cắt theo giọng đọc)
     from hbt.stickv.render import _render_single_beat_clip
 

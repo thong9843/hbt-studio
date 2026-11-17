@@ -122,6 +122,15 @@ def test_stickman_upload_priority_no_overwrite_and_pose_endpoint(tmp_path: Path)
     assert r_think.status_code == 200
     assert r_think.content == custom_bytes
 
+    # Kiểm tra ensure_default_poses không tạo đè khi đã có file {pose}.* của người dùng
+    flow_dir = tmp_path / "flow_poses"
+    flow_dir.mkdir()
+    flow_file = flow_dir / "explain.png_Same_stickman_mascot_123.png"
+    flow_file.write_bytes(custom_bytes)
+    ensured = ensure_default_poses(flow_dir)
+    assert any(p.name == flow_file.name for p in ensured)
+    assert not (flow_dir / "explain.png").exists()
+
 
 def test_stickman_video_pose_upload_and_list(tmp_path: Path) -> None:
     from unittest.mock import patch

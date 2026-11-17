@@ -379,23 +379,44 @@ def render_pose_png(pose: str, out_path: Path) -> Path:
 
 
 def ensure_default_poses(poses_dir: Path | None = None) -> list[Path]:
-    """Đảm bảo đủ 8 dáng người que chuẩn và index.json trong library/stickman/poses/."""
+    """Đảm bảo có ảnh dáng trong `poses_dir`; không ghi đè file của người dùng."""
     target_dir = (
         Path(poses_dir) if poses_dir is not None else (REPO_ROOT / "library" / "stickman" / "poses")
     )
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    existing_files = [
+        p
+        for p in target_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    ]
+
     created: list[Path] = []
     entries: list[dict[str, object]] = []
     for pose in DEFAULT_POSES:
-        png = target_dir / f"{pose}.png"
-        if not png.is_file():
+        matched = next(
+            (
+                p
+                for p in existing_files
+                if p.stem.lower() == pose
+                or p.name.lower().startswith(f"{pose}.")
+                or p.name.lower().startswith(f"{pose}_")
+            ),
+            None,
+        )
+        if matched is not None:
+            created.append(matched)
+            file_name = matched.name
+        else:
+            png = target_dir / f"{pose}.png"
             render_pose_png(pose, png)
-        created.append(png)
+            created.append(png)
+            file_name = png.name
+
         entries.append(
             {
                 "id": f"stickman-{pose}",
-                "file": f"{pose}.png",
+                "file": file_name,
                 "title": POSE_TITLES[pose],
                 "tags": [pose, "stickman", "hbt"],
             }
@@ -407,54 +428,47 @@ def ensure_default_poses(poses_dir: Path | None = None) -> list[Path]:
     return created
 
 
-def remove_white_background(
-    src_path: Path,
-    out_path: Path | None = None,
+def remove_white_background_image(
+    img: Image.Image,
     *,
-    threshold: int = 240,
-) -> tuple[Path, bool]:
-    """Tự động tách nền trắng bên ngoài bằng flood-fill từ 4 góc + làm mềm viền anti-alias.
+    threshold: int = 235,
+) -> tuple[Image.Image, bool]:
+    """Tách nền trắng sáng bên ngoài bằng flood-fill từ 4 cạnh biên + làm mềm viền 1-2px.
 
-    Giữ nguyên toàn bộ vùng trắng bên trong đầu/cổ áo của nhân vật.
-    Trả về `(đường dẫn PNG đầu ra, đã_tách_nền_hay_chưa)`.
+    Giữ nguyên 100% màu trắng bên trong đầu, mắt, găng tay và cổ áo nhân vật.
     """
-    src_path = Path(src_path)
-    dest = Path(out_path) if out_path is not None else src_path.with_suffix(".png")
-
-    with Image.open(src_path) as raw:
-        rgba = raw.convert("RGBA")
-        try:
-            arr = np.array(rgba, dtype=np.uint8)
-        finally:
-            rgba.close()
+    rgba = img.convert("RGBA")
+    arr = np.array(rgba, dtype=np.uint8)
+    rgba.close()
 
     h, w, _ = arr.shape
     if h == 0 or w == 0:
-        return src_path, False
-
-    corners = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
-    has_white_corner = any(
-        int(arr[y, x, 0]) > threshold
-        and int(arr[y, x, 1]) > threshold
-        and int(arr[y, x, 2]) > threshold
-        and int(arr[y, x, 3]) >= 200
-        for y, x in corners
-    )
-    if not has_white_corner:
-        return src_path, False
+        return Image.fromarray(arr, mode="RGBA"), False
 
     is_white = (
-        (arr[:, :, 0] >= threshold)
-        & (arr[:, :, 1] >= threshold)
-        & (arr[:, :, 2] >= threshold)
+        (arr[:, :, 0] > threshold)
+        & (arr[:, :, 1] > threshold)
+        & (arr[:, :, 2] > threshold)
         & (arr[:, :, 3] >= 200)
     )
+
     bg_mask = np.zeros((h, w), dtype=bool)
     queue: deque[tuple[int, int]] = deque()
-    for cy, cx in corners:
-        if is_white[cy, cx] and not bg_mask[cy, cx]:
-            bg_mask[cy, cx] = True
-            queue.append((cy, cx))
+
+    # Quét toàn bộ 4 cạnh biên (trên, dưới, trái, phải) để không sót nền trắng
+    for x in range(w):
+        for y in (0, h - 1):
+            if is_white[y, x] and not bg_mask[y, x]:
+                bg_mask[y, x] = True
+                queue.append((y, x))
+    for y in range(h):
+        for x in (0, w - 1):
+            if is_white[y, x] and not bg_mask[y, x]:
+                bg_mask[y, x] = True
+                queue.append((y, x))
+
+    if not queue:
+        return Image.fromarray(arr, mode="RGBA"), False
 
     while queue:
         y, x = queue.popleft()
@@ -464,34 +478,82 @@ def remove_white_background(
                 queue.append((ny, nx))
 
     if not np.any(bg_mask):
-        return src_path, False
+        return Image.fromarray(arr, mode="RGBA"), False
 
-    # Làm trong suốt vùng nền trắng bên ngoài
     arr[bg_mask, 3] = 0
 
-    # Làm mềm viền anti-alias 1px tiếp giáp nền trắng
-    adj = np.zeros((h, w), dtype=bool)
-    adj[1:, :] |= bg_mask[:-1, :]
-    adj[:-1, :] |= bg_mask[1:, :]
-    adj[:, 1:] |= bg_mask[:, :-1]
-    adj[:, :-1] |= bg_mask[:, 1:]
-    edge = adj & (~bg_mask)
-    min_rgb = np.min(arr[:, :, :3], axis=2)
-    soft_thresh = max(180, threshold - 40)
-    feather = edge & (min_rgb >= soft_thresh)
-    if np.any(feather):
-        alpha_scale = np.clip(
-            (threshold - min_rgb[feather]) / max(1, threshold - soft_thresh), 0.0, 1.0
-        )
-        arr[feather, 3] = (arr[feather, 3].astype(np.float32) * alpha_scale).astype(np.uint8)
+    # Làm mềm viền anti-alias 1-2px tiếp giáp nền trắng bên ngoài
+    def _dilate_once(mask: np.ndarray) -> np.ndarray:
+        out = np.zeros_like(mask)
+        out[1:, :] |= mask[:-1, :]
+        out[:-1, :] |= mask[1:, :]
+        out[:, 1:] |= mask[:, :-1]
+        out[:, :-1] |= mask[:, 1:]
+        return out
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    out_img = Image.fromarray(arr, mode="RGBA")
+    ring1 = _dilate_once(bg_mask) & (~bg_mask)
+    ring2 = _dilate_once(bg_mask | ring1) & (~bg_mask) & (~ring1)
+    min_rgb = np.min(arr[:, :, :3], axis=2)
+    soft_thresh = max(175, threshold - 45)
+
+    for ring, weight in ((ring1, 1.0), (ring2, 0.55)):
+        feather = ring & (min_rgb >= soft_thresh)
+        if np.any(feather):
+            scale = np.clip(
+                (threshold - min_rgb[feather]) / max(1, threshold - soft_thresh), 0.0, 1.0
+            )
+            blended = 1.0 - (1.0 - scale) * weight
+            arr[feather, 3] = (arr[feather, 3].astype(np.float32) * blended).astype(np.uint8)
+
+    return Image.fromarray(arr, mode="RGBA"), True
+
+
+def remove_white_background(
+    src_path: Path,
+    out_path: Path | None = None,
+    *,
+    threshold: int = 235,
+) -> tuple[Path, bool]:
+    """Đọc file ảnh, tách nền trắng bên ngoài và lưu thành PNG RGBA trong suốt."""
+    src_path = Path(src_path)
+    dest = Path(out_path) if out_path is not None else src_path.with_suffix(".png")
+
+    with Image.open(src_path) as raw:
+        out_img, removed = remove_white_background_image(raw, threshold=threshold)
+
     try:
+        if not removed and src_path.suffix.lower() == ".png":
+            return src_path, False
+        dest.parent.mkdir(parents=True, exist_ok=True)
         out_img.save(dest, format="PNG", optimize=True)
+        return dest, removed
     finally:
         out_img.close()
-    return dest, True
+
+
+def convert_stickman_dir_to_transparent(folder: Path, *, threshold: int = 235) -> int:
+    """Tự động chuyển các file .jpg/.jpeg/.webp/.png nền trắng trong thư mục sang PNG RGBA."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return 0
+    converted = 0
+    for p in list(folder.iterdir()):
+        if not p.is_file() or p.name.startswith("."):
+            continue
+        ext = p.suffix.lower()
+        if ext not in {".jpg", ".jpeg", ".webp", ".png"}:
+            continue
+        png_dest = p.with_suffix(".png")
+        try:
+            final_p, changed = remove_white_background(p, png_dest, threshold=threshold)
+            if ext != ".png" and final_p.is_file():
+                p.unlink(missing_ok=True)
+                converted += 1
+            elif changed:
+                converted += 1
+        except Exception:
+            continue
+    return converted
 
 
 if __name__ == "__main__":

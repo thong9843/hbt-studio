@@ -11,7 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from hbt.config import REPO_ROOT
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvAspect, StickvBeat, StickvTheme
-from hbt.stickv.poses_init import DEFAULT_POSES, ensure_default_poses
+from hbt.stickv.poses_init import (
+    DEFAULT_POSES,
+    convert_stickman_dir_to_transparent,
+    ensure_default_poses,
+)
 
 FONTS_DIR = REPO_ROOT / "backend" / "hbt" / "fonts"
 FONT_EXTRABOLD = FONTS_DIR / "BeVietnamPro-ExtraBold.ttf"
@@ -64,40 +68,85 @@ def _load_font(path: Path, size: int) -> ImageFont.FreeTypeFont | ImageFont.Imag
     return ImageFont.load_default()
 
 
+_POSE_IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _match_pose_in_dir(directory: Path, pose_clean: str) -> Path | None:
+    if not directory.is_dir():
+        return None
+    files = [
+        p
+        for p in directory.iterdir()
+        if p.is_file() and p.suffix.lower() in _POSE_IMG_EXTS and not p.name.startswith(".")
+    ]
+    if not files:
+        return None
+
+    low_pose = pose_clean.lower()
+    stem = Path(low_pose).stem
+    exact_names = {low_pose, f"{stem}.png", f"{stem}.jpg", f"{stem}.jpeg", f"{stem}.webp"}
+
+    # 1. Khớp chính xác tên file
+    exact = [p for p in files if p.name.lower() in exact_names]
+    if exact:
+        exact.sort(key=lambda p: (p.suffix.lower() == ".png", p.stat().st_mtime), reverse=True)
+        return exact[0]
+
+    # 2. Khớp tiền tố bắt đầu bằng {pose}. hoặc {pose}_ (vd: shock.png_Same_stickman_mascot_...png)
+    prefixed = [
+        p
+        for p in files
+        if p.name.lower().startswith(f"{stem}.") or p.name.lower().startswith(f"{stem}_")
+    ]
+    if prefixed:
+        prefixed.sort(key=lambda p: (p.suffix.lower() == ".png", p.stat().st_mtime), reverse=True)
+        return prefixed[0]
+
+    # 3. File mặc định người dùng (default.png / stickman_mascot) hoặc file mới nhất trong thư mục
+    defaults = [
+        p
+        for p in files
+        if p.stem.lower() == "default" or p.name.lower().startswith("stickman_mascot")
+    ]
+    if defaults:
+        defaults.sort(key=lambda p: (p.suffix.lower() == ".png", p.stat().st_mtime), reverse=True)
+        return defaults[0]
+
+    return None
+
+
 def resolve_pose_png(pose: str, library_dir: Path, assets_dir: Path) -> Path:
     """Tìm file PNG dáng nhân vật theo thứ tự ưu tiên:
-    1. Ảnh người dùng tải lên khớp tên/dáng trong `assets/stickman/`
-    2. Ảnh mặc định do người dùng đặt (`assets/stickman/default.png`) nếu là dáng chuẩn
-    3. Bộ 8 dáng chuẩn trong `library/stickman/poses/` (tự khởi tạo nếu thiếu)
+    1. Khớp chính xác `{pose}.png` trong `assets/stickman/` -> `library/stickman/poses/`
+    2. Khớp tiền tố `{pose}.` / `{pose}_` (vd `shock.png_Same_stickman_...`) mới nhất
+    3. `default.png` / `stickman_mascot` hoặc file mới nhất trong `assets/stickman/`
+    4. Bộ mặc định trong `library/stickman/poses/`
     """
     clean = (pose or "explain").strip()
-    fname = clean if clean.lower().endswith(".png") else f"{clean}.png"
-    stem = Path(clean).stem
-
-    user_candidates = [
-        assets_dir / "stickman" / clean,
-        assets_dir / "stickman" / fname,
-        assets_dir / "stickman" / "poses" / fname,
-    ]
-    for c in user_candidates:
-        if c.is_file():
-            return c
-
-    user_default = assets_dir / "stickman" / "default.png"
-    if user_default.is_file():
-        return user_default
-
+    user_dir = assets_dir / "stickman"
     poses_dir = library_dir / "stickman" / "poses"
-    ensure_default_poses(poses_dir)
-    lib_candidates = [
-        poses_dir / fname,
-        library_dir / "stickman" / clean,
-        library_dir / "stickman" / fname,
-    ]
-    for c in lib_candidates:
-        if c.is_file():
-            return c
+    lib_stick_dir = library_dir / "stickman"
 
+    for d in (user_dir, poses_dir):
+        convert_stickman_dir_to_transparent(d)
+
+    for d in (user_dir, user_dir / "poses", poses_dir, lib_stick_dir):
+        found = _match_pose_in_dir(d, clean)
+        if found is not None:
+            return found
+
+    # Nếu vẫn có ảnh bất kỳ trong assets/stickman, dùng ảnh mới nhất làm fallback
+    if user_dir.is_dir():
+        user_imgs = sorted(
+            (p for p in user_dir.iterdir() if p.is_file() and p.suffix.lower() in _POSE_IMG_EXTS),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if user_imgs:
+            return user_imgs[0]
+
+    ensure_default_poses(poses_dir)
+    stem = Path(clean).stem.lower()
     fallback = poses_dir / (f"{stem}.png" if stem in DEFAULT_POSES else "explain.png")
     return fallback if fallback.is_file() else poses_dir / "explain.png"
 
@@ -435,40 +484,22 @@ def render_animated_beat_frame(
         elif beat.motion == "bounce":
             dy = -abs(math.sin(t_sec * 6.0)) * 14.0
 
-        # Gật đầu nhẹ theo nhịp
-        dy += math.sin(t_sec * 4.2) * 3.0
+        # Nhún nhịp theo biên độ giọng đọc (bobbing) + gật đầu nhẹ
+        dy += math.sin(t_sec * 4.2) * 3.0 - (mouth_open * 6.0)
         px = int(round(base_x + dx))
         py = int(round(base_y + dy))
 
         frame_rgba = frame.convert("RGBA")
         try:
+            # Bóng đổ mềm dưới chân nhân vật (giữ nguyên tạo hình nhân vật, không vẽ đè mặt/tay)
+            shadow_draw = ImageDraw.Draw(frame_rgba)
+            sx0 = px + int(char_img.width * 0.2)
+            sx1 = px + int(char_img.width * 0.8)
+            sy0 = base_y + char_img.height - 26
+            sy1 = base_y + char_img.height + 6
+            shadow_draw.ellipse((sx0, sy0, sx1, sy1), fill=(15, 23, 42, 42))
+
             frame_rgba.alpha_composite(char_img, (px, py))
-
-            # Lip-sync & chớp mắt tự động cho 8 dáng chuẩn
-            if beat.pose in DEFAULT_POSES:
-                draw = ImageDraw.Draw(frame_rgba)
-                head_cx = px + int(char_img.width * (0.52 if beat.facing == "left" else 0.48))
-                head_cy = py + int(char_img.height * 0.172)
-
-                # Chớp mắt định kỳ mỗi ~2.5s (trong 0.12s)
-                if (t_sec % 2.5) < 0.12:
-                    ey = head_cy - 6
-                    for ex in (head_cx - 19, head_cx + 19):
-                        draw.ellipse(
-                            (ex - 10, ey - 10, ex + 10, ey + 10), fill=(255, 253, 248, 255)
-                        )
-                        draw.line([(ex - 9, ey), (ex + 9, ey)], fill=(24, 32, 48, 255), width=4)
-
-                # Nhép miệng khớp biên độ sóng âm (Audio-reactive Lip-sync)
-                if mouth_open > 0.18:
-                    my = head_cy + 20
-                    mh = int(4 + min(1.0, mouth_open) * 12)
-                    draw.ellipse(
-                        (head_cx - 12, my - mh // 2, head_cx + 12, my + mh),
-                        fill=(217, 35, 46, 255),
-                        outline=(24, 32, 48, 255),
-                        width=3,
-                    )
 
             draw_karaoke_strip(frame_rgba, word_timings, t_sec, aspect=aspect)
             rgb = frame_rgba.convert("RGB")

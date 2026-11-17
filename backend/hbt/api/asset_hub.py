@@ -47,7 +47,11 @@ from hbt.shared.online_sources import (
     search_tuna_sfx,
     update_meme_metadata,
 )
-from hbt.stickv.poses_init import ensure_default_poses, remove_white_background
+from hbt.stickv.poses_init import (
+    convert_stickman_dir_to_transparent,
+    ensure_default_poses,
+    remove_white_background,
+)
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
@@ -657,6 +661,8 @@ def list_asset_hub_items(category: str, state: State) -> dict[str, Any]:
                 )
             )
     elif category == "stickman":
+        convert_stickman_dir_to_transparent(assets_folder)
+        convert_stickman_dir_to_transparent(lib_dir / "stickman" / "poses")
         ensure_default_poses(lib_dir / "stickman" / "poses")
         items.extend(
             _collect_dir_items(
