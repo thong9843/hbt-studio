@@ -91,6 +91,49 @@ def test_unified_renders_sync_list_and_delete(tmp_path: Path) -> None:
     assert client.get("/api/renders").json()["items"] == []
 
 
+def test_unified_renders_lists_all_four_engines(tmp_path: Path) -> None:
+    import json
+
+    client = _make_client(tmp_path)
+
+    # 1. Core
+    core_dir = tmp_path / "workspace" / "projects" / "demo-core" / "renders" / "j1"
+    core_dir.mkdir(parents=True)
+    (core_dir / "video.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+    (core_dir / "cover_9x16.jpg").write_bytes(b"\xff\xd8\xff\xe0cover")
+    (core_dir / "meta.json").write_text(json.dumps({"duration": 31.2}), encoding="utf-8")
+
+    # 2. Chatting
+    chat_dir = tmp_path / "workspace" / "chatting" / "chat-1" / "renders"
+    chat_dir.mkdir(parents=True)
+    (chat_dir / "render_1.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    # 3. StickV
+    sv_dir = tmp_path / "workspace" / "stickv" / "sv-1" / "renders"
+    sv_dir.mkdir(parents=True)
+    (sv_dir / "final.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    # 4. PostV in assets/renders
+    pv_dir = tmp_path / "assets" / "renders" / "postv" / "pv-1"
+    pv_dir.mkdir(parents=True)
+    (pv_dir / "video.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    res = client.get("/api/renders")
+    assert res.status_code == 200
+    items = res.json()["items"]
+    assert len(items) == 4
+    assert {it["engine"] for it in items} == {"core", "postv", "chatting", "stickv"}
+    core_it = next(it for it in items if it["engine"] == "core")
+    assert core_it["duration_sec"] == 31.2
+    assert core_it["size_bytes"] > 0
+    assert core_it["thumb_url"] == core_it["cover_url"]
+    assert core_it["thumb_url"] is not None
+
+    media_res = client.get(core_it["video_url"])
+    assert media_res.status_code == 200
+    assert media_res.content.startswith(b"\x00\x00\x00\x18ftypmp42")
+
+
 def test_stickman_upload_priority_no_overwrite_and_pose_endpoint(tmp_path: Path) -> None:
     from PIL import Image
 

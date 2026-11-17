@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,58 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DB_PATH = REPO_ROOT / "workspace" / "studio.db"
 PIPELINE_STAGES = ("draft", "rendered", "edited", "scheduled", "published")
 VALID_ENGINES = ("core", "postv", "chatting", "clipper", "editor", "stickv")
+_SKIP_DIR_PARTS = {"build", "chunks", ".git", "node_modules"}
+
+
+def normalize_media_path(path: str | Path, base_dir: Path | None = None) -> str:
+    """Chuẩn hoá đường dẫn thành POSIX tương đối theo base_dir."""
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    p = Path(raw)
+    root = (base_dir or REPO_ROOT).resolve()
+    resolved = p.resolve() if p.is_absolute() else (root / p).resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def resolve_media_path(stored_path: str | Path, base_dir: Path | None = None) -> Path:
+    """Giải mã đường dẫn đã lưu (tương đối POSIX hoặc tuyệt đối cũ) thành Path thực tế."""
+    raw = str(stored_path or "").strip()
+    if not raw:
+        return Path("")
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return ((base_dir or REPO_ROOT).resolve() / p).resolve()
+
+
+def _probe_video_duration(mp4: Path) -> float:
+    """Đo nhanh thời lượng video bằng ffprobe (trả về 0.0 nếu không khả dụng)."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(mp4),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2.5,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return round(max(0.0, float(proc.stdout.strip())), 3)
+    except Exception:
+        pass
+    return 0.0
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -57,19 +110,35 @@ def upsert_render(
     scheduled_at: str = "",
     created_at: str | None = None,
     db_path: Path | None = None,
+    base_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Thêm mới hoặc cập nhật bản ghi video trong bảng renders."""
+    """Thêm mới hoặc cập nhật bản ghi video trong bảng renders, tránh trùng file_path."""
     if pipeline_stage not in PIPELINE_STAGES:
         raise ValueError(f"pipeline_stage không hợp lệ: {pipeline_stage}")
-    fp = Path(file_path)
+    norm_fp = normalize_media_path(file_path, base_dir=base_dir)
+    norm_cover = normalize_media_path(cover_path, base_dir=base_dir) if cover_path else ""
+    abs_fp = resolve_media_path(norm_fp, base_dir=base_dir)
     computed_size = (
-        round(fp.stat().st_size / (1024 * 1024), 2)
-        if size_mb is None and fp.is_file()
+        round(abs_fp.stat().st_size / (1024 * 1024), 2)
+        if size_mb is None and abs_fp.is_file()
         else float(size_mb or 0.0)
     )
     ts = created_at or datetime.now(UTC).isoformat()
     conn = init_db(db_path)
     try:
+        # Xoá bản ghi trùng file_path (khác id hoặc định dạng path cũ) để tránh UNIQUE constraint
+        target_resolved = abs_fp.resolve()
+        other_rows = conn.execute(
+            "SELECT id, file_path, duration_sec FROM renders WHERE id != ?", (render_id,)
+        ).fetchall()
+        preserved_dur = float(duration_sec or 0.0)
+        for er in other_rows:
+            er_resolved = resolve_media_path(er["file_path"], base_dir=base_dir).resolve()
+            if er["file_path"] == norm_fp or er_resolved == target_resolved:
+                if preserved_dur <= 0.0 and float(er["duration_sec"] or 0.0) > 0.0:
+                    preserved_dur = float(er["duration_sec"])
+                conn.execute("DELETE FROM renders WHERE id = ?", (er["id"],))
+
         conn.execute(
             """
             INSERT INTO renders (
@@ -82,8 +151,14 @@ def upsert_render(
                 title = excluded.title,
                 engine = excluded.engine,
                 file_path = excluded.file_path,
-                cover_path = excluded.cover_path,
-                duration_sec = excluded.duration_sec,
+                cover_path = CASE
+                    WHEN excluded.cover_path != '' THEN excluded.cover_path
+                    ELSE renders.cover_path
+                END,
+                duration_sec = CASE
+                    WHEN excluded.duration_sec > 0 THEN excluded.duration_sec
+                    ELSE renders.duration_sec
+                END,
                 size_mb = excluded.size_mb,
                 source_credit = CASE
                     WHEN excluded.source_credit != '' THEN excluded.source_credit
@@ -95,9 +170,9 @@ def upsert_render(
                 slug,
                 title,
                 engine,
-                str(fp),
-                str(cover_path),
-                float(duration_sec),
+                norm_fp,
+                norm_cover,
+                preserved_dur,
                 computed_size,
                 pipeline_stage,
                 source_credit,
@@ -177,16 +252,94 @@ def delete_render(render_id: str, db_path: Path | None = None) -> bool:
         conn.close()
 
 
-def sync_renders_dir(
-    renders_root: Path,
+def _is_valid_render_mp4(mp4: Path) -> bool:
+    if not mp4.is_file():
+        return False
+    if mp4.name.endswith((".part.mp4", ".tmp.mp4")):
+        return False
+    return not any(part in _SKIP_DIR_PARTS for part in mp4.parts)
+
+
+def _read_render_sidecars(mp4: Path) -> tuple[float, str, str, dict[str, Any]]:
+    """Đọc thời lượng, publish.txt, cover ảnh và meta.json cạnh file mp4."""
+    dur = 0.0
+    meta: dict[str, Any] = {}
+    for meta_file in (mp4.parent / "meta.json", mp4.with_suffix(".json")):
+        if meta_file.is_file():
+            try:
+                mdata = json.loads(meta_file.read_text(encoding="utf-8"))
+                if isinstance(mdata, dict):
+                    meta = mdata
+                    dur = float(mdata.get("duration") or mdata.get("duration_sec") or 0.0)
+                    break
+            except Exception:
+                pass
+
+    pub_file = mp4.parent / "publish.txt"
+    pub_txt = (
+        pub_file.read_text(encoding="utf-8", errors="ignore").strip() if pub_file.is_file() else ""
+    )
+
+    cover_path = ""
+    for cand in (
+        mp4.parent / "cover_9x16.jpg",
+        mp4.parent / "thumbnail.jpg",
+        mp4.with_suffix(".jpg"),
+    ):
+        if cand.is_file():
+            cover_path = str(cand)
+            break
+
+    return dur, pub_txt, cover_path, meta
+
+
+def _infer_project_meta(pdir: Path) -> tuple[str, str]:
+    """Đọc title và engine (core|postv) từ workspace/projects/<slug>/project.json."""
+    proj_title = pdir.name
+    proj_engine = "core"
+    pjson = pdir / "project.json"
+    if pjson.is_file():
+        try:
+            pdata = json.loads(pjson.read_text(encoding="utf-8"))
+            proj_title = str(pdata.get("title") or pdir.name)
+            if pdata.get("kind") == "postv" or "post" in pdata:
+                proj_engine = "postv"
+        except Exception:
+            pass
+    return proj_title, proj_engine
+
+
+def sync_renders_from_disk(
+    renders_root: Path | None = None,
     db_path: Path | None = None,
     *,
     workspace_dir: Path | None = None,
 ) -> dict[str, int]:
-    """Đồng bộ thư mục assets/renders/<engine>/<job_id>/ và workspace với SQLite."""
+    """Quét đệ quy toàn bộ video thành phẩm của 4 động cơ trên đĩa và đồng bộ vào studio.db."""
     added_or_updated = 0
     removed = 0
-    existing_paths: set[str] = set()
+    base_dir = (
+        workspace_dir.parent.resolve()
+        if workspace_dir is not None
+        else (
+            renders_root.parent.parent.resolve()
+            if renders_root is not None and renders_root.parent.name == "assets"
+            else REPO_ROOT
+        )
+    )
+    existing_resolved: set[Path] = set()
+
+    # Đọc cache duration từ DB hiện có để tránh chạy ffprobe lặp lại
+    cached_durs: dict[Path, float] = {}
+    conn = init_db(db_path)
+    try:
+        for row in conn.execute("SELECT file_path, duration_sec FROM renders").fetchall():
+            if float(row["duration_sec"] or 0.0) > 0.0:
+                cached_durs[resolve_media_path(row["file_path"], base_dir=base_dir).resolve()] = (
+                    float(row["duration_sec"])
+                )
+    finally:
+        conn.close()
 
     def _index_mp4(
         mp4: Path,
@@ -196,126 +349,88 @@ def sync_renders_dir(
         title: str,
         duration_sec: float = 0.0,
         publish_text: str = "",
+        cover_path: str = "",
     ) -> None:
         nonlocal added_or_updated
-        resolved_str = str(mp4.resolve())
-        if resolved_str in existing_paths:
+        resolved = mp4.resolve()
+        if resolved in existing_resolved:
             return
-        existing_paths.add(resolved_str)
+        existing_resolved.add(resolved)
+        dur = duration_sec if duration_sec > 0.0 else cached_durs.get(resolved, 0.0)
+        if dur <= 0.0:
+            dur = _probe_video_duration(resolved)
         render_id = f"{engine}:{slug}:{mp4.parent.name}:{mp4.name}"
-        cover_candidate = mp4.parent / "cover_9x16.jpg"
-        if not cover_candidate.is_file():
-            cover_candidate = mp4.with_suffix(".jpg")
-        cover_path = str(cover_candidate.resolve()) if cover_candidate.is_file() else ""
         mtime_iso = datetime.fromtimestamp(mp4.stat().st_mtime, tz=UTC).isoformat()
         upsert_render(
             render_id=render_id,
             slug=slug,
             title=title or slug,
             engine=engine,
-            file_path=mp4.resolve(),
+            file_path=resolved,
             cover_path=cover_path,
-            duration_sec=duration_sec,
+            duration_sec=dur,
             source_credit=publish_text,
             created_at=mtime_iso,
             db_path=db_path,
+            base_dir=base_dir,
         )
         added_or_updated += 1
 
-    if renders_root.is_dir():
+    # 1. assets/renders/<engine>/.../*.mp4
+    if renders_root is not None and renders_root.is_dir():
         for mp4 in renders_root.rglob("*.mp4"):
-            if not mp4.is_file() or mp4.name.endswith(".part.mp4") or mp4.name.endswith(".tmp.mp4"):
+            if not _is_valid_render_mp4(mp4):
                 continue
             rel_parts = mp4.relative_to(renders_root).parts
             engine = (
                 rel_parts[0] if len(rel_parts) >= 2 and rel_parts[0] in VALID_ENGINES else "core"
             )
             job_id = rel_parts[1] if len(rel_parts) >= 3 else mp4.stem
-            pub_file = mp4.parent / "publish.txt"
-            pub_txt = (
-                pub_file.read_text(encoding="utf-8", errors="ignore").strip()
-                if pub_file.is_file()
-                else ""
+            dur, pub_txt, cover_p, meta = _read_render_sidecars(mp4)
+            title = str(meta.get("title") or "").strip() or (
+                pub_txt.splitlines()[0][:80] if pub_txt else mp4.stem
             )
-            dur = 0.0
-            meta_file = mp4.parent / "meta.json"
-            if meta_file.is_file():
-                try:
-                    mdata = json.loads(meta_file.read_text(encoding="utf-8"))
-                    dur = float(mdata.get("duration", 0.0) or 0.0)
-                except Exception:
-                    pass
             _index_mp4(
                 mp4,
                 engine=engine,
                 slug=job_id,
-                title=pub_txt.splitlines()[0][:80] if pub_txt else mp4.stem,
+                title=title,
                 duration_sec=dur,
                 publish_text=pub_txt,
+                cover_path=cover_p,
             )
 
     if workspace_dir is not None and workspace_dir.is_dir():
-        # Quét workspace/projects/<slug>/renders/<job_id>/video.mp4 (HBT Core & PostV)
+        # 2. workspace/projects/<slug>/renders/**/*.mp4 (HBT Core & PostV)
         projects_dir = workspace_dir / "projects"
         if projects_dir.is_dir():
             for pdir in projects_dir.iterdir():
-                if not pdir.is_dir():
-                    continue
                 rdir = pdir / "renders"
-                if not rdir.is_dir():
+                if not (pdir.is_dir() and rdir.is_dir()):
                     continue
-                proj_title = pdir.name
-                proj_engine = "core"
-                pjson = pdir / "project.json"
-                if pjson.is_file():
-                    try:
-                        pdata = json.loads(pjson.read_text(encoding="utf-8"))
-                        proj_title = str(pdata.get("title") or pdir.name)
-                        if pdata.get("kind") == "postv" or "post" in pdata:
-                            proj_engine = "postv"
-                    except Exception:
-                        pass
-                for jdir in rdir.iterdir():
-                    if not jdir.is_dir():
+                proj_title, proj_engine = _infer_project_meta(pdir)
+                for mp4 in rdir.rglob("*.mp4"):
+                    if not _is_valid_render_mp4(mp4):
                         continue
-                    for vmp4 in jdir.glob("*.mp4"):
-                        if (
-                            not vmp4.is_file()
-                            or vmp4.name.endswith(".part.mp4")
-                            or vmp4.name.endswith(".tmp.mp4")
-                        ):
-                            continue
-                        pub_file = jdir / "publish.txt"
-                        pub_txt = (
-                            pub_file.read_text(encoding="utf-8", errors="ignore").strip()
-                            if pub_file.is_file()
-                            else ""
-                        )
-                        dur = 0.0
-                        meta_file = jdir / "meta.json"
-                        if meta_file.is_file():
-                            try:
-                                mdata = json.loads(meta_file.read_text(encoding="utf-8"))
-                                dur = float(mdata.get("duration", 0.0) or 0.0)
-                            except Exception:
-                                pass
-                        _index_mp4(
-                            vmp4,
-                            engine=proj_engine,
-                            slug=pdir.name,
-                            title=proj_title,
-                            duration_sec=dur,
-                            publish_text=pub_txt,
-                        )
+                    dur, pub_txt, cover_p, meta = _read_render_sidecars(mp4)
+                    m_eng = str(meta.get("engine") or meta.get("kind") or "").lower()
+                    engine = m_eng if m_eng in VALID_ENGINES else proj_engine
+                    _index_mp4(
+                        mp4,
+                        engine=engine,
+                        slug=pdir.name,
+                        title=str(meta.get("title") or proj_title),
+                        duration_sec=dur,
+                        publish_text=pub_txt,
+                        cover_path=cover_p,
+                    )
 
-        # Quét workspace/chatting/<slug>/renders/render_*.mp4 (Chatting)
+        # 3. workspace/chatting/<slug>/renders/**/*.mp4 (Chatting)
         chatting_dir = workspace_dir / "chatting"
         if chatting_dir.is_dir():
             for cdir in chatting_dir.iterdir():
-                if not cdir.is_dir():
-                    continue
                 rdir = cdir / "renders"
-                if not rdir.is_dir():
+                if not (cdir.is_dir() and rdir.is_dir()):
                     continue
                 chat_title = cdir.name
                 cjson = cdir / "chat.json"
@@ -325,31 +440,55 @@ def sync_renders_dir(
                         chat_title = str(cdata.get("title") or cdir.name)
                     except Exception:
                         pass
-                for mp4 in rdir.glob("*.mp4"):
-                    if not mp4.is_file():
+                for mp4 in rdir.rglob("*.mp4"):
+                    if not _is_valid_render_mp4(mp4):
                         continue
-                    dur = 0.0
-                    meta_candidate = rdir / f"{mp4.stem}.json"
-                    if meta_candidate.is_file():
-                        try:
-                            mdata = json.loads(meta_candidate.read_text(encoding="utf-8"))
-                            dur = float(mdata.get("duration", 0.0) or 0.0)
-                        except Exception:
-                            pass
+                    dur, pub_txt, cover_p, _ = _read_render_sidecars(mp4)
                     _index_mp4(
                         mp4,
                         engine="chatting",
                         slug=cdir.name,
                         title=chat_title,
                         duration_sec=dur,
-                        publish_text=f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+                        publish_text=pub_txt or f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+                        cover_path=cover_p,
+                    )
+
+        # 4. workspace/stickv/<slug>/renders/**/*.mp4 (StickV)
+        stickv_dir = workspace_dir / "stickv"
+        if stickv_dir.is_dir():
+            for sdir in stickv_dir.iterdir():
+                rdir = sdir / "renders"
+                if not (sdir.is_dir() and rdir.is_dir()):
+                    continue
+                sv_title = sdir.name
+                sjson = sdir / "project.json"
+                if sjson.is_file():
+                    try:
+                        sdata = json.loads(sjson.read_text(encoding="utf-8"))
+                        sv_title = str(sdata.get("title") or sdir.name)
+                    except Exception:
+                        pass
+                for mp4 in rdir.rglob("*.mp4"):
+                    if not _is_valid_render_mp4(mp4):
+                        continue
+                    dur, pub_txt, cover_p, _ = _read_render_sidecars(mp4)
+                    _index_mp4(
+                        mp4,
+                        engine="stickv",
+                        slug=sdir.name,
+                        title=sv_title,
+                        duration_sec=dur,
+                        publish_text=pub_txt,
+                        cover_path=cover_p,
                     )
 
     conn = init_db(db_path)
     try:
         rows = conn.execute("SELECT id, file_path FROM renders").fetchall()
         for r in rows:
-            if r["file_path"] not in existing_paths and not Path(r["file_path"]).is_file():
+            resolved_r = resolve_media_path(r["file_path"], base_dir=base_dir).resolve()
+            if resolved_r not in existing_resolved and not resolved_r.is_file():
                 conn.execute("DELETE FROM renders WHERE id = ?", (r["id"],))
                 removed += 1
         conn.commit()
@@ -357,3 +496,13 @@ def sync_renders_dir(
         conn.close()
 
     return {"synced": added_or_updated, "removed": removed}
+
+
+def sync_renders_dir(
+    renders_root: Path,
+    db_path: Path | None = None,
+    *,
+    workspace_dir: Path | None = None,
+) -> dict[str, int]:
+    """Alias tương thích ngược cho sync_renders_from_disk."""
+    return sync_renders_from_disk(renders_root, db_path=db_path, workspace_dir=workspace_dir)

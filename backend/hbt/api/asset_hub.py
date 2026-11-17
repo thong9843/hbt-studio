@@ -32,7 +32,6 @@ from hbt.shared.db.media_index import (
     delete_render,
     init_db,
     list_renders,
-    sync_renders_dir,
 )
 from hbt.shared.online_sources import (
     batch_auto_tag_memes,
@@ -858,17 +857,28 @@ def _db_path(state: State) -> Path:
 
 @router.get("/renders")
 def list_unified_renders(state: State, engine: str | None = None) -> dict[str, Any]:
-    """Liệt kê hợp nhất toàn bộ Video đã xuất từ 3 động cơ (core, postv, chatting)."""
+    """Liệt kê hợp nhất toàn bộ Video đã xuất từ 4 động cơ (core, postv, chatting, stickv)."""
+    from hbt.shared.db.media_index import resolve_media_path, sync_renders_from_disk
+
     db = _db_path(state)
+    base_dir = state.settings.workspace_dir.parent
     renders_root = state.settings.assets_dir / "renders"
-    sync_renders_dir(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
+    sync_renders_from_disk(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
     valid_eng = engine if engine in ("core", "postv", "chatting", "stickv") else None
     rows = list_renders(engine=valid_eng, db_path=db)
     items: list[dict[str, Any]] = []
     for r in rows:
         rid = str(r["id"])
         enc_id = quote(rid, safe="")
-        has_cover = bool(r.get("cover_path")) and Path(str(r["cover_path"])).is_file()
+        abs_video = resolve_media_path(str(r.get("file_path") or ""), base_dir=base_dir)
+        size_bytes = abs_video.stat().st_size if abs_video.is_file() else 0
+        size_mb = float(r.get("size_mb") or 0.0)
+        if size_mb <= 0.0 and size_bytes > 0:
+            size_mb = round(size_bytes / (1024 * 1024), 2)
+        cover_raw = str(r.get("cover_path") or "")
+        abs_cover = resolve_media_path(cover_raw, base_dir=base_dir) if cover_raw else Path("")
+        has_cover = bool(cover_raw) and abs_cover.is_file()
+        cover_url = f"/api/renders/media/{enc_id}?kind=cover" if has_cover else None
         items.append(
             {
                 "id": rid,
@@ -876,11 +886,13 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
                 "title": r.get("title", ""),
                 "engine": r.get("engine", "core"),
                 "duration_sec": float(r.get("duration_sec") or 0.0),
-                "size_mb": float(r.get("size_mb") or 0.0),
+                "size_mb": size_mb,
+                "size_bytes": size_bytes,
                 "publish_text": r.get("source_credit") or "",
                 "created_at": r.get("created_at") or "",
                 "video_url": f"/api/renders/media/{enc_id}?kind=video",
-                "cover_url": f"/api/renders/media/{enc_id}?kind=cover" if has_cover else None,
+                "cover_url": cover_url,
+                "thumb_url": cover_url,
             }
         )
     return {"items": items}
@@ -888,6 +900,8 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
 
 @router.get("/renders/media/{render_id:path}")
 def serve_unified_render_media(render_id: str, state: State, kind: str = "video") -> FileResponse:
+    from hbt.shared.db.media_index import resolve_media_path
+
     db = _db_path(state)
     conn = init_db(db)
     try:
@@ -899,7 +913,7 @@ def serve_unified_render_media(render_id: str, state: State, kind: str = "video"
     target_str = str(row["cover_path"] if kind == "cover" else row["file_path"])
     if not target_str:
         raise NotFound("Không có tệp media tương ứng")
-    target = Path(target_str).resolve()
+    target = resolve_media_path(target_str, base_dir=state.settings.workspace_dir.parent)
     if not target.is_file():
         raise NotFound("Tệp media không còn tồn tại trên ổ đĩa")
     return FileResponse(target)
@@ -907,6 +921,8 @@ def serve_unified_render_media(render_id: str, state: State, kind: str = "video"
 
 @router.delete("/renders/{render_id:path}")
 def delete_unified_render(render_id: str, state: State) -> dict[str, Any]:
+    from hbt.shared.db.media_index import resolve_media_path
+
     db = _db_path(state)
     conn = init_db(db)
     try:
@@ -915,7 +931,7 @@ def delete_unified_render(render_id: str, state: State) -> dict[str, Any]:
         conn.close()
     if row is None:
         raise NotFound(f"Không tìm thấy bản xuất '{render_id}'")
-    fp = Path(str(row["file_path"]))
+    fp = resolve_media_path(str(row["file_path"]), base_dir=state.settings.workspace_dir.parent)
     if fp.is_file():
         fp.unlink(missing_ok=True)
     delete_render(render_id, db_path=db)

@@ -601,6 +601,20 @@ class JobManager:
                 # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
                 align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
                 write_run_stats(result.job_dir, result.seconds, align_cached)
+                eng = "postv" if self.storage.kind_of(job.slug) == "postv" else "core"
+                try:
+                    proj_title = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    proj_title = job.slug
+                self._upsert_render_index(
+                    engine=eng,
+                    slug=job.slug,
+                    title=proj_title,
+                    video_path=result.video,
+                    cover_path=result.cover or "",
+                    duration_sec=result.duration,
+                    publish_path=result.publish,
+                )
                 job._finish(DONE, output=output)
         finally:
             if not job.finished:
@@ -837,11 +851,21 @@ class JobManager:
                 )
 
                 rel = self.storage.rel
+                loaded_proj = self.storage.load_any(job.slug)
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=loaded_proj.title,
+                    video_path=render_res.video,
+                    cover_path=getattr(render_res, "cover", None) or "",
+                    duration_sec=float(getattr(render_res, "duration", 0.0) or 0.0),
+                    publish_path=render_res.publish,
+                )
                 output = {
                     "video": rel(render_res.video),
                     "publish": rel(render_res.publish),
                     "preview_seconds": 10.0,
-                    "project": self.storage.load_any(job.slug).model_dump(mode="json"),
+                    "project": loaded_proj.model_dump(mode="json"),
                 }
                 job._finish(DONE, output=output)
         except RenderCancelled:
@@ -851,11 +875,64 @@ class JobManager:
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
+    def _upsert_render_index(
+        self,
+        *,
+        engine: str,
+        slug: str,
+        title: str,
+        video_path: Path,
+        cover_path: Path | str | None = "",
+        duration_sec: float = 0.0,
+        publish_path: Path | None = None,
+        source_credit: str = "",
+    ) -> None:
+        """Ghi nhận thành phẩm vừa xuất vào workspace/studio.db."""
+        try:
+            from hbt.shared.db.media_index import upsert_render
+
+            ws = self.storage.workspace_dir
+            pub_text = source_credit
+            if not pub_text and publish_path is not None and publish_path.is_file():
+                pub_text = publish_path.read_text(encoding="utf-8", errors="ignore").strip()
+            render_id = f"{engine}:{slug}:{video_path.parent.name}:{video_path.name}"
+            upsert_render(
+                render_id=render_id,
+                slug=slug,
+                title=title or slug,
+                engine=engine,
+                file_path=video_path,
+                cover_path=cover_path or "",
+                duration_sec=float(duration_sec or 0.0),
+                source_credit=pub_text,
+                db_path=ws / "studio.db",
+                base_dir=ws.parent,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không thể ghi studio.db cho %s/%s: %s", engine, slug, exc)
+
     def _run_postv_quick(self, job: Job) -> None:
         """Chạy chuỗi tự động 6 bước của PostV (PV9)."""
         from hbt.postv.auto import run_auto_job
 
         run_auto_job(self, job)
+        if job.status == DONE and isinstance(job.output, dict) and job.output.get("video"):
+            vrel = str(job.output["video"]).lstrip("/")
+            vpath = self.storage.workspace_dir / vrel
+            if not vpath.is_file():
+                vpath = self.storage.project_dir(job.slug) / vrel
+            if vpath.is_file():
+                try:
+                    ptitle = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    ptitle = job.slug
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=ptitle,
+                    video_path=vpath,
+                    duration_sec=float(job.output.get("duration") or 0.0),
+                )
 
     def submit_chatting_auto(
         self,
@@ -994,6 +1071,14 @@ class JobManager:
                 aspect_mode=getattr(job, "aspect_mode", None),
             )
 
+            chat_title = getattr(doc, "title", None) or job.slug
+            self._upsert_render_index(
+                engine="chatting",
+                slug=job.slug,
+                title=chat_title,
+                video_path=video_path,
+                source_credit=f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+            )
             output = {
                 "slug": job.slug,
                 "video": f"/api/chatting/{job.slug}/renders/{video_path.name}",
@@ -1084,6 +1169,14 @@ class JobManager:
                 "timings": [t.model_dump(mode="json") for t in result.timings],
             }
             write_run_stats(result.job_dir, result.seconds, False)
+            self._upsert_render_index(
+                engine="core",
+                slug=job.slug,
+                title=getattr(script, "title", None) or job.slug,
+                video_path=result.video,
+                duration_sec=result.duration,
+                publish_path=result.publish,
+            )
             job._finish(DONE, output=output)
         except RenderCancelled:
             job._finish(CANCELLED)
@@ -1114,7 +1207,6 @@ class JobManager:
 
     def _run_stickv_render(self, job: Job) -> None:
         """Thực thi job stickv_render và ghi chỉ mục vào workspace/studio.db."""
-        from hbt.shared.db.media_index import upsert_render
         from hbt.stickv.render import render_stickv
         from hbt.stickv.storage import (
             load_stickv_project,
@@ -1161,17 +1253,13 @@ class JobManager:
             )
             save_stickv_project(ws, proj)
 
-            if not job.preview:
-                upsert_render(
-                    render_id=f"stickv:{job.slug}:{out_path.name}",
-                    slug=job.slug,
-                    title=proj.title,
-                    engine="stickv",
-                    file_path=out_path,
-                    duration_sec=float(res["duration_sec"] or 0.0),
-                    size_mb=float(res["size_mb"] or 0.0),
-                    db_path=ws / "studio.db",
-                )
+            self._upsert_render_index(
+                engine="stickv",
+                slug=job.slug,
+                title=proj.title,
+                video_path=out_path,
+                duration_sec=float(res["duration_sec"] or 0.0),
+            )
 
             job._finish(
                 DONE,

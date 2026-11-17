@@ -39,6 +39,7 @@ from hbt.postv.censor import CensorStore
 from hbt.postv.memes import MemeLibrary
 from hbt.postv.voice import VieNeuProvider, VoiceProvider
 from hbt.sensitive import SensitiveStore
+from hbt.shared.db.media_index import init_db, sync_renders_from_disk
 from hbt.state import AppState
 from hbt.storage import (
     BadRequest,
@@ -101,6 +102,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        db_file = settings.workspace_dir / "studio.db"
+        init_db(db_file).close()
+        try:
+            sync_renders_from_disk(
+                settings.assets_dir / "renders",
+                db_path=db_file,
+                workspace_dir=settings.workspace_dir,
+            )
+        except Exception:
+            pass
         yield
         state.jobs.shutdown()  # huỷ việc đang dựng khi tắt server
 

@@ -227,7 +227,9 @@ export function HomePage() {
   const { open: openNew } = useNewProject();
   const [searchQuery, setSearchQuery] = useState('');
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
-  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
+  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting' | 'stickv'>(
+    'all',
+  );
   const [activeRender, setActiveRender] = useState<UnifiedRenderItem | null>(null);
   const [deletingRender, setDeletingRender] = useState<UnifiedRenderItem | null>(null);
   const queryClient = useQueryClient();
@@ -417,11 +419,11 @@ export function HomePage() {
           <div>
             <h2 className="text-title font-extrabold text-text">Video đã xuất gần đây</h2>
             <p className="text-small text-muted">
-              Đồng bộ trực tiếp từ thư viện thành phẩm 9:16 của HBT Core, PostV và Chatting.
+              Đồng bộ trực tiếp từ thư viện thành phẩm 9:16 của HBT Core, PostV, Chatting và StickV.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {(['all', 'core', 'postv', 'chatting'] as const).map((eng) => {
+            {(['all', 'core', 'postv', 'chatting', 'stickv'] as const).map((eng) => {
               const active = engineFilter === eng;
               return (
                 <button
