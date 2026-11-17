@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useNewProject } from '../../hooks/newProject';
-import { MessagesSquareIcon, PlusIcon, SmartphoneIcon, ZapIcon } from '../icons';
+import { MessagesSquareIcon, PlusIcon, SmartphoneIcon, SparklesIcon, ZapIcon } from '../icons';
 import { Drawer } from '../ui/Drawer';
 
 interface QuickCreateDrawerProps {
@@ -38,6 +38,16 @@ const ENGINES = [
     icon: MessagesSquareIcon,
     accent: 'border-engine-chatting/30 bg-engine-chatting-soft/60 hover:border-engine-chatting',
     badge: 'bg-engine-chatting text-white',
+  },
+  {
+    id: 'stickv',
+    to: '/stickv',
+    title: 'StickV — Người que 2D/2.5D',
+    desc: 'Video giải thích kiến thức 9:16 & 16:9 với nhân vật người que, bảng minh họa & SFX.',
+    cta: 'Tạo video Người que',
+    icon: SparklesIcon,
+    accent: 'border-engine-stickv/30 bg-engine-stickv-soft/60 hover:border-engine-stickv',
+    badge: 'bg-engine-stickv text-white',
   },
 ] as const;
 

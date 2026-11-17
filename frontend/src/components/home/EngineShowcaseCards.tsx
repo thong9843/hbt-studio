@@ -1,14 +1,17 @@
 import { Link } from 'react-router-dom';
-import { MessagesSquareIcon, SmartphoneIcon, ZapIcon } from '../icons';
+import { MessagesSquareIcon, SmartphoneIcon, SparklesIcon, ZapIcon } from '../icons';
 
 /**
- * 3 Thẻ Động cơ Sáng tạo tương tác trên Trang chủ:
+ * 4 Thẻ Động cơ Sáng tạo tương tác trên Trang chủ:
  * Mỗi thẻ có dải accent/glow theo màu định danh riêng, hình minh họa UI thu nhỏ trực quan
  * cấu trúc video đầu ra và nút bấm hành động rõ nghĩa.
  */
 export function EngineShowcaseCards() {
   return (
-    <section aria-label="3 Động cơ Sáng tạo" className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+    <section
+      aria-label="4 Động cơ Sáng tạo"
+      className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4"
+    >
       {/* 1. HBT Core — Video Kiến thức (San hô / Đỏ hồng) */}
       <div className="group relative flex flex-col justify-between overflow-hidden rounded-card border border-line bg-card p-5 shadow-card transition-all duration-180 hover:-translate-y-0.5 hover:border-engine-core/50 hover:shadow-[0_14px_36px_-8px_rgba(244,63,94,0.22)]">
         <div
@@ -169,6 +172,62 @@ export function EngineShowcaseCards() {
           <Link to="/chatting" className="ui-btn ui-btn-chatting w-full justify-center">
             <MessagesSquareIcon size={16} />
             Tạo đoạn chat 2 người
+          </Link>
+        </div>
+      </div>
+
+      {/* 4. StickV — Video Người que 2D/2.5D (Cam Nghệ / Vàng Hổ Phách #F59E0B) */}
+      <div className="group relative flex flex-col justify-between overflow-hidden rounded-card border border-line bg-card p-5 shadow-card transition-all duration-180 hover:-translate-y-0.5 hover:border-engine-stickv/50 hover:shadow-[0_14px_36px_-8px_rgba(245,158,11,0.24)]">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#F59E0B] to-[#D97706]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-[#F59E0B]/10 blur-2xl transition-opacity group-hover:opacity-100"
+        />
+
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-pill bg-engine-stickv-soft px-3 py-1 text-tiny font-extrabold text-on-engine-stickv-soft">
+              <SparklesIcon size={14} />
+              StickV · 9:16 & 16:9
+            </span>
+            <span className="text-tiny font-semibold text-muted">Audio Anchoring</span>
+          </div>
+
+          <h2 className="mt-3 text-title font-extrabold text-text">Video Người que 2D/2.5D</h2>
+          <p className="mt-1 text-small text-muted">
+            Kể chuyện & giải thích kiến thức 1–15 phút với nhân vật người que, bảng minh họa & SFX.
+          </p>
+
+          <div
+            aria-hidden="true"
+            className="mt-4 flex items-center gap-3 rounded-inner border border-engine-stickv/20 bg-engine-stickv-soft/50 p-3"
+          >
+            <div className="flex h-16 w-12 shrink-0 flex-col items-center justify-between rounded-lg border border-amber-300/70 bg-[#FAF7F0] p-1.5 shadow-sm">
+              <div className="h-3 w-full rounded bg-amber-400/30" />
+              <div className="h-6 w-6 rounded-full border-2 border-slate-800 bg-white" />
+              <div className="h-1.5 w-6 rounded bg-red-500" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-engine-stickv" />
+                <span className="text-[11px] font-bold text-text">8 dáng chuẩn + Bảng thông minh</span>
+              </div>
+              <div className="h-2 w-4/5 rounded bg-engine-stickv/20" />
+              <div className="h-2 w-3/5 rounded bg-engine-stickv/10" />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <Link
+            to="/stickv"
+            className="ui-btn w-full justify-center bg-engine-stickv text-white hover:bg-[#d97706]"
+          >
+            <SparklesIcon size={16} />
+            Tạo video Người que
           </Link>
         </div>
       </div>

@@ -19,6 +19,7 @@ import { ScenesTab } from '../pages/ScenesTab';
 import { SettingsPage } from '../pages/SettingsPage';
 import { ChattingHome } from '../pages/chatting/ChattingHome';
 import { ChattingEditor } from '../pages/chatting/ChattingEditor';
+import { StickvPage } from '../pages/StickvPage';
 
 export function App() {
   return (
@@ -44,6 +45,7 @@ export function App() {
         </Route>
         <Route path="chatting" element={<ChattingHome />} />
         <Route path="chatting/:slug" element={<ChattingEditor />} />
+        <Route path="stickv" element={<StickvPage />} />
         <Route path="library" element={<AssetHubPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

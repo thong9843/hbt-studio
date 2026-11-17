@@ -19,6 +19,8 @@ export interface PhonePreviewStageProps {
   previewLabel?: string;
   exportLabel?: string;
   showWatermarkControl?: boolean;
+  aspect?: '9:16' | '16:9';
+  onAspectChange?: (aspect: '9:16' | '16:9') => void;
   footer?: ReactNode;
   children: ReactNode;
 }
@@ -43,6 +45,8 @@ export function PhonePreviewStage({
   previewLabel = 'Xem nhanh (Preview)',
   exportLabel = 'Xuất bản đẹp (1080×1920)',
   showWatermarkControl = true,
+  aspect = '9:16',
+  onAspectChange,
   footer,
   children,
 }: PhonePreviewStageProps) {
@@ -78,12 +82,30 @@ export function PhonePreviewStage({
         )}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {onAspectChange && (
+          <div className="inline-flex rounded-pill border border-line bg-soft p-0.5 text-tiny font-bold">
+            {(['9:16', '16:9'] as const).map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => onAspectChange(a)}
+                className={`rounded-pill px-2.5 py-1 transition-colors ${
+                  aspect === a ? 'bg-card text-text shadow-sm' : 'text-muted hover:text-text'
+                }`}
+              >
+                {a === '9:16' ? '9:16 Dọc' : '16:9 Ngang'}
+              </button>
+            ))}
+          </div>
+        )}
         <SafeZoneToolbar platform={safeZone} onChange={onSafeZoneChange} />
       </div>
 
       <div
-        className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-[24px]"
+        className={`relative mx-auto w-full overflow-hidden rounded-[24px] ${
+          aspect === '16:9' ? 'aspect-video max-w-[360px]' : 'aspect-[9/16] max-w-[300px]'
+        }`}
         style={{
           background: 'linear-gradient(160deg, #1E1B4B 0%, #312E81 55%, #1E293B 100%)',
           border: '2px solid rgba(129, 140, 248, 0.35)',

@@ -42,6 +42,7 @@ export const vi = {
     projects: 'Dự án',
     postv: 'PostV',
     chatting: 'Chatting',
+    stickv: 'StickV',
     library: 'Thư viện',
     settings: 'Cài đặt',
     newVideo: 'Tạo video',

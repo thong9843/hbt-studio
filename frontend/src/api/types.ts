@@ -856,7 +856,13 @@ export interface HbtCoreRenderResponse {
   script?: HbtCoreScript;
 }
 
-export type AssetHubCategory = 'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks';
+export type AssetHubCategory =
+  | 'music'
+  | 'backgrounds'
+  | 'stickers'
+  | 'memes'
+  | 'watermarks'
+  | 'stickman';
 
 export interface AssetHubItem {
   id?: string;
@@ -910,11 +916,55 @@ export interface UnifiedRenderItem {
   id: string;
   slug: string;
   title: string;
-  engine: 'core' | 'postv' | 'chatting';
+  engine: 'core' | 'postv' | 'chatting' | 'stickv';
   duration_sec: number;
   size_mb: number;
   publish_text: string;
   created_at: string;
   video_url: string;
   cover_url?: string | null;
+}
+
+export type StickvAspect = '9:16' | '16:9';
+export type StickvTheme = 'cream' | 'dark';
+export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
+export type StickvBoardType = 'none' | 'bullets' | 'big_number' | 'comparison' | 'flow_steps';
+export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
+
+export interface StickvBeat {
+  id: string;
+  chapter: number;
+  narration: string;
+  pose: string;
+  facing: 'left' | 'right';
+  motion: StickvMotion;
+  sfx_tag: StickvSfxTag;
+  board_type: StickvBoardType;
+  board_title: string;
+  board_data: Record<string, unknown>;
+  media_path: string;
+  duration_sec: number;
+}
+
+export interface StickvProject {
+  slug: string;
+  title: string;
+  topic: string;
+  aspect: StickvAspect;
+  theme: StickvTheme;
+  fps: number;
+  voice_id: string;
+  music_mood: string;
+  gemini_model: string;
+  target_minutes: number;
+  beats: StickvBeat[];
+  created_at: string;
+  updated_at: string;
+  last_render?: {
+    video_url: string;
+    duration_sec: number;
+    size_mb: number;
+    aspect: StickvAspect;
+    preview: boolean;
+  } | null;
 }
