@@ -50,7 +50,7 @@ class StickvProject(BaseModel):
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     fps: int = Field(default=30, ge=15, le=60)
-    voice_id: str = Field(default="vienneu_default", max_length=120)
+    voice_id: str = Field(default="Thanh Bình", max_length=120)
     music_mood: str = Field(default="science", max_length=60)
     gemini_model: str = Field(default="", max_length=120)
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)

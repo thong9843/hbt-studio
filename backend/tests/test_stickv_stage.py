@@ -177,5 +177,30 @@ def test_lipsync_karaoke_and_vieneu_status_check(tmp_path: Path) -> None:
     broken_provider = SimpleNamespace(status=lambda: SimpleNamespace(ok=False, note="Thiếu model"))
     with pytest.raises(RuntimeError, match="Thiếu model"):
         synth_stickv_beats_audio(
-            [beat], tmp_path / "aud", voice_provider=broken_provider, voice_id="vienneu_default"
+            [beat], tmp_path / "aud", voice_provider=broken_provider, voice_id="Thanh Bình"
         )
+
+    # Kiểm tra fallback khi voice_id cũ không nằm trong provider.list_voices()
+    captured_voices: list[str] = []
+
+    def fake_synth_many(items):
+        for it in items:
+            captured_voices.append(it.voice_id)
+            it.out.parent.mkdir(parents=True, exist_ok=True)
+            it.out.write_bytes(b"RIFF" + b"\x00" * 100)
+
+    ok_provider = SimpleNamespace(
+        status=lambda: SimpleNamespace(ok=True, note=""),
+        list_voices=lambda: [
+            SimpleNamespace(id="Adam bựa"),
+            SimpleNamespace(id="Thanh Bình"),
+        ],
+        synthesize_many=fake_synth_many,
+    )
+    synth_stickv_beats_audio(
+        [beat],
+        tmp_path / "aud_ok",
+        voice_provider=ok_provider,
+        voice_id="Bình (nam miền Bắc)",
+    )
+    assert captured_voices == ["Thanh Bình"]

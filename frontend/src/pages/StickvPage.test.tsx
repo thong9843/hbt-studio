@@ -76,6 +76,13 @@ vi.mock('../api/endpoints', async (importOriginal) => {
           },
         ],
       }),
+      listVoices: vi.fn().mockResolvedValue({
+        default: 'Adam bựa',
+        voices: [
+          { id: 'Adam bựa', label: 'Adam bựa' },
+          { id: 'Thanh Bình', label: 'Thanh Bình' },
+        ],
+      }),
     },
   };
 });
@@ -104,6 +111,11 @@ describe('StickvPage', () => {
       screen.getByRole('option', { name: 'Gemini 3.1 Flash Lite (Mặc định / 500 RPD)' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Dáng: Flow Hero' })).toBeInTheDocument();
+
+    const voiceSelect = (await screen.findByLabelText(
+      'Chọn giọng đọc VieNeu',
+    )) as HTMLSelectElement;
+    expect(voiceSelect.value).toBe('Thanh Bình');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Dán JSON (0 Token)' }));
     expect(screen.getByRole('button', { name: /Copy Prompt Đạo diễn/i })).toBeInTheDocument();

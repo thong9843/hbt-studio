@@ -108,6 +108,28 @@ export function StickvPage() {
     queryFn: () => api.listAssetHub('stickman'),
   });
 
+  const voicesQuery = useQuery({
+    queryKey: ['voices'],
+    queryFn: () => api.listVoices(),
+    retry: false,
+  });
+
+  const voiceOptions = useMemo(() => {
+    const raw = voicesQuery.data?.voices ?? [];
+    if (raw.length === 0) {
+      return [{ id: 'Thanh Bình', label: 'Thanh Bình (Mặc định)' }];
+    }
+    return raw.map((v) => ({
+      id: String(v.id),
+      label: String(v.label || v.id),
+    }));
+  }, [voicesQuery.data?.voices]);
+
+  const defaultVoiceId = useMemo(() => {
+    if (voiceOptions.some((v) => v.id === 'Thanh Bình')) return 'Thanh Bình';
+    return voiceOptions[0]?.id ?? 'Thanh Bình';
+  }, [voiceOptions]);
+
   const models = useMemo(
     () =>
       (listQuery.data?.gemini_models ?? []).map((m) =>
@@ -584,7 +606,23 @@ export function StickvPage() {
                     Mỗi beat tự neo thời gian theo giọng VieNeu-TTS + SFX + Bảng minh họa
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    aria-label="Chọn giọng đọc VieNeu"
+                    value={
+                      voiceOptions.some((v) => v.id === draft.voice_id)
+                        ? draft.voice_id
+                        : defaultVoiceId
+                    }
+                    onChange={(e) => setDraft({ ...draft, voice_id: e.target.value })}
+                    className="rounded-input border border-line-input bg-card px-2.5 py-1.5 text-tiny font-semibold text-text"
+                  >
+                    {voiceOptions.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        Giọng: {v.label}
+                      </option>
+                    ))}
+                  </select>
                   <Button
                     tone="soft"
                     size="sm"

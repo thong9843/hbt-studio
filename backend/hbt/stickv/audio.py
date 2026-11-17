@@ -16,7 +16,7 @@ from hbt.shared.ffmpeg_utils import (
     build_acrossfade_filter_graph,
     measure_audio_duration,
 )
-from hbt.shared.tts_client import resolve_voice_id
+from hbt.shared.tts_client import DEFAULT_VIENEU_VOICE, resolve_voice_id
 from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
@@ -125,11 +125,10 @@ def synth_stickv_beats_audio(
     *,
     voice_provider: VoiceProvider | None,
     voice_id: str,
-    default_voice: str = "Bình (nam miền Bắc)",
+    default_voice: str = DEFAULT_VIENEU_VOICE,
 ) -> list[tuple[Path, float]]:
     """Sinh giọng từng beat bằng VieNeu-TTS theo lô (1 lần nạp model) & đo duration_sec."""
     audio_dir.mkdir(parents=True, exist_ok=True)
-    chosen_voice = resolve_voice_id(voice_id, default_voice)
 
     if voice_provider is not None:
         status = voice_provider.status()
@@ -138,6 +137,14 @@ def synth_stickv_beats_audio(
                 status.note
                 or "VieNeu-TTS (.venv-tts hoặc models/hf_vieneu) chưa sẵn sàng để đọc lời thoại."
             )
+        available_ids: list[str] = []
+        try:
+            available_ids = [v.id for v in voice_provider.list_voices()]
+        except Exception:
+            available_ids = []
+        chosen_voice = resolve_voice_id(
+            voice_id, default_voice, available_voices=available_ids or None
+        )
         synth_items: list[SynthItem] = []
         wav_paths: list[Path] = []
         for beat in beats:
