@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -24,6 +27,7 @@ from pydantic import BaseModel
 from hbt.api.deps import State
 from hbt.app_settings import resolve_online_api_key
 from hbt.config import BRAND_DIR, REPO_ROOT
+from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.shared.db.media_index import (
     delete_render,
     init_db,
@@ -36,16 +40,26 @@ from hbt.shared.online_sources import (
     import_greenmeme,
     import_pixabay_audio,
     import_sigstick_pack,
+    import_tuna_sfx,
     search_giphy_stickers,
     search_greenmeme,
     search_pixabay_audio,
+    search_tuna_sfx,
     update_meme_metadata,
+)
+from hbt.stickv.poses_init import (
+    convert_stickman_dir_to_transparent,
+    ensure_default_poses,
+    remove_white_background,
 )
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
 
-VALID_CATEGORIES = ("music", "backgrounds", "stickers", "memes", "watermarks")
+_ONLINE_CACHE_TTL_S = 600.0
+_ONLINE_SEARCH_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+
+VALID_CATEGORIES = ("music", "backgrounds", "stickers", "memes", "watermarks", "stickman")
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
@@ -117,6 +131,72 @@ def _read_index_map(folder: Path) -> dict[str, dict[str, Any]]:
     return {}
 
 
+def _probe_and_thumb_video_pose(
+    video_path: Path, thumb_dir: Path
+) -> tuple[float, int, int, Path | None]:
+    """Đo duration_sec, width, height bằng ffprobe và xuất thumbnail .jpg cho Video Pose."""
+    dur, w, h = 0.0, 0, 0
+    try:
+        pr = subprocess.run(
+            [
+                shutil.which("ffprobe") or "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if pr.returncode == 0 and pr.stdout.strip():
+            info = json.loads(pr.stdout)
+            streams = info.get("streams") or []
+            if streams:
+                w = int(streams[0].get("width") or 0)
+                h = int(streams[0].get("height") or 0)
+            dur = round(float((info.get("format") or {}).get("duration") or 0.0), 2)
+    except Exception:
+        pass
+
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    thumb_path = thumb_dir / f"{video_path.stem}.jpg"
+    if not thumb_path.is_file():
+        seek_s = "0.5" if dur <= 0 or dur >= 0.6 else "0.0"
+        try:
+            subprocess.run(
+                [
+                    ffmpeg_exe(),
+                    "-y",
+                    "-ss",
+                    seek_s,
+                    "-i",
+                    str(video_path),
+                    "-vframes",
+                    "1",
+                    "-vf",
+                    "scale=360:-2",
+                    "-q:v",
+                    "4",
+                    str(thumb_path),
+                ],
+                capture_output=True,
+                timeout=12,
+                check=False,
+            )
+        except Exception:
+            pass
+    return dur, w, h, (thumb_path if thumb_path.is_file() else None)
+
+
 def _serialize_item(
     category: str,
     path: Path,
@@ -135,14 +215,17 @@ def _serialize_item(
     else:
         url = f"/api/asset-hub/file/{quote(source)}/{quote(category)}/{quote(rel, safe='/')}"
     m = meta or {}
+    kind = _file_kind(path)
     return {
         "id": str(m.get("id") or path.stem),
         "name": path.name,
         "category": category,
-        "kind": _file_kind(path),
+        "kind": kind,
+        "media_type": "video" if kind == "video" else "image",
         "size": stat.st_size,
         "modified_at": mtime,
         "url": url,
+        "file_url": url,
         "source": source,
         "readonly": readonly,
         "title": str(m.get("title") or path.stem),
@@ -152,6 +235,8 @@ def _serialize_item(
         "topic": str(m.get("topic") or ""),
         "duration": float(m.get("duration") or m.get("duration_sec") or 0.0),
         "duration_sec": float(m.get("duration_sec") or m.get("duration") or 0.0),
+        "width": int(m.get("width") or 0),
+        "height": int(m.get("height") or 0),
         "thumb_url": thumb_url,
     }
 
@@ -190,6 +275,14 @@ def _collect_dir_items(
         if category == "backgrounds":
             thumb_file = folder / "thumbs" / f"{p.stem}.jpg"
             if thumb_file.is_file():
+                thumb_url = (
+                    f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
+                    f"/thumbs/{quote(thumb_file.name)}"
+                )
+        elif category == "stickman" and _file_kind(p) == "video":
+            dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
+            meta = {**(meta or {}), "duration_sec": dur, "width": vw, "height": vh}
+            if thumb_file is not None:
                 thumb_url = (
                     f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
                     f"/thumbs/{quote(thumb_file.name)}"
@@ -233,10 +326,108 @@ class SigStickImportBody(BaseModel):
     url: str
 
 
+class TunaImportBody(BaseModel):
+    item_id: str
+    title: str
+    preview_url: str
+    tags: list[str] = []
+
+
 class MemePatchBody(BaseModel):
     tags: list[str] | None = None
     topic: str | None = None
     title: str | None = None
+
+
+@router.get("/asset-hub/online/search")
+async def online_search_unified(
+    state: State,
+    category: Literal["music", "sfx", "memes", "stickers"] = Query(default="music"),
+    source: str = Query(default=""),
+    q: str = Query(default=""),
+) -> dict[str, Any]:
+    """Cổng tìm kiếm tài nguyên online thống nhất kèm In-Memory TTL Cache (10 phút)."""
+    chosen_src = source.strip().lower()
+    if not chosen_src:
+        chosen_src = (
+            "tuna"
+            if category == "sfx"
+            else "pixabay"
+            if category == "music"
+            else "greenmeme"
+            if category == "memes"
+            else "giphy"
+        )
+    norm_q = (q or "").strip().lower()
+    cache_key = (category, chosen_src, norm_q)
+    now = time.monotonic()
+    cached = _ONLINE_SEARCH_CACHE.get(cache_key)
+    if cached is not None and (now - cached[0]) < _ONLINE_CACHE_TTL_S:
+        return {**cached[1], "cached": True}
+
+    try:
+        if category == "sfx" and chosen_src == "tuna":
+            items = await search_tuna_sfx(q or "meme")
+            res: dict[str, Any] = {
+                "items": items,
+                "missing_key": False,
+                "source": "tuna",
+                "category": "sfx",
+            }
+        elif category in ("music", "sfx"):
+            api_key = resolve_online_api_key("PIXABAY_API_KEY", state.settings.workspace_dir)
+            if not api_key:
+                return {
+                    "items": [],
+                    "missing_key": True,
+                    "source": "pixabay",
+                    "category": category,
+                }
+            items = await search_pixabay_audio(q, kind=category, api_key=api_key)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "pixabay",
+                "category": category,
+            }
+        elif category == "memes":
+            items = await search_greenmeme(q)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "greenmeme",
+                "category": "memes",
+            }
+        else:
+            api_key = resolve_online_api_key("GIPHY_API_KEY", state.settings.workspace_dir)
+            if not api_key:
+                return {
+                    "items": [],
+                    "missing_key": True,
+                    "source": "giphy",
+                    "category": "stickers",
+                }
+            items = await search_giphy_stickers(q, api_key=api_key)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "giphy",
+                "category": "stickers",
+            }
+    except Exception as exc:
+        return {
+            "items": [],
+            "missing_key": False,
+            "source": chosen_src,
+            "category": category,
+            "error": (
+                f"Nguồn {chosen_src} tạm thời không phản hồi ({exc.__class__.__name__}). "
+                "Vui lòng thử lại."
+            ),
+        }
+
+    _ONLINE_SEARCH_CACHE[cache_key] = (now, res)
+    return {**res, "cached": False}
 
 
 @router.get("/asset-hub/online/pixabay")
@@ -244,12 +435,33 @@ async def online_search_pixabay(
     state: State,
     q: str = Query(default=""),
     kind: Literal["music", "sfx"] = Query(default="music"),
+    source: Literal["pixabay", "tuna"] = Query(default="pixabay"),
 ) -> dict[str, Any]:
+    if source == "tuna" and kind == "sfx":
+        items = await search_tuna_sfx(q or "meme")
+        return {"items": items, "missing_key": False, "source": "tuna"}
     api_key = resolve_online_api_key("PIXABAY_API_KEY", state.settings.workspace_dir)
     if not api_key:
         return {"items": [], "missing_key": True}
     items = await search_pixabay_audio(q, kind=kind, api_key=api_key)
-    return {"items": items, "missing_key": False}
+    return {"items": items, "missing_key": False, "source": "pixabay"}
+
+
+@router.get("/asset-hub/online/tuna")
+async def online_search_tuna(q: str = Query(default="meme")) -> dict[str, Any]:
+    items = await search_tuna_sfx(q)
+    return {"items": items, "missing_key": False, "source": "tuna"}
+
+
+@router.post("/asset-hub/online/tuna/import")
+async def online_import_tuna(body: TunaImportBody, state: State) -> dict[str, Any]:
+    return await import_tuna_sfx(
+        item_id=body.item_id,
+        title=body.title,
+        preview_url=body.preview_url,
+        tags=body.tags,
+        library_dir=state.settings.library_dir,
+    )
 
 
 @router.post("/asset-hub/online/pixabay/import")
@@ -448,6 +660,30 @@ def list_asset_hub_items(category: str, state: State) -> dict[str, Any]:
                     readonly=True,
                 )
             )
+    elif category == "stickman":
+        convert_stickman_dir_to_transparent(assets_folder)
+        convert_stickman_dir_to_transparent(lib_dir / "stickman" / "poses")
+        ensure_default_poses(lib_dir / "stickman" / "poses")
+        items.extend(
+            _collect_dir_items(
+                assets_folder,
+                category,
+                source="assets",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+                recursive=True,
+            )
+        )
+        items.extend(
+            _collect_dir_items(
+                lib_dir / "stickman",
+                category,
+                source="library",
+                seen_paths=seen_paths,
+                allowed_exts=IMAGE_EXTS | VIDEO_EXTS,
+                recursive=True,
+            )
+        )
 
     items.sort(key=lambda x: str(x["modified_at"]), reverse=True)
     return {"category": category, "items": items}
@@ -474,7 +710,78 @@ async def upload_asset_hub_item(
 
     content = await file.read()
     target.write_bytes(content)
-    return {"ok": True, "item": _serialize_item(category, target, source="assets")}
+
+    meta_override: dict[str, Any] | None = None
+    thumb_url: str | None = None
+    if category == "stickman" and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        png_target = target.with_suffix(".png")
+        final_path, _ = remove_white_background(target, png_target)
+        if final_path != target and target.is_file() and final_path.is_file():
+            target.unlink(missing_ok=True)
+            target = final_path
+    elif category == "stickman" and target.suffix.lower() in VIDEO_EXTS:
+        dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, folder / "thumbs")
+        meta_override = {"duration_sec": dur, "width": vw, "height": vh}
+        if thumb_file is not None:
+            thumb_url = f"/api/asset-hub/file/assets/stickman/thumbs/{quote(thumb_file.name)}"
+
+    return {
+        "ok": True,
+        "item": _serialize_item(
+            category, target, source="assets", meta=meta_override, thumb_url=thumb_url
+        ),
+    }
+
+
+@router.post("/asset-hub/stickman/{filename}/remove-bg")
+def remove_stickman_background(
+    filename: str,
+    state: State,
+    source: str | None = None,
+) -> dict[str, Any]:
+    """Tách nền trắng bên ngoài cho ảnh nhân vật Stickman."""
+    clean_name = _validate_existing_filename(filename)
+    assets_dir = _category_dir(state, "stickman")
+    candidates: list[tuple[str, Path]] = []
+    if source in (None, "assets"):
+        candidates.append(("assets", assets_dir / clean_name))
+    if source in (None, "library"):
+        candidates.append(("library", state.settings.library_dir / "stickman" / clean_name))
+        candidates.append(
+            ("library", state.settings.library_dir / "stickman" / "poses" / clean_name)
+        )
+
+    for src_name, path in candidates:
+        if path.is_file():
+            png_target = path.with_suffix(".png")
+            final_path, removed = remove_white_background(path, png_target)
+            if final_path != path and path.is_file() and final_path.is_file():
+                path.unlink(missing_ok=True)
+            return {
+                "ok": True,
+                "removed": removed,
+                "item": _serialize_item("stickman", final_path, source=src_name),
+            }
+
+    raise NotFound(f"Không tìm thấy nhân vật '{clean_name}'")
+
+
+@router.post("/asset-hub/stickman/{filename}/set-default")
+def set_default_stickman(filename: str, state: State) -> dict[str, Any]:
+    """Đặt ảnh nhân vật người dùng upload làm nhân vật mặc định (default.png) cho StickV."""
+    clean_name = _validate_existing_filename(filename)
+    assets_dir = _category_dir(state, "stickman")
+    src = (assets_dir / clean_name).resolve()
+    if not src.is_file():
+        src_lib = (state.settings.library_dir / "stickman" / clean_name).resolve()
+        src = src_lib if src_lib.is_file() else src
+    if not src.is_file():
+        raise NotFound(f"Không tìm thấy nhân vật '{clean_name}'")
+
+    dest = assets_dir / "default.png"
+    if src != dest.resolve():
+        dest.write_bytes(src.read_bytes())
+    return {"ok": True, "item": _serialize_item("stickman", dest, source="assets")}
 
 
 @router.delete("/asset-hub/{category}/{filename}")
@@ -555,7 +862,7 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
     db = _db_path(state)
     renders_root = state.settings.assets_dir / "renders"
     sync_renders_dir(renders_root, db_path=db, workspace_dir=state.settings.workspace_dir)
-    valid_eng = engine if engine in ("core", "postv", "chatting") else None
+    valid_eng = engine if engine in ("core", "postv", "chatting", "stickv") else None
     rows = list_renders(engine=valid_eng, db_path=db)
     items: list[dict[str, Any]] = []
     for r in rows:

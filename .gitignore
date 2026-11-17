@@ -10,6 +10,8 @@ library/memes/**
 !library/memes/index.json
 library/stickers/**
 !library/stickers/index.json
+library/stickman/**
+!library/stickman/poses/index.json
 *.mp3
 *.m4a
 *.ogg

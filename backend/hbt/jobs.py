@@ -536,6 +536,9 @@ class JobManager:
             if job.kind == "hbt_core_auto":
                 self._run_hbt_core_auto(job)
                 return
+            if job.kind == "stickv_render":
+                self._run_stickv_render(job)
+                return
             folder = self.storage.project_dir(job.slug)
             cfg = self.app_settings.load() if self.app_settings is not None else None
             opts = RenderOptions(
@@ -1086,4 +1089,102 @@ class JobManager:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job hbt_core_auto: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_stickv_render(self, slug: str, *, preview: bool = False) -> Job:
+        """Đưa job dựng video StickV vào hàng đợi 1 luồng chung."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án StickV đang bận, hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            kind="stickv_render",
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_stickv_render(self, job: Job) -> None:
+        """Thực thi job stickv_render và ghi chỉ mục vào workspace/studio.db."""
+        from hbt.shared.db.media_index import upsert_render
+        from hbt.stickv.render import render_stickv
+        from hbt.stickv.storage import (
+            load_stickv_project,
+            save_stickv_project,
+            stickv_project_dir,
+        )
+
+        def on_progress(pct: float, msg: str) -> None:
+            job._progress(pct, "render", msg)
+            job._emit("progress", {"percent": pct, "text": msg})
+
+        try:
+            ws = self.storage.workspace_dir
+            assets_dir = ws.parent / "assets"
+            proj = load_stickv_project(ws, job.slug)
+            pdir = stickv_project_dir(ws, job.slug)
+            wm = self.app_settings.load().watermark if self.app_settings is not None else None
+
+            res = render_stickv(
+                proj,
+                pdir,
+                library_dir=self.library_dir,
+                assets_dir=assets_dir,
+                brand_dir=self.brand_dir,
+                voice_provider=self.voice,
+                watermark=wm,
+                preview=job.preview,
+                cancel=job.token,
+                on_progress=on_progress,
+            )
+
+            out_path = Path(res["file_path"])
+            video_url = f"/api/stickv/{job.slug}/renders/{out_path.name}"
+            proj = proj.model_copy(
+                update={
+                    "last_render": {
+                        "video_url": video_url,
+                        "duration_sec": res["duration_sec"],
+                        "size_mb": res["size_mb"],
+                        "aspect": res["aspect"],
+                        "preview": job.preview,
+                    }
+                }
+            )
+            save_stickv_project(ws, proj)
+
+            if not job.preview:
+                upsert_render(
+                    render_id=f"stickv:{job.slug}:{out_path.name}",
+                    slug=job.slug,
+                    title=proj.title,
+                    engine="stickv",
+                    file_path=out_path,
+                    duration_sec=float(res["duration_sec"] or 0.0),
+                    size_mb=float(res["size_mb"] or 0.0),
+                    db_path=ws / "studio.db",
+                )
+
+            job._finish(
+                DONE,
+                output={
+                    "slug": job.slug,
+                    "video": video_url,
+                    "duration": res["duration_sec"],
+                    "aspect": res["aspect"],
+                    "preview": job.preview,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job stickv_render: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)

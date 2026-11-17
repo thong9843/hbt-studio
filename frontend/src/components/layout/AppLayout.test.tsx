@@ -67,6 +67,7 @@ describe('Unified Studio UI: AppLayout & Sidebar & HbtCorePage', () => {
       'HBT Core',
       'PostV',
       'Chatting',
+      'StickV',
       'Thư viện',
     ]);
 

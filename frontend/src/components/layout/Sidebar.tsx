@@ -21,6 +21,7 @@ import {
   PlusIcon,
   SettingsIcon,
   SmartphoneIcon,
+  SparklesIcon,
   SunIcon,
   UploadIcon,
   ZapIcon,
@@ -337,6 +338,12 @@ export function Sidebar({ mini, render }: SidebarProps) {
             to="/chatting"
             icon={<MessagesSquareIcon className="text-engine-chatting" />}
             label={vi.nav.chatting}
+            mini={mini}
+          />
+          <NavItem
+            to="/stickv"
+            icon={<SparklesIcon className="text-engine-stickv" />}
+            label={vi.nav.stickv}
             mini={mini}
           />
           <NavItem to="/library" icon={<FolderIcon />} label={vi.nav.library} mini={mini} />

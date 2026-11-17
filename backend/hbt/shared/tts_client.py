@@ -1,8 +1,9 @@
-"""Giao thức gọi VieNeu-TTS dùng chung cho HBT Core, PostV và Chatting."""
+"""Giao thức gọi VieNeu-TTS dùng chung cho HBT Core, PostV, Chatting và StickV."""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from hbt.postv.voice import SynthItem, VoiceProvider
@@ -10,14 +11,28 @@ from hbt.postv.voice import SynthItem, VoiceProvider
 logger = logging.getLogger(__name__)
 
 DEFAULT_VOICE_ALIAS = "vienneu_default"
+DEFAULT_VIENEU_VOICE = "Thanh Bình"
 
 
-def resolve_voice_id(voice_id: str | None, default_voice: str) -> str:
-    """Chuẩn hóa `voice_id`: ánh xạ `vienneu_default` hoặc rỗng về giọng mặc định."""
+def resolve_voice_id(
+    voice_id: str | None,
+    default_voice: str = DEFAULT_VIENEU_VOICE,
+    *,
+    available_voices: Sequence[str] | None = None,
+) -> str:
+    """Chuẩn hóa `voice_id` và tự ánh xạ sang giọng khả dụng nếu không khớp."""
     raw = (voice_id or DEFAULT_VOICE_ALIAS).strip()
-    if not raw or raw == DEFAULT_VOICE_ALIAS:
-        return default_voice
-    return raw
+    chosen = default_voice if (not raw or raw == DEFAULT_VOICE_ALIAS) else raw
+
+    if available_voices:
+        avail_list = [v for v in available_voices if v]
+        if avail_list:
+            if chosen in avail_list:
+                return chosen
+            if default_voice in avail_list:
+                return default_voice
+            return avail_list[0]
+    return chosen
 
 
 def synthesize_single_segment_sync(

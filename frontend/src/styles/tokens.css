@@ -40,6 +40,11 @@
   --engine-chatting-soft: #ecfdf5;
   --on-engine-chatting-soft: #047857;
 
+  --engine-stickv: #f59e0b;
+  --engine-stickv-strong: #d97706;
+  --engine-stickv-soft: #fffbeb;
+  --on-engine-stickv-soft: #b45309;
+
   /* Gradient đặc biệt: Magic AI & Final Export */
   --magic-from: #8b5cf6;
   --magic-to: #ec4899;
@@ -129,6 +134,8 @@
     --on-engine-postv-soft: #93c5fd;
     --engine-chatting-soft: #0c2922;
     --on-engine-chatting-soft: #6ee7b7;
+    --engine-stickv-soft: #2c1e09;
+    --on-engine-stickv-soft: #fcd34d;
 
     --ok: #22c55e;
     --ok-soft: #102a1d;
@@ -171,6 +178,8 @@
   --on-engine-postv-soft: #93c5fd;
   --engine-chatting-soft: #0c2922;
   --on-engine-chatting-soft: #6ee7b7;
+  --engine-stickv-soft: #2c1e09;
+  --on-engine-stickv-soft: #fcd34d;
 
   --ok: #22c55e;
   --ok-soft: #102a1d;

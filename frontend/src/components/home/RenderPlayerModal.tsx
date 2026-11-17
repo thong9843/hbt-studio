@@ -6,10 +6,11 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 
-const ENGINE_LABELS: Record<'core' | 'postv' | 'chatting', string> = {
+const ENGINE_LABELS: Record<'core' | 'postv' | 'chatting' | 'stickv', string> = {
   core: 'HBT Core',
   postv: 'PostV',
   chatting: 'Chatting',
+  stickv: 'StickV',
 };
 
 interface RenderPlayerModalProps {

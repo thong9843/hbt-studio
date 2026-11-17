@@ -34,11 +34,12 @@ import { readiness } from '../utils/readiness';
 const RECENT = 4;
 const TONE = { final: 'red', preview: 'yel', none: 'neutral', broken: 'danger' } as const;
 
-const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting', string> = {
+const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', string> = {
   all: 'Tất cả',
   core: 'HBT Core',
   postv: 'PostV',
   chatting: 'Chatting',
+  stickv: 'StickV',
 };
 
 function getTimeGreeting(): string {

@@ -43,14 +43,21 @@ const TABS: {
   { id: 'backgrounds', emoji: '🎮', label: 'Video nền Gameplay', cta: 'Import video nền' },
   { id: 'memes', emoji: '😂', label: 'Meme', cta: 'Import Meme' },
   { id: 'stickers', emoji: '🎭', label: 'Sticker', cta: 'Import Sticker' },
+  {
+    id: 'stickman',
+    emoji: '🏃',
+    label: 'Nhân vật Stickman',
+    cta: 'Thêm nhân vật / Video Pose',
+  },
   { id: 'watermarks', emoji: '🏷️', label: 'Logo Watermark', cta: 'Tải lên Watermark' },
 ];
 
-const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting', string> = {
+const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', string> = {
   all: 'Tất cả',
   core: 'HBT Core',
   postv: 'PostV',
   chatting: 'Chatting',
+  stickv: 'StickV',
 };
 
 function formatBytes(bytes: number): string {
@@ -73,11 +80,14 @@ export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<LibraryTab>('renders');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
   const [previewRender, setPreviewRender] = useState<UnifiedRenderItem | null>(null);
-  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
+  const [engineFilter, setEngineFilter] = useState<
+    'all' | 'core' | 'postv' | 'chatting' | 'stickv'
+  >('all');
   const [memeSearch, setMemeSearch] = useState('');
   const [memeTagFilter, setMemeTagFilter] = useState<string>('all');
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [playingAudioUrl, setPlayingAudioUrl] = useState<string | null>(null);
+  const [hoveredStickman, setHoveredStickman] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
@@ -106,6 +116,10 @@ export function AssetHubPage() {
     queryKey: ['asset-hub', 'stickers'],
     queryFn: () => api.listAssetHub('stickers'),
   });
+  const stickmanQuery = useQuery({
+    queryKey: ['asset-hub', 'stickman'],
+    queryFn: () => api.listAssetHub('stickman'),
+  });
   const watermarkQuery = useQuery({
     queryKey: ['asset-hub', 'watermarks'],
     queryFn: () => api.listAssetHub('watermarks'),
@@ -116,6 +130,7 @@ export function AssetHubPage() {
     backgrounds: bgQuery,
     memes: memeQuery,
     stickers: stickerQuery,
+    stickman: stickmanQuery,
     watermarks: watermarkQuery,
   } as const;
 
@@ -127,6 +142,7 @@ export function AssetHubPage() {
     backgrounds: bgQuery.data?.items.length ?? 0,
     memes: memeQuery.data?.items.length ?? 0,
     stickers: stickerQuery.data?.items.length ?? 0,
+    stickman: stickmanQuery.data?.items.length ?? 0,
     watermarks: watermarkQuery.data?.items.length ?? 0,
   };
 
@@ -170,6 +186,28 @@ export function AssetHubPage() {
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'memes'] });
       toast.info(`Đã tự gắn tag cho ${res.updated}/${res.total} meme!`);
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  const removeStickmanBgMut = useMutation({
+    mutationFn: (item: AssetHubItem) => api.removeStickmanBg(item.name, item.source),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'stickman'] });
+      toast.info(
+        res.removed
+          ? `Đã tách nền trắng cho ${res.item.name}`
+          : `${res.item.name} đã trong suốt sẵn`,
+      );
+    },
+    onError: (e) => toast.error(e),
+  });
+
+  const setDefaultStickmanMut = useMutation({
+    mutationFn: (item: AssetHubItem) => api.setDefaultStickman(item.name),
+    onSuccess: (_res, item) => {
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'stickman'] });
+      toast.info(`Đã đặt "${item.name}" làm nhân vật mặc định cho StickV`);
     },
     onError: (e) => toast.error(e),
   });
@@ -341,7 +379,7 @@ export function AssetHubPage() {
               Toàn bộ video 9:16 đã dựng từ HBT Core, PostV và Chatting trong workspace.
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
-              {(['all', 'core', 'postv', 'chatting'] as const).map((eng) => {
+              {(['all', 'core', 'postv', 'chatting', 'stickv'] as const).map((eng) => {
                 const active = engineFilter === eng;
                 return (
                   <button
@@ -703,53 +741,107 @@ export function AssetHubPage() {
       ) : (
         /* 5b. Tab Sticker */
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {items.map((item) => (
-            <Card
-              key={`${item.source}-${item.name}`}
-              as="li"
-              padded={false}
-              className="group overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
-            >
-              <button
-                type="button"
-                onClick={() => setPreviewItem(item)}
-                className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-soft"
-                aria-label={`Xem ${item.name}`}
+          {items.map((item) => {
+            const cardKey = `${item.source}-${item.name}`;
+            const isVideo = item.kind === 'video' || item.media_type === 'video';
+            const isHovered = hoveredStickman === cardKey;
+            return (
+              <Card
+                key={cardKey}
+                as="li"
+                padded={false}
+                className="group overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
+                onMouseEnter={() => isVideo && setHoveredStickman(cardKey)}
+                onMouseLeave={() => isVideo && setHoveredStickman(null)}
               >
-                {item.kind === 'video' ? (
-                  <video
-                    src={item.url}
-                    muted
-                    loop
-                    playsInline
-                    preload="metadata"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <img
-                    src={item.url}
-                    alt={item.name}
-                    className="h-full w-full object-contain p-2"
-                    loading="lazy"
-                  />
-                )}
-              </button>
-              <div className="flex items-center justify-between gap-2 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-tiny font-bold text-text">{item.name}</p>
-                  <p className="num text-[11px] text-muted">{formatBytes(item.size)}</p>
-                </div>
                 <button
                   type="button"
-                  onClick={() => removeAsset.mutate(item)}
-                  aria-label={`Xóa ${item.name}`}
-                  className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                  onClick={() => setPreviewItem(item)}
+                  className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-soft"
+                  aria-label={`Xem ${item.name}`}
                 >
-                  <TrashIcon size={14} />
+                  {isVideo && (
+                    <span className="absolute left-2 top-2 z-10 rounded-pill bg-black/75 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                      VIDEO{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                    </span>
+                  )}
+                  {isVideo ? (
+                    isHovered || !item.thumb_url ? (
+                      <video
+                        src={item.file_url || item.url}
+                        muted
+                        loop
+                        autoPlay={isHovered}
+                        playsInline
+                        preload="metadata"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <img
+                        src={item.thumb_url}
+                        alt={item.name}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    )
+                  ) : (
+                    <img
+                      src={
+                        activeTab === 'stickman'
+                          ? `${item.url}?t=${encodeURIComponent(item.modified_at)}`
+                          : item.url
+                      }
+                      alt={item.name}
+                      className="h-full w-full object-contain p-2"
+                      loading="lazy"
+                    />
+                  )}
                 </button>
-              </div>
-            </Card>
-          ))}
+                <div className="flex items-center justify-between gap-2 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-tiny font-bold text-text">{item.name}</p>
+                    <p className="num text-[11px] text-muted">{formatBytes(item.size)}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {activeTab === 'stickman' && !isVideo && (
+                      <>
+                        <Button
+                          tone="soft"
+                          size="sm"
+                          busy={removeStickmanBgMut.isPending}
+                          onClick={() => removeStickmanBgMut.mutate(item)}
+                          aria-label={`Tách nền trắng ${item.name}`}
+                          title="Tách nền trắng bên ngoài"
+                        >
+                          Tách nền trắng
+                        </Button>
+                        {item.source === 'assets' && item.name !== 'default.png' && (
+                          <Button
+                            tone="soft"
+                            size="sm"
+                            busy={setDefaultStickmanMut.isPending}
+                            onClick={() => setDefaultStickmanMut.mutate(item)}
+                            aria-label={`Đặt mặc định ${item.name}`}
+                            title="Dùng làm nhân vật mặc định cho StickV"
+                          >
+                            Mặc định
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeAsset.mutate(item)}
+                      aria-label={`Xóa ${item.name}`}
+                      className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                    >
+                      <TrashIcon size={14} />
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </ul>
       )}
 

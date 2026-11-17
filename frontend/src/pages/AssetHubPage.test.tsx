@@ -59,6 +59,25 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
         new Response(JSON.stringify({ category: 'stickers', items: stickers }), {
           headers: { 'Content-Type': 'application/json' },
         }),
+      'GET /api/asset-hub/stickman': () =>
+        new Response(
+          JSON.stringify({
+            category: 'stickman',
+            items: [
+              {
+                name: 'explain.png',
+                category: 'stickman',
+                kind: 'image',
+                size: 1024,
+                modified_at: '2026-11-17T08:00:00Z',
+                url: '/api/asset-hub/file/library/stickman/poses/explain.png',
+                source: 'library',
+                title: 'Giải thích / Chỉ bảng',
+              },
+            ],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
       'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
       'GET /api/asset-hub/memes': { category: 'memes', items: [] },
       'GET /api/asset-hub/watermarks': { category: 'watermarks', items: [] },
@@ -69,6 +88,24 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
           headers: { 'Content-Type': 'application/json' },
         });
       },
+      'GET /api/asset-hub/online/search': () =>
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 't1',
+                title: 'Vine Boom',
+                duration_sec: 1.5,
+                preview_url: 'https://cdn.voicemod.net/boom.mp3',
+                source: 'tuna',
+                tags: ['meme'],
+              },
+            ],
+            missing_key: false,
+            source: 'tuna',
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
     });
 
     const user = userEvent.setup();
@@ -93,5 +130,17 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
     await user.click(screen.getByRole('button', { name: 'Xóa shock.png' }));
     await waitFor(() => expect(screen.queryByText('shock.png')).toBeNull());
     expect(screen.getByText('Chưa có tệp nào trong mục này.')).toBeVisible();
+    // Chuyển sang tab Nhạc nền và mở drawer Tìm & Tải Online (đồng bộ Tuna SFX + Pixabay)
+    await user.click(screen.getByRole('tab', { name: /Nhạc nền/i }));
+    await user.click(screen.getByRole('button', { name: /Tìm & Tải Online/i }));
+    expect(await screen.findByText('Vine Boom')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Voicemod Tuna' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pixabay' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    // Chuyển sang tab Nhân vật Stickman và kiểm tra nút Tách nền trắng
+    await user.click(screen.getByRole('tab', { name: /Nhân vật Stickman/i }));
+    expect(await screen.findByText('explain.png')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tách nền trắng explain.png/i })).toBeInTheDocument();
   });
 });
