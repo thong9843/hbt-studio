@@ -227,9 +227,9 @@ export function HomePage() {
   const { open: openNew } = useNewProject();
   const [searchQuery, setSearchQuery] = useState('');
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
-  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting' | 'stickv'>(
-    'all',
-  );
+  const [engineFilter, setEngineFilter] = useState<
+    'all' | 'core' | 'postv' | 'chatting' | 'stickv'
+  >('all');
   const [activeRender, setActiveRender] = useState<UnifiedRenderItem | null>(null);
   const [deletingRender, setDeletingRender] = useState<UnifiedRenderItem | null>(null);
   const queryClient = useQueryClient();
