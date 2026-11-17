@@ -184,6 +184,19 @@ export function AssetHubPage() {
     onError: (e) => toast.error(e),
   });
 
+  const removeStickmanBgMut = useMutation({
+    mutationFn: (item: AssetHubItem) => api.removeStickmanBg(item.name, item.source),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'stickman'] });
+      toast.info(
+        res.removed
+          ? `Đã tách nền trắng cho ${res.item.name}`
+          : `${res.item.name} đã trong suốt sẵn`,
+      );
+    },
+    onError: (e) => toast.error(e),
+  });
+
   const items = useMemo(() => activeAssetQuery?.data?.items ?? [], [activeAssetQuery?.data?.items]);
   const filteredMemeItems = useMemo(() => {
     if (activeTab !== 'memes') return items;
@@ -749,14 +762,28 @@ export function AssetHubPage() {
                   <p className="truncate text-tiny font-bold text-text">{item.name}</p>
                   <p className="num text-[11px] text-muted">{formatBytes(item.size)}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => removeAsset.mutate(item)}
-                  aria-label={`Xóa ${item.name}`}
-                  className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
-                >
-                  <TrashIcon size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  {activeTab === 'stickman' && (
+                    <Button
+                      tone="soft"
+                      size="sm"
+                      busy={removeStickmanBgMut.isPending}
+                      onClick={() => removeStickmanBgMut.mutate(item)}
+                      aria-label={`Tách nền trắng ${item.name}`}
+                      title="Tách nền trắng bên ngoài"
+                    >
+                      Tách nền trắng
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeAsset.mutate(item)}
+                    aria-label={`Xóa ${item.name}`}
+                    className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </div>
               </div>
             </Card>
           ))}

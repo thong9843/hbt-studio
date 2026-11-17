@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 from hbt.config import REPO_ROOT
@@ -403,6 +405,93 @@ def ensure_default_poses(poses_dir: Path | None = None) -> list[Path]:
     if not index_path.is_file():
         index_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
     return created
+
+
+def remove_white_background(
+    src_path: Path,
+    out_path: Path | None = None,
+    *,
+    threshold: int = 240,
+) -> tuple[Path, bool]:
+    """Tự động tách nền trắng bên ngoài bằng flood-fill từ 4 góc + làm mềm viền anti-alias.
+
+    Giữ nguyên toàn bộ vùng trắng bên trong đầu/cổ áo của nhân vật.
+    Trả về `(đường dẫn PNG đầu ra, đã_tách_nền_hay_chưa)`.
+    """
+    src_path = Path(src_path)
+    dest = Path(out_path) if out_path is not None else src_path.with_suffix(".png")
+
+    with Image.open(src_path) as raw:
+        rgba = raw.convert("RGBA")
+        try:
+            arr = np.array(rgba, dtype=np.uint8)
+        finally:
+            rgba.close()
+
+    h, w, _ = arr.shape
+    if h == 0 or w == 0:
+        return src_path, False
+
+    corners = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
+    has_white_corner = any(
+        int(arr[y, x, 0]) > threshold
+        and int(arr[y, x, 1]) > threshold
+        and int(arr[y, x, 2]) > threshold
+        and int(arr[y, x, 3]) >= 200
+        for y, x in corners
+    )
+    if not has_white_corner:
+        return src_path, False
+
+    is_white = (
+        (arr[:, :, 0] >= threshold)
+        & (arr[:, :, 1] >= threshold)
+        & (arr[:, :, 2] >= threshold)
+        & (arr[:, :, 3] >= 200)
+    )
+    bg_mask = np.zeros((h, w), dtype=bool)
+    queue: deque[tuple[int, int]] = deque()
+    for cy, cx in corners:
+        if is_white[cy, cx] and not bg_mask[cy, cx]:
+            bg_mask[cy, cx] = True
+            queue.append((cy, cx))
+
+    while queue:
+        y, x = queue.popleft()
+        for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            if 0 <= ny < h and 0 <= nx < w and not bg_mask[ny, nx] and is_white[ny, nx]:
+                bg_mask[ny, nx] = True
+                queue.append((ny, nx))
+
+    if not np.any(bg_mask):
+        return src_path, False
+
+    # Làm trong suốt vùng nền trắng bên ngoài
+    arr[bg_mask, 3] = 0
+
+    # Làm mềm viền anti-alias 1px tiếp giáp nền trắng
+    adj = np.zeros((h, w), dtype=bool)
+    adj[1:, :] |= bg_mask[:-1, :]
+    adj[:-1, :] |= bg_mask[1:, :]
+    adj[:, 1:] |= bg_mask[:, :-1]
+    adj[:, :-1] |= bg_mask[:, 1:]
+    edge = adj & (~bg_mask)
+    min_rgb = np.min(arr[:, :, :3], axis=2)
+    soft_thresh = max(180, threshold - 40)
+    feather = edge & (min_rgb >= soft_thresh)
+    if np.any(feather):
+        alpha_scale = np.clip(
+            (threshold - min_rgb[feather]) / max(1, threshold - soft_thresh), 0.0, 1.0
+        )
+        arr[feather, 3] = (arr[feather, 3].astype(np.float32) * alpha_scale).astype(np.uint8)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    out_img = Image.fromarray(arr, mode="RGBA")
+    try:
+        out_img.save(dest, format="PNG", optimize=True)
+    finally:
+        out_img.close()
+    return dest, True
 
 
 if __name__ == "__main__":

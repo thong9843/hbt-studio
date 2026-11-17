@@ -112,5 +112,9 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
     await user.click(screen.getByRole('button', { name: 'Xóa shock.png' }));
     await waitFor(() => expect(screen.queryByText('shock.png')).toBeNull());
     expect(screen.getByText('Chưa có tệp nào trong mục này.')).toBeVisible();
+    // Chuyển sang tab Nhân vật Stickman và kiểm tra nút Tách nền trắng
+    await user.click(screen.getByRole('tab', { name: /Nhân vật Stickman/i }));
+    expect(await screen.findByText('explain.png')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tách nền trắng explain.png/i })).toBeInTheDocument();
   });
 });

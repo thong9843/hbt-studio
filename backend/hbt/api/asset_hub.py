@@ -41,6 +41,7 @@ from hbt.shared.online_sources import (
     search_pixabay_audio,
     update_meme_metadata,
 )
+from hbt.stickv.poses_init import remove_white_background
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
@@ -495,7 +496,48 @@ async def upload_asset_hub_item(
 
     content = await file.read()
     target.write_bytes(content)
+
+    if category == "stickman" and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        png_target = target.with_suffix(".png")
+        final_path, _ = remove_white_background(target, png_target)
+        if final_path != target and target.is_file() and final_path.is_file():
+            target.unlink(missing_ok=True)
+            target = final_path
+
     return {"ok": True, "item": _serialize_item(category, target, source="assets")}
+
+
+@router.post("/asset-hub/stickman/{filename}/remove-bg")
+def remove_stickman_background(
+    filename: str,
+    state: State,
+    source: str | None = None,
+) -> dict[str, Any]:
+    """Tách nền trắng bên ngoài cho ảnh nhân vật Stickman."""
+    clean_name = _validate_existing_filename(filename)
+    assets_dir = _category_dir(state, "stickman")
+    candidates: list[tuple[str, Path]] = []
+    if source in (None, "assets"):
+        candidates.append(("assets", assets_dir / clean_name))
+    if source in (None, "library"):
+        candidates.append(("library", state.settings.library_dir / "stickman" / clean_name))
+        candidates.append(
+            ("library", state.settings.library_dir / "stickman" / "poses" / clean_name)
+        )
+
+    for src_name, path in candidates:
+        if path.is_file():
+            png_target = path.with_suffix(".png")
+            final_path, removed = remove_white_background(path, png_target)
+            if final_path != path and path.is_file() and final_path.is_file():
+                path.unlink(missing_ok=True)
+            return {
+                "ok": True,
+                "removed": removed,
+                "item": _serialize_item("stickman", final_path, source=src_name),
+            }
+
+    raise NotFound(f"Không tìm thấy nhân vật '{clean_name}'")
 
 
 @router.delete("/asset-hub/{category}/{filename}")

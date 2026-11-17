@@ -462,4 +462,10 @@ export const api = {
     ),
   patchMemeMetadata: (memeId: string, body: { tags?: string[]; topic?: string; title?: string }) =>
     apiRequest<{ ok: boolean }>('PATCH', `/asset-hub/memes/${enc(memeId)}`, { json: body }),
+
+  removeStickmanBg: (filename: string, source?: string) =>
+    apiRequest<{ ok: boolean; removed: boolean; item: AssetHubItem }>(
+      'POST',
+      `/asset-hub/stickman/${enc(filename)}/remove-bg${source ? `?source=${enc(source)}` : ''}`,
+    ),
 };
