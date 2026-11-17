@@ -1381,5 +1381,11 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
 - **Sân khấu & Chất lượng v6.1 (`stage.py`, `render.py`, `poses_init.py`):** Hỗ trợ `9:16` (`1080×1920`) và `16:9` (`1920×1080`), 2 theme (`#FAF7F0` / `#111827`), bảng minh họa co giãn theo nội dung (`bullets`, `big_number`, `comparison` có huy hiệu `VS`, `flow_steps`, `takeaway`), phụ đề Karaoke `#FFD43B` vùng giữa, tách nền trắng 4 cạnh biên tự động (`remove_white_background`), quét động toàn bộ pose mới (`GET /api/stickv/poses`), Video Pose `.mp4`/`.webm`/`.mov` khớp thời lượng lời thoại, và **Outro 4s HBT** (`xfade` + `acrossfade` 0.5s; nền `#B22228` cho `16:9`).
 - **Voicemod Tuna Meme SFX & Tìm kiếm Online Thống nhất (`shared/online_sources/tuna_sfx.py`, `asset_hub.py`, `OnlineAssetDrawer.tsx`):** Cổng `GET /api/asset-hub/online/search` kèm In-Memory TTL Cache 10 phút, timeout 4.5s/5s, mặc định `tuna` cho SFX (chuẩn hóa `-16 LUFS` khi tải về `library/sfx/`), thanh Search Online đồng bộ giữa Nhạc nền, SFX và Meme/Sticker.
 
+### 17. Tối ưu Nhịp đọc StickV & Đồng bộ 4 Động cơ vào `studio.db` (Mốc v6.1.1)
+
+- **Nhịp đọc tự nhiên & khóa Karaoke (`stickv/audio.py`, `models.py`, `llm.py`, `render.py`):** Tách câu con trong beat (`split_beat_sentences`), ghép khoảng lặng `0.10s` đầu beat, `0.30s` giữa các câu và `0.25s`/`0.45s` cuối beat (nhân theo `pause_scale`); dùng `align_silence()` khóa phụ đề Karaoke và `extract_wav_rms_envelope()` gọn trong vùng nói thực tế.
+- **Đồng bộ 4 động cơ vào `workspace/studio.db` (`shared/db/media_index.py`, `main.py`, `jobs.py`, `api/asset_hub.py`, `HomePage.tsx`):** `sync_renders_from_disk()` quét đệ quy cả 4 nguồn (`workspace/projects/*/renders/`, `workspace/chatting/*/renders/`, `workspace/stickv/*/renders/`, `assets/renders/`) với đường dẫn POSIX tương đối, tự khử trùng lặp `UNIQUE(file_path)` khi `upsert_render`, chạy tự động trong `lifespan` của FastAPI và ngay sau mỗi job render ở cả 4 động cơ.
+
+
 
 
