@@ -115,6 +115,37 @@ def _match_pose_in_dir(directory: Path, pose_clean: str) -> Path | None:
     return None
 
 
+def list_available_poses(library_dir: Path, assets_dir: Path) -> list[str]:
+    """Quét động toàn bộ tên dáng khả dụng trong `assets/stickman/` và `library/stickman/poses/`."""
+    found: list[str] = list(DEFAULT_POSES)
+    seen: set[str] = set(DEFAULT_POSES)
+    skip_stems = {"default", "stickman_mascot"}
+
+    for d in (
+        assets_dir / "stickman",
+        library_dir / "stickman" / "poses",
+        library_dir / "stickman",
+    ):
+        if not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if not p.is_file() or p.name.startswith("."):
+                continue
+            if p.suffix.lower() not in _POSE_IMG_EXTS:
+                continue
+            name_low = p.name.lower()
+            # Lấy tiền tố trước '.png_' nếu là file Google Flow, hoặc stem
+            if ".png_" in name_low:
+                pose_name = name_low.split(".png_", 1)[0]
+            else:
+                pose_name = p.stem.lower()
+            if not pose_name or pose_name in skip_stems or pose_name in seen:
+                continue
+            seen.add(pose_name)
+            found.append(pose_name)
+    return found
+
+
 def resolve_pose_png(pose: str, library_dir: Path, assets_dir: Path) -> Path:
     """Tìm file PNG dáng nhân vật theo thứ tự ưu tiên:
     1. Khớp chính xác `{pose}.png` trong `assets/stickman/` -> `library/stickman/poses/`

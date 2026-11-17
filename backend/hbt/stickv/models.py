@@ -53,6 +53,7 @@ class StickvProject(BaseModel):
     fps: int = Field(default=30, ge=15, le=60)
     voice_id: str = Field(default="Thanh Bình", max_length=120)
     music_mood: str = Field(default="science", max_length=60)
+    outro: bool = True
     gemini_model: str = Field(default="", max_length=120)
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
     beats: list[StickvBeat] = Field(default_factory=list)

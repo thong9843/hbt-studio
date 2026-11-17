@@ -274,3 +274,74 @@ def test_lipsync_karaoke_and_vieneu_status_check(tmp_path: Path) -> None:
         )
     assert "-stream_loop" not in cmds[-1]
     assert "6.000" in cmds[-1]
+
+
+def test_append_outro_both_aspects_and_dynamic_pose_discovery(tmp_path: Path) -> None:
+    from hbt.stickv.render import _append_outro
+    from hbt.stickv.stage import list_available_poses
+
+    # 1. Quét động pose mới (confused, facepalm...)
+    user_dir = tmp_path / "assets" / "stickman"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / "confused.png").write_bytes(b"png")
+    (user_dir / "facepalm.png_Same_stickman_mascot_123.png").write_bytes(b"png")
+    poses = list_available_poses(tmp_path / "library", tmp_path / "assets")
+    assert "confused" in poses
+    assert "facepalm" in poses
+
+    # 2. Ghép outro 9:16 và 16:9
+    brand = tmp_path / "brand"
+    (brand / "outro").mkdir(parents=True, exist_ok=True)
+    (brand / "outro" / "outro_4s_50fps.mp4").write_bytes(b"outro")
+    lib = tmp_path / "library"
+    (lib / "outro").mkdir(parents=True, exist_ok=True)
+    (lib / "outro" / "voice.wav").write_bytes(b"wav")
+    chunks = tmp_path / "chunks"
+    chunks.mkdir(parents=True, exist_ok=True)
+    main_mp4 = chunks / "body.mp4"
+    main_mp4.write_bytes(b"body")
+    main_wav = chunks / "mixed.wav"
+    main_wav.write_bytes(b"wav")
+
+    cmds: list[list[str]] = []
+
+    def fake_ff(cmd: list[str], *a, **kw):
+        cmds.append(cmd)
+        Path(cmd[-1]).write_bytes(b"final")
+
+    with (
+        patch("hbt.stickv.render.build_outro_audio"),
+        patch("hbt.stickv.render.measure_audio_duration", return_value=10.0),
+        patch("hbt.stickv.render.run_ffmpeg", side_effect=fake_ff),
+    ):
+        _append_outro(
+            main_mp4=main_mp4,
+            main_wav=main_wav,
+            out_mp4=tmp_path / "out_916.mp4",
+            w=1080,
+            h=1920,
+            fps=30,
+            aspect="9:16",
+            brand_dir=brand,
+            library_dir=lib,
+            chunks_dir=chunks,
+        )
+        fc_916 = cmds[-1][cmds[-1].index("-filter_complex") + 1]
+        assert "xfade=transition=fade:duration=0.5" in fc_916
+        assert "acrossfade=d=0.5" in fc_916
+
+        _append_outro(
+            main_mp4=main_mp4,
+            main_wav=main_wav,
+            out_mp4=tmp_path / "out_169.mp4",
+            w=1920,
+            h=1080,
+            fps=30,
+            aspect="16:9",
+            brand_dir=brand,
+            library_dir=lib,
+            chunks_dir=chunks,
+        )
+        fc_169 = cmds[-1][cmds[-1].index("-filter_complex") + 1]
+        assert "#B22228" in fc_169
+        assert "xfade=transition=fade:duration=0.5" in fc_169

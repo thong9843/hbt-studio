@@ -169,28 +169,53 @@ export function StickvPage() {
   );
 
   const poseOptions = useMemo(() => {
-    const custom = (stickmanQuery.data?.items ?? [])
-      .filter((it) => !DEFAULT_POSE_OPTIONS.some((d) => `${d.id}.png` === it.name))
-      .map((it) => {
-        const isVideo = it.kind === 'video' || it.media_type === 'video';
-        return {
-          id: it.name,
-          label: isVideo ? `🎬 Video: ${it.title || it.name}` : it.title || it.name,
-          url: it.file_url || it.url,
-          isVideo,
-        };
-      });
-    return [
-      ...DEFAULT_POSE_OPTIONS.map((d) => ({
-        ...d,
-        url:
-          stickmanQuery.data?.items.find((it) => it.name === `${d.id}.png`)?.url ??
-          `/api/stickv/poses/${d.id}`,
+    const labelMap = new Map(DEFAULT_POSE_OPTIONS.map((d) => [d.id, d.label]));
+    const byId = new Map<string, { id: string; label: string; url: string; isVideo: boolean }>();
+
+    for (const d of DEFAULT_POSE_OPTIONS) {
+      byId.set(d.id, {
+        id: d.id,
+        label: d.label,
+        url: `/api/stickv/poses/${encodeURIComponent(d.id)}`,
         isVideo: false,
-      })),
-      ...custom,
-    ];
-  }, [stickmanQuery.data?.items]);
+      });
+    }
+
+    for (const p of listQuery.data?.poses ?? []) {
+      if (!byId.has(p)) {
+        byId.set(p, {
+          id: p,
+          label: labelMap.get(p) ?? p,
+          url: `/api/stickv/poses/${encodeURIComponent(p)}`,
+          isVideo: false,
+        });
+      }
+    }
+
+    for (const it of stickmanQuery.data?.items ?? []) {
+      const isVideo = it.kind === 'video' || it.media_type === 'video';
+      if (isVideo) {
+        byId.set(it.name, {
+          id: it.name,
+          label: `🎬 Video: ${it.title || it.name}`,
+          url: it.file_url || it.url,
+          isVideo: true,
+        });
+      } else {
+        const stem = it.name.replace(/\.[^.]+$/, '');
+        if (!DEFAULT_POSE_OPTIONS.some((d) => d.id === stem) && !byId.has(it.name)) {
+          byId.set(it.name, {
+            id: it.name,
+            label: it.title || it.name,
+            url: it.url,
+            isVideo: false,
+          });
+        }
+      }
+    }
+
+    return Array.from(byId.values());
+  }, [listQuery.data?.poses, stickmanQuery.data?.items]);
 
   const genMutation = useMutation({
     mutationFn: () =>
@@ -831,6 +856,19 @@ export function StickvPage() {
             onPreview={() => renderMutation.mutate(true)}
             onExport={() => renderMutation.mutate(false)}
             exportLabel={`Xuất bản đẹp (${(draft?.aspect ?? aspect) === '16:9' ? '1920×1080' : '1080×1920'})`}
+            footer={
+              draft && (
+                <label className="flex cursor-pointer items-center justify-between gap-2 rounded-inner border border-line bg-soft-2 px-3 py-2 text-tiny font-bold text-text">
+                  <span>Thêm Outro 4s (@HayBietTuot)</span>
+                  <input
+                    type="checkbox"
+                    checked={draft.outro ?? true}
+                    onChange={(e) => setDraft({ ...draft, outro: e.target.checked })}
+                    className="h-4 w-4 accent-amber-500"
+                  />
+                </label>
+              )
+            }
           >
             {draft?.last_render?.video_url ? (
               <video

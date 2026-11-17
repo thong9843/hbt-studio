@@ -15,19 +15,22 @@ VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "shake", "float", "stati
 VALID_BOARD_TYPES = {"none", "bullets", "big_number", "comparison", "flow_steps"}
 VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
 
-# System prompt nén gọn (~40% ít token hơn) theo cấu trúc giữ chân 5 chặng
-_SYSTEM_PROMPT = (
-    "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
-    "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
-    "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
-    "pose: explain|think|shock|happy|run|rich|sad|angry. "
-    "motion: bounce|slide_left|slide_right|shake|float|static. "
-    "sfx_tag: none|whoosh|pop|vine_boom|ding. "
-    "board_type: bullets|big_number|comparison|flow_steps|none.\n"
-    "board_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
-    "comparison={left_title,left_items,right_title,right_items,takeaway}, "
-    "flow_steps={steps:[...],takeaway}."
-)
+
+def _build_system_prompt(available_poses: list[str] | None = None) -> str:
+    poses = available_poses or list(DEFAULT_POSES)
+    pose_str = "|".join(poses[:30])
+    return (
+        "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
+        "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
+        "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
+        f"pose: {pose_str}. "
+        "motion: bounce|slide_left|slide_right|shake|float|static. "
+        "sfx_tag: none|whoosh|pop|vine_boom|ding. "
+        "board_type: bullets|big_number|comparison|flow_steps|none.\n"
+        "board_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
+        "comparison={left_title,left_items,right_title,right_items,takeaway}, "
+        "flow_steps={steps:[...],takeaway}."
+    )
 
 
 def build_director_prompt(
@@ -36,11 +39,13 @@ def build_director_prompt(
     topic: str = "science",
     aspect: StickvAspect = "9:16",
     target_minutes: float = 1.0,
+    available_poses: list[str] | None = None,
 ) -> str:
     """Tạo Prompt Đạo diễn chuẩn 5 chặng để người dùng copy sang Web Gemini Pro (0 Token API)."""
     beat_count = max(6, min(14, round(target_minutes * 7)))
+    sys_p = _build_system_prompt(available_poses)
     return (
-        f"{_SYSTEM_PROMPT}\n\n"
+        f"{sys_p}\n\n"
         f"Chủ đề: {idea}\n"
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
         'Schema JSON:\n{"title":"Tiêu đề","beats":[{"narration":"1-2 câu tiếng Việt",'
@@ -92,10 +97,17 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
     return {}
 
 
-def sanitize_beats(raw_beats: Any, *, chapter: int = 1, start_idx: int = 1) -> list[StickvBeat]:
+def sanitize_beats(
+    raw_beats: Any,
+    *,
+    chapter: int = 1,
+    start_idx: int = 1,
+    allowed_poses: set[str] | None = None,
+) -> list[StickvBeat]:
     """Chuẩn hóa danh sách beat từ Gemini JSON thành StickvBeat hợp lệ."""
     if not isinstance(raw_beats, list):
         return []
+    valid_poses = allowed_poses or set(DEFAULT_POSES)
     out: list[StickvBeat] = []
     for item in raw_beats:
         if not isinstance(item, dict):
@@ -104,7 +116,7 @@ def sanitize_beats(raw_beats: Any, *, chapter: int = 1, start_idx: int = 1) -> l
         if not narration:
             continue
         pose = str(item.get("pose") or "explain").strip().lower()
-        if pose not in DEFAULT_POSES:
+        if pose not in valid_poses:
             pose = "explain"
         motion = str(item.get("motion") or "bounce").strip().lower()
         if motion not in VALID_MOTIONS:
@@ -134,7 +146,9 @@ def sanitize_beats(raw_beats: Any, *, chapter: int = 1, start_idx: int = 1) -> l
     return out
 
 
-def parse_stickv_json_payload(raw_text: str) -> tuple[str, list[StickvBeat]]:
+def parse_stickv_json_payload(
+    raw_text: str, *, allowed_poses: set[str] | None = None
+) -> tuple[str, list[StickvBeat]]:
     """Phân tích JSON dán từ Web Gemini Pro (0 Token API)."""
     clean = (raw_text or "").strip()
     if clean.startswith("```"):
@@ -145,10 +159,10 @@ def parse_stickv_json_payload(raw_text: str) -> tuple[str, list[StickvBeat]]:
     parsed = json.loads(clean)
     if isinstance(parsed, list):
         title = "Kịch bản StickV (JSON)"
-        beats = sanitize_beats(parsed)
+        beats = sanitize_beats(parsed, allowed_poses=allowed_poses)
     elif isinstance(parsed, dict):
         title = str(parsed.get("title") or "Kịch bản StickV (JSON)").strip()[:160]
-        beats = sanitize_beats(parsed.get("beats"))
+        beats = sanitize_beats(parsed.get("beats"), allowed_poses=allowed_poses)
     else:
         raise ValueError("JSON phải là object {title, beats} hoặc mảng beats")
     if not beats:
@@ -236,12 +250,16 @@ def generate_stickv_script(
     aspect: StickvAspect = "9:16",
     target_minutes: float = 1.0,
     model: str | None = None,
+    available_poses: list[str] | None = None,
 ) -> tuple[str, list[StickvBeat], dict[str, Any]]:
     """Sinh kịch bản StickV; tự chia lô theo chương nếu target_minutes > 2.5 phút."""
     chosen_model = (model or "").strip() or GEMINI_MODEL
     clean_idea = (idea or "").strip()
     if not clean_idea:
         raise ValueError("Vui lòng nhập ý tưởng hoặc chủ đề video")
+
+    sys_prompt = _build_system_prompt(available_poses)
+    allowed_set = set(available_poses) if available_poses else None
 
     if target_minutes <= 2.5:
         beat_count = max(5, min(14, round(target_minutes * 7)))
@@ -252,10 +270,12 @@ def generate_stickv_script(
             '"board_data":{"items":["..."],"takeaway":"..."}}]}'
         )
         parsed, timings = generate_structured_json(
-            _SYSTEM_PROMPT, user_prompt, model=chosen_model, timeout=60.0
+            sys_prompt, user_prompt, model=chosen_model, timeout=60.0
         )
         title = str(parsed.get("title") or clean_idea[:80]).strip()
-        beats = sanitize_beats(parsed.get("beats"), chapter=1, start_idx=1)
+        beats = sanitize_beats(
+            parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
+        )
         return title, beats, {"chapters": 1, **timings}
 
     num_chapters = max(2, min(6, math.ceil(target_minutes / 2.5)))
@@ -265,7 +285,7 @@ def generate_stickv_script(
         'JSON: {"title":"...","chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
     )
     outline, t0 = generate_structured_json(
-        _SYSTEM_PROMPT, outline_prompt, model=chosen_model, timeout=60.0
+        sys_prompt, outline_prompt, model=chosen_model, timeout=60.0
     )
     title = str(outline.get("title") or clean_idea[:80]).strip()
     raw_chapters = outline.get("chapters") or []
@@ -288,11 +308,14 @@ def generate_stickv_script(
             '"board_title":"...","board_data":{}}]}'
         )
         ch_parsed, ch_t = generate_structured_json(
-            _SYSTEM_PROMPT, ch_prompt, model=chosen_model, timeout=60.0
+            sys_prompt, ch_prompt, model=chosen_model, timeout=60.0
         )
         total_llm_s += float(ch_t.get("llm_s") or 0.0)
         ch_beats = sanitize_beats(
-            ch_parsed.get("beats"), chapter=ch_idx, start_idx=len(all_beats) + 1
+            ch_parsed.get("beats"),
+            chapter=ch_idx,
+            start_idx=len(all_beats) + 1,
+            allowed_poses=allowed_set,
         )
         all_beats.extend(ch_beats)
 

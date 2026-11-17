@@ -19,7 +19,7 @@ from hbt.stickv.llm import (
     split_raw_narration_to_beats,
 )
 from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
-from hbt.stickv.stage import resolve_pose_png
+from hbt.stickv.stage import list_available_poses, resolve_pose_png
 from hbt.stickv.storage import (
     create_stickv_project,
     delete_stickv_project,
@@ -75,15 +75,27 @@ class StickvImportScriptBody(BaseModel):
     theme: StickvTheme = "cream"
 
 
+def _poses_for_state(state: State) -> list[str]:
+    return list_available_poses(state.settings.library_dir, state.settings.assets_dir)
+
+
 @router.get("/stickv")
 def list_stickv(state: State) -> dict[str, Any]:
     projects = list_stickv_projects(state.settings.workspace_dir)
+    poses = _poses_for_state(state)
     return {
         "items": [p.model_dump(mode="json") for p in projects],
         "gemini_models": list(AVAILABLE_GEMINI_MODELS),
         "default_model": GEMINI_MODEL,
-        "director_prompt": build_director_prompt(),
+        "director_prompt": build_director_prompt(available_poses=poses),
+        "poses": poses,
     }
+
+
+@router.get("/stickv/poses")
+def list_stickv_poses(state: State) -> dict[str, Any]:
+    """Liệt kê động toàn bộ tên dáng nhân vật có trong kho."""
+    return {"poses": _poses_for_state(state)}
 
 
 @router.post("/stickv", status_code=201)
@@ -104,12 +116,14 @@ def create_stickv(body: StickvCreateBody, state: State) -> dict[str, Any]:
 @router.post("/stickv/generate")
 def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
     try:
+        poses = _poses_for_state(state)
         title, beats, meta = generate_stickv_script(
             idea=body.idea,
             topic=body.topic,
             aspect=body.aspect,
             target_minutes=body.target_minutes,
             model=body.model or None,
+            available_poses=poses,
         )
     except GeminiClientError as exc:
         raise Unprocessable(str(exc)) from exc
@@ -147,7 +161,8 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
 @router.post("/stickv/import-json")
 def import_stickv_json(body: StickvImportJsonBody, state: State) -> dict[str, Any]:
     try:
-        title, beats = parse_stickv_json_payload(body.raw_json)
+        poses = set(_poses_for_state(state))
+        title, beats = parse_stickv_json_payload(body.raw_json, allowed_poses=poses)
     except Exception as exc:
         raise Unprocessable(f"JSON kịch bản không hợp lệ: {exc}") from exc
     proj = create_stickv_project(

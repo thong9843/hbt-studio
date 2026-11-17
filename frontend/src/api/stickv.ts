@@ -11,6 +11,7 @@ export interface StickvListResponse {
   gemini_models: Array<string | GeminiModelOption>;
   default_model: string;
   director_prompt?: string;
+  poses?: string[];
 }
 
 export const stickvApi = {

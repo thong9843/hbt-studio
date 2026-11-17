@@ -963,6 +963,7 @@ export interface StickvProject {
   fps: number;
   voice_id: string;
   music_mood: string;
+  outro?: boolean;
   gemini_model: string;
   target_minutes: number;
   beats: StickvBeat[];

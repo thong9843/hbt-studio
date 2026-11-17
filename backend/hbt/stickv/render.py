@@ -11,6 +11,7 @@ from typing import Any
 
 from PIL import Image
 
+from hbt.pipeline.audio import build_outro_audio
 from hbt.pipeline.cancel import CancelToken
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
@@ -207,6 +208,89 @@ def _render_single_beat_clip(
     )
 
 
+def _resolve_outro_clip(brand_dir: Path, fps: int) -> Path | None:
+    outro_dir = Path(brand_dir) / "outro"
+    candidates = (
+        [outro_dir / "outro_4s_60fps.mp4", outro_dir / "outro_4s_50fps.mp4"]
+        if fps >= 50
+        else [outro_dir / "outro_4s_50fps.mp4", outro_dir / "outro_4s_60fps.mp4"]
+    )
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+def _append_outro(
+    *,
+    main_mp4: Path,
+    main_wav: Path,
+    out_mp4: Path,
+    w: int,
+    h: int,
+    fps: int,
+    aspect: str,
+    brand_dir: Path,
+    library_dir: Path,
+    chunks_dir: Path,
+) -> Path:
+    """Ghép Outro 4s thương hiệu HBT Studio bằng xfade 0.5s + acrossfade 0.5s (-14 LUFS)."""
+    outro_clip = _resolve_outro_clip(brand_dir, fps)
+    if outro_clip is None:
+        return main_mp4
+
+    outro_voice = Path(library_dir) / "outro" / "voice.wav"
+    outro_wav = chunks_dir / "outro_audio.wav"
+    build_outro_audio(outro_voice if outro_voice.is_file() else None, outro_wav, chunks_dir)
+
+    main_dur = measure_audio_duration(main_mp4) or measure_audio_duration(main_wav) or 4.0
+    offset = max(0.0, main_dur - 0.5)
+
+    if aspect == "16:9":
+        # Mở rộng nền đỏ HBT #B22228 ra 1920x1080 và căn giữa clip outro sắc nét
+        outro_vf = (
+            f"color=c=#B22228:s={w}x{h}:r={fps}:d=4.0[obg];"
+            f"[1:v]scale=-2:{h}:flags=lanczos,fps={fps},format=yuv420p[ofg];"
+            f"[obg][ofg]overlay=(W-w)/2:0:shortest=1,settb=AVTB[v1];"
+        )
+    else:
+        outro_vf = f"[1:v]scale={w}:{h}:flags=lanczos,fps={fps},format=yuv420p,settb=AVTB[v1];"
+
+    fc = (
+        f"[0:v]fps={fps},format=yuv420p,settb=AVTB[v0];"
+        f"{outro_vf}"
+        f"[v0][v1]xfade=transition=fade:duration=0.5:offset={offset:.3f}[vout];"
+        "[2:a][3:a]acrossfade=d=0.5:c1=tri:c2=tri[aout]"
+    )
+
+    run_ffmpeg(
+        [
+            *FFMPEG_RESOURCE_CLAMP,
+            "-i",
+            str(main_mp4),
+            "-i",
+            str(outro_clip),
+            "-i",
+            str(main_wav),
+            "-i",
+            str(outro_wav),
+            "-filter_complex",
+            fc,
+            "-map",
+            "[vout]",
+            "-map",
+            "[aout]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            *FFMPEG_ENCODE_CLAMP,
+            str(out_mp4),
+        ]
+    )
+    return out_mp4
+
+
 def render_stickv(
     project: StickvProject,
     project_dir: Path,
@@ -331,6 +415,9 @@ def render_stickv(
         )
 
         wm = watermark or WatermarkSettings()
+        with_outro = bool(getattr(project, "outro", True)) and not preview
+        body_mp4 = (chunks_dir / "body_muxed.mp4") if with_outro else out_mp4
+
         if wm.enabled:
             wm_png = chunks_dir / "watermark.png"
             render_watermark_png(
@@ -365,7 +452,7 @@ def render_stickv(
                     "192k",
                     "-shortest",
                     *FFMPEG_ENCODE_CLAMP,
-                    str(out_mp4),
+                    str(body_mp4),
                 ]
             )
         else:
@@ -383,9 +470,27 @@ def render_stickv(
                     "-b:a",
                     "192k",
                     "-shortest",
-                    str(out_mp4),
+                    str(body_mp4),
                 ]
             )
+
+        if with_outro:
+            emit(92.0, "Đang ghép Outro 4 giây HBT Studio...")
+            check_cancel()
+            joined = _append_outro(
+                main_mp4=body_mp4,
+                main_wav=mixed_wav,
+                out_mp4=out_mp4,
+                w=w,
+                h=h,
+                fps=fps,
+                aspect=project.aspect,
+                brand_dir=brand_dir,
+                library_dir=library_dir,
+                chunks_dir=chunks_dir,
+            )
+            if joined != out_mp4 and body_mp4.is_file():
+                body_mp4.replace(out_mp4)
 
         emit(98.0, "Đang dọn tệp tạm & hoàn tất...")
         dur_s = measure_audio_duration(out_mp4) or round(sum(b.duration_sec for b in beats), 2)
