@@ -59,6 +59,25 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
         new Response(JSON.stringify({ category: 'stickers', items: stickers }), {
           headers: { 'Content-Type': 'application/json' },
         }),
+      'GET /api/asset-hub/stickman': () =>
+        new Response(
+          JSON.stringify({
+            category: 'stickman',
+            items: [
+              {
+                name: 'explain.png',
+                category: 'stickman',
+                kind: 'image',
+                size: 1024,
+                modified_at: '2026-11-17T08:00:00Z',
+                url: '/api/asset-hub/file/library/stickman/poses/explain.png',
+                source: 'library',
+                title: 'Giải thích / Chỉ bảng',
+              },
+            ],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
       'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
       'GET /api/asset-hub/memes': { category: 'memes', items: [] },
       'GET /api/asset-hub/watermarks': { category: 'watermarks', items: [] },

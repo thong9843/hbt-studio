@@ -43,14 +43,16 @@ const TABS: {
   { id: 'backgrounds', emoji: '🎮', label: 'Video nền Gameplay', cta: 'Import video nền' },
   { id: 'memes', emoji: '😂', label: 'Meme', cta: 'Import Meme' },
   { id: 'stickers', emoji: '🎭', label: 'Sticker', cta: 'Import Sticker' },
+  { id: 'stickman', emoji: '🏃', label: 'Nhân vật Stickman', cta: 'Import Nhân vật PNG' },
   { id: 'watermarks', emoji: '🏷️', label: 'Logo Watermark', cta: 'Tải lên Watermark' },
 ];
 
-const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting', string> = {
+const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', string> = {
   all: 'Tất cả',
   core: 'HBT Core',
   postv: 'PostV',
   chatting: 'Chatting',
+  stickv: 'StickV',
 };
 
 function formatBytes(bytes: number): string {
@@ -73,7 +75,9 @@ export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<LibraryTab>('renders');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
   const [previewRender, setPreviewRender] = useState<UnifiedRenderItem | null>(null);
-  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting'>('all');
+  const [engineFilter, setEngineFilter] = useState<'all' | 'core' | 'postv' | 'chatting' | 'stickv'>(
+    'all',
+  );
   const [memeSearch, setMemeSearch] = useState('');
   const [memeTagFilter, setMemeTagFilter] = useState<string>('all');
   const [onlineOpen, setOnlineOpen] = useState(false);
@@ -106,6 +110,10 @@ export function AssetHubPage() {
     queryKey: ['asset-hub', 'stickers'],
     queryFn: () => api.listAssetHub('stickers'),
   });
+  const stickmanQuery = useQuery({
+    queryKey: ['asset-hub', 'stickman'],
+    queryFn: () => api.listAssetHub('stickman'),
+  });
   const watermarkQuery = useQuery({
     queryKey: ['asset-hub', 'watermarks'],
     queryFn: () => api.listAssetHub('watermarks'),
@@ -116,6 +124,7 @@ export function AssetHubPage() {
     backgrounds: bgQuery,
     memes: memeQuery,
     stickers: stickerQuery,
+    stickman: stickmanQuery,
     watermarks: watermarkQuery,
   } as const;
 
@@ -127,6 +136,7 @@ export function AssetHubPage() {
     backgrounds: bgQuery.data?.items.length ?? 0,
     memes: memeQuery.data?.items.length ?? 0,
     stickers: stickerQuery.data?.items.length ?? 0,
+    stickman: stickmanQuery.data?.items.length ?? 0,
     watermarks: watermarkQuery.data?.items.length ?? 0,
   };
 
@@ -341,7 +351,7 @@ export function AssetHubPage() {
               Toàn bộ video 9:16 đã dựng từ HBT Core, PostV và Chatting trong workspace.
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
-              {(['all', 'core', 'postv', 'chatting'] as const).map((eng) => {
+              {(['all', 'core', 'postv', 'chatting', 'stickv'] as const).map((eng) => {
                 const active = engineFilter === eng;
                 return (
                   <button
