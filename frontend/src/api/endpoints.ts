@@ -54,6 +54,7 @@ import type {
   OnlineGiphyItem,
   OnlineGreenMemeItem,
   OnlinePixabayItem,
+  OnlineTunaItem,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -419,10 +420,32 @@ export const api = {
   deleteUnifiedRender: (renderId: string) =>
     apiRequest<{ ok: boolean; deleted: string }>('DELETE', `/renders/${enc(renderId)}`),
 
+  searchOnlineAssets: (category: 'music' | 'sfx' | 'memes' | 'stickers', q: string, source = '') =>
+    apiGet<{
+      items: Record<string, unknown>[];
+      missing_key?: boolean;
+      source?: string;
+      error?: string;
+      cached?: boolean;
+    }>(
+      `/asset-hub/online/search?category=${enc(category)}&q=${enc(q)}${
+        source ? `&source=${enc(source)}` : ''
+      }`,
+    ),
   searchPixabayOnline: (q: string, kind: 'music' | 'sfx' = 'music') =>
     apiGet<{ items: OnlinePixabayItem[]; missing_key?: boolean }>(
       `/asset-hub/online/pixabay?q=${enc(q)}&kind=${enc(kind)}`,
     ),
+  searchTunaSfxOnline: (q: string) =>
+    apiGet<{ items: OnlineTunaItem[]; missing_key?: boolean; source: string }>(
+      `/asset-hub/online/pixabay?q=${enc(q)}&kind=sfx&source=tuna`,
+    ),
+  importTunaSfxOnline: (body: {
+    item_id: string;
+    title: string;
+    preview_url: string;
+    tags: string[];
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/tuna/import', { json: body }),
   importPixabayOnline: (body: {
     item_id: string;
     title: string;
@@ -467,5 +490,11 @@ export const api = {
     apiRequest<{ ok: boolean; removed: boolean; item: AssetHubItem }>(
       'POST',
       `/asset-hub/stickman/${enc(filename)}/remove-bg${source ? `?source=${enc(source)}` : ''}`,
+    ),
+
+  setDefaultStickman: (filename: string) =>
+    apiRequest<{ ok: boolean; item: AssetHubItem }>(
+      'POST',
+      `/asset-hub/stickman/${enc(filename)}/set-default`,
     ),
 };

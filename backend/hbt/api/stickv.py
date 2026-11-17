@@ -19,6 +19,7 @@ from hbt.stickv.llm import (
     split_raw_narration_to_beats,
 )
 from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
+from hbt.stickv.stage import resolve_pose_png
 from hbt.stickv.storage import (
     create_stickv_project,
     delete_stickv_project,
@@ -175,6 +176,15 @@ def import_stickv_script(body: StickvImportScriptBody, state: State) -> dict[str
         beats=beats,
     )
     return {"project": proj.model_dump(mode="json")}
+
+
+@router.get("/stickv/poses/{pose}")
+def serve_stickv_pose(pose: str, state: State) -> FileResponse:
+    """Phục vụ ảnh PNG nhân vật Stickman (ưu tiên ảnh người dùng upload -> mặc định)."""
+    if "/" in pose or "\\" in pose or ".." in pose:
+        raise Unprocessable("Tên dáng không hợp lệ")
+    target = resolve_pose_png(pose, state.settings.library_dir, state.settings.assets_dir)
+    return FileResponse(target, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/stickv/{slug}")

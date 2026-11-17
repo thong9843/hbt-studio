@@ -38,6 +38,7 @@ class StickvBeat(BaseModel):
     board_title: str = Field(default="", max_length=120)
     board_data: dict[str, Any] = Field(default_factory=dict)
     media_path: str = Field(default="", max_length=260)
+    clip_path: str = Field(default="", max_length=260)
     duration_sec: float = Field(default=0.0, ge=0.0)
 
 

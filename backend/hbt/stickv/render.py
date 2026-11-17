@@ -125,6 +125,30 @@ def _stream_beat_frames_to_ffmpeg(
     return out_mp4
 
 
+def _resolve_beat_video_clip(
+    beat: StickvBeat,
+    *,
+    project_dir: Path,
+    library_dir: Path,
+    assets_dir: Path,
+) -> Path | None:
+    """Tìm file Video Pose (.mp4/.mov/.webm) từ clip_path hoặc media_path."""
+    raw = (beat.clip_path or beat.media_path or "").strip()
+    if not raw:
+        return None
+    name = Path(raw.split("?")[0]).name
+    candidates = [
+        project_dir / raw,
+        assets_dir / "stickman" / name,
+        library_dir / "stickman" / name,
+        library_dir / "stickman" / "poses" / name,
+    ]
+    for c in candidates:
+        if c.is_file() and c.suffix.lower() in {".mp4", ".mov", ".webm"}:
+            return c
+    return None
+
+
 def _render_single_beat_clip(
     *,
     beat: StickvBeat,
@@ -137,24 +161,25 @@ def _render_single_beat_clip(
     fps: int,
     aspect: str,
     project_dir: Path,
+    library_dir: Path,
+    assets_dir: Path,
     cancel: CancelToken | None = None,
 ) -> Path:
     dur = max(1.0, float(beat.duration_sec or 2.0))
-    media_file = (project_dir / beat.media_path) if beat.media_path else None
+    media_file = _resolve_beat_video_clip(
+        beat, project_dir=project_dir, library_dir=library_dir, assets_dir=assets_dir
+    )
 
-    if (
-        media_file
-        and media_file.is_file()
-        and media_file.suffix.lower() in {".mp4", ".mov", ".webm"}
-    ):
+    if media_file is not None:
+        clip_dur = measure_audio_duration(media_file)
         vf = (
             f"scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p"
         )
+        loop_args = ["-stream_loop", "-1"] if (clip_dur <= 0 or clip_dur < dur) else []
         cmd = [
             *FFMPEG_RESOURCE_CLAMP,
-            "-stream_loop",
-            "-1",
+            *loop_args,
             "-i",
             str(media_file),
             "-t",
@@ -270,6 +295,8 @@ def render_stickv(
                 fps=fps,
                 aspect=project.aspect,
                 project_dir=project_dir,
+                library_dir=library_dir,
+                assets_dir=assets_dir,
                 cancel=cancel,
             )
             beat_clips.append(clip_mp4)

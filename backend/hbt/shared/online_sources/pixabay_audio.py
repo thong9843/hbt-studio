@@ -78,7 +78,7 @@ async def search_pixabay_audio(
 
     if client is not None:
         return await _do(client)
-    async with httpx.AsyncClient(timeout=15.0, headers=DEFAULT_HEADERS, follow_redirects=True) as c:
+    async with httpx.AsyncClient(timeout=5.0, headers=DEFAULT_HEADERS, follow_redirects=True) as c:
         return await _do(c)
 
 

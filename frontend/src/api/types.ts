@@ -864,9 +864,11 @@ export interface AssetHubItem {
   name: string;
   category: AssetHubCategory;
   kind: 'image' | 'video' | 'audio' | 'other';
+  media_type?: 'image' | 'video';
   size: number;
   modified_at: string;
   url: string;
+  file_url?: string;
   source?: 'assets' | 'library' | 'brand' | 'chatting';
   readonly?: boolean;
   title?: string;
@@ -876,6 +878,8 @@ export interface AssetHubItem {
   topic?: string;
   duration?: number;
   duration_sec?: number;
+  width?: number;
+  height?: number;
   thumb_url?: string | null;
 }
 
@@ -888,6 +892,14 @@ export interface OnlinePixabayItem {
   preview_url: string;
   download_url: string;
   kind: 'music' | 'sfx';
+}
+
+export interface OnlineTunaItem {
+  id: string;
+  title: string;
+  duration_sec: number;
+  preview_url: string;
+  tags: string[];
 }
 
 export interface OnlineGreenMemeItem {
@@ -938,6 +950,7 @@ export interface StickvBeat {
   board_title: string;
   board_data: Record<string, unknown>;
   media_path: string;
+  clip_path?: string;
   duration_sec: number;
 }
 

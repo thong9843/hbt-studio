@@ -65,21 +65,40 @@ def _load_font(path: Path, size: int) -> ImageFont.FreeTypeFont | ImageFont.Imag
 
 
 def resolve_pose_png(pose: str, library_dir: Path, assets_dir: Path) -> Path:
-    """Tìm file PNG dáng nhân vật trong assets/stickman -> library/stickman/poses."""
+    """Tìm file PNG dáng nhân vật theo thứ tự ưu tiên:
+    1. Ảnh người dùng tải lên khớp tên/dáng trong `assets/stickman/`
+    2. Ảnh mặc định do người dùng đặt (`assets/stickman/default.png`) nếu là dáng chuẩn
+    3. Bộ 8 dáng chuẩn trong `library/stickman/poses/` (tự khởi tạo nếu thiếu)
+    """
     clean = (pose or "explain").strip()
     fname = clean if clean.lower().endswith(".png") else f"{clean}.png"
-    candidates = [
-        assets_dir / "stickman" / fname,
+    stem = Path(clean).stem
+
+    user_candidates = [
         assets_dir / "stickman" / clean,
-        library_dir / "stickman" / "poses" / fname,
-        library_dir / "stickman" / fname,
+        assets_dir / "stickman" / fname,
+        assets_dir / "stickman" / "poses" / fname,
     ]
-    for c in candidates:
+    for c in user_candidates:
         if c.is_file():
             return c
+
+    user_default = assets_dir / "stickman" / "default.png"
+    if user_default.is_file():
+        return user_default
+
     poses_dir = library_dir / "stickman" / "poses"
     ensure_default_poses(poses_dir)
-    fallback = poses_dir / (fname if clean in DEFAULT_POSES else "explain.png")
+    lib_candidates = [
+        poses_dir / fname,
+        library_dir / "stickman" / clean,
+        library_dir / "stickman" / fname,
+    ]
+    for c in lib_candidates:
+        if c.is_file():
+            return c
+
+    fallback = poses_dir / (f"{stem}.png" if stem in DEFAULT_POSES else "explain.png")
     return fallback if fallback.is_file() else poses_dir / "explain.png"
 
 

@@ -171,13 +171,22 @@ export function StickvPage() {
   const poseOptions = useMemo(() => {
     const custom = (stickmanQuery.data?.items ?? [])
       .filter((it) => !DEFAULT_POSE_OPTIONS.some((d) => `${d.id}.png` === it.name))
-      .map((it) => ({ id: it.name, label: it.title || it.name, url: it.url }));
+      .map((it) => {
+        const isVideo = it.kind === 'video' || it.media_type === 'video';
+        return {
+          id: it.name,
+          label: isVideo ? `🎬 Video: ${it.title || it.name}` : it.title || it.name,
+          url: it.file_url || it.url,
+          isVideo,
+        };
+      });
     return [
       ...DEFAULT_POSE_OPTIONS.map((d) => ({
         ...d,
         url:
           stickmanQuery.data?.items.find((it) => it.name === `${d.id}.png`)?.url ??
-          `/api/asset-hub/file/library/stickman/poses/${d.id}.png`,
+          `/api/stickv/poses/${d.id}`,
+        isVideo: false,
       })),
       ...custom,
     ];
@@ -340,9 +349,16 @@ export function StickvPage() {
     }
   };
 
-  const currentPoseUrl =
-    poseOptions.find((p) => p.id === activeBeat?.pose)?.url ??
-    `/api/asset-hub/file/library/stickman/poses/explain.png`;
+  const activePoseName = activeBeat?.pose || 'explain';
+  const matchedStickman = (stickmanQuery.data?.items ?? []).find(
+    (it) =>
+      it.name === activePoseName ||
+      it.name === `${activePoseName}.png` ||
+      it.name === 'default.png',
+  );
+  const currentPoseUrl = `/api/stickv/poses/${encodeURIComponent(activePoseName)}${
+    matchedStickman?.modified_at ? `?t=${encodeURIComponent(matchedStickman.modified_at)}` : ''
+  }`;
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-6 pb-10">
@@ -708,7 +724,13 @@ export function StickvPage() {
                         <select
                           aria-label="Dáng người que"
                           value={beat.pose}
-                          onChange={(e) => updateBeat(beat.id, { pose: e.target.value })}
+                          onChange={(e) => {
+                            const chosen = poseOptions.find((p) => p.id === e.target.value);
+                            updateBeat(beat.id, {
+                              pose: e.target.value,
+                              clip_path: chosen?.isVideo ? chosen.url : '',
+                            });
+                          }}
                           className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
                         >
                           {poseOptions.map((p) => (
@@ -825,26 +847,53 @@ export function StickvPage() {
                     : 'bg-[#111827] text-slate-50'
                 }`}
               >
-                <div className="rounded-xl border border-black/10 bg-white/80 p-3 text-slate-900 shadow-sm">
-                  <p className="text-[11px] font-extrabold text-amber-600 uppercase">
-                    {activeBeat?.board_type ?? 'bullets'}
-                  </p>
-                  <p className="mt-1 text-xs font-bold">
-                    {activeBeat?.board_title || draft?.title || 'Bảng minh họa thông minh'}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-[11px] text-slate-600">
-                    {activeBeat?.narration || 'Sinh kịch bản hoặc chọn beat để xem trước...'}
-                  </p>
-                </div>
+                {activeBeat?.board_type !== 'none' && (
+                  <div className="rounded-xl border border-black/10 bg-white/80 p-3 text-slate-900 shadow-sm">
+                    <p className="text-[11px] font-extrabold text-amber-600 uppercase">
+                      {activeBeat?.board_type ?? 'bullets'}
+                    </p>
+                    <p className="mt-1 text-xs font-bold">
+                      {activeBeat?.board_title || draft?.title || 'Bảng minh họa thông minh'}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-slate-600">
+                      {activeBeat?.narration || 'Sinh kịch bản hoặc chọn beat để xem trước...'}
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex flex-1 items-end justify-center pb-2">
-                  <img
-                    src={currentPoseUrl}
-                    alt={activeBeat?.pose ?? 'explain'}
-                    className={`h-32 w-auto object-contain ${
-                      activeBeat?.facing === 'left' ? '-scale-x-100' : ''
-                    }`}
-                  />
+                  {activeBeat?.clip_path ||
+                  poseOptions.find((p) => p.id === activeBeat?.pose)?.isVideo ? (
+                    <video
+                      key={
+                        activeBeat?.clip_path ||
+                        poseOptions.find((p) => p.id === activeBeat?.pose)?.url
+                      }
+                      src={
+                        activeBeat?.clip_path ||
+                        poseOptions.find((p) => p.id === activeBeat?.pose)?.url
+                      }
+                      muted
+                      loop
+                      autoPlay
+                      playsInline
+                      className="h-36 w-auto rounded-lg object-contain"
+                    />
+                  ) : (
+                    <img
+                      src={currentPoseUrl}
+                      alt={activeBeat?.pose ?? 'explain'}
+                      onError={(e) => {
+                        if (!e.currentTarget.dataset.fb) {
+                          e.currentTarget.dataset.fb = '1';
+                          e.currentTarget.src = '/api/stickv/poses/explain';
+                        }
+                      }}
+                      className={`h-32 w-auto object-contain ${
+                        activeBeat?.facing === 'left' ? '-scale-x-100' : ''
+                      }`}
+                    />
+                  )}
                 </div>
               </div>
             )}

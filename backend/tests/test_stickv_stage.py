@@ -204,3 +204,68 @@ def test_lipsync_karaoke_and_vieneu_status_check(tmp_path: Path) -> None:
         voice_id="Bình (nam miền Bắc)",
     )
     assert captured_voices == ["Thanh Bình"]
+
+    # Kiểm tra resolve_pose_png ưu tiên ảnh người dùng upload (assets/stickman) thay vì mặc định
+    from hbt.stickv.stage import resolve_pose_png
+
+    user_shock = tmp_path / "assets" / "stickman" / "shock.png"
+    user_shock.parent.mkdir(parents=True, exist_ok=True)
+    user_shock.write_bytes(b"custom-shock")
+    assert resolve_pose_png("shock", tmp_path / "library", tmp_path / "assets") == user_shock
+
+    # Kiểm tra render_single_beat_clip khớp thời lượng Video Pose (lặp/cắt theo giọng đọc)
+    from hbt.stickv.render import _render_single_beat_clip
+
+    vp_file = tmp_path / "assets" / "stickman" / "flow_wave.mp4"
+    vp_file.write_bytes(b"mp4")
+    vp_beat = StickvBeat(
+        id="b_vp", narration="Xin chào", clip_path="flow_wave.mp4", duration_sec=6.0
+    )
+    cmds: list[list[str]] = []
+
+    def cap_ffmpeg(cmd: list[str], *a, **kw):
+        cmds.append(cmd)
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"out")
+
+    with (
+        patch("hbt.stickv.render.run_ffmpeg", side_effect=cap_ffmpeg),
+        patch("hbt.stickv.render.measure_audio_duration", return_value=3.0),
+    ):
+        _render_single_beat_clip(
+            beat=vp_beat,
+            wav_path=tmp_path / "w.wav",
+            bg_png=tmp_path / "b.png",
+            char_png=None,
+            out_mp4=tmp_path / "out_short.mp4",
+            w=1080,
+            h=1920,
+            fps=24,
+            aspect="9:16",
+            project_dir=tmp_path,
+            library_dir=tmp_path / "library",
+            assets_dir=tmp_path / "assets",
+        )
+    assert "-stream_loop" in cmds[-1]
+    assert "6.000" in cmds[-1]
+
+    with (
+        patch("hbt.stickv.render.run_ffmpeg", side_effect=cap_ffmpeg),
+        patch("hbt.stickv.render.measure_audio_duration", return_value=10.0),
+    ):
+        _render_single_beat_clip(
+            beat=vp_beat,
+            wav_path=tmp_path / "w.wav",
+            bg_png=tmp_path / "b.png",
+            char_png=None,
+            out_mp4=tmp_path / "out_long.mp4",
+            w=1080,
+            h=1920,
+            fps=24,
+            aspect="9:16",
+            project_dir=tmp_path,
+            library_dir=tmp_path / "library",
+            assets_dir=tmp_path / "assets",
+        )
+    assert "-stream_loop" not in cmds[-1]
+    assert "6.000" in cmds[-1]
