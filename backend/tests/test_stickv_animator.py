@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from hbt.api.app import create_app
 from PIL import Image
 
 from hbt.config import Settings
+from hbt.main import create_app
 from hbt.stickv.animator import StickmanAnimator, list_available_animations
 
 
@@ -131,7 +131,9 @@ def test_asset_hub_upload_stickman_animation_slots(tmp_path: Path) -> None:
         workspace_dir=tmp_path / "ws",
         assets_dir=tmp_path / "assets",
         library_dir=tmp_path / "lib",
-        out_dir=tmp_path / "out",
+        whisper_model="small",
+        whisper_device="cpu",
+        default_fps=50,
     )
     app = create_app(settings)
     client = TestClient(app)

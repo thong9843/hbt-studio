@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
-from hbt.pipeline.ffutil import ffmpeg_exe, ffprobe_exe
+from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
 from hbt.stickv.stage import resolve_pose_png
 
@@ -102,7 +103,7 @@ def _probe_video_dimensions(path: Path) -> tuple[int, int]:
     try:
         proc = subprocess.run(
             [
-                ffprobe_exe(),
+                shutil.which("ffprobe") or "ffprobe",
                 "-v",
                 "error",
                 "-select_streams",

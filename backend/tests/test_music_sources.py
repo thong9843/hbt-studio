@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from hbt.api.app import create_app
 
 from hbt.api.asset_hub import _ONLINE_SEARCH_CACHE
 from hbt.config import Settings
+from hbt.main import create_app
 from hbt.shared.online_sources.freesound_audio import import_freesound_audio, search_freesound_audio
 from hbt.shared.online_sources.jamendo_music import import_jamendo_music, search_jamendo_music
 from hbt.stickv.audio import auto_resolve_mood_bgm
 
 
-@pytest.mark.asyncio
-async def test_jamendo_search_and_import(tmp_path: Path) -> None:
+def test_jamendo_search_and_import(tmp_path: Path) -> None:
     search_resp = MagicMock()
     search_resp.json.return_value = {
         "results": [
@@ -43,22 +43,26 @@ async def test_jamendo_search_and_import(tmp_path: Path) -> None:
     client = AsyncMock()
     client.get.side_effect = [search_resp, dl_resp]
 
-    hits = await search_jamendo_music(mood="curious_science", client_id="cid-123", client=client)
+    hits = asyncio.run(
+        search_jamendo_music(mood="curious_science", client_id="cid-123", client=client)
+    )
     assert len(hits) == 1
     assert hits[0]["source"] == "jamendo"
     assert hits[0]["title"] == "Quantum Pulse"
 
     with patch("hbt.shared.online_sources.jamendo_music._normalize_mp3_lufs"):
-        res = await import_jamendo_music(
-            item_id=hits[0]["id"],
-            title=hits[0]["title"],
-            artist=hits[0]["artist"],
-            download_url=hits[0]["download_url"],
-            tags=hits[0]["tags"],
-            moods=["curious_science"],
-            license_url=hits[0]["license"],
-            library_dir=tmp_path,
-            client=client,
+        res = asyncio.run(
+            import_jamendo_music(
+                item_id=hits[0]["id"],
+                title=hits[0]["title"],
+                artist=hits[0]["artist"],
+                download_url=hits[0]["download_url"],
+                tags=hits[0]["tags"],
+                moods=["curious_science"],
+                license_url=hits[0]["license"],
+                library_dir=tmp_path,
+                client=client,
+            )
         )
     assert res["ok"] is True
     mp3_path = tmp_path / "music" / "jamendo-12345.mp3"
@@ -68,8 +72,7 @@ async def test_jamendo_search_and_import(tmp_path: Path) -> None:
     assert "curious_science" in idx[0]["moods"]
 
 
-@pytest.mark.asyncio
-async def test_freesound_search_and_import(tmp_path: Path) -> None:
+def test_freesound_search_and_import(tmp_path: Path) -> None:
     search_resp = MagicMock()
     search_resp.json.return_value = {
         "results": [
@@ -93,21 +96,23 @@ async def test_freesound_search_and_import(tmp_path: Path) -> None:
     client = AsyncMock()
     client.get.side_effect = [search_resp, dl_resp]
 
-    hits = await search_freesound_audio("clock", kind="sfx", api_key="fs-key", client=client)
+    hits = asyncio.run(search_freesound_audio("clock", kind="sfx", api_key="fs-key", client=client))
     assert len(hits) == 1
     assert hits[0]["source"] == "freesound"
 
     with patch("hbt.shared.online_sources.freesound_audio._normalize_mp3_lufs"):
-        res = await import_freesound_audio(
-            item_id=hits[0]["id"],
-            title=hits[0]["title"],
-            artist=hits[0]["artist"],
-            download_url=hits[0]["download_url"],
-            kind="sfx",
-            tags=hits[0]["tags"],
-            license_url=hits[0]["license"],
-            library_dir=tmp_path,
-            client=client,
+        res = asyncio.run(
+            import_freesound_audio(
+                item_id=hits[0]["id"],
+                title=hits[0]["title"],
+                artist=hits[0]["artist"],
+                download_url=hits[0]["download_url"],
+                kind="sfx",
+                tags=hits[0]["tags"],
+                license_url=hits[0]["license"],
+                library_dir=tmp_path,
+                client=client,
+            )
         )
     assert res["ok"] is True
     assert (tmp_path / "sfx" / "freesound-9988.mp3").is_file()
@@ -124,7 +129,9 @@ def test_unified_online_search_jamendo_and_ttl_cache(
         workspace_dir=tmp_path / "ws",
         assets_dir=tmp_path / "assets",
         library_dir=tmp_path / "lib",
-        out_dir=tmp_path / "out",
+        whisper_model="small",
+        whisper_device="cpu",
+        default_fps=50,
     )
     app = create_app(settings)
     client = TestClient(app)
