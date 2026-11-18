@@ -174,3 +174,81 @@ def test_v8_pose_diversity_and_chunked_grouping(tmp_path: Path) -> None:
     )
     assert len(chunks) >= 3
     assert sum(len(items) for _, items in chunks) == 6
+
+
+def test_v9_meaningful_boards_anti_parrot_cta_recap_and_emotion_diversity() -> None:
+    from hbt.stickv.llm import _enforce_meaningful_boards, enforce_pose_diversity
+    from hbt.stickv.models import StickvBeat
+
+    # 1. Alias bullets & takeaway trên StickvBeat + default emotion="auto"
+    aliased = StickvBeat(
+        id="b001",
+        narration="Cơ chế bức xạ Hawking làm hố đen bốc hơi.",
+        pose="present_board",
+        bullets=["**Bức xạ Hawking** tạo cặp hạt ảo"],
+        takeaway="Hố đen không hoàn toàn bất tử",
+    )
+    assert aliased.emotion == "auto"
+    assert aliased.board_data["items"] == ["**Bức xạ Hawking** tạo cặp hạt ảo"]
+    assert aliased.board_data["takeaway"] == "Hố đen không hoàn toàn bất tử"
+
+    # 2. Anti-Parrot (>70% word overlap) + cliché filtering + CTA end-beat -> recap_card
+    raw_beats = [
+        StickvBeat(
+            id="b001",
+            narration="Ánh sáng Mặt Trời mất tám phút để truyền tới Trái Đất qua chân không.",
+            pose="present_board",
+            emotion="confident",
+            board_type="bullets",
+            board_title="Mở đầu video",
+            board_data={
+                "items": [
+                    "Ánh sáng Mặt Trời mất tám phút để truyền tới Trái Đất qua chân không",
+                    "Hãy tìm hiểu nhé",
+                ],
+                "takeaway": "Ánh sáng đi 300.000 km/s",
+            },
+        ),
+        StickvBeat(
+            id="b002",
+            narration="Nếu Mặt Trời biến mất đột ngột, ta vẫn thấy nắng trong 8 phút.",
+            pose="present_board",
+            emotion="confident",
+            board_type="bullets",
+            board_title="Độ trễ ánh sáng",
+            board_data={
+                "items": ["**Độ trễ 8 phút** dù trọng lực đổi tức thì"],
+                "takeaway": "Sóng hấp dẫn truyền với tốc độ ánh sáng",
+            },
+        ),
+        StickvBeat(
+            id="b003",
+            narration=(
+                "Cảm ơn bạn đã xem, đừng quên đăng ký kênh và bình luận cảm nghĩ bên dưới nhé!"
+            ),
+            pose="present_board",
+            emotion="confident",
+            board_type="bullets",
+            board_title="Kết luận",
+            board_data={"items": ["Đăng ký kênh ngay"]},
+        ),
+    ]
+
+    enforced = _enforce_meaningful_boards(raw_beats)
+    assert enforced[0].board_title == ""  # Đã xóa tiêu đề sáo rỗng "Mở đầu video"
+    assert all("tìm hiểu" not in it.lower() for it in enforced[0].board_data["items"])
+    # Beat 0 chống nhại lời thoại -> đã rút gọn từ khóa **...** ngắn hơn câu gốc
+    first_item = enforced[0].board_data["items"][0]
+    assert "**" in first_item and len(first_item) < len(raw_beats[0].narration)
+    assert enforced[0].board_data["items"] != raw_beats[0].board_data["items"]
+
+    # Beat cuối CTA bắt buộc chuyển thành recap_card 3 ý cốt lõi
+    assert enforced[-1].board_type == "recap_card"
+    assert enforced[-1].board_title == "TÓM TẮT 3 Ý CỐT LÕI"
+    assert len(enforced[-1].board_data["items"]) >= 2
+
+    # 3. enforce_pose_diversity phải chống trùng cả pose lẫn emotion liên tiếp
+    diversified = enforce_pose_diversity(enforced)
+    for a, b in zip(diversified, diversified[1:], strict=False):
+        assert a.pose != b.pose
+        assert a.emotion != b.emotion

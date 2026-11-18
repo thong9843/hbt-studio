@@ -9,6 +9,7 @@ import type {
   StickvBoardType,
   StickvCameraShot,
   StickvDomain,
+  StickvEmotion,
   StickvInteraction,
   StickvMotion,
   StickvProject,
@@ -26,6 +27,7 @@ import { useToast } from '../hooks/toast';
 
 const DEFAULT_POSE_OPTIONS = [
   { id: 'point_up', label: 'Chỉ tay lên bảng' },
+  { id: 'point_board_high', label: 'Chỉ cao lên bảng' },
   { id: 'think_chin', label: 'Vắt tay lên cằm' },
   { id: 'arms_crossed', label: 'Khoanh tay phân tích' },
   { id: 'hands_on_hips', label: 'Chống nạnh khẳng định' },
@@ -37,6 +39,11 @@ const DEFAULT_POSE_OPTIONS = [
   { id: 'count_points', label: 'Đếm ý trên tay' },
   { id: 'walk_explore', label: 'Sải bước khám phá' },
   { id: 'idle_breathe', label: 'Đứng thở tự nhiên' },
+  { id: 'wave_hello', label: 'Vẫy tay chào mở đầu' },
+  { id: 'scratch_head', label: 'Gãi đầu băn khoăn' },
+  { id: 'facepalm_light', label: 'Vỗ trán ngán ngẩm' },
+  { id: 'nod_yes', label: 'Gật đầu đồng tình' },
+  { id: 'shake_no', label: 'Lắc đầu bác bỏ' },
 ];
 
 const EXTRA_POSE_LABELS: Record<string, string> = {
@@ -99,6 +106,7 @@ const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'card', label: 'Thẻ thông tin' },
   { id: 'quote', label: 'Trích dẫn' },
   { id: 'list', label: 'Danh sách' },
+  { id: 'recap_card', label: 'Tóm tắt 3 ý (CTA)' },
   { id: 'none', label: 'Thẻ tự động (Icon)' },
 ];
 
@@ -131,12 +139,27 @@ const INTERACTIONS: { id: StickvInteraction; label: string }[] = [
   { id: 'versus_split', label: 'So sánh 2 vế' },
 ];
 
+const EMOTIONS: { id: StickvEmotion; label: string }[] = [
+  { id: 'auto', label: 'Tự động theo thoại' },
+  { id: 'neutral', label: 'Bình tĩnh / Trung tính' },
+  { id: 'confident', label: 'Tự tin / Thuyết phục' },
+  { id: 'curious', label: 'Tò mò / Dấu hỏi' },
+  { id: 'idea', label: 'Bừng sáng ý tưởng' },
+  { id: 'shock', label: 'Sửng sốt / Bất ngờ' },
+  { id: 'skeptical', label: 'Hoài nghi / Nhướn mày' },
+  { id: 'serious', label: 'Nghiêm túc / Nhấn mạnh' },
+  { id: 'sad', label: 'Đồng cảm / Buồn nhẹ' },
+  { id: 'happy', label: 'Vui vẻ / Cởi mở' },
+  { id: 'excited', label: 'Hào hứng / Đỉnh điểm' },
+];
+
 function makeEmptyBeat(index: number): StickvBeat {
   return {
     id: `b${String(index).padStart(3, '0')}`,
     chapter: 1,
     narration: '',
     pose: 'present_board',
+    emotion: 'auto',
     camera_shot: 'wide_stage',
     facing: 'right',
     motion: 'bounce',
@@ -1011,6 +1034,45 @@ export function StickvPage() {
                             </option>
                           ))}
                         </select>
+
+                        <select
+                          aria-label="Biểu cảm khuôn mặt"
+                          value={beat.emotion ?? 'auto'}
+                          onChange={(e) =>
+                            updateBeat(beat.id, {
+                              emotion: e.target.value as StickvEmotion,
+                            })
+                          }
+                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
+                        >
+                          {EMOTIONS.map((em) => (
+                            <option key={em.id} value={em.id}>
+                              Cảm xúc: {em.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input
+                          type="text"
+                          aria-label="Câu chốt ý (takeaway)"
+                          value={
+                            beat.takeaway ??
+                            (typeof beat.board_data?.takeaway === 'string'
+                              ? beat.board_data.takeaway
+                              : '')
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateBeat(beat.id, {
+                              takeaway: val,
+                              board_data: { ...(beat.board_data ?? {}), takeaway: val },
+                            });
+                          }}
+                          placeholder="Chốt lại 1 dòng ngắn trên bảng (tuỳ chọn)..."
+                          className="min-w-[240px] flex-1 rounded-input border border-line-input bg-card px-2.5 py-1.5 text-tiny text-text"
+                        />
                       </div>
 
                       {(beat.interaction === 'hold_prop' || beat.prop_query) && (
@@ -1160,7 +1222,9 @@ export function StickvPage() {
                               activeBeat?.pose ?? 'explain',
                             )}&interaction=${encodeURIComponent(
                               activeBeat?.interaction ?? 'none',
-                            )}&facing=${encodeURIComponent(activeBeat?.facing ?? 'right')}`
+                            )}&facing=${encodeURIComponent(
+                              activeBeat?.facing ?? 'right',
+                            )}&emotion=${encodeURIComponent(activeBeat?.emotion ?? 'auto')}`
                           : currentPoseUrl
                       }
                       alt={activeBeat?.pose ?? 'explain'}

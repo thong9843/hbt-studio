@@ -428,10 +428,12 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
 
     # Render thử đủ 10 biểu cảm khuôn mặt & kiểm tra các ký hiệu màu cảm xúc
     expected_colors = {
-        "idea": lambda r, g, b, a: a > 200 and r > 220 and g > 180 and b < 60,  # #FACC15
-        "sad": lambda r, g, b, a: a > 200 and b > 210 and r < 100 and g > 150,  # #38BDF8
-        "shock": lambda r, g, b, a: a > 200 and r > 180 and g < 60 and b < 70,  # #D9232E
-        "curious": lambda r, g, b, a: a > 200 and r > 210 and 120 < g < 190 and b < 40,  # #F59E0B
+        "idea": lambda r, g, b, a: (a > 200) & (r > 220) & (g > 180) & (b < 60),  # #FACC15
+        "sad": lambda r, g, b, a: (a > 200) & (b > 210) & (r < 100) & (g > 150),  # #38BDF8
+        "shock": lambda r, g, b, a: (a > 200) & (r > 180) & (g < 60) & (b < 70),  # #D9232E
+        "curious": lambda r, g, b, a: (
+            (a > 200) & (r > 210) & (g > 120) & (g < 190) & (b < 40)
+        ),  # #F59E0B
     }
     for emo in VALID_EMOTIONS:
         rig = PuppetRig(

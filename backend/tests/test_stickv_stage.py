@@ -581,7 +581,7 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
     assert lay_focus.clamp_bounds[3] <= 865
     assert lay_focus.char_scale == pytest.approx(0.82)
 
-    lay_close = compute_layered_camera_layout(
+    lay_close_fade = compute_layered_camera_layout(
         "closeup_react",
         aspect="9:16",
         w=1080,
@@ -589,8 +589,18 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
         t_sec=0.35,
         prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
     )
-    assert lay_close.board_alpha == pytest.approx(0.0, abs=0.01)
-    assert lay_close.char_scale == pytest.approx(1.22)
+    assert lay_close_fade.board_alpha == pytest.approx(0.0, abs=0.01)
+
+    lay_close_done = compute_layered_camera_layout(
+        "closeup_react",
+        aspect="9:16",
+        w=1080,
+        h=1920,
+        t_sec=0.60,
+        prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
+    )
+    assert lay_close_done.board_alpha == pytest.approx(0.0, abs=0.01)
+    assert lay_close_done.char_scale == pytest.approx(1.22)
 
     # 2. Kiểm tra focus_board không đẩy chữ lên sát mép y < 110 và closeup_react ẩn bảng lớn
     bg = Image.new("RGB", (540, 960), (250, 247, 240))

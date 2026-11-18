@@ -965,6 +965,18 @@ export interface PuppetStatusResponse {
 }
 export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'float' | 'static';
 export type StickvCameraShot = 'wide_stage' | 'focus_board' | 'closeup_react';
+export type StickvEmotion =
+  | 'auto'
+  | 'neutral'
+  | 'confident'
+  | 'curious'
+  | 'idea'
+  | 'shock'
+  | 'skeptical'
+  | 'serious'
+  | 'sad'
+  | 'happy'
+  | 'excited';
 export type StickvBoardType =
   | 'none'
   | 'bullets'
@@ -978,7 +990,8 @@ export type StickvBoardType =
   | 'counter_grow'
   | 'timeline_era'
   | 'location_map'
-  | 'myth_vs_fact';
+  | 'myth_vs_fact'
+  | 'recap_card';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
@@ -987,6 +1000,7 @@ export interface StickvBeat {
   chapter_title?: string;
   narration: string;
   pose: string;
+  emotion?: StickvEmotion;
   anim_oneshot?: string | null;
   anim_loop?: string;
   interaction?: StickvInteraction;
@@ -998,6 +1012,7 @@ export interface StickvBeat {
   board_type: StickvBoardType;
   board_title: string;
   board_items?: string[];
+  takeaway?: string;
   board_data: Record<string, unknown>;
   visual_data?: Record<string, unknown>;
   media_path: string;
