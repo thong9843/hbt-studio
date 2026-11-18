@@ -20,11 +20,13 @@ from hbt.shared.ffmpeg_utils import (
     FFMPEG_RESOURCE_CLAMP,
     measure_audio_duration,
 )
+from hbt.shared.online_sources.iconify_props import resolve_prop_png
 from hbt.shared.pipeline.watermark import (
     WatermarkSettings,
     build_watermark_overlay_filter,
     render_watermark_png,
 )
+from hbt.stickv.animator import StickmanAnimator
 from hbt.stickv.audio import (
     LEAD_IN_SILENCE_S,
     align_beat_karaoke,
@@ -33,7 +35,8 @@ from hbt.stickv.audio import (
     mix_stickv_audio,
     synth_stickv_beats_audio,
 )
-from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject
+from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
+from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
 from hbt.stickv.stage import render_animated_beat_frame, render_beat_layers
 
 
@@ -48,19 +51,25 @@ def _stream_beat_frames_to_ffmpeg(
     h: int,
     fps: int,
     aspect: str,
+    library_dir: Path,
+    assets_dir: Path,
+    domain: str = "paper_classic",
+    theme: StickvTheme = "cream",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
-    """Stream từng khung hình RGB (lip-sync + chớp mắt + karaoke) vào FFmpeg stdin, 0 PNG rác."""
+    """Stream từng khung hình RGB (backdrop động + animator + prop + karaoke) vào FFmpeg stdin."""
     dur = max(1.0, float(beat.duration_sec or 2.0))
     n_frames = max(1, int(round(dur * fps)))
     rms_env = extract_wav_rms_envelope(wav_path, fps, dur)
     pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
+    lead_in = LEAD_IN_SILENCE_S * pause_scale
+    speech_end = max(lead_in + 0.3, dur - pause_after)
     word_timings = align_beat_karaoke(
         beat.narration,
         wav_path,
         dur,
-        lead_in_s=LEAD_IN_SILENCE_S * pause_scale,
+        lead_in_s=lead_in,
         pause_after_s=pause_after,
     )
 
@@ -87,52 +96,97 @@ def _stream_beat_frames_to_ffmpeg(
         str(out_mp4),
     ]
 
-    with Image.open(bg_png) as raw_bg:
-        bg_img = raw_bg.convert("RGB")
-        char_img: Image.Image | None = None
-        if char_png is not None and char_png.is_file():
-            with Image.open(char_png) as raw_char:
-                char_img = raw_char.convert("RGBA")
+    norm_domain = normalize_domain(domain)
+    backdrop = BackdropRenderer(norm_domain, w, h)
+    char_img: Image.Image | None = None
+    if char_png is not None and char_png.is_file():
+        with Image.open(char_png) as raw_char:
+            char_img = raw_char.convert("RGBA")
 
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        try:
-            assert proc.stdin is not None
-            for f_idx in range(n_frames):
-                if cancel is not None and f_idx % 8 == 0:
-                    cancel.check()
-                t_sec = f_idx / fps
-                mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
+    target_char_h = char_img.height if char_img is not None else int(h * (0.48 if aspect == "9:16" else 0.56))
+    animator = StickmanAnimator(
+        pose=beat.pose,
+        anim_oneshot=getattr(beat, "anim_oneshot", None),
+        anim_loop=getattr(beat, "anim_loop", None),
+        facing=beat.facing,
+        duration_sec=dur,
+        speech_start=lead_in,
+        speech_end=speech_end,
+        fps=fps,
+        rms_env=rms_env,
+        library_dir=library_dir,
+        assets_dir=assets_dir,
+        target_height=target_char_h,
+        char_img_fallback=char_img,
+    )
+
+    prop_img: Image.Image | None = None
+    interaction = getattr(beat, "interaction", "none") or "none"
+    prop_query = (getattr(beat, "prop_query", None) or "").strip()
+    if interaction == "hold_prop" and prop_query:
+        accent = DOMAIN_PALETTES[norm_domain]["accent"]
+        prop_path = resolve_prop_png(prop_query, library_dir, accent_color=accent)
+        if prop_path.is_file():
+            with Image.open(prop_path) as raw_prop:
+                prop_img = raw_prop.convert("RGBA")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert proc.stdin is not None
+        for f_idx in range(n_frames):
+            if cancel is not None and f_idx % 8 == 0:
+                cancel.check()
+            t_sec = f_idx / fps
+            mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
+            if interaction == "versus_split":
+                animator.facing = "left" if t_sec < dur * 0.5 else "right"
+            bg_frame = backdrop.render_frame(t_sec)
+            anim_char, motion = animator.frame_at(f_idx, t_sec)
+            try:
                 frame = render_animated_beat_frame(
-                    bg_img=bg_img,
-                    char_img=char_img,
+                    bg_img=bg_frame,
+                    char_img=anim_char,
                     beat=beat,
                     aspect=aspect,  # type: ignore[arg-type]
                     t_sec=t_sec,
                     mouth_open=mouth,
                     word_timings=word_timings,
+                    prop_img=prop_img,
+                    domain=norm_domain,
+                    theme=theme,
+                    duration_sec=dur,
+                    draw_board=True,
+                    extra_dy=motion.dy if motion.used_fallback else 0.0,
                 )
-                try:
-                    proc.stdin.write(frame.tobytes())
-                finally:
-                    frame.close()
-            proc.stdin.close()
-            _, stderr_b = proc.communicate()
-            if proc.returncode != 0:
-                raise FFmpegError(
-                    f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
-                    f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
-                )
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-            bg_img.close()
-            if char_img is not None:
-                char_img.close()
+            finally:
+                bg_frame.close()
+                if anim_char is not None:
+                    anim_char.close()
+            try:
+                proc.stdin.write(frame.tobytes())
+            finally:
+                frame.close()
+        proc.stdin.close()
+        _, stderr_b = proc.communicate()
+        if proc.returncode != 0:
+            raise FFmpegError(
+                f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
+                f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
+            )
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        backdrop.close()
+        animator.close()
+        if char_img is not None:
+            char_img.close()
+        if prop_img is not None:
+            prop_img.close()
     return out_mp4
 
 
@@ -174,6 +228,8 @@ def _render_single_beat_clip(
     project_dir: Path,
     library_dir: Path,
     assets_dir: Path,
+    domain: str = "paper_classic",
+    theme: StickvTheme = "cream",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
@@ -215,6 +271,10 @@ def _render_single_beat_clip(
         h=h,
         fps=fps,
         aspect=aspect,
+        library_dir=library_dir,
+        assets_dir=assets_dir,
+        domain=domain,
+        theme=theme,
         pause_scale=pause_scale,
         cancel=cancel,
     )
@@ -395,6 +455,8 @@ def render_stickv(
                 project_dir=project_dir,
                 library_dir=library_dir,
                 assets_dir=assets_dir,
+                domain=getattr(project, "domain", "paper_classic"),
+                theme=project.theme,
                 pause_scale=pause_scale,
                 cancel=cancel,
             )
