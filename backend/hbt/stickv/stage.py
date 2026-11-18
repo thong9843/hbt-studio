@@ -32,7 +32,7 @@ FONT_BOLD = FONTS_DIR / "BeVietnamPro-Bold.ttf"
 FONT_MEDIUM = FONTS_DIR / "BeVietnamPro-Medium.ttf"
 
 BOARD_BADGES: dict[str, str] = {
-    "bullets": "SỰ THẬT",
+    "bullets": "PHÂN TÍCH",
     "list": "DANH SÁCH",
     "card": "THÔNG TIN",
     "quote": "TRÍCH DẪN",
@@ -44,13 +44,14 @@ BOARD_BADGES: dict[str, str] = {
     "timeline_era": "NIÊN ĐẠI",
     "location_map": "ĐỊA DANH",
     "myth_vs_fact": "GIẢI MÃ",
-    "none": "ĐIỂM NHẤN",
+    "recap_card": "TÓM TẮT",
+    "none": "PHÂN TÍCH",
 }
 
 CAMERA_PRESETS: dict[str, dict[str, tuple[float, float, float]]] = {
     "wide_stage": {"9:16": (1.0, 0.5, 0.5), "16:9": (1.0, 0.5, 0.5)},
-    "focus_board": {"9:16": (1.15, 0.5, 0.30), "16:9": (1.15, 0.65, 0.44)},
-    "closeup_react": {"9:16": (1.28, 0.5, 0.72), "16:9": (1.28, 0.24, 0.56)},
+    "focus_board": {"9:16": (1.07, 0.5, 0.25), "16:9": (1.08, 0.65, 0.44)},
+    "closeup_react": {"9:16": (1.22, 0.5, 0.72), "16:9": (1.22, 0.24, 0.56)},
 }
 
 _AUTO_ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -303,6 +304,96 @@ def _draw_wrapped_text(
     return cur_y
 
 
+def _highlight_color_for_card(
+    pal: dict[str, tuple[int, int, int, int]],
+) -> tuple[int, int, int, int]:
+    """Chọn màu tô từ khóa **...**: vàng #FACC15 trên nền tối, đỏ #B91C1C trên nền sáng."""
+    card_r, card_g, card_b = pal["card"][:3]
+    luma = 0.299 * card_r + 0.587 * card_g + 0.114 * card_b
+    return (250, 204, 21, 255) if luma < 128 else (185, 28, 28, 255)
+
+
+def _draw_rich_wrapped_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    xy: tuple[int, int],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    highlight_fill: tuple[int, int, int, int],
+    *,
+    max_width_px: int,
+    line_gap: int = 10,
+) -> int:
+    """Vẽ chữ tự xuống dòng hỗ trợ tô màu các cụm `**từ khóa**`."""
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    for m in re.finditer(r"\*\*(.+?)\*\*", (text or "").strip()):
+        if m.start() > pos:
+            for w in text[pos : m.start()].split():
+                tokens.append((w, False))
+        for w in m.group(1).split():
+            tokens.append((w, True))
+        pos = m.end()
+    if pos < len(text or ""):
+        for w in (text or "")[pos:].split():
+            tokens.append((w, False))
+    if not tokens:
+        return xy[1]
+
+    space_bb = draw.textbbox((0, 0), " ", font=font)
+    space_w = max(5, space_bb[2] - space_bb[0])
+    x0, cur_y = xy
+    cur_x = x0
+    line_h = 0
+
+    for idx, (word, is_hl) in enumerate(tokens):
+        bb = draw.textbbox((0, 0), word, font=font)
+        ww = bb[2] - bb[0]
+        wh = bb[3] - bb[1]
+        if idx > 0 and cur_x + ww > x0 + max_width_px:
+            cur_y += max(26, line_h) + line_gap
+            cur_x = x0
+            line_h = 0
+        draw.text((cur_x, cur_y), word, font=font, fill=highlight_fill if is_hl else fill)
+        cur_x += ww + space_w
+        line_h = max(line_h, wh)
+
+    return cur_y + max(26, line_h) + line_gap
+
+
+def _draw_topic_circle_badge(
+    canvas: Image.Image,
+    center_xy: tuple[int, int],
+    size: int,
+    pal: dict[str, tuple[int, int, int, int]],
+    prop_img: Image.Image | None,
+) -> None:
+    """Vẽ huy hiệu tròn chứa Iconify sắc nét (`54×54px`) hoặc biểu tượng vector tương phản cao."""
+    cx, cy = center_xy
+    r = max(24, size // 2)
+    draw = ImageDraw.Draw(canvas)
+    draw.ellipse(
+        (cx - r, cy - r, cx + r, cy + r),
+        fill=pal["pill_bg"],
+        outline=pal["accent"],
+        width=3,
+    )
+    if prop_img is not None:
+        fit = prop_img.copy()
+        target_d = max(30, int(round(size * 0.72)))
+        fit.thumbnail((target_d, target_d), Image.Resampling.LANCZOS)
+        canvas.alpha_composite(fit, (cx - fit.width // 2, cy - fit.height // 2))
+        fit.close()
+        return
+
+    ir = max(12, int(round(r * 0.56)))
+    draw.ellipse((cx - ir, cy - ir, cx + ir, cy + ir), outline=pal["accent"], width=3)
+    draw.polygon(
+        [(cx, cy - ir + 3), (cx + ir // 2, cy + 2), (cx, cy + ir - 3), (cx - ir // 2, cy + 2)],
+        fill=pal["amber"],
+    )
+
+
 def _ease_out_cubic(t: float) -> float:
     u = max(0.0, min(1.0, float(t)))
     return 1.0 - (1.0 - u) ** 3
@@ -340,37 +431,47 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
-    takeaway = str(data.get("takeaway") or "").strip()
+    takeaway = str(getattr(beat, "takeaway", "") or data.get("takeaway") or "").strip()
+    hl_fill = _highlight_color_for_card(pal)
 
     tmp_draw = ImageDraw.Draw(canvas)
-    est_h = 92
+    est_h = 104
     eff_title = beat.board_title or (
         _extract_highlight_keyword(beat.narration) if beat.board_type == "none" else ""
     )
     if eff_title:
-        _, th = _measure_wrapped_height(tmp_draw, eff_title, f_title, max(18, bw // 26), 10)
-        est_h += th + 14
+        _, th = _measure_wrapped_height(tmp_draw, eff_title, f_title, max(16, (bw - 120) // 25), 10)
+        est_h += max(58, th + 16)
 
-    if beat.board_type == "none":
-        est_h += 220
-    elif beat.board_type in ("bullets", "list", "card"):
-        items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:5]
+    if beat.board_type in ("none", "bullets", "list", "card"):
+        items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
+        if not items and beat.board_type == "none":
+            clauses = [
+                c.strip()
+                for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
+                if len(c.strip().split()) >= 3
+            ]
+            items = clauses[:2] or [beat.narration[:70]]
         for it in items:
-            _, ih = _measure_wrapped_height(tmp_draw, it, f_body, max(16, (bw - 140) // 21), 10)
-            est_h += max(50, ih) + 18
+            _, ih = _measure_wrapped_height(
+                tmp_draw, re.sub(r"\*\*", "", it), f_body, max(16, (bw - 130) // 21), 10
+            )
+            est_h += max(56, ih) + 22
+    elif beat.board_type == "recap_card":
+        est_h += 300
     elif beat.board_type in ("big_number", "counter_grow"):
         est_h += 240
     elif beat.board_type == "quote":
         q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
         _, qh = _measure_wrapped_height(tmp_draw, q_txt, f_body, max(18, (bw - 120) // 22), 12)
-        est_h += max(120, qh + 60)
+        est_h += max(140, qh + 64)
     elif beat.board_type == "comparison":
         left_n = len((data.get("left_items") or [])[:4])
         right_n = len((data.get("right_items") or [])[:4])
-        est_h += 76 + max(1, left_n, right_n) * 66
+        est_h += 86 + max(1, left_n, right_n) * 66
     elif beat.board_type == "bar_compare":
         bars = (data.get("values") or data.get("bars") or [])[:4]
-        est_h += max(220, len(bars) * 82 + 40)
+        est_h += max(230, len(bars) * 82 + 44)
     elif beat.board_type == "flow_steps":
         steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
             :4
@@ -380,14 +481,16 @@ def _draw_smart_board_content(
         ev_count = max(2, len((data.get("events") or data.get("items") or [])[:4]))
         est_h += ev_count * 84 + 24
     elif beat.board_type == "location_map":
-        est_h += 250
+        est_h += 260
     elif beat.board_type == "myth_vs_fact":
-        est_h += 270
+        est_h += 280
 
     if takeaway:
-        est_h += 86
+        est_h += 92
 
-    card_h = min(max_y1 - y0, max(280, est_h + 36))
+    # Lấp đầy cân đối ~84% khung bảng tri thức (không để thẻ lọt thỏm hay trống thừa)
+    min_card_h = max(280, int(round((max_y1 - y0) * 0.84)))
+    card_h = min(max_y1 - y0, max(min_card_h, est_h + 36))
     y1 = y0 + card_h
 
     if draw_shell:
@@ -403,8 +506,7 @@ def _draw_smart_board_content(
             width=3,
         )
 
-        # Badge phân loại góc trên trái + chỉ báo Chương
-        badge_txt = BOARD_BADGES.get(beat.board_type, "NỔI BẬT")
+        badge_txt = BOARD_BADGES.get(beat.board_type, "PHÂN TÍCH")
         bb = shell_draw.textbbox((0, 0), badge_txt, font=f_badge)
         badge_w = (bb[2] - bb[0]) + 32
         shell_draw.rounded_rectangle(
@@ -414,7 +516,11 @@ def _draw_smart_board_content(
         )
         shell_draw.text((x0 + 48, y0 + 30), badge_txt, font=f_badge, fill=(255, 255, 255, 255))
 
-        chap_txt = f"CHƯƠNG {beat.chapter}"
+        chap_txt = (
+            f"CHƯƠNG {beat.chapter}"
+            if total_chapters > 1
+            else (beat.chapter_title or "KIẾN THỨC")[:18].upper()
+        )
         cbb = shell_draw.textbbox((0, 0), chap_txt, font=f_badge)
         cw_pill = (cbb[2] - cbb[0]) + 28
         shell_draw.rounded_rectangle(
@@ -427,8 +533,27 @@ def _draw_smart_board_content(
     inner_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0)) if content_alpha < 0.999 else canvas
     try:
         draw = ImageDraw.Draw(inner_layer)
-        cur_y = y0 + 82
-        if eff_title:
+        cur_y = y0 + 84
+
+        # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính
+        if beat.board_type in ("none", "bullets", "list", "card", "recap_card"):
+            icon_sz = 56
+            _draw_topic_circle_badge(inner_layer, (x0 + 62, cur_y + 28), icon_sz, pal, prop_img)
+            title_x = x0 + 106
+            title_max_w = max(200, bw - 140)
+            if eff_title:
+                cur_y = _draw_rich_wrapped_text(
+                    draw,
+                    eff_title,
+                    (title_x, cur_y + 4),
+                    f_title,
+                    pal["text"],
+                    hl_fill,
+                    max_width_px=title_max_w,
+                    line_gap=8,
+                )
+            cur_y = max(cur_y + 12, y0 + 156)
+        elif eff_title:
             cur_y = _draw_wrapped_text(
                 draw,
                 eff_title,
@@ -440,90 +565,80 @@ def _draw_smart_board_content(
             )
             cur_y += 14
 
-        content_bottom = y1 - (94 if takeaway else 28)
+        content_bottom = y1 - (96 if takeaway else 28)
 
-        if beat.board_type == "none":
-            # Thẻ Minh Họa Tự Động (Icon màu Iconify/Vector + câu nhấn + thanh tiến trình chương)
-            icon_box_size = 112
-            ix0, iy0 = x0 + 38, cur_y + 4
-            draw.rounded_rectangle(
-                (ix0, iy0, ix0 + icon_box_size, iy0 + icon_box_size),
-                radius=24,
-                fill=pal["pill_bg"],
-                outline=pal["accent"],
-                width=2,
-            )
-            if prop_img is not None:
-                icon_fit = prop_img.copy()
-                icon_fit.thumbnail(
-                    (icon_box_size - 20, icon_box_size - 20), Image.Resampling.LANCZOS
-                )
-                inner_layer.alpha_composite(
-                    icon_fit,
-                    (
-                        ix0 + (icon_box_size - icon_fit.width) // 2,
-                        iy0 + (icon_box_size - icon_fit.height) // 2,
-                    ),
-                )
-                icon_fit.close()
-            else:
-                # Vẽ huy hiệu la bàn/tia sáng vector rõ nét
-                cx_i, cy_i = ix0 + icon_box_size // 2, iy0 + icon_box_size // 2
-                draw.ellipse(
-                    (cx_i - 28, cy_i - 28, cx_i + 28, cy_i + 28), outline=pal["accent"], width=4
-                )
-                draw.polygon(
-                    [
-                        (cx_i, cy_i - 22),
-                        (cx_i + 12, cy_i + 4),
-                        (cx_i, cy_i + 22),
-                        (cx_i - 12, cy_i + 4),
-                    ],
-                    fill=pal["amber"],
-                )
-            text_x = ix0 + icon_box_size + 26
-            snippet = (beat.narration or "").strip()
-            _draw_wrapped_text(
-                draw,
-                snippet,
-                (text_x, iy0 + 4),
-                f_body,
-                pal["text"],
-                width_chars=max(14, (x1 - text_x - 36) // 20),
-                line_gap=10,
-            )
-            # Thanh tiến trình chương ở đáy thẻ
-            bar_y = max(iy0 + icon_box_size + 22, content_bottom - 26)
-            bar_w = max(80, bw - 76)
-            ratio = max(0.12, min(1.0, float(beat.chapter) / max(1, total_chapters)))
-            draw.rounded_rectangle(
-                (x0 + 38, bar_y, x0 + 38 + bar_w, bar_y + 12),
-                radius=6,
-                fill=pal["pill_bg"],
-            )
-            draw.rounded_rectangle(
-                (x0 + 38, bar_y, x0 + 38 + int(bar_w * ratio), bar_y + 12),
-                radius=6,
-                fill=pal["accent"],
-            )
-
-        elif beat.board_type in ("bullets", "list", "card"):
-            items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:5]
-            for idx, item in enumerate(items, start=1):
-                if cur_y > content_bottom - 48:
+        if beat.board_type in ("none", "bullets", "list", "card"):
+            # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & highlight **từ khóa**
+            items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
+            if not items:
+                clauses = [
+                    c.strip()
+                    for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
+                    if len(c.strip().split()) >= 3
+                ]
+                items = clauses[:2] or [(beat.narration or "Phân tích trọng tâm")[:75]]
+            for idx, item in enumerate(items):
+                if cur_y > content_bottom - 52:
                     break
-                draw.ellipse((x0 + 38, cur_y + 4, x0 + 80, cur_y + 46), fill=pal["amber"])
-                draw.text((x0 + 51, cur_y + 7), str(idx), font=f_sub, fill=(255, 255, 255, 255))
-                cur_y = _draw_wrapped_text(
+                bar_c = pal["accent"] if idx % 2 == 0 else pal["amber"]
+                row_top = cur_y + 4
+                end_y = _draw_rich_wrapped_text(
                     draw,
                     item,
-                    (x0 + 100, cur_y),
+                    (x0 + 58, row_top),
                     f_body,
                     pal["text"],
-                    width_chars=max(16, (bw - 140) // 21),
-                    line_gap=10,
+                    hl_fill,
+                    max_width_px=max(200, bw - 96),
+                    line_gap=8,
                 )
-                cur_y += 14
+                draw.rounded_rectangle(
+                    (x0 + 38, row_top + 2, x0 + 46, max(row_top + 30, end_y - 10)),
+                    radius=4,
+                    fill=bar_c,
+                )
+                cur_y = end_y + 10
+
+        elif beat.board_type == "recap_card":
+            # 3 thẻ ngang đúc kết kiến thức cốt lõi (1 · 2 · 3)
+            recap_items = [
+                str(it)
+                for it in (data.get("items") or data.get("bullets") or [])
+                if str(it).strip()
+            ][:3]
+            if not recap_items:
+                recap_items = [
+                    "Nắm vững cơ chế gốc",
+                    "Loại bỏ lầm tưởng cũ",
+                    "Áp dụng ngay thực tế",
+                ]
+            slot_h = max(72, (content_bottom - cur_y - 24) // max(1, len(recap_items)) - 12)
+            for idx, item in enumerate(recap_items, start=1):
+                if cur_y > content_bottom - 58:
+                    break
+                cy1 = min(content_bottom - 8, cur_y + slot_h)
+                fill_c = pal["takeaway_bg"] if idx % 2 == 1 else pal["pill_bg"]
+                badge_c = pal["accent"] if idx == 1 else pal["amber"]
+                draw.rounded_rectangle(
+                    (x0 + 34, cur_y, x1 - 34, cy1),
+                    radius=18,
+                    fill=fill_c,
+                    outline=badge_c,
+                    width=2,
+                )
+                draw.ellipse((x0 + 48, cur_y + 14, x0 + 92, cur_y + 58), fill=badge_c)
+                draw.text((x0 + 62, cur_y + 20), str(idx), font=f_body, fill=(255, 255, 255, 255))
+                _draw_rich_wrapped_text(
+                    draw,
+                    item,
+                    (x0 + 108, cur_y + 14),
+                    f_body,
+                    pal["text"],
+                    hl_fill,
+                    max_width_px=max(180, bw - 160),
+                    line_gap=6,
+                )
+                cur_y = cy1 + 12
 
         elif beat.board_type == "quote":
             q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
@@ -803,17 +918,17 @@ def _draw_smart_board_content(
             )
 
         if takeaway:
-            ty0 = y1 - 78
+            ty0 = y1 - 80
             draw.rounded_rectangle(
-                (x0 + 28, ty0, x1 - 28, y1 - 20),
+                (x0 + 28, ty0, x1 - 28, y1 - 18),
                 radius=16,
                 fill=pal["takeaway_bg"],
                 outline=pal["amber"],
                 width=2,
             )
             draw.text(
-                (x0 + 46, ty0 + 14),
-                f"Chốt lại: {takeaway[:54]}",
+                (x0 + 46, ty0 + 16),
+                f"CHỐT LẠI: {takeaway[:54]}",
                 font=f_sub,
                 fill=pal["pill_text"],
             )
@@ -855,8 +970,15 @@ def _composite_transitioned_board(
     prev_stage_state: BeatStageState | None = None,
     total_chapters: int = 1,
     has_next_diff_title: bool = True,
+    cam_board_scale: float = 1.0,
+    cam_board_alpha: float = 1.0,
+    clamp_bounds: tuple[int, int, int, int] | None = None,
+    anchor_top_center: tuple[float, float] | None = None,
 ) -> None:
-    """Chuyển tiếp thẻ không hard-cut: slide+scale+fade (0.35s vào / 0.30s ra) hoặc cross-fade."""
+    """Chuyển tiếp thẻ không hard-cut + tách lớp camera kẹp biên an toàn (không cắt chữ)."""
+    if cam_board_alpha <= 0.015:
+        return
+
     cur_title = (beat.board_title or "").strip()
     same_title = (
         prev_stage_state is not None
@@ -864,7 +986,12 @@ def _composite_transitioned_board(
         and cur_title == (getattr(prev_stage_state, "last_board_title", "") or "").strip()
     )
 
-    if same_title:
+    if (
+        same_title
+        and abs(cam_board_scale - 1.0) < 0.004
+        and cam_board_alpha > 0.99
+        and clamp_bounds is None
+    ):
         c_alpha = _ease_out_cubic(min(1.0, t_sec / 0.25)) if t_sec < 0.25 else 1.0
         _draw_smart_board_content(
             frame_rgba,
@@ -881,24 +1008,25 @@ def _composite_transitioned_board(
 
     enter_t = 0.35
     exit_t = 0.30
-    scale = 1.0
+    scale = float(cam_board_scale)
     dy_px = 0.0
-    alpha = 1.0
-    if t_sec < enter_t:
-        u = _ease_out_cubic(t_sec / enter_t)
-        scale = 0.94 + 0.06 * u
-        dy_px = 28.0 * (1.0 - u)
-        alpha = u
-    elif (
-        has_next_diff_title
-        and duration_sec > (enter_t + exit_t)
-        and t_sec > (duration_sec - exit_t)
-    ):
-        u = _ease_in_cubic((t_sec - (duration_sec - exit_t)) / exit_t)
-        dy_px = -18.0 * u
-        alpha = 1.0 - u
+    alpha = float(cam_board_alpha)
+    if not same_title:
+        if t_sec < enter_t:
+            u = _ease_out_cubic(t_sec / enter_t)
+            scale *= 0.94 + 0.06 * u
+            dy_px = 28.0 * (1.0 - u)
+            alpha *= u
+        elif (
+            has_next_diff_title
+            and duration_sec > (enter_t + exit_t)
+            and t_sec > (duration_sec - exit_t)
+        ):
+            u = _ease_in_cubic((t_sec - (duration_sec - exit_t)) / exit_t)
+            dy_px = -18.0 * u
+            alpha *= 1.0 - u
 
-    if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995:
+    if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
         _draw_smart_board_content(
             frame_rgba,
             beat,
@@ -931,6 +1059,14 @@ def _composite_transitioned_board(
             if abs(scale - 1.0) >= 0.004:
                 nw = max(8, int(round(sub.width * scale)))
                 nh = max(8, int(round(sub.height * scale)))
+                if clamp_bounds is not None:
+                    cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+                    max_w = max(8, cb_x1 - cb_x0)
+                    max_h = max(8, cb_y1 - cb_y0)
+                    if nw > max_w or nh > max_h:
+                        fit = min(max_w / nw, max_h / nh)
+                        nw = max(8, int(round(nw * fit)))
+                        nh = max(8, int(round(nh * fit)))
                 scaled = sub.resize((nw, nh), Image.Resampling.BICUBIC)
             else:
                 scaled = sub.copy()
@@ -940,8 +1076,22 @@ def _composite_transitioned_board(
                         lambda p: int(round(p * max(0.0, min(1.0, alpha))))
                     )
                     scaled.putalpha(a_band)
-                dest_x = cx0 + (sub.width - scaled.width) // 2
-                dest_y = cy0 + (sub.height - scaled.height) // 2 + int(round(dy_px))
+                if anchor_top_center is not None:
+                    dest_x = int(round(anchor_top_center[0] - scaled.width * 0.5))
+                    dest_y = int(round(anchor_top_center[1] + dy_px))
+                else:
+                    dest_x = cx0 + (sub.width - scaled.width) // 2
+                    dest_y = cy0 + (sub.height - scaled.height) // 2 + int(round(dy_px))
+
+                # Kẹp cứng biên an toàn cho Bảng tri thức (không bao giờ lọt ngoài khung)
+                if clamp_bounds is not None:
+                    cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+                    dest_x = max(cb_x0, min(cb_x1 - scaled.width, dest_x))
+                    dest_y = max(cb_y0, min(cb_y1 - scaled.height, dest_y))
+                else:
+                    dest_x = max(0, min(frame_rgba.width - scaled.width, dest_x))
+                    dest_y = max(0, min(frame_rgba.height - scaled.height, dest_y))
+
                 frame_rgba.alpha_composite(scaled, (dest_x, dest_y))
             finally:
                 scaled.close()
@@ -958,8 +1108,9 @@ def draw_karaoke_strip(
     *,
     aspect: StickvAspect,
     spoken_segments: list[tuple[float, float, str]] | None = None,
+    camera_shot: str = "wide_stage",
 ) -> None:
-    """Vẽ dải phụ đề Karaoke khóa trong câu đang nói (ổn định nền qua ngắt <=0.22s)."""
+    """Vẽ dải phụ đề Karaoke khóa câu đang nói + né đầu Stickman ở closeup_react."""
     if not word_timings:
         return
 
@@ -972,7 +1123,6 @@ def draw_karaoke_strip(
                 active_seg = (st, et, txt)
                 break
         if active_seg is None:
-            # Kiểm tra khoảng ngắt hơi ngắn (<= 0.22s) giữa 2 câu để giữ ổn định nền mờ
             for idx in range(len(spoken_segments) - 1):
                 g_start = spoken_segments[idx][1]
                 g_end = spoken_segments[idx + 1][0]
@@ -993,7 +1143,15 @@ def draw_karaoke_strip(
 
     w, h = frame.size
     draw = ImageDraw.Draw(frame)
-    base_y = 970 if aspect == "9:16" else int(h * 0.86)
+    shot = (camera_shot or "wide_stage").strip().lower()
+    if aspect == "9:16":
+        if shot == "closeup_react":
+            base_y = int(round(h * (855.0 / 1920.0)))  # vùng 820..990 (cách đầu >= 100px)
+        else:
+            base_y = int(round(h * (935.0 / 1920.0)))  # vùng 895..1065
+    else:
+        base_y = int(round(h * (925.0 / 1080.0)))  # vùng 910..1030
+
     if micro_gap_hold:
         strip_w = min(w - 120, 620 if aspect == "9:16" else 880)
         sx0 = (w - strip_w) // 2
@@ -1062,7 +1220,7 @@ def _ease_in_out(t: float) -> float:
 
 @dataclass(frozen=True)
 class BeatStageState:
-    """Trạng thái cuối beat (vị trí nhân vật, camera, tiêu đề thẻ, chương) để nối mượt."""
+    """Trạng thái cuối beat (nhân vật, camera tách lớp, độ mờ bảng, chương) để nối mượt."""
 
     x: float
     y: float
@@ -1071,9 +1229,25 @@ class BeatStageState:
     camera_zoom: float = 1.0
     camera_pan_x: float = 0.5
     camera_pan_y: float = 0.5
+    board_alpha: float = 1.0
+    camera_shot: str = "wide_stage"
     last_board_title: str = ""
     last_board_type: str = ""
     last_chapter: int = 1
+
+
+@dataclass(frozen=True)
+class LayeredCameraLayout:
+    """Thông số biến đổi tách lớp kẹp biên an toàn cho Bảng tri thức & Stickman."""
+
+    board_box: tuple[int, int, int, int]
+    board_scale: float
+    board_alpha: float
+    clamp_bounds: tuple[int, int, int, int] | None
+    anchor_top_center: tuple[float, float] | None
+    char_scale: float
+    char_center_x: float
+    char_foot_y: float
 
 
 def compute_camera_state(
@@ -1097,25 +1271,189 @@ def compute_camera_state(
     return pz + (tz - pz) * p, px + (tx - px) * p, py + (ty - py) * p
 
 
-def _apply_virtual_camera(
-    frame_rgba: Image.Image,
-    zoom: float,
-    pan_x: float,
-    pan_y: float,
-) -> Image.Image:
-    if zoom <= 1.002:
-        return frame_rgba
-    w, h = frame_rgba.size
-    cw = max(16.0, w / zoom)
-    ch = max(16.0, h / zoom)
-    cx0 = max(0.0, min(float(w) - cw, pan_x * w - cw * 0.5))
-    cy0 = max(0.0, min(float(h) - ch, pan_y * h - ch * 0.5))
-    return frame_rgba.transform(
-        (w, h),
-        Image.Transform.EXTENT,
-        (cx0, cy0, cx0 + cw, cy0 + ch),
-        resample=Image.Resampling.BICUBIC,
+def _target_layered_shot_params(
+    shot_key: str, *, aspect: StickvAspect, w: int, h: int
+) -> tuple[
+    tuple[int, int, int, int],
+    float,
+    float,
+    tuple[int, int, int, int] | None,
+    tuple[float, float] | None,
+    float,
+    float,
+    float,
+]:
+    if aspect == "9:16":
+        sx, sy = w / 1080.0, h / 1920.0
+        base_box = (
+            int(round(56 * sx)),
+            int(round(125 * sy)),
+            w - int(round(56 * sx)),
+            int(round(830 * sy)),
+        )
+        if shot_key == "focus_board":
+            clamp = (
+                int(round(20 * sx)),
+                int(round(115 * sy)),
+                w - int(round(20 * sx)),
+                int(round(865 * sy)),
+            )
+            return (
+                base_box,
+                1.07,
+                1.0,
+                clamp,
+                (w * 0.5, 118.0 * sy),
+                0.82,
+                0.36 * w,
+                0.91 * h,
+            )
+        if shot_key == "closeup_react":
+            return base_box, 1.0, 0.0, None, None, 1.22, 0.50 * w, 0.93 * h
+        return (
+            base_box,
+            1.0,
+            1.0,
+            (
+                int(round(20 * sx)),
+                int(round(115 * sy)),
+                w - int(round(20 * sx)),
+                int(round(865 * sy)),
+            ),
+            None,
+            1.0,
+            0.50 * w,
+            0.90 * h,
+        )
+
+    # 16:9 YouTube Khám phá dài (1920x1080)
+    sx, sy = w / 1920.0, h / 1080.0
+    base_box = (
+        int(round(680 * sx)),
+        int(round(115 * sy)),
+        int(round(1840 * sx)),
+        int(round(860 * sy)),
     )
+    if shot_key == "focus_board":
+        clamp = (
+            int(round(650 * sx)),
+            int(round(95 * sy)),
+            int(round(1860 * sx)),
+            int(round(900 * sy)),
+        )
+        return (
+            base_box,
+            1.08,
+            1.0,
+            clamp,
+            (float((base_box[0] + base_box[2]) * 0.5), 105.0 * sy),
+            0.88,
+            0.16 * w,
+            0.91 * h,
+        )
+    if shot_key == "closeup_react":
+        return (
+            base_box,
+            0.94,
+            0.35,
+            (
+                int(round(650 * sx)),
+                int(round(95 * sy)),
+                int(round(1860 * sx)),
+                int(round(900 * sy)),
+            ),
+            None,
+            1.22,
+            0.24 * w,
+            0.93 * h,
+        )
+    return base_box, 1.0, 1.0, None, None, 1.0, 0.21 * w, 0.91 * h
+
+
+def compute_layered_camera_layout(
+    camera_shot: StickvCameraShot | str,
+    *,
+    aspect: StickvAspect,
+    w: int,
+    h: int,
+    t_sec: float,
+    prev_stage_state: BeatStageState | None = None,
+    transition_dur: float = 0.55,
+) -> LayeredCameraLayout:
+    """Tính tách lớp camera kẹp biên an toàn (mờ bảng mượt 0.30s ở closeup_react)."""
+    shot_key = (camera_shot or "wide_stage").strip().lower()
+    box, t_bscale, t_balpha, clamp, anchor, t_cscale, t_cx, t_fy = _target_layered_shot_params(
+        shot_key, aspect=aspect, w=w, h=h
+    )
+    if prev_stage_state is None or transition_dur <= 0:
+        return LayeredCameraLayout(
+            board_box=box,
+            board_scale=t_bscale,
+            board_alpha=t_balpha,
+            clamp_bounds=clamp,
+            anchor_top_center=anchor,
+            char_scale=t_cscale,
+            char_center_x=t_cx,
+            char_foot_y=t_fy,
+        )
+
+    prev_shot = (getattr(prev_stage_state, "camera_shot", "wide_stage") or "wide_stage").lower()
+    _, p_bscale, _, _, _, p_cscale, p_cx, p_fy = _target_layered_shot_params(
+        prev_shot, aspect=aspect, w=w, h=h
+    )
+    p_balpha = float(getattr(prev_stage_state, "board_alpha", 1.0))
+
+    u = _ease_in_out(min(1.0, t_sec / transition_dur))
+    # Riêng độ mờ bảng khi closeup_react (9:16) hạ về 0.0 mượt trong 0.30s đầu
+    alpha_u = (
+        _ease_out_cubic(min(1.0, t_sec / 0.30))
+        if (shot_key == "closeup_react" and aspect == "9:16")
+        else u
+    )
+    return LayeredCameraLayout(
+        board_box=box,
+        board_scale=p_bscale + (t_bscale - p_bscale) * u,
+        board_alpha=p_balpha + (t_balpha - p_balpha) * alpha_u,
+        clamp_bounds=clamp,
+        anchor_top_center=anchor,
+        char_scale=p_cscale + (t_cscale - p_cscale) * u,
+        char_center_x=p_cx + (t_cx - p_cx) * u,
+        char_foot_y=p_fy + (t_fy - p_fy) * u,
+    )
+
+
+def _draw_compact_topic_pill(
+    frame_rgba: Image.Image,
+    *,
+    chapter: int,
+    chapter_title: str,
+    board_title: str,
+    pal: dict[str, tuple[int, int, int, int]],
+    aspect: StickvAspect,
+) -> None:
+    """Giữ lại thanh pill tên Chương/Chủ đề gọn ở y=125px khi closeup_react ẩn bảng lớn."""
+    w, h = frame_rgba.size
+    sy = h / (1920.0 if aspect == "9:16" else 1080.0)
+    raw_lbl = (chapter_title or board_title or f"Chương {chapter}").strip()
+    label = (
+        f"CHƯƠNG {chapter}: {raw_lbl[:34]}"
+        if raw_lbl and f"{chapter}" not in raw_lbl
+        else raw_lbl[:38]
+    )
+    f_pill = _load_font(FONT_EXTRABOLD, 24)
+    d = ImageDraw.Draw(frame_rgba)
+    bb = d.textbbox((0, 0), label, font=f_pill)
+    pill_w = min(w - 80, (bb[2] - bb[0]) + 44)
+    x0 = (w - pill_w) // 2
+    y0 = int(round(125 * sy))
+    d.rounded_rectangle(
+        (x0, y0, x0 + pill_w, y0 + 48),
+        radius=999,
+        fill=pal["pill_bg"],
+        outline=pal["accent"],
+        width=2,
+    )
+    d.text((x0 + 22, y0 + 10), label, font=f_pill, fill=pal["pill_text"])
 
 
 def _draw_chapter_banner(
@@ -1177,36 +1515,34 @@ def compute_beat_character_target(
     *,
     interaction: str,
     aspect: StickvAspect,
+    camera_shot: str = "wide_stage",
 ) -> tuple[float, float, float]:
-    """Tính tọa độ `(target_x, target_y, target_scale)` chuẩn theo interaction và aspect."""
-    scale = 1.0
-    if interaction == "point_chart":
-        target_h = int(h * (0.38 if aspect == "9:16" else 0.56))
+    """Tính tọa độ `(target_x, target_y, target_scale)` chuẩn theo interaction, aspect và camera."""
+    cam = compute_layered_camera_layout(camera_shot, aspect=aspect, w=w, h=h, t_sec=0.0)
+    scale = cam.char_scale
+    if aspect == "16:9":
+        base_target_h = int(h * 0.64)
+        if char_h > 0:
+            scale = (base_target_h / char_h) * cam.char_scale
+    elif interaction == "point_chart":
+        target_h = int(h * 0.38)
         if char_h > target_h and char_h > 0:
-            scale = target_h / char_h
+            scale = (target_h / char_h) * cam.char_scale
         eff_w = char_w * scale
         eff_h = char_h * scale
-        bx = w * (0.24 if aspect == "9:16" else 0.22) - eff_w * 0.5
-        by = (h - eff_h - 220) if aspect == "9:16" else (h * 0.84 - eff_h)
+        bx = w * 0.24 - eff_w * 0.5
+        by = cam.char_foot_y - eff_h
         return bx, by, scale
-    if interaction == "hold_prop":
-        center_x = w * (0.34 if aspect == "9:16" else 0.24)
-        bx = center_x - char_w * 0.5
-        by = (h - char_h - 220) if aspect == "9:16" else (h * 0.84 - char_h)
-        return bx, by, scale
-    if interaction == "versus_split":
-        bx = (w - char_w) * 0.5
-        by = (h - char_h - 220) if aspect == "9:16" else (h * 0.84 - char_h)
-        return bx, by, scale
-    if aspect == "9:16":
-        return (w - char_w) * 0.5, float(h - char_h - 220), scale
-    # 16:9 YouTube Khám phá dài: Stickman đứng bên trái (x: 22%, đáy y: 84%, cao 64%)
-    target_h = int(h * 0.64)
-    if char_h > 0 and abs(char_h - target_h) > 16:
-        scale = target_h / char_h
+
     eff_w = char_w * scale
     eff_h = char_h * scale
-    return w * 0.22 - eff_w * 0.5, h * 0.84 - eff_h, scale
+    if interaction == "hold_prop" and aspect == "9:16":
+        cx = w * (0.34 if cam.char_scale <= 1.0 else 0.50)
+    elif interaction == "versus_split":
+        cx = w * 0.5
+    else:
+        cx = cam.char_center_x
+    return cx - eff_w * 0.5, cam.char_foot_y - eff_h, scale
 
 
 def _draw_versus_split_layer(
@@ -1306,28 +1642,33 @@ def render_animated_beat_frame(
     has_next_diff_title: bool = True,
     show_chapter_banner: bool = False,
 ) -> Image.Image:
-    """Tổng hợp 1 frame động: backdrop + thẻ không hard-cut + puppet + camera ảo + karaoke."""
+    """Tổng hợp 1 frame động: backdrop + camera tách lớp + thẻ 2 tầng + puppet + karaoke."""
     frame = bg_img.copy()
     w, h = frame.size
     pal = resolve_stage_palette(domain, theme)
     interaction = getattr(beat, "interaction", "none") or "none"
+    camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
+    cam_layout = compute_layered_camera_layout(
+        camera_shot,
+        aspect=aspect,
+        w=w,
+        h=h,
+        t_sec=t_sec,
+        prev_stage_state=prev_stage_state,
+    )
 
     frame_rgba = frame.convert("RGBA")
     try:
-        if interaction == "versus_split":
+        if interaction == "versus_split" and cam_layout.board_alpha > 0.05:
             _draw_versus_split_layer(frame_rgba, beat, pal, aspect=aspect)
 
         if draw_board:
             anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
             prog = min(1.0, max(0.0, t_sec / anim_dur))
-            if aspect == "9:16":
-                board_box = (60, int(h * 0.09), w - 60, int(h * 0.51))
-            else:
-                board_box = (int(w * 0.38), int(h * 0.12), int(w * 0.94), int(h * 0.76))
             _composite_transitioned_board(
                 frame_rgba,
                 beat,
-                board_box,
+                cam_layout.board_box,
                 pal,
                 t_sec=t_sec,
                 duration_sec=duration_sec,
@@ -1336,9 +1677,23 @@ def render_animated_beat_frame(
                 prev_stage_state=prev_stage_state,
                 total_chapters=total_chapters,
                 has_next_diff_title=has_next_diff_title,
+                cam_board_scale=cam_layout.board_scale,
+                cam_board_alpha=cam_layout.board_alpha,
+                clamp_bounds=cam_layout.clamp_bounds,
+                anchor_top_center=cam_layout.anchor_top_center,
             )
 
-        if interaction == "hold_prop" and prop_img is not None:
+        if aspect == "9:16" and camera_shot == "closeup_react" and cam_layout.board_alpha < 0.85:
+            _draw_compact_topic_pill(
+                frame_rgba,
+                chapter=beat.chapter,
+                chapter_title=getattr(beat, "chapter_title", ""),
+                board_title=beat.board_title,
+                pal=pal,
+                aspect=aspect,
+            )
+
+        if interaction == "hold_prop" and prop_img is not None and cam_layout.board_alpha > 0.1:
             _composite_prop_overlay(frame_rgba, prop_img, aspect=aspect, t_sec=t_sec, pal=pal)
 
         if char_img is not None:
@@ -1349,6 +1704,7 @@ def render_animated_beat_frame(
                 char_img.height,
                 interaction=interaction,
                 aspect=aspect,
+                camera_shot=camera_shot,
             )
             if prev_stage_state is not None and tween_dur > 0 and t_sec < tween_dur:
                 p = _ease_in_out(t_sec / tween_dur)
@@ -1392,35 +1748,24 @@ def render_animated_beat_frame(
             if eff_char is not char_img:
                 eff_char.close()
 
-        # Áp dụng góc máy ảo (virtual camera) lên sân khấu trước khi vẽ Karaoke & Banner
-        cam_zoom, cam_px, cam_py = compute_camera_state(
-            getattr(beat, "camera_shot", "wide_stage"),
-            aspect=aspect,
-            t_sec=t_sec,
-            prev_stage_state=prev_stage_state,
-        )
-        cam_frame = _apply_virtual_camera(frame_rgba, cam_zoom, cam_px, cam_py)
-        try:
-            if show_chapter_banner and getattr(beat, "chapter_title", ""):
-                _draw_chapter_banner(
-                    cam_frame,
-                    chapter=beat.chapter,
-                    chapter_title=beat.chapter_title,
-                    t_sec=t_sec,
-                    pal=pal,
-                    aspect=aspect,
-                )
-            draw_karaoke_strip(
-                cam_frame,
-                word_timings,
-                t_sec,
+        if show_chapter_banner and getattr(beat, "chapter_title", ""):
+            _draw_chapter_banner(
+                frame_rgba,
+                chapter=beat.chapter,
+                chapter_title=beat.chapter_title,
+                t_sec=t_sec,
+                pal=pal,
                 aspect=aspect,
-                spoken_segments=spoken_segments,
             )
-            return cam_frame.convert("RGB")
-        finally:
-            if cam_frame is not frame_rgba:
-                cam_frame.close()
+        draw_karaoke_strip(
+            frame_rgba,
+            word_timings,
+            t_sec,
+            aspect=aspect,
+            spoken_segments=spoken_segments,
+            camera_shot=camera_shot,
+        )
+        return frame_rgba.convert("RGB")
     finally:
         frame_rgba.close()
         frame.close()

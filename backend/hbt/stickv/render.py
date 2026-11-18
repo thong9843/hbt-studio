@@ -38,10 +38,12 @@ from hbt.stickv.audio import (
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
+from hbt.stickv.puppet import normalize_stickv_pose
 from hbt.stickv.stage import (
     BeatStageState,
     compute_beat_character_target,
     compute_camera_state,
+    compute_layered_camera_layout,
     infer_auto_prop_query,
     render_animated_beat_frame,
     render_beat_layers,
@@ -530,8 +532,18 @@ def _stream_chunk_frames_to_ffmpeg(
                 spoken_segments=spoken_segs,
             )
 
+            camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
+            eff_pose = beat.pose
+            if camera_shot == "focus_board" and normalize_stickv_pose(beat.pose) in (
+                "idle_breathe",
+                "present_board",
+            ):
+                eff_pose = "point_board_high"
+
             animator = StickmanAnimator(
-                pose=beat.pose,
+                pose=eff_pose,
+                emotion=getattr(beat, "emotion", "auto"),
+                narration=beat.narration,
                 anim_oneshot=getattr(beat, "anim_oneshot", None),
                 anim_loop=getattr(beat, "anim_loop", None),
                 facing=beat.facing,
@@ -554,9 +566,16 @@ def _stream_chunk_frames_to_ffmpeg(
 
             prop_img: Image.Image | None = None
             raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
-            if not raw_prop_q and beat.board_type == "none":
+            wants_card_icon = beat.board_type in (
+                "none",
+                "bullets",
+                "list",
+                "card",
+                "recap_card",
+            )
+            if not raw_prop_q and wants_card_icon:
                 raw_prop_q = infer_auto_prop_query(beat.narration)
-            if (interaction == "hold_prop" or beat.board_type == "none") and raw_prop_q:
+            if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
                 try:
                     prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
                     if prop_path.is_file():
@@ -621,10 +640,19 @@ def _stream_chunk_frames_to_ffmpeg(
                     finally:
                         frame.close()
 
+                end_t_b = max(0.0, (n_frames_beat - 1) / max(1, fps))
                 last_cam = compute_camera_state(
-                    getattr(beat, "camera_shot", "wide_stage"),
+                    camera_shot,
                     aspect=aspect,  # type: ignore[arg-type]
-                    t_sec=max(0.0, (n_frames_beat - 1) / max(1, fps)),
+                    t_sec=end_t_b,
+                    prev_stage_state=cur_state,
+                )
+                end_layout = compute_layered_camera_layout(
+                    camera_shot,
+                    aspect=aspect,  # type: ignore[arg-type]
+                    w=w,
+                    h=h,
+                    t_sec=end_t_b,
                     prev_stage_state=cur_state,
                 )
                 cw, ch_h = last_char_size or (
@@ -639,6 +667,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     ch_h,
                     interaction=interaction,
                     aspect=aspect,  # type: ignore[arg-type]
+                    camera_shot=camera_shot,
                 )
                 cur_state = BeatStageState(
                     x=tx,
@@ -648,6 +677,8 @@ def _stream_chunk_frames_to_ffmpeg(
                     camera_zoom=last_cam[0],
                     camera_pan_x=last_cam[1],
                     camera_pan_y=last_cam[2],
+                    board_alpha=end_layout.board_alpha,
+                    camera_shot=camera_shot,
                     last_board_title=(beat.board_title or "").strip(),
                     last_board_type=beat.board_type,
                     last_chapter=beat.chapter,

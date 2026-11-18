@@ -555,14 +555,98 @@ def test_v8_stage_100pct_coverage_3_history_cards_virtual_cam_and_16x9() -> None
         prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
     )
     assert z0 == pytest.approx(1.0)
-    assert 1.10 < z_mid < 1.20
-    assert z1 == pytest.approx(1.28)
+    assert 1.05 < z_mid < 1.18
+    assert z1 == pytest.approx(1.22)
     assert px1 < 0.30
 
     tx_169, _, _ = compute_beat_character_target(
         1920, 1080, 300, 690, interaction="none", aspect="16:9"
     )
     assert tx_169 < 420.0  # Stickman đứng bên trái màn hình 16:9
+
+
+def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
+    from hbt.stickv.stage import (
+        BeatStageState,
+        compute_layered_camera_layout,
+    )
+
+    # 1. Kiểm tra kẹp biên tách lớp trên 1080x1920
+    lay_focus = compute_layered_camera_layout(
+        "focus_board", aspect="9:16", w=1080, h=1920, t_sec=0.6
+    )
+    assert lay_focus.board_scale == pytest.approx(1.07)
+    assert lay_focus.clamp_bounds is not None
+    assert lay_focus.clamp_bounds[1] >= 115
+    assert lay_focus.clamp_bounds[3] <= 865
+    assert lay_focus.char_scale == pytest.approx(0.82)
+
+    lay_close = compute_layered_camera_layout(
+        "closeup_react",
+        aspect="9:16",
+        w=1080,
+        h=1920,
+        t_sec=0.35,
+        prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
+    )
+    assert lay_close.board_alpha == pytest.approx(0.0, abs=0.01)
+    assert lay_close.char_scale == pytest.approx(1.22)
+
+    # 2. Kiểm tra focus_board không đẩy chữ lên sát mép y < 110 và closeup_react ẩn bảng lớn
+    bg = Image.new("RGB", (540, 960), (250, 247, 240))
+    char = Image.new("RGBA", (140, 280), (11, 14, 20, 255))
+    try:
+        b_recap = StickvBeat(
+            id="b_recap",
+            chapter=3,
+            chapter_title="Tổng kết",
+            narration="Hãy bình luận bên dưới!",
+            pose="wave_hello",
+            emotion="happy",
+            camera_shot="focus_board",
+            board_type="recap_card",
+            board_title="TÓM TẮT **3 Ý CỐT LÕI**",
+            board_data={
+                "items": [
+                    "**Amygdala** phản ứng 12ms",
+                    "**Thói quen** cần 21 ngày",
+                    "**Ngủ đủ 8h** tăng trí nhớ",
+                ],
+                "takeaway": "Hiểu cơ chế để làm chủ hành vi",
+            },
+        )
+        f_focus = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_recap,
+            aspect="9:16",
+            t_sec=0.6,
+            mouth_open=0.3,
+            word_timings=[("Hãy", 0.0, 0.4), ("bình", 0.4, 0.8)],
+            draw_board=True,
+        )
+        # Vùng mép trên y < 55 vẫn giữ nguyên màu nền (không cắt bảng)
+        assert f_focus.getpixel((270, 30)) == (250, 247, 240)
+        f_focus.close()
+
+        b_close = b_recap.model_copy(update={"camera_shot": "closeup_react"})
+        f_close = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_close,
+            aspect="9:16",
+            t_sec=0.4,
+            mouth_open=0.3,
+            word_timings=[],
+            draw_board=True,
+            prev_stage_state=BeatStageState(x=200.0, y=500.0, board_alpha=1.0),
+        )
+        # Vùng giữa bảng cũ y = 260 ở closeup_react trở về màu nền vì bảng lớn đã ẩn mượt
+        assert f_close.getpixel((270, 260)) == (250, 247, 240)
+        f_close.close()
+    finally:
+        bg.close()
+        char.close()
 
 
 def test_mp4_compat_flags_and_legacy_shake_motion_normalized() -> None:
