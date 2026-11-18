@@ -46,14 +46,19 @@ def test_iconify_search_and_cache_download(tmp_path: Path) -> None:
         assert (tmp_path / "props" / "brain.png").is_file()
 
     # Lần 2 đọc từ cache cục bộ không gọi mạng
-    with patch("hbt.shared.online_sources.iconify_props.httpx.Client", side_effect=AssertionError("should use cache")):
+    with patch(
+        "hbt.shared.online_sources.iconify_props.httpx.Client",
+        side_effect=AssertionError("should use cache"),
+    ):
         p2 = resolve_prop_png("brain", tmp_path)
         assert p2 == p
 
 
 def test_iconify_offline_fallback_badge(tmp_path: Path) -> None:
     clear_iconify_cache()
-    with patch("hbt.shared.online_sources.iconify_props.httpx.Client", side_effect=OSError("offline")):
+    with patch(
+        "hbt.shared.online_sources.iconify_props.httpx.Client", side_effect=OSError("offline")
+    ):
         p = resolve_prop_png("black hole", tmp_path)
         assert p.is_file()
         assert p.name == "black-hole_fallback.png"

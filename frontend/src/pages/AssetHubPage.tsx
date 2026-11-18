@@ -831,81 +831,81 @@ export function AssetHubPage() {
                         VIDEO{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
                       </span>
                     )}
-                  {isVideo ? (
-                    isHovered || !item.thumb_url ? (
-                      <video
-                        src={item.file_url || item.url}
-                        muted
-                        loop
-                        autoPlay={isHovered}
-                        playsInline
-                        preload="metadata"
-                        className="h-full w-full object-cover"
-                      />
+                    {isVideo ? (
+                      isHovered || !item.thumb_url ? (
+                        <video
+                          src={item.file_url || item.url}
+                          muted
+                          loop
+                          autoPlay={isHovered}
+                          playsInline
+                          preload="metadata"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={item.thumb_url}
+                          alt={item.name}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      )
                     ) : (
                       <img
-                        src={item.thumb_url}
+                        src={
+                          activeTab === 'stickman'
+                            ? `${item.url}?t=${encodeURIComponent(item.modified_at)}`
+                            : item.url
+                        }
                         alt={item.name}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain p-2"
                         loading="lazy"
                       />
-                    )
-                  ) : (
-                    <img
-                      src={
-                        activeTab === 'stickman'
-                          ? `${item.url}?t=${encodeURIComponent(item.modified_at)}`
-                          : item.url
-                      }
-                      alt={item.name}
-                      className="h-full w-full object-contain p-2"
-                      loading="lazy"
-                    />
-                  )}
-                </button>
-                <div className="flex items-center justify-between gap-2 p-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-tiny font-bold text-text">{item.name}</p>
-                    <p className="num text-[11px] text-muted">{formatBytes(item.size)}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {activeTab === 'stickman' && !isVideo && (
-                      <>
-                        <Button
-                          tone="soft"
-                          size="sm"
-                          busy={removeStickmanBgMut.isPending}
-                          onClick={() => removeStickmanBgMut.mutate(item)}
-                          aria-label={`Tách nền trắng ${item.name}`}
-                          title="Tách nền trắng bên ngoài"
-                        >
-                          Tách nền trắng
-                        </Button>
-                        {item.source === 'assets' && item.name !== 'default.png' && (
+                    )}
+                  </button>
+                  <div className="flex items-center justify-between gap-2 p-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-tiny font-bold text-text">{item.name}</p>
+                      <p className="num text-[11px] text-muted">{formatBytes(item.size)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {activeTab === 'stickman' && !isVideo && (
+                        <>
                           <Button
                             tone="soft"
                             size="sm"
-                            busy={setDefaultStickmanMut.isPending}
-                            onClick={() => setDefaultStickmanMut.mutate(item)}
-                            aria-label={`Đặt mặc định ${item.name}`}
-                            title="Dùng làm nhân vật mặc định cho StickV"
+                            busy={removeStickmanBgMut.isPending}
+                            onClick={() => removeStickmanBgMut.mutate(item)}
+                            aria-label={`Tách nền trắng ${item.name}`}
+                            title="Tách nền trắng bên ngoài"
                           >
-                            Mặc định
+                            Tách nền trắng
                           </Button>
-                        )}
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeAsset.mutate(item)}
-                      aria-label={`Xóa ${item.name}`}
-                      className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
-                    >
-                      <TrashIcon size={14} />
-                    </button>
+                          {item.source === 'assets' && item.name !== 'default.png' && (
+                            <Button
+                              tone="soft"
+                              size="sm"
+                              busy={setDefaultStickmanMut.isPending}
+                              onClick={() => setDefaultStickmanMut.mutate(item)}
+                              aria-label={`Đặt mặc định ${item.name}`}
+                              title="Dùng làm nhân vật mặc định cho StickV"
+                            >
+                              Mặc định
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeAsset.mutate(item)}
+                        aria-label={`Xóa ${item.name}`}
+                        className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </Card>
+                </Card>
               );
             })}
           </ul>

@@ -38,16 +38,20 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
         "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
         "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài.\n"
-        "Phân loại domain phù hợp: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
+        "Phân loại domain phù hợp: "
+        "paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
         f"pose: {pose_str}. "
         "anim_oneshot: null|shock_jump|idea_bulb|point_board|facepalm|nod_agree|celebrate. "
         "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
-        "interaction: none|hold_prop|point_chart|versus_split (nếu hold_prop thêm prop_query 1-2 từ tiếng Anh). "
+        "interaction: none|hold_prop|point_chart|versus_split "
+        "(nếu hold_prop thêm prop_query 1-2 từ tiếng Anh). "
         "motion: bounce|slide_left|slide_right|shake|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
-        "board_type: bullets|big_number|comparison|flow_steps|bar_compare|counter_grow|card|quote|list|none.\n"
-        "board_data/visual_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
+        "board_type: bullets|big_number|comparison|flow_steps|"
+        "bar_compare|counter_grow|card|quote|list|none.\n"
+        "board_data/visual_data: bullets={items:[...],takeaway}, "
+        "big_number={value,label,sub,takeaway}, "
         "bar_compare={values:[{label,value}],takeaway}, counter_grow={target,unit,label}, "
         "comparison={left_title,left_items,right_title,right_items,takeaway}, "
         "flow_steps={steps:[...],takeaway}."
@@ -69,7 +73,8 @@ def build_director_prompt(
         f"{sys_p}\n\n"
         f"Chủ đề: {idea}\n"
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
-        'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science","music_mood":"curious_science",'
+        'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science",'
+        '"music_mood":"curious_science",'
         '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"explain","anim_oneshot":"idea_bulb",'
         '"anim_loop":"talk_explain","interaction":"hold_prop","prop_query":"brain","facing":"right",'
         '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets","board_title":"Tiêu đề bảng",'
@@ -160,7 +165,11 @@ def sanitize_beats(
         raw_vdata = item.get("visual_data")
         vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}
         raw_items = item.get("board_items")
-        bitems = [str(x).strip()[:90] for x in raw_items if str(x).strip()][:5] if isinstance(raw_items, list) else []
+        bitems = (
+            [str(x).strip()[:90] for x in raw_items if str(x).strip()][:5]
+            if isinstance(raw_items, list)
+            else []
+        )
         facing = "left" if str(item.get("facing") or "right").strip().lower() == "left" else "right"
         idx = start_idx + len(out)
         out.append(
@@ -316,12 +325,16 @@ def generate_stickv_script(
         beats = sanitize_beats(
             parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
         )
-        return title, beats, {
-            "chapters": 1,
-            "domain": normalize_domain(parsed.get("domain")),
-            "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
-            **timings,
-        }
+        return (
+            title,
+            beats,
+            {
+                "chapters": 1,
+                "domain": normalize_domain(parsed.get("domain")),
+                "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
+                **timings,
+            },
+        )
 
     num_chapters = max(2, min(6, math.ceil(target_minutes / 2.5)))
     outline_prompt = (

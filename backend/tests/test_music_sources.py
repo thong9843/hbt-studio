@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-
 from hbt.api.app import create_app
+
 from hbt.api.asset_hub import _ONLINE_SEARCH_CACHE
 from hbt.config import Settings
 from hbt.shared.online_sources.freesound_audio import import_freesound_audio, search_freesound_audio
@@ -142,7 +142,9 @@ def test_unified_online_search_jamendo_and_ttl_cache(
             "kind": "music",
         }
     ]
-    with patch("hbt.api.asset_hub.search_jamendo_music", new=AsyncMock(return_value=fake_items)) as m_j:
+    with patch(
+        "hbt.api.asset_hub.search_jamendo_music", new=AsyncMock(return_value=fake_items)
+    ) as m_j:
         r1 = client.get("/api/asset-hub/online/search?category=music&source=jamendo&q=science")
         assert r1.status_code == 200
         assert r1.json()["cached"] is False

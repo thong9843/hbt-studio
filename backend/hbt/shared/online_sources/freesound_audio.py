@@ -75,9 +75,7 @@ async def search_freesound_audio(
             if not isinstance(r, dict):
                 continue
             previews = r.get("previews") if isinstance(r.get("previews"), dict) else {}
-            hq = str(
-                previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or ""
-            ).strip()
+            hq = str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "").strip()
             if not hq:
                 continue
             raw_tags = r.get("tags") if isinstance(r.get("tags"), list) else []
@@ -115,7 +113,7 @@ async def import_freesound_audio(
     library_dir: Path,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
-    """Tải preview-hq-mp3 từ Freesound về `library/music/` (-14 LUFS) hoặc `library/sfx/` (-16 LUFS)."""
+    """Tải preview-hq-mp3 từ Freesound về `library/music/` (-14 LUFS) hoặc `library/sfx/`."""
     sub = "music" if kind == "music" else "sfx"
     target_dir = Path(library_dir) / sub
     target_dir.mkdir(parents=True, exist_ok=True)

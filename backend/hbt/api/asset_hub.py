@@ -291,7 +291,13 @@ def _collect_dir_items(
                 anim_group = "loop"
             if _file_kind(p) == "video":
                 dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
-                meta = {**(meta or {}), "duration_sec": dur, "width": vw, "height": vh, "anim_group": anim_group}
+                meta = {
+                    **(meta or {}),
+                    "duration_sec": dur,
+                    "width": vw,
+                    "height": vh,
+                    "anim_group": anim_group,
+                }
                 if thumb_file is not None:
                     thumb_url = (
                         f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
@@ -815,9 +821,15 @@ async def upload_asset_hub_item(
     content = await file.read()
     target.write_bytes(content)
 
-    meta_override: dict[str, Any] | None = {"anim_group": clean_group} if category == "stickman" else None
+    meta_override: dict[str, Any] | None = (
+        {"anim_group": clean_group} if category == "stickman" else None
+    )
     thumb_url: str | None = None
-    if category == "stickman" and not is_anim_slot and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+    if (
+        category == "stickman"
+        and not is_anim_slot
+        and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    ):
         png_target = target.with_suffix(".png")
         final_path, _ = remove_white_background(target, png_target)
         if final_path != target and target.is_file() and final_path.is_file():
@@ -827,7 +839,9 @@ async def upload_asset_hub_item(
         dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, base_lib / "thumbs")
         meta_override = {"duration_sec": dur, "width": vw, "height": vh, "anim_group": clean_group}
         if thumb_file is not None:
-            thumb_url = f"/api/asset-hub/file/{quote(dest_source)}/stickman/thumbs/{quote(thumb_file.name)}"
+            thumb_url = (
+                f"/api/asset-hub/file/{quote(dest_source)}/stickman/thumbs/{quote(thumb_file.name)}"
+            )
 
     relpath = f"animations/{clean_group}/{target.name}" if is_anim_slot else None
     return {
@@ -909,19 +923,23 @@ def delete_asset_hub_item(
     if source in (None, "assets"):
         candidates.append(folder)
         if category == "stickman":
-            candidates.extend([
-                folder / "animations" / "oneshot",
-                folder / "animations" / "loop",
-            ])
+            candidates.extend(
+                [
+                    folder / "animations" / "oneshot",
+                    folder / "animations" / "loop",
+                ]
+            )
     if source in (None, "library"):
         lib_cat = state.settings.library_dir / category
         candidates.append(lib_cat)
         if category == "stickman":
-            candidates.extend([
-                lib_cat / "poses",
-                lib_cat / "animations" / "oneshot",
-                lib_cat / "animations" / "loop",
-            ])
+            candidates.extend(
+                [
+                    lib_cat / "poses",
+                    lib_cat / "animations" / "oneshot",
+                    lib_cat / "animations" / "loop",
+                ]
+            )
 
     for base in candidates:
         base_res = base.resolve()

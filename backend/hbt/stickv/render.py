@@ -103,7 +103,9 @@ def _stream_beat_frames_to_ffmpeg(
         with Image.open(char_png) as raw_char:
             char_img = raw_char.convert("RGBA")
 
-    target_char_h = char_img.height if char_img is not None else int(h * (0.48 if aspect == "9:16" else 0.56))
+    target_char_h = (
+        char_img.height if char_img is not None else int(h * (0.48 if aspect == "9:16" else 0.56))
+    )
     animator = StickmanAnimator(
         pose=beat.pose,
         anim_oneshot=getattr(beat, "anim_oneshot", None),

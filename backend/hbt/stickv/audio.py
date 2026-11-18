@@ -318,6 +318,7 @@ def auto_resolve_mood_bgm(
     if not cid:
         return []
     try:
+
         async def _fetch() -> list[Path]:
             hits = await search_jamendo_music(mood=music_mood, client_id=cid, limit=5)
             if not hits:
@@ -353,7 +354,7 @@ def mix_stickv_audio(
     music_mood: str = "",
     workspace_dir: Path | None = None,
 ) -> Path:
-    """Ghép giọng đọc theo neo thời gian + SFX (-16 LUFS) + nhạc nền (-27 LUFS) + master -14 LUFS."""
+    """Ghép giọng đọc + SFX (-16 LUFS) + nhạc nền (-27 LUFS) + master -14 LUFS."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     total_dur = round(sum(d for _, d in beat_wavs), 3)
     if total_dur <= 0:

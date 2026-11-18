@@ -66,7 +66,9 @@ def test_stage_interactions_hold_prop_point_chart_versus_split() -> None:
             narration="So sánh tốc độ",
             board_type="bullets",
             board_title="Tốc độ",
-            board_data={"values": [{"label": "Ánh sáng", "value": 300}, {"label": "Âm thanh", "value": 1}]},
+            board_data={
+                "values": [{"label": "Ánh sáng", "value": 300}, {"label": "Âm thanh", "value": 1}]
+            },
         )
         object.__setattr__(b_chart, "interaction", "point_chart")
         object.__setattr__(b_chart, "board_type", "bar_compare")

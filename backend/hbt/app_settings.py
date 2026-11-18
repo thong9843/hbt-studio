@@ -47,9 +47,7 @@ class AppSettings(BaseModel):
 
 
 def resolve_online_api_key(
-    env_name: Literal[
-        "PIXABAY_API_KEY", "GIPHY_API_KEY", "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"
-    ],
+    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY", "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"],
     workspace_dir: Path | None = None,
 ) -> str:
     """Đọc API key từ .env trước, sau đó fallback sang workspace/settings/app.json."""

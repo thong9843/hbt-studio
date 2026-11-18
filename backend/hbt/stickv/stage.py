@@ -44,6 +44,7 @@ def resolve_stage_palette(
         return THEME_PALETTES["dark"]
     return DOMAIN_PALETTES.get(norm, THEME_PALETTES[theme])
 
+
 THEME_PALETTES: dict[StickvTheme, dict[str, tuple[int, int, int, int]]] = {
     "cream": {
         "bg": (250, 247, 240, 255),
@@ -300,7 +301,9 @@ def _draw_smart_board(
         bars = (data.get("values") or data.get("bars") or [])[:4]
         est_h += max(220, len(bars) * 82 + 40)
     elif beat.board_type == "flow_steps":
-        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][:4]
+        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
+            :4
+        ]
         est_h += len(steps) * 96
 
     if takeaway:
@@ -484,7 +487,9 @@ def _draw_smart_board(
             )
 
     elif beat.board_type == "flow_steps":
-        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][:4]
+        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
+            :4
+        ]
         active_count = max(1, int(math.ceil(prog * max(1, len(steps)))))
         for idx, step in enumerate(steps, start=1):
             if cur_y > content_bottom - 60:
@@ -600,12 +605,26 @@ def _draw_versus_split_layer(
     top_y = 140 if aspect == "9:16" else 90
     bot_y = int(h * 0.56) if aspect == "9:16" else int(h * 0.72)
     mid_x = w // 2
-    draw.rounded_rectangle((36, top_y, mid_x - 16, bot_y), radius=28, fill=(217, 35, 46, 36), outline=(217, 35, 46, 170), width=3)
-    draw.rounded_rectangle((mid_x + 16, top_y, w - 36, bot_y), radius=28, fill=(37, 99, 235, 36), outline=(37, 99, 235, 170), width=3)
+    draw.rounded_rectangle(
+        (36, top_y, mid_x - 16, bot_y),
+        radius=28,
+        fill=(217, 35, 46, 36),
+        outline=(217, 35, 46, 170),
+        width=3,
+    )
+    draw.rounded_rectangle(
+        (mid_x + 16, top_y, w - 36, bot_y),
+        radius=28,
+        fill=(37, 99, 235, 36),
+        outline=(37, 99, 235, 170),
+        width=3,
+    )
 
     f_lbl = _load_font(FONT_EXTRABOLD, 40 if aspect == "9:16" else 36)
     _draw_wrapped_text(draw, left_lbl, (64, top_y + 32), f_lbl, pal["text"], width_chars=14)
-    _draw_wrapped_text(draw, right_lbl, (mid_x + 44, top_y + 32), f_lbl, pal["text"], width_chars=14)
+    _draw_wrapped_text(
+        draw, right_lbl, (mid_x + 44, top_y + 32), f_lbl, pal["text"], width_chars=14
+    )
 
     # Huy hiệu VS ở giữa
     draw.ellipse((mid_x - 36, top_y + 18, mid_x + 36, top_y + 90), fill=pal["accent"])

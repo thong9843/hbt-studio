@@ -938,11 +938,7 @@ export interface UnifiedRenderItem {
 export type StickvAspect = '9:16' | '16:9';
 export type StickvTheme = 'cream' | 'dark';
 export type StickvDomain =
-  | 'paper_classic'
-  | 'physics_science'
-  | 'history_geo'
-  | 'psychology_story'
-  | 'cosmos_mystery';
+  'paper_classic' | 'physics_science' | 'history_geo' | 'psychology_story' | 'cosmos_mystery';
 export type StickvInteraction = 'none' | 'hold_prop' | 'point_chart' | 'versus_split';
 export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
 export type StickvBoardType =

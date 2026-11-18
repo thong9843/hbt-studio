@@ -286,9 +286,7 @@ class StickmanAnimator:
         self.rms_env = rms_env
         self.target_height = max(64, int(target_height))
 
-        oneshot_src = resolve_animation_source(
-            anim_oneshot, "oneshot", library_dir, assets_dir
-        )
+        oneshot_src = resolve_animation_source(anim_oneshot, "oneshot", library_dir, assets_dir)
         loop_src = resolve_animation_source(anim_loop, "loop", library_dir, assets_dir)
         idle_src = resolve_animation_source("idle_breathe", "loop", library_dir, assets_dir)
 
@@ -322,12 +320,12 @@ class StickmanAnimator:
                     rgba = raw.convert("RGBA")
                     scale = self.target_height / max(1, rgba.height)
                     nw = max(32, int(round(rgba.width * scale)))
-                    self.fallback_img = rgba.resize((nw, self.target_height), Image.Resampling.LANCZOS)
+                    self.fallback_img = rgba.resize(
+                        (nw, self.target_height), Image.Resampling.LANCZOS
+                    )
                     self._owns_fallback = True
 
-    def frame_at(
-        self, frame_idx: int, t_sec: float
-    ) -> tuple[Image.Image | None, AnimatorMotion]:
+    def frame_at(self, frame_idx: int, t_sec: float) -> tuple[Image.Image | None, AnimatorMotion]:
         rms = self.rms_env[frame_idx] if 0 <= frame_idx < len(self.rms_env) else 0.0
         rms_norm = max(0.0, min(1.0, rms))
         is_speaking = (self.speech_start <= t_sec <= self.speech_end) and rms_norm > 0.08

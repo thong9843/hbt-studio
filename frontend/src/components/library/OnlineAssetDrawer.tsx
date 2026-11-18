@@ -85,10 +85,7 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
       if (activeCategory === 'music' || activeCategory === 'sfx') {
         const mapped = (res.items ?? []).map((raw) => {
           const src = String(res.source ?? raw.source ?? 'pixabay') as
-            | 'tuna'
-            | 'pixabay'
-            | 'jamendo'
-            | 'freesound';
+            'tuna' | 'pixabay' | 'jamendo' | 'freesound';
           return {
             id: String(raw.id ?? ''),
             title: String(raw.title ?? 'Âm thanh'),

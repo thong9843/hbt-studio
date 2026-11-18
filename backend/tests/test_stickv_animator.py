@@ -1,13 +1,13 @@
-"""Unit test cho StickmanAnimator (.webm alpha / PNG sequence / RMS PNG fallback) & slot /library."""
+"""Unit test cho StickmanAnimator (.webm alpha / PNG sequence / RMS fallback) & /library."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from hbt.api.app import create_app
 from PIL import Image
 
-from hbt.api.app import create_app
 from hbt.config import Settings
 from hbt.stickv.animator import StickmanAnimator, list_available_animations
 
@@ -28,11 +28,20 @@ def test_animator_three_phases_with_png_sequences(tmp_path: Path) -> None:
 
     # Tạo chuỗi PNG cho oneshot (đỏ), loop (xanh dương) và idle_breathe (xanh lá)
     for i in range(6):
-        _make_png(lib / "stickman" / "animations" / "oneshot" / "shock_jump" / f"{i:03d}.png", (220, 30, 30, 255))
+        _make_png(
+            lib / "stickman" / "animations" / "oneshot" / "shock_jump" / f"{i:03d}.png",
+            (220, 30, 30, 255),
+        )
     for i in range(4):
-        _make_png(lib / "stickman" / "animations" / "loop" / "talk_explain" / f"{i:03d}.png", (30, 90, 220, 255))
+        _make_png(
+            lib / "stickman" / "animations" / "loop" / "talk_explain" / f"{i:03d}.png",
+            (30, 90, 220, 255),
+        )
     for i in range(4):
-        _make_png(lib / "stickman" / "animations" / "loop" / "idle_breathe" / f"{i:03d}.png", (30, 180, 90, 255))
+        _make_png(
+            lib / "stickman" / "animations" / "loop" / "idle_breathe" / f"{i:03d}.png",
+            (30, 180, 90, 255),
+        )
 
     listed = list_available_animations(lib, assets)
     assert "shock_jump" in listed["oneshot"]
@@ -136,7 +145,9 @@ def test_asset_hub_upload_stickman_animation_slots(tmp_path: Path) -> None:
     item1 = res1.json()["item"]
     assert item1["anim_group"] == "oneshot"
     assert item1["source"] == "library"
-    assert (settings.library_dir / "stickman" / "animations" / "oneshot" / "shock_jump.webm").is_file()
+    assert (
+        settings.library_dir / "stickman" / "animations" / "oneshot" / "shock_jump.webm"
+    ).is_file()
 
     res2 = client.post(
         "/api/asset-hub/stickman",
@@ -145,7 +156,9 @@ def test_asset_hub_upload_stickman_animation_slots(tmp_path: Path) -> None:
     )
     assert res2.status_code == 201
     assert res2.json()["item"]["anim_group"] == "loop"
-    assert (settings.library_dir / "stickman" / "animations" / "loop" / "talk_explain.webm").is_file()
+    assert (
+        settings.library_dir / "stickman" / "animations" / "loop" / "talk_explain.webm"
+    ).is_file()
 
     listed = client.get("/api/asset-hub/stickman").json()["items"]
     groups = {it["name"]: it["anim_group"] for it in listed}
