@@ -17,6 +17,7 @@ StickvDomain = Literal[
     "cosmos_mystery",
 ]
 StickvInteraction = Literal["none", "hold_prop", "point_chart", "versus_split"]
+StickvAnimationMode = Literal["auto", "static"]
 StickvMotion = Literal["bounce", "slide_left", "slide_right", "shake", "float", "static"]
 StickvBoardType = Literal[
     "none",
@@ -88,6 +89,7 @@ class StickvProject(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     topic: str = Field(default="science", max_length=40)
     domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     fps: int = Field(default=30, ge=15, le=60)

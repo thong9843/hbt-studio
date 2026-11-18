@@ -55,6 +55,7 @@ def _stream_beat_frames_to_ffmpeg(
     assets_dir: Path,
     domain: str = "paper_classic",
     theme: StickvTheme = "cream",
+    animation_mode: str = "auto",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
@@ -106,6 +107,7 @@ def _stream_beat_frames_to_ffmpeg(
     target_char_h = (
         char_img.height if char_img is not None else int(h * (0.48 if aspect == "9:16" else 0.56))
     )
+    interaction = getattr(beat, "interaction", "none") or "none"
     animator = StickmanAnimator(
         pose=beat.pose,
         anim_oneshot=getattr(beat, "anim_oneshot", None),
@@ -120,10 +122,13 @@ def _stream_beat_frames_to_ffmpeg(
         assets_dir=assets_dir,
         target_height=target_char_h,
         char_img_fallback=char_img,
+        interaction=interaction,
+        beat_id=beat.id,
+        animation_mode=animation_mode,
+        wav_path=wav_path,
     )
 
     prop_img: Image.Image | None = None
-    interaction = getattr(beat, "interaction", "none") or "none"
     prop_query = (getattr(beat, "prop_query", None) or "").strip()
     if interaction == "hold_prop" and prop_query:
         accent = DOMAIN_PALETTES[norm_domain]["accent"]
@@ -156,7 +161,7 @@ def _stream_beat_frames_to_ffmpeg(
                     beat=beat,
                     aspect=aspect,  # type: ignore[arg-type]
                     t_sec=t_sec,
-                    mouth_open=mouth,
+                    mouth_open=0.0 if motion.phase == "puppet" else mouth,
                     word_timings=word_timings,
                     prop_img=prop_img,
                     domain=norm_domain,
@@ -232,6 +237,7 @@ def _render_single_beat_clip(
     assets_dir: Path,
     domain: str = "paper_classic",
     theme: StickvTheme = "cream",
+    animation_mode: str = "auto",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
 ) -> Path:
@@ -277,6 +283,7 @@ def _render_single_beat_clip(
         assets_dir=assets_dir,
         domain=domain,
         theme=theme,
+        animation_mode=animation_mode,
         pause_scale=pause_scale,
         cancel=cancel,
     )
@@ -461,6 +468,7 @@ def render_stickv(
                 assets_dir=assets_dir,
                 domain=getattr(project, "domain", "paper_classic"),
                 theme=project.theme,
+                animation_mode=getattr(project, "animation_mode", "auto"),
                 pause_scale=pause_scale,
                 cancel=cancel,
             )

@@ -13,6 +13,7 @@ from PIL import Image
 
 from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
+from hbt.stickv.puppet import PuppetRig, compute_smoothed_rms, is_puppet_ready
 from hbt.stickv.stage import resolve_pose_png
 
 ANIM_VIDEO_EXTS = {".webm", ".mov"}
@@ -278,6 +279,10 @@ class StickmanAnimator:
         assets_dir: Path,
         target_height: int,
         char_img_fallback: Image.Image | None = None,
+        interaction: str = "none",
+        beat_id: str = "b001",
+        animation_mode: str = "auto",
+        wav_path: Path | None = None,
     ) -> None:
         self.facing = facing
         self.duration_sec = max(0.5, float(duration_sec))
@@ -286,20 +291,54 @@ class StickmanAnimator:
         self.fps = max(15, int(fps))
         self.rms_env = rms_env
         self.target_height = max(64, int(target_height))
+        self.animation_mode = (animation_mode or "auto").strip().lower()
 
-        oneshot_src = resolve_animation_source(anim_oneshot, "oneshot", library_dir, assets_dir)
-        loop_src = resolve_animation_source(anim_loop, "loop", library_dir, assets_dir)
-        idle_src = resolve_animation_source("idle_breathe", "loop", library_dir, assets_dir)
+        # Mức 1: 2D Procedural Puppet (khi đủ bộ linh kiện & animation_mode != "static")
+        self.puppet_rig: PuppetRig | None = None
+        if self.animation_mode != "static" and is_puppet_ready(library_dir, assets_dir):
+            try:
+                puppet_env = (
+                    compute_smoothed_rms(wav_path, self.fps, self.duration_sec)
+                    if wav_path is not None and wav_path.is_file()
+                    else rms_env
+                )
+                self.puppet_rig = PuppetRig(
+                    library_dir=library_dir,
+                    assets_dir=assets_dir,
+                    target_height=self.target_height,
+                    pose=pose,
+                    anim_oneshot=anim_oneshot,
+                    anim_loop=anim_loop or "talk_explain",
+                    interaction=interaction,
+                    facing=facing,
+                    beat_id=beat_id,
+                    fps=self.fps,
+                    speech_start=self.speech_start,
+                    speech_end=self.speech_end,
+                    rms_env=puppet_env,
+                )
+            except Exception:
+                self.puppet_rig = None
 
-        self.oneshot_frames = load_animation_frames(
-            oneshot_src, fps=self.fps, target_height=self.target_height
-        )
-        self.loop_frames = load_animation_frames(
-            loop_src, fps=self.fps, target_height=self.target_height
-        )
-        self.idle_frames = load_animation_frames(
-            idle_src, fps=self.fps, target_height=self.target_height
-        )
+        # Mức 2: Clip .webm/.mov alpha hoặc chuỗi PNG (khi chưa có Puppet)
+        if self.puppet_rig is None and self.animation_mode != "static":
+            oneshot_src = resolve_animation_source(anim_oneshot, "oneshot", library_dir, assets_dir)
+            loop_src = resolve_animation_source(anim_loop, "loop", library_dir, assets_dir)
+            idle_src = resolve_animation_source("idle_breathe", "loop", library_dir, assets_dir)
+
+            self.oneshot_frames = load_animation_frames(
+                oneshot_src, fps=self.fps, target_height=self.target_height
+            )
+            self.loop_frames = load_animation_frames(
+                loop_src, fps=self.fps, target_height=self.target_height
+            )
+            self.idle_frames = load_animation_frames(
+                idle_src, fps=self.fps, target_height=self.target_height
+            )
+        else:
+            self.oneshot_frames = []
+            self.loop_frames = []
+            self.idle_frames = []
 
         self.oneshot_dur = (
             min(len(self.oneshot_frames) / self.fps, max(0.6, self.speech_end))
@@ -327,6 +366,11 @@ class StickmanAnimator:
                     self._owns_fallback = True
 
     def frame_at(self, frame_idx: int, t_sec: float) -> tuple[Image.Image | None, AnimatorMotion]:
+        if self.puppet_rig is not None:
+            self.puppet_rig.facing = self.facing
+            img = self.puppet_rig.render_frame(frame_idx, t_sec)
+            return img, AnimatorMotion(phase="puppet", used_fallback=False)
+
         rms = self.rms_env[frame_idx] if 0 <= frame_idx < len(self.rms_env) else 0.0
         rms_norm = max(0.0, min(1.0, rms))
         is_speaking = (self.speech_start <= t_sec <= self.speech_end) and rms_norm > 0.08
@@ -389,6 +433,9 @@ class StickmanAnimator:
         )
 
     def close(self) -> None:
+        if self.puppet_rig is not None:
+            self.puppet_rig.close()
+            self.puppet_rig = None
         for group in (self.oneshot_frames, self.loop_frames, self.idle_frames):
             for im in group:
                 im.close()
