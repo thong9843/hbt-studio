@@ -135,7 +135,8 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
     await user.click(screen.getByRole('button', { name: /Tìm & Tải Online/i }));
     expect(await screen.findByText('Vine Boom')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Voicemod Tuna' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Pixabay' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Freesound SFX' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pixabay SFX' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
 
     // Chuyển sang tab Nhân vật Stickman và kiểm tra nút Tách nền trắng
