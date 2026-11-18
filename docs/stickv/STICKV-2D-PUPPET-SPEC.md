@@ -10,6 +10,7 @@
 Hệ thống đọc các tệp ảnh PNG RGBA trong suốt (đã qua `remove_white_background` và tự động crop sát viền non-transparent `getbbox()` + padding 4px) tại thư mục `assets/stickman/puppet/`:
 
 ### 1.1 Danh sách 7 linh kiện chuẩn & Linh kiện tách khớp tự động
+
 1. **`base_character.png` (Bắt buộc để bật chế độ Puppet):**
    - Nhân vật HBT đứng thẳng đối diện, dáng A-Pose đối xứng (hai tay mở nhẹ ~30–35° tách khỏi thân), **đầu tròn trắng trơn không vẽ sẵn mắt hay miệng**.
 2. **Tự động tách 4 bộ phận cơ thể từ `base_character.png` (`auto_segment_puppet`):**
@@ -34,6 +35,7 @@ Hệ thống đọc các tệp ảnh PNG RGBA trong suốt (đã qua `remove_whi
 Mọi tọa độ gắn kết đều tính theo **tỷ lệ chuẩn hóa `[0.0, 1.0]` trên bounding box** của từng bộ phận (lưu cấu hình tại `assets/stickman/puppet/rig_config.json` để có thể tinh chỉnh nếu cần, mặc định tự tính chuẩn xác):
 
 ### 2.1 Cây phân cấp biến đổi (Transform Hierarchy)
+
 ```text
 [1] ROOT (Bàn chân / Mặt đất — y_anchor = 1.0)
  └─ [2] BODY_TORSO (Nhún nhẹ scale_y, nghiêng thân tối đa ±2.5°)
@@ -43,9 +45,11 @@ Mọi tọa độ gắn kết đều tính theo **tỷ lệ chuẩn hóa `[0.0, 
          ├─ [6] EYES_LAYER  (Gắn cố định trong hệ tọa độ cục bộ của Head, tự liếc & chớp)
          └─ [7] MOUTH_LAYER (Gắn cố định trong hệ tọa độ cục bộ của Head, co giãn theo RMS)
 ```
+
 > **Quy tắc sống còn:** Vì `EYES_LAYER` và `MOUTH_LAYER` là **con trực tiếp của `HEAD_BLANK`**, khi đầu gật (`head_angle`) hoặc nghiêng sang bên, mắt và miệng **xoay cùng một khối với đầu** — tuyệt đối không bao giờ xảy ra lỗi đầu nghiêng một đường mà mắt/miệng trôi lệch ra ngoài khuôn mặt.
 
 ### 2.2 Tọa độ Neo & Tâm Xoay Chuẩn (Default Anatomical Anchors)
+
 - **Tâm xoay Cổ (`neck_pivot`):** Nằm tại `(0.50, 0.94)` của `head_blank.png`, gắn vào điểm `(0.50, 0.04)` trên cổ áo của `body_torso.png`.
 - **Tâm xoay Vai Trái (`shoulder_left_pivot`):** Nằm tại `(0.88, 0.12)` (góc trên bên phải của ảnh `arm_left.png`), gắn vào vai trái thân tại `(0.36, 0.14)` của `body_torso.png`.
 - **Tâm xoay Vai Phải (`shoulder_right_pivot`):** Nằm tại `(0.12, 0.12)` (góc trên bên trái của ảnh `arm_right.png`), gắn vào vai phải thân tại `(0.64, 0.14)` của `body_torso.png`.
@@ -58,18 +62,20 @@ Mọi tọa độ gắn kết đều tính theo **tỷ lệ chuẩn hóa `[0.0, 
 ## 3. ĐỒNG BỘ KHẨU HÌNH (LIP-SYNC) & BIỂU CẢM MẮT TỰ ĐỘNG
 
 ### 3.1 Đường bao Âm lượng RMS Làm mượt (`compute_smoothed_rms`)
+
 - Đọc tệp WAV giọng đọc **VieNeu-TTS** của beat hiện tại ở tần số lấy mẫu gốc, chia thành các cửa sổ khớp từng khung hình video (`fps = 30`).
 - Tính giá trị `rms[i]` cho từng frame `i`, chuẩn hóa về `[0.0, 1.0]` theo phân vị thứ 92 (`P92`) của chính beat đó.
 - **Lọc thông thấp (Exponential Moving Average — EMA):**
   `env[i] = 0.55 * rms_norm[i] + 0.45 * env[i - 1]`
-  *(Giúp miệng đóng mở uyển chuyển như người thật đang phát âm, loại bỏ hiện tượng miệng rung giật liên hồi 30 lần/giây).*
+  _(Giúp miệng đóng mở uyển chuyển như người thật đang phát âm, loại bỏ hiện tượng miệng rung giật liên hồi 30 lần/giây)._
 - **Quy tắc đóng/mở miệng từng frame:**
   - Nếu `env[i] < 0.14` (đang trong khoảng nghỉ `0.10s` đầu câu, `0.28s` giữa hai câu, hoặc `0.45s` cuối beat): hiển thị **`mouth_closed.png`** (`scale_x = 1.0, scale_y = 1.0`).
   - Nếu `env[i] >= 0.14`: hiển thị **`mouth_open.png`**, co giãn theo biên độ nói:
     - `mouth_scale_y = 0.55 + 0.75 * min(1.0, (env[i] - 0.14) / 0.70)` (dao động tự nhiên từ `0.55` đến `1.30`).
-    - `mouth_scale_x = 1.04 - 0.12 * (mouth_scale_y - 0.55)` (nguyên tắc *Squash & Stretch* trong hoạt hình: miệng mở càng cao theo chiều dọc thì hơi thu gọn chiều ngang).
+    - `mouth_scale_x = 1.04 - 0.12 * (mouth_scale_y - 0.55)` (nguyên tắc _Squash & Stretch_ trong hoạt hình: miệng mở càng cao theo chiều dọc thì hơi thu gọn chiều ngang).
 
 ### 3.2 Tự động Chọn Mắt, Chớp Mắt & Hướng Nhìn (`EyeController`)
+
 - **Ánh xạ biểu cảm từ `pose` / `anim_oneshot` của beat:**
   - `shock`, `scared`, `shock_jump`, `confused` $\rightarrow$ `eyes_shock.png`
   - `happy`, `laugh`, `winner`, `love`, `idea`, `idea_bulb`, `celebrate`, `rich` $\rightarrow$ `eyes_happy.png`
@@ -88,19 +94,20 @@ Mọi tọa độ gắn kết đều tính theo **tỷ lệ chuẩn hóa `[0.0, 
 
 Mỗi hành động được định nghĩa bằng công thức điều hòa mượt (tính theo giây `t` và đường bao giọng nói `env[i]`), bảo đảm **góc xoay nằm trong giới hạn giải phẫu người thật**:
 
-| Tên hành động (`anim_oneshot` / `anim_loop`) | Đầu (`head_angle`) | Tay trái (`arm_L`) | Tay phải (`arm_R`) | Thân (`dy`, `scale_y`) |
-| :--- | :--- | :--- | :--- | :--- |
-| **`idle_breathe`** *(Lúc im lặng / chờ)* | Nghiêng êm `2.0° * sin(1.8t)` | Đung đưa nhẹ `4° * sin(1.8t)` | Đung đưa ngược pha `-4° * sin(1.8t)` | Thở phồng `scale_y = 1.0 + 0.012 * sin(2.2t)`, chân cố định `dy = 0` |
-| **`talk_explain`** *(Mặc định lúc nói)* | Gật theo giọng nói `-5.5° * env[i] + 2° * sin(3t)` | Hạ tự nhiên `8° + 5° * sin(2.5t)` | Vung giải thích `-28° + 14° * sin(4.2t) * env[i]` | Nhún nhẹ `-3px * env[i]` |
-| **`point_board`** *(Chỉ bảng / biểu đồ)* | Nghiêng nhìn bảng `-6°` + gật nhẹ theo `env[i]` | Hạ tự nhiên `10°` | Giơ cao chỉ bảng `-52° + 6° * sin(5t)` | Nghiêng thân `2°` về phía bảng |
-| **`hold_prop`** *(Cầm / triệu hồi icon)* | Nhìn về phía icon `5°` | Hạ tự nhiên `10°` | Đưa tay đỡ icon `-42° + 4° * sin(3t)` | Nhún nhẹ `-2px * env[i]` |
-| **`talk_excited` / `celebrate`** | Gật mạnh `-7° * env[i]` | Vung cao `-45° + 18° * sin(6t)` | Vung cao `45° - 18° * sin(6t)` | Nhún nhịp `dy = -8px * abs(sin(5t))` |
-| **`think_loop`** *(Suy nghĩ / phân tích)* | Nghiêng đầu suy tư `9° + 1.5° * sin(1.5t)` | Khoanh ngang `-18°` | Đưa tay lên cằm `-62° + 3° * sin(2t)` | Thở chậm `1.5 Hz` |
-| **`shock_jump`** *(One-shot `0.55s` đầu câu)* | Ngửa nhẹ `-8°` + rung ngang `±4px` | Dang rộng `-48°` (giảm dần theo damping) | Dang rộng `48°` (giảm dần theo damping) | Bật nhảy parabol `dy = -26px * sin(π * t / 0.45)` trong `0.45s` đầu rồi tiếp đất êm |
-| **`nod_agree`** *(One-shot gật đầu đồng ý)* | Gật 2 nhịp rõ ràng `-12° * sin(2π * t / 0.6)` | Đung đưa nhẹ `5°` | Đung đưa nhẹ `-5°` | Nhún nhẹ khớp nhịp gật |
-| **`shake_head`** *(One-shot lắc đầu phủ nhận)* | Dịch ngang `dx = 7px * sin(3π * t / 0.7)` | Hạ nhẹ `6°` | Hạ nhẹ `-6°` | Giữ vững thân |
+| Tên hành động (`anim_oneshot` / `anim_loop`)   | Đầu (`head_angle`)                                 | Tay trái (`arm_L`)                       | Tay phải (`arm_R`)                                | Thân (`dy`, `scale_y`)                                                              |
+| :--------------------------------------------- | :------------------------------------------------- | :--------------------------------------- | :------------------------------------------------ | :---------------------------------------------------------------------------------- |
+| **`idle_breathe`** _(Lúc im lặng / chờ)_       | Nghiêng êm `2.0° * sin(1.8t)`                      | Đung đưa nhẹ `4° * sin(1.8t)`            | Đung đưa ngược pha `-4° * sin(1.8t)`              | Thở phồng `scale_y = 1.0 + 0.012 * sin(2.2t)`, chân cố định `dy = 0`                |
+| **`talk_explain`** _(Mặc định lúc nói)_        | Gật theo giọng nói `-5.5° * env[i] + 2° * sin(3t)` | Hạ tự nhiên `8° + 5° * sin(2.5t)`        | Vung giải thích `-28° + 14° * sin(4.2t) * env[i]` | Nhún nhẹ `-3px * env[i]`                                                            |
+| **`point_board`** _(Chỉ bảng / biểu đồ)_       | Nghiêng nhìn bảng `-6°` + gật nhẹ theo `env[i]`    | Hạ tự nhiên `10°`                        | Giơ cao chỉ bảng `-52° + 6° * sin(5t)`            | Nghiêng thân `2°` về phía bảng                                                      |
+| **`hold_prop`** _(Cầm / triệu hồi icon)_       | Nhìn về phía icon `5°`                             | Hạ tự nhiên `10°`                        | Đưa tay đỡ icon `-42° + 4° * sin(3t)`             | Nhún nhẹ `-2px * env[i]`                                                            |
+| **`talk_excited` / `celebrate`**               | Gật mạnh `-7° * env[i]`                            | Vung cao `-45° + 18° * sin(6t)`          | Vung cao `45° - 18° * sin(6t)`                    | Nhún nhịp `dy = -8px * abs(sin(5t))`                                                |
+| **`think_loop`** _(Suy nghĩ / phân tích)_      | Nghiêng đầu suy tư `9° + 1.5° * sin(1.5t)`         | Khoanh ngang `-18°`                      | Đưa tay lên cằm `-62° + 3° * sin(2t)`             | Thở chậm `1.5 Hz`                                                                   |
+| **`shock_jump`** _(One-shot `0.55s` đầu câu)_  | Ngửa nhẹ `-8°` + rung ngang `±4px`                 | Dang rộng `-48°` (giảm dần theo damping) | Dang rộng `48°` (giảm dần theo damping)           | Bật nhảy parabol `dy = -26px * sin(π * t / 0.45)` trong `0.45s` đầu rồi tiếp đất êm |
+| **`nod_agree`** _(One-shot gật đầu đồng ý)_    | Gật 2 nhịp rõ ràng `-12° * sin(2π * t / 0.6)`      | Đung đưa nhẹ `5°`                        | Đung đưa nhẹ `-5°`                                | Nhún nhẹ khớp nhịp gật                                                              |
+| **`shake_head`** _(One-shot lắc đầu phủ nhận)_ | Dịch ngang `dx = 7px * sin(3π * t / 0.7)`          | Hạ nhẹ `6°`                              | Hạ nhẹ `-6°`                                      | Giữ vững thân                                                                       |
 
 ### 4.1 Chuyển tiếp mượt giữa `oneshot` $\rightarrow$ `loop` $\rightarrow$ `idle` (Cross-Fade Pose Blending)
+
 - Khi kết thúc pha `anim_oneshot` (ví dụ tại `t = 0.65s`) để chuyển sang `anim_loop`, không nhảy cóc góc xoay ngay lập tức mà **nội suy tuyến tính mượt (Lerp) trong `0.15s` (5 frames)**:
   `angle_final = (1 - alpha) * angle_oneshot + alpha * angle_loop` (`alpha: 0 -> 1`).
 - Nhờ vậy mọi chuyển động nối tiếp nhau đều có quán tính tự nhiên như phim hoạt hình vẽ tay.
@@ -114,7 +121,7 @@ Mỗi hành động được định nghĩa bằng công thức điều hòa mư
    - **Mức 2 (Clip 3D/2D `.webm` Alpha):** Nếu chưa có bộ `puppet/`, kiểm tra `animations/oneshot/` và `animations/loop/` lấy clip `.webm`/`.mov` trong suốt.
    - **Mức 3 (Bộ 27+ ảnh PNG biểu cảm tĩnh):** Nếu cả hai chưa có, dùng ảnh PNG tương ứng trong `assets/stickman/` kèm chuyển động nhún RMS + lật hướng.
 2. **Tích hợp trên `StickvPage.tsx` & `AssetHubPage.tsx`:**
-   - Trong `/library` $\rightarrow$ tab **Nhân vật Stickman**: Thêm thẻ trạng thái **"Bộ Linh Kiện Puppet 2D (7 mảnh)"** hiển thị ô thả nhanh cho từng mảnh (`base_character`, `eyes_neutral`, `eyes_happy`, `eyes_shock`, `eyes_angry`, `mouth_closed`, `mouth_open`), tự động tách nền trắng khi upload và hiển thị thanh trạng thái *"Sẵn sàng diễn hoạt tự động (7/7 mảnh)"*.
+   - Trong `/library` $\rightarrow$ tab **Nhân vật Stickman**: Thêm thẻ trạng thái **"Bộ Linh Kiện Puppet 2D (7 mảnh)"** hiển thị ô thả nhanh cho từng mảnh (`base_character`, `eyes_neutral`, `eyes_happy`, `eyes_shock`, `eyes_angry`, `mouth_closed`, `mouth_open`), tự động tách nền trắng khi upload và hiển thị thanh trạng thái _"Sẵn sàng diễn hoạt tự động (7/7 mảnh)"_.
    - Trên `StickvPage.tsx`: Thêm công tắc chọn chế độ diễn hoạt nhân vật (`Tự động (Puppet 2D -> WebM -> PNG)` / `Chỉ dùng Ảnh Pose tĩnh`) và hiển thị khung xem trước nhân vật đã lắp ráp đủ mặt trên sân khấu.
 
 ---
