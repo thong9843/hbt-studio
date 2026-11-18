@@ -25,7 +25,15 @@ PUPPET_SLOTS: tuple[str, ...] = (
     "mouth_open",
 )
 
+SEG_CACHE_VERSION = "v2_elbow"
 SEGMENT_NAMES: tuple[str, ...] = ("body_torso", "head_blank", "arm_left", "arm_right")
+ARM_2SEG_NAMES: tuple[str, ...] = (
+    "upper_arm_left",
+    "forearm_left",
+    "upper_arm_right",
+    "forearm_right",
+)
+ALL_SEGMENT_NAMES: tuple[str, ...] = SEGMENT_NAMES + ARM_2SEG_NAMES
 _IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 JOINT_CAP_COLOR = (11, 14, 20, 255)  # #0B0E14
 
@@ -36,6 +44,10 @@ DEFAULT_RIG_CONFIG: dict[str, Any] = {
     "shoulder_left_torso": [0.36, 0.14],
     "shoulder_right_pivot": [0.12, 0.12],
     "shoulder_right_torso": [0.64, 0.14],
+    "elbow_anchor_left": [0.50, 0.90],
+    "elbow_left_pivot": [0.50, 0.12],
+    "elbow_anchor_right": [0.50, 0.90],
+    "elbow_right_pivot": [0.50, 0.12],
     "eyes_center_head": [0.50, 0.44],
     "eyes_width_ratio": 0.58,
     "mouth_center_head": [0.50, 0.72],
@@ -205,14 +217,126 @@ def _draw_joint_cap(img: Image.Image, xy: tuple[float, float], radius: int) -> N
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=JOINT_CAP_COLOR)
 
 
+def _crop_rgba_mask(
+    arr: np.ndarray, mask: np.ndarray, pad: int = 4
+) -> tuple[Image.Image, tuple[int, int]]:
+    ys, xs = np.nonzero(mask)
+    if len(xs) == 0:
+        return Image.new("RGBA", (32, 32), (0, 0, 0, 0)), (0, 0)
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    sub = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
+    sub_m = mask[y0:y1, x0:x1]
+    sub[sub_m] = arr[y0:y1, x0:x1][sub_m]
+    cropped = Image.fromarray(sub, mode="RGBA")
+    out = Image.new("RGBA", (cropped.width + pad * 2, cropped.height + pad * 2), (0, 0, 0, 0))
+    out.alpha_composite(cropped, (pad, pad))
+    cropped.close()
+    return out, (x0 - pad, y0 - pad)
+
+
+def _norm_in_img(pt: tuple[float, float], off: tuple[int, int], im: Image.Image) -> list[float]:
+    nx = max(0.0, min(1.0, (pt[0] - off[0]) / max(1, im.width)))
+    ny = max(0.0, min(1.0, (pt[1] - off[1]) / max(1, im.height)))
+    return [round(nx, 4), round(ny, 4)]
+
+
+def _split_arm_two_segments(
+    arr: np.ndarray,
+    arm_mask: np.ndarray,
+    shoulder_pt: tuple[float, float],
+    min_cap_r: int,
+) -> tuple[
+    Image.Image,
+    Image.Image,
+    list[float],
+    list[float],
+    list[float],
+]:
+    """Tách 1 cánh tay thành (upper_arm, forearm) tại mốc 52% và vá khớp vai + khuỷu `#0B0E14`."""
+    ys, xs = np.nonzero(arm_mask)
+    if len(xs) == 0:
+        blank = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        return blank, blank.copy(), [0.5, 0.15], [0.5, 0.85], [0.5, 0.15]
+
+    sx, sy = float(shoulder_pt[0]), float(shoulder_pt[1])
+    dx = xs.astype(np.float32) - sx
+    dy = ys.astype(np.float32) - sy
+    dist2 = dx * dx + dy * dy
+    far_idx = int(np.argmax(dist2))
+    hx, hy = float(xs[far_idx]), float(ys[far_idx])
+    vx, vy = hx - sx, hy - sy
+    length = max(1.0, math.hypot(vx, vy))
+    ux, uy = vx / length, vy / length
+
+    # Chiếu từng pixel dọc trục shoulder -> hand_tip để cắt tại 52% chiều dài
+    proj = (dx * ux + dy * uy) / length
+    upper_mask = np.zeros_like(arm_mask)
+    forearm_mask = np.zeros_like(arm_mask)
+
+    upper_sel = proj <= 0.52
+    # Đảm bảo cả 2 đoạn đều có pixel nếu tay quá ngắn
+    if not np.any(upper_sel) or np.all(upper_sel):
+        med = float(np.median(proj))
+        upper_sel = proj <= med
+
+    upper_mask[ys[upper_sel], xs[upper_sel]] = True
+    forearm_mask[ys[~upper_sel], xs[~upper_sel]] = True
+
+    # Điểm khuỷu tay nằm tại 52% (hút về trọng tâm pixel quanh mốc 52% để nằm đúng tâm nét mực)
+    band = (proj >= 0.44) & (proj <= 0.60)
+    if np.any(band):
+        elbow_pt = (float(np.mean(xs[band])), float(np.mean(ys[band])))
+    else:
+        elbow_pt = (sx + 0.52 * vx, sy + 0.52 * vy)
+
+    # Ước lượng độ dày nét tay quanh khuỷu để chọn bán kính vá khớp = 0.52 * độ dày
+    mid_band = (proj >= 0.36) & (proj <= 0.64)
+    if np.any(mid_band):
+        perp = np.abs(
+            -uy * (xs[mid_band].astype(np.float32) - sx)
+            + ux * (ys[mid_band].astype(np.float32) - sy)
+        )
+        p_low, p_high = float(np.percentile(perp, 10)), float(np.percentile(perp, 90))
+        arm_thickness = max(6.0, p_high - p_low + 2.0)
+    else:
+        arm_thickness = float(max(6, min_cap_r * 2))
+    joint_r = max(min_cap_r, int(round(0.52 * arm_thickness)))
+
+    upper_img, upper_off = _crop_rgba_mask(arr, upper_mask, pad=max(6, joint_r + 2))
+    forearm_img, forearm_off = _crop_rgba_mask(arr, forearm_mask, pad=max(6, joint_r + 2))
+
+    sh_pivot = _norm_in_img(shoulder_pt, upper_off, upper_img)
+    el_anchor_upper = _norm_in_img(elbow_pt, upper_off, upper_img)
+    el_pivot_forearm = _norm_in_img(elbow_pt, forearm_off, forearm_img)
+
+    # Vá khớp tròn kép #0B0E14 tại cả vai và khuỷu để gập -118° không bao giờ hở khe
+    _draw_joint_cap(
+        upper_img,
+        (sh_pivot[0] * upper_img.width, sh_pivot[1] * upper_img.height),
+        joint_r,
+    )
+    _draw_joint_cap(
+        upper_img,
+        (el_anchor_upper[0] * upper_img.width, el_anchor_upper[1] * upper_img.height),
+        joint_r,
+    )
+    _draw_joint_cap(
+        forearm_img,
+        (el_pivot_forearm[0] * forearm_img.width, el_pivot_forearm[1] * forearm_img.height),
+        joint_r,
+    )
+    return upper_img, forearm_img, sh_pivot, el_anchor_upper, el_pivot_forearm
+
+
 def auto_segment_puppet(
     base_char_path: Path,
     cache_dir: Path,
     *,
     puppet_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Tự tách `base_character.png` thành 4 lớp RGBA + vá khớp vai `#0B0E14` + cache SHA-256."""
-    # Nếu người dùng đã upload sẵn 4 file rời trong puppet_dir thì dùng trực tiếp
+    """Tự tách `base_character.png` thành các lớp RGBA (kèm bắp tay + cẳng tay) & cache v2_elbow."""
+    # Nếu người dùng đã upload sẵn 4 file rời trong puppet_dir thì dùng (nếu đã tách 2 đoạn)
     if puppet_dir is not None and all((puppet_dir / f"{s}.png").is_file() for s in SEGMENT_NAMES):
         cfg = dict(DEFAULT_RIG_CONFIG)
         cfg_file = puppet_dir / "rig_config.json"
@@ -221,20 +345,21 @@ def auto_segment_puppet(
                 cfg.update(json.loads(cfg_file.read_text(encoding="utf-8")))
             except Exception:
                 pass
-        return {
-            "segments": {s: puppet_dir / f"{s}.png" for s in SEGMENT_NAMES},
-            "rig_config": cfg,
-            "cached": True,
-        }
+        segs: dict[str, Path] = {s: puppet_dir / f"{s}.png" for s in SEGMENT_NAMES}
+        if all((puppet_dir / f"{s}.png").is_file() for s in ARM_2SEG_NAMES):
+            for s in ARM_2SEG_NAMES:
+                segs[s] = puppet_dir / f"{s}.png"
+            return {"segments": segs, "rig_config": cfg, "cached": True}
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     digest = _sha256_file(base_char_path)[:16]
-    meta_file = cache_dir / f"segments_{digest}.json"
-    seg_paths = {s: cache_dir / f"{s}_{digest}.png" for s in SEGMENT_NAMES}
+    meta_file = cache_dir / f"segments_{SEG_CACHE_VERSION}_{digest}.json"
+    seg_paths = {s: cache_dir / f"{s}_{SEG_CACHE_VERSION}_{digest}.png" for s in ALL_SEGMENT_NAMES}
     if meta_file.is_file() and all(p.is_file() for p in seg_paths.values()):
         try:
             meta = json.loads(meta_file.read_text(encoding="utf-8"))
-            return {"segments": seg_paths, "rig_config": meta["rig_config"], "cached": True}
+            if meta.get("version") == SEG_CACHE_VERSION:
+                return {"segments": seg_paths, "rig_config": meta["rig_config"], "cached": True}
         except Exception:
             pass
 
@@ -337,47 +462,26 @@ def auto_segment_puppet(
     if not np.any(torso_mask):
         torso_mask[neck_y:, :] = alpha[neck_y:, :]
 
-    def _mask_to_cropped(mask: np.ndarray, pad: int = 4) -> tuple[Image.Image, tuple[int, int]]:
-        ys, xs = np.nonzero(mask)
-        if len(xs) == 0:
-            return Image.new("RGBA", (32, 32), (0, 0, 0, 0)), (0, 0)
-        x0, x1 = int(xs.min()), int(xs.max()) + 1
-        y0, y1 = int(ys.min()), int(ys.max()) + 1
-        sub = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
-        sub_m = mask[y0:y1, x0:x1]
-        sub[sub_m] = arr[y0:y1, x0:x1][sub_m]
-        cropped = Image.fromarray(sub, mode="RGBA")
-        out = Image.new("RGBA", (cropped.width + pad * 2, cropped.height + pad * 2), (0, 0, 0, 0))
-        out.alpha_composite(cropped, (pad, pad))
-        cropped.close()
-        return out, (x0 - pad, y0 - pad)
+    head_img, _head_off = _crop_rgba_mask(arr, head_mask)
+    torso_img, torso_off = _crop_rgba_mask(arr, torso_mask)
+    arm_l_img, arm_l_off = _crop_rgba_mask(arr, arm_left_mask)
+    arm_r_img, arm_r_off = _crop_rgba_mask(arr, arm_right_mask)
 
-    head_img, _head_off = _mask_to_cropped(head_mask)
-    torso_img, torso_off = _mask_to_cropped(torso_mask)
-    arm_l_img, arm_l_off = _mask_to_cropped(arm_left_mask)
-    arm_r_img, arm_r_off = _mask_to_cropped(arm_right_mask)
-
-    # 4. Tính tọa độ khớp giải phẫu thực tế trên bounding box từng mảnh & vá khớp `#0B0E14`
+    # 4. Tính tọa độ khớp giải phẫu & tách bắp tay / cẳng tay + vá khớp `#0B0E14`
     cap_r = max(4, int(round(min(w, h) * 0.014)))
     rig_cfg = dict(DEFAULT_RIG_CONFIG)
 
-    # Tọa độ vai trong ảnh gốc
     sh_l_global = (float(cut_l), float(shoulder_y))
     sh_r_global = (float(cut_r), float(shoulder_y))
 
-    def _to_norm(pt: tuple[float, float], off: tuple[int, int], im: Image.Image) -> list[float]:
-        nx = max(0.0, min(1.0, (pt[0] - off[0]) / max(1, im.width)))
-        ny = max(0.0, min(1.0, (pt[1] - off[1]) / max(1, im.height)))
-        return [round(nx, 4), round(ny, 4)]
-
-    rig_cfg["neck_anchor_torso"] = _to_norm(
+    rig_cfg["neck_anchor_torso"] = _norm_in_img(
         (float(x_center), float(neck_y + 2)), torso_off, torso_img
     )
-    rig_cfg["shoulder_left_torso"] = _to_norm(sh_l_global, torso_off, torso_img)
-    rig_cfg["shoulder_right_torso"] = _to_norm(sh_r_global, torso_off, torso_img)
+    rig_cfg["shoulder_left_torso"] = _norm_in_img(sh_l_global, torso_off, torso_img)
+    rig_cfg["shoulder_right_torso"] = _norm_in_img(sh_r_global, torso_off, torso_img)
 
     if np.any(arm_left_mask):
-        rig_cfg["shoulder_left_pivot"] = _to_norm(sh_l_global, arm_l_off, arm_l_img)
+        rig_cfg["shoulder_left_pivot"] = _norm_in_img(sh_l_global, arm_l_off, arm_l_img)
         _draw_joint_cap(
             arm_l_img,
             (
@@ -386,8 +490,19 @@ def auto_segment_puppet(
             ),
             cap_r,
         )
+        up_l_img, fore_l_img, sh_l_up, el_l_up, el_l_fore = _split_arm_two_segments(
+            arr, arm_left_mask, sh_l_global, cap_r
+        )
+        rig_cfg["upper_shoulder_left_pivot"] = sh_l_up
+        rig_cfg["elbow_anchor_left"] = el_l_up
+        rig_cfg["elbow_left_pivot"] = el_l_fore
+    else:
+        up_l_img = arm_l_img.copy()
+        fore_l_img = arm_l_img.copy()
+        rig_cfg["upper_shoulder_left_pivot"] = list(rig_cfg["shoulder_left_pivot"])
+
     if np.any(arm_right_mask):
-        rig_cfg["shoulder_right_pivot"] = _to_norm(sh_r_global, arm_r_off, arm_r_img)
+        rig_cfg["shoulder_right_pivot"] = _norm_in_img(sh_r_global, arm_r_off, arm_r_img)
         _draw_joint_cap(
             arm_r_img,
             (
@@ -396,6 +511,16 @@ def auto_segment_puppet(
             ),
             cap_r,
         )
+        up_r_img, fore_r_img, sh_r_up, el_r_up, el_r_fore = _split_arm_two_segments(
+            arr, arm_right_mask, sh_r_global, cap_r
+        )
+        rig_cfg["upper_shoulder_right_pivot"] = sh_r_up
+        rig_cfg["elbow_anchor_right"] = el_r_up
+        rig_cfg["elbow_right_pivot"] = el_r_fore
+    else:
+        up_r_img = arm_r_img.copy()
+        fore_r_img = arm_r_img.copy()
+        rig_cfg["upper_shoulder_right_pivot"] = list(rig_cfg["shoulder_right_pivot"])
 
     # Vá khớp vai trên thân để khi tay xoay không bao giờ hở khe
     _draw_joint_cap(
@@ -415,20 +540,30 @@ def auto_segment_puppet(
         cap_r,
     )
 
+    imgs_to_save = {
+        "body_torso": torso_img,
+        "head_blank": head_img,
+        "arm_left": arm_l_img,
+        "arm_right": arm_r_img,
+        "upper_arm_left": up_l_img,
+        "forearm_left": fore_l_img,
+        "upper_arm_right": up_r_img,
+        "forearm_right": fore_r_img,
+    }
     try:
-        torso_img.save(seg_paths["body_torso"], format="PNG")
-        head_img.save(seg_paths["head_blank"], format="PNG")
-        arm_l_img.save(seg_paths["arm_left"], format="PNG")
-        arm_r_img.save(seg_paths["arm_right"], format="PNG")
+        for seg_key, seg_im in imgs_to_save.items():
+            seg_im.save(seg_paths[seg_key], format="PNG")
         meta_file.write_text(
-            json.dumps({"sha256": digest, "rig_config": rig_cfg}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {"version": SEG_CACHE_VERSION, "sha256": digest, "rig_config": rig_cfg},
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
     finally:
-        head_img.close()
-        torso_img.close()
-        arm_l_img.close()
-        arm_r_img.close()
+        for seg_im in imgs_to_save.values():
+            seg_im.close()
 
     return {"segments": seg_paths, "rig_config": rig_cfg, "cached": False}
 
@@ -551,10 +686,173 @@ def compute_mouth_transform(env_val: float) -> tuple[str, float, float]:
     return "mouth_open", round(scale_x, 4), round(scale_y, 4)
 
 
-class EyeController:
-    """Điều khiển biểu cảm mắt, chớp mắt sinh học 3.2s và liếc mắt theo interaction."""
+POSE_ALIASES: dict[str, str] = {
+    "explain": "present_board",
+    "think": "think_chin",
+    "shock": "shock_hands_up",
+    "happy": "present_board",
+    "point": "point_up",
+    "walk": "walk_explore",
+    "sad": "idle_breathe",
+    "bored": "idle_breathe",
+    "angry": "arms_crossed",
+    "strict": "arms_crossed",
+    "scared": "shock_hands_up",
+    "confused": "shrug_ask",
+    "laugh": "present_board",
+    "winner": "present_board",
+    "idea": "point_up",
+}
 
-    _SHOCK_POSES = {"shock", "scared", "shock_jump", "confused"}
+# 12 Hành động biểu cảm kể chuyện dùng hệ xương tay 2 đoạn (vai + khuỷu tay)
+POSE_PRESETS: dict[str, dict[str, Any]] = {
+    "point_up": {
+        "shoulder_l": 12.0,
+        "elbow_l": 8.0,
+        "shoulder_r": -48.0,
+        "elbow_r": -58.0,
+        "head_deg": -6.0,
+        "torso_deg": 1.5,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, -4.0),
+    },
+    "think_chin": {
+        "shoulder_l": -28.0,
+        "elbow_l": -68.0,
+        "shoulder_r": 18.0,
+        "elbow_r": -118.0,
+        "head_deg": 9.0,
+        "torso_deg": -1.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (3.0, -3.0),
+    },
+    "arms_crossed": {
+        "shoulder_l": 22.0,
+        "elbow_l": 78.0,
+        "shoulder_r": -22.0,
+        "elbow_r": -78.0,
+        "head_deg": -2.0,
+        "torso_deg": 0.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+    "hands_on_hips": {
+        "shoulder_l": 34.0,
+        "elbow_l": -72.0,
+        "shoulder_r": -34.0,
+        "elbow_r": 72.0,
+        "head_deg": 0.0,
+        "torso_deg": 0.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+    "shrug_ask": {
+        "shoulder_l": -28.0,
+        "elbow_l": -48.0,
+        "shoulder_r": 28.0,
+        "elbow_r": 48.0,
+        "head_deg": 7.0,
+        "torso_deg": 0.0,
+        "dy_px": -4.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+    "present_board": {
+        "shoulder_l": 30.0,
+        "elbow_l": -68.0,
+        "shoulder_r": -38.0,
+        "elbow_r": -24.0,
+        "head_deg": -4.0,
+        "torso_deg": 1.5,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (3.0, -2.0),
+    },
+    "emphatic_chop": {
+        "shoulder_l": 14.0,
+        "elbow_l": 12.0,
+        "shoulder_r": -32.0,
+        "elbow_r": -40.0,
+        "head_deg": -4.0,
+        "torso_deg": 1.8,
+        "dy_px": -2.5,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+    "shock_hands_up": {
+        "shoulder_l": -52.0,
+        "elbow_l": -62.0,
+        "shoulder_r": 52.0,
+        "elbow_r": 62.0,
+        "head_deg": -8.0,
+        "torso_deg": 0.0,
+        "dy_px": -18.0,
+        "eye_override": "eyes_shock",
+        "eye_gaze": (0.0, 0.0),
+    },
+    "lean_secret": {
+        "shoulder_l": 16.0,
+        "elbow_l": 20.0,
+        "shoulder_r": 12.0,
+        "elbow_r": -105.0,
+        "head_deg": 5.0,
+        "torso_deg": 4.5,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (5.0, 0.0),
+    },
+    "count_points": {
+        "shoulder_l": -15.0,
+        "elbow_l": -75.0,
+        "shoulder_r": -26.0,
+        "elbow_r": -40.0,
+        "head_deg": -3.0,
+        "torso_deg": 0.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (2.0, 0.0),
+    },
+    "walk_explore": {
+        "shoulder_l": 18.0,
+        "elbow_l": 14.0,
+        "shoulder_r": -18.0,
+        "elbow_r": -14.0,
+        "head_deg": 2.0,
+        "torso_deg": 1.5,
+        "dy_px": -3.0,
+        "eye_override": None,
+        "eye_gaze": (2.0, 0.0),
+    },
+    "idle_breathe": {
+        "shoulder_l": 14.0,
+        "elbow_l": 12.0,
+        "shoulder_r": -14.0,
+        "elbow_r": -12.0,
+        "head_deg": 0.0,
+        "torso_deg": 0.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+}
+
+
+def normalize_stickv_pose(pose: str | None) -> str:
+    """Chuẩn hóa tên pose (tương thích ngược các tên cũ sang 12 hành động v8)."""
+    key = (pose or "present_board").strip().lower()
+    if key in POSE_PRESETS:
+        return key
+    return POSE_ALIASES.get(key, "present_board")
+
+
+class EyeController:
+    """Điều khiển biểu cảm mắt, chớp mắt sinh học 3.2s và liếc mắt theo pose / interaction."""
+
+    _SHOCK_POSES = {"shock", "shock_hands_up", "scared", "shock_jump", "confused"}
     _HAPPY_POSES = {"happy", "laugh", "winner", "love", "idea", "idea_bulb", "celebrate", "rich"}
     _ANGRY_POSES = {"angry", "evil_grin", "run", "stop", "stop_hand"}
 
@@ -568,6 +866,8 @@ class EyeController:
         fps: int = 30,
     ) -> None:
         self.fps = max(15, int(fps))
+        self.raw_pose = (pose or "").strip().lower()
+        self.norm_pose = normalize_stickv_pose(pose)
         self.interaction = (interaction or "none").strip().lower()
         self.eye_slot = self._resolve_slot(pose, anim_oneshot)
         # Hạt giống lệch pha ±0.4s theo beat_id
@@ -577,6 +877,8 @@ class EyeController:
 
     @classmethod
     def _resolve_slot(cls, pose: str, anim_oneshot: str | None) -> str:
+        norm = normalize_stickv_pose(pose)
+        preset_eye = POSE_PRESETS.get(norm, {}).get("eye_override")
         for raw in (anim_oneshot or "", pose or ""):
             key = raw.strip().lower()
             if key in cls._SHOCK_POSES:
@@ -585,6 +887,8 @@ class EyeController:
                 return "eyes_happy"
             if key in cls._ANGRY_POSES:
                 return "eyes_angry"
+        if isinstance(preset_eye, str) and preset_eye:
+            return preset_eye
         return "eyes_neutral"
 
     def state_at(self, frame_idx: int) -> tuple[str, float, float, float]:
@@ -599,7 +903,8 @@ class EyeController:
             elif pos == 2:
                 eye_scale_y = 0.50
 
-        ox, oy = 0.0, 0.0
+        gaze = POSE_PRESETS.get(self.norm_pose, {}).get("eye_gaze", (0.0, 0.0))
+        ox, oy = float(gaze[0]), float(gaze[1])
         if self.interaction == "hold_prop":
             ox, oy = 4.0, -2.0
         elif self.interaction == "point_chart":
@@ -613,7 +918,9 @@ class PuppetPoseState:
     head_angle: float = 0.0
     head_dx: float = 0.0
     arm_l_angle: float = 0.0
+    elbow_l_angle: float = 0.0
     arm_r_angle: float = 0.0
+    elbow_r_angle: float = 0.0
     torso_angle: float = 0.0
     torso_dy: float = 0.0
     torso_scale_y: float = 1.0
@@ -650,85 +957,173 @@ def lerp_pose_state(a: PuppetPoseState, b: PuppetPoseState, alpha: float) -> Pup
         head_angle=a.head_angle + (b.head_angle - a.head_angle) * t,
         head_dx=a.head_dx + (b.head_dx - a.head_dx) * t,
         arm_l_angle=a.arm_l_angle + (b.arm_l_angle - a.arm_l_angle) * t,
+        elbow_l_angle=a.elbow_l_angle + (b.elbow_l_angle - a.elbow_l_angle) * t,
         arm_r_angle=a.arm_r_angle + (b.arm_r_angle - a.arm_r_angle) * t,
+        elbow_r_angle=a.elbow_r_angle + (b.elbow_r_angle - a.elbow_r_angle) * t,
         torso_angle=a.torso_angle + (b.torso_angle - a.torso_angle) * t,
         torso_dy=a.torso_dy + (b.torso_dy - a.torso_dy) * t,
         torso_scale_y=a.torso_scale_y + (b.torso_scale_y - a.torso_scale_y) * t,
     )
 
 
+def evaluate_pose_preset(
+    pose: str, t_sec: float, env_val: float, *, beat_t: float | None = None
+) -> PuppetPoseState:
+    """Tính góc khớp vai & khuỷu tay cho 12 hành động `POSE_PRESETS` kèm nhịp RMS sống động."""
+    key = normalize_stickv_pose(pose)
+    cfg = POSE_PRESETS[key]
+    env = max(0.0, min(1.0, float(env_val)))
+    t = max(0.0, float(t_sec))
+    local_t = t if beat_t is None else max(0.0, float(beat_t))
+
+    sh_l = float(cfg["shoulder_l"])
+    el_l = float(cfg["elbow_l"])
+    sh_r = float(cfg["shoulder_r"])
+    el_r = float(cfg["elbow_r"])
+    head = float(cfg["head_deg"])
+    torso = float(cfg["torso_deg"])
+    dy = float(cfg["dy_px"])
+    scale_y = 1.0 + 0.012 * math.sin(2.2 * t)
+
+    if key == "point_up":
+        sh_r += 4.5 * math.sin(2.4 * t) * (0.3 + 0.7 * env)
+        el_r += 6.0 * math.sin(2.4 * t) * (0.3 + 0.7 * env)
+        head += -2.5 * env + 1.2 * math.sin(2.0 * t)
+    elif key == "think_chin":
+        head += 1.5 * math.sin(1.5 * t)
+        el_r += 2.5 * math.sin(1.8 * t)
+    elif key == "arms_crossed":
+        head += -1.5 * env + 1.2 * math.sin(1.8 * t)
+        dy += -2.0 * env
+    elif key == "hands_on_hips":
+        head += -3.0 * env + 1.4 * math.sin(2.2 * t)
+        torso += 0.8 * math.sin(2.0 * t)
+    elif key == "shrug_ask":
+        sign = 1.0 if int(local_t * 1.4) % 2 == 0 else -1.0
+        head = sign * 7.0 + 1.8 * math.sin(2.6 * t)
+        sh_l += -4.0 * math.sin(2.8 * t)
+        sh_r += 4.0 * math.sin(2.8 * t)
+        dy = -4.0 - 2.0 * env
+    elif key == "present_board":
+        wave_r = math.sin(3.4 * t) * (0.35 + 0.65 * env)
+        sh_r += 8.0 * wave_r
+        el_r += -9.0 * wave_r
+        head += -2.5 * env + 1.5 * math.sin(2.4 * t)
+    elif key == "emphatic_chop":
+        chop = math.sin(5.2 * t) * (0.25 + 0.75 * env)
+        el_r = -40.0 + 25.0 * chop
+        sh_r += 5.0 * chop
+        head += -4.0 * env
+        dy += -2.5 * env
+    elif key == "shock_hands_up":
+        damp = max(0.0, 1.0 - local_t / 0.65)
+        dy = -18.0 * math.sin(math.pi * local_t / 0.40) if local_t < 0.40 else -2.0 * env
+        sh_l = -52.0 + 8.0 * (1.0 - damp)
+        sh_r = 52.0 - 8.0 * (1.0 - damp)
+    elif key == "lean_secret":
+        head += 1.8 * math.sin(2.2 * t)
+        el_r += 3.0 * math.sin(2.4 * t) * env
+    elif key == "count_points":
+        el_r = -40.0 + 15.0 * math.sin(4.6 * t) * (0.3 + 0.7 * env)
+        head += -2.5 * env + 1.5 * math.sin(2.0 * t)
+    elif key == "walk_explore":
+        stride = math.sin(3.4 * t)
+        sh_l = 24.0 * stride
+        sh_r = -24.0 * stride
+        el_l = 16.0 - 8.0 * stride
+        el_r = -16.0 - 8.0 * stride
+        dy = -5.0 * abs(stride)
+        torso = 1.6 * stride
+        head = 2.0 * stride
+    else:  # idle_breathe
+        breathe = math.sin(1.8 * t)
+        sh_l += 3.0 * breathe
+        sh_r -= 3.0 * breathe
+        head += 2.0 * breathe
+
+    return PuppetPoseState(
+        head_angle=head,
+        arm_l_angle=sh_l,
+        elbow_l_angle=el_l,
+        arm_r_angle=sh_r,
+        elbow_r_angle=el_r,
+        torso_angle=torso,
+        torso_dy=dy,
+        torso_scale_y=scale_y,
+    )
+
+
 def evaluate_action_curve(action: str, t_sec: float, env_val: float) -> PuppetPoseState:
-    """Tính góc xoay & dịch chuyển theo 9 đường cong hành động chuẩn (§4)."""
+    """Tính góc xoay & dịch chuyển khớp theo action oneshot/loop hoặc POSE_PRESETS."""
     act = (action or "talk_explain").strip().lower()
     env = max(0.0, min(1.0, float(env_val)))
     t = max(0.0, float(t_sec))
 
-    if act == "idle_breathe":
-        return PuppetPoseState(
-            head_angle=2.0 * math.sin(1.8 * t),
-            arm_l_angle=4.0 * math.sin(1.8 * t),
-            arm_r_angle=-4.0 * math.sin(1.8 * t),
-            torso_scale_y=1.0 + 0.012 * math.sin(2.2 * t),
-        )
-    if act in ("point_board", "point_chart"):
-        phrase = math.sin(2.4 * t) * (0.4 + 0.6 * env)
-        return PuppetPoseState(
-            head_angle=-6.0 - 3.0 * env + 1.5 * math.sin(2.0 * t),
-            arm_l_angle=10.0 + 4.0 * phrase,
-            arm_r_angle=-52.0 + 9.0 * phrase,
-            torso_angle=2.0 + 0.6 * math.sin(1.8 * t),
-        )
+    if act in POSE_PRESETS:
+        return evaluate_pose_preset(act, t, env, beat_t=t)
+    if act == "point_board" or act == "point_chart":
+        return evaluate_pose_preset("point_up", t, env, beat_t=t)
     if act == "hold_prop":
-        phrase = math.sin(2.6 * t) * (0.4 + 0.6 * env)
+        st = evaluate_pose_preset("present_board", t, env, beat_t=t)
         return PuppetPoseState(
-            head_angle=5.0 - 2.0 * env + 1.2 * math.sin(2.0 * t),
-            arm_l_angle=10.0 + 3.5 * phrase,
-            arm_r_angle=-42.0 + 7.5 * phrase,
+            head_angle=st.head_angle + 4.0,
+            arm_l_angle=st.arm_l_angle,
+            elbow_l_angle=st.elbow_l_angle,
+            arm_r_angle=-42.0 + 7.0 * math.sin(2.6 * t) * (0.4 + 0.6 * env),
+            elbow_r_angle=-32.0,
+            torso_angle=st.torso_angle,
             torso_dy=-2.5 * env,
+            torso_scale_y=st.torso_scale_y,
         )
     if act in ("talk_excited", "celebrate"):
         return PuppetPoseState(
             head_angle=-7.0 * env + 2.0 * math.sin(5.0 * t),
             arm_l_angle=-45.0 + 18.0 * math.sin(6.0 * t),
+            elbow_l_angle=-32.0 + 12.0 * math.sin(6.0 * t),
             arm_r_angle=45.0 - 18.0 * math.sin(6.0 * t),
+            elbow_r_angle=32.0 - 12.0 * math.sin(6.0 * t),
             torso_dy=-8.0 * abs(math.sin(5.0 * t)),
         )
     if act == "think_loop":
-        return PuppetPoseState(
-            head_angle=9.0 + 1.5 * math.sin(1.5 * t),
-            arm_l_angle=-18.0,
-            arm_r_angle=-62.0 + 3.0 * math.sin(2.0 * t),
-            torso_scale_y=1.0 + 0.01 * math.sin(1.5 * math.pi * 2.0 * t),
-        )
+        return evaluate_pose_preset("think_chin", t, env, beat_t=t)
     if act == "shock_jump":
-        damp = max(0.0, 1.0 - t / 0.65)
-        jump_dy = -26.0 * math.sin(math.pi * t / 0.45) if t < 0.45 else 0.0
-        return PuppetPoseState(
-            head_angle=-8.0 * damp,
-            head_dx=0.0,
-            arm_l_angle=-48.0 * damp,
-            arm_r_angle=48.0 * damp,
-            torso_dy=jump_dy,
-        )
+        return evaluate_pose_preset("shock_hands_up", t, env, beat_t=t)
     if act == "nod_agree":
         return PuppetPoseState(
             head_angle=-12.0 * math.sin(2.0 * math.pi * t / 0.6),
-            arm_l_angle=5.0,
-            arm_r_angle=-5.0,
+            arm_l_angle=10.0,
+            elbow_l_angle=12.0,
+            arm_r_angle=-10.0,
+            elbow_r_angle=-12.0,
             torso_dy=-2.0 * abs(math.sin(2.0 * math.pi * t / 0.6)),
         )
     if act == "shake_head":
         return PuppetPoseState(
             head_dx=7.0 * math.sin(3.0 * math.pi * t / 0.7),
-            arm_l_angle=6.0,
-            arm_r_angle=-6.0,
+            arm_l_angle=12.0,
+            elbow_l_angle=10.0,
+            arm_r_angle=-12.0,
+            elbow_r_angle=-10.0,
         )
-    # Mặc định: talk_explain
-    return PuppetPoseState(
-        head_angle=-5.5 * env + 2.0 * math.sin(3.0 * t),
-        arm_l_angle=8.0 + 5.0 * math.sin(2.5 * t),
-        arm_r_angle=-28.0 + 14.0 * math.sin(4.2 * t) * env,
-        torso_dy=-3.0 * env,
+    if act == "walk_loop":
+        return evaluate_pose_preset("walk_explore", t, env, beat_t=t)
+    return evaluate_pose_preset("present_board", t, env, beat_t=t)
+
+
+def _transform_anchor_world(
+    local_xy: tuple[float, float],
+    pivot_local: tuple[float, float],
+    world_pivot: tuple[float, float],
+    angle_deg: float,
+) -> tuple[float, float]:
+    """Ánh xạ điểm neo cục bộ sang tọa độ world sau phép xoay quanh `pivot_local`."""
+    theta = math.radians(angle_deg)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    lx = local_xy[0] - pivot_local[0]
+    ly = local_xy[1] - pivot_local[1]
+    return (
+        world_pivot[0] + (lx * cos_t + ly * sin_t),
+        world_pivot[1] + (-lx * sin_t + ly * cos_t),
     )
 
 
@@ -743,7 +1138,7 @@ def _load_rgba_scaled(path: Path, scale: float) -> Image.Image:
 
 
 class PuppetRig:
-    """Bộ diễn hoạt Puppet 2D hoàn chỉnh cho 1 beat (tách khớp + hierarchical bone tree)."""
+    """Bộ diễn hoạt Puppet 2D hoàn chỉnh (xương tay 2 đoạn vai–khuỷu + hierarchical bone tree)."""
 
     def __init__(
         self,
@@ -751,7 +1146,7 @@ class PuppetRig:
         library_dir: Path,
         assets_dir: Path,
         target_height: int,
-        pose: str = "explain",
+        pose: str = "present_board",
         anim_oneshot: str | None = None,
         anim_loop: str = "talk_explain",
         interaction: str = "none",
@@ -765,7 +1160,8 @@ class PuppetRig:
         global_t_offset: float = 0.0,
     ) -> None:
         self.target_height = max(120, int(target_height))
-        self.pose = pose
+        self.raw_pose = (pose or "present_board").strip().lower()
+        self.pose = normalize_stickv_pose(pose)
         self.anim_oneshot = (anim_oneshot or "").strip() or None
         self.anim_loop = (anim_loop or "talk_explain").strip() or "talk_explain"
         self.interaction = (interaction or "none").strip().lower()
@@ -776,13 +1172,15 @@ class PuppetRig:
         self.env = smooth_rms_envelope(rms_env or [])
         self.prev_pose_state = prev_pose_state
         self.global_t_offset = max(0.0, float(global_t_offset))
-        self.tween_dur = 0.40 if prev_pose_state is not None else 0.0
+        self.tween_dur = 0.45 if prev_pose_state is not None else 0.0
         init_st = prev_pose_state or PuppetPoseState()
         self._springs = {
             "head_angle": _SpringChannel(init_st.head_angle),
             "head_dx": _SpringChannel(init_st.head_dx),
             "arm_l_angle": _SpringChannel(init_st.arm_l_angle),
+            "elbow_l_angle": _SpringChannel(init_st.elbow_l_angle),
             "arm_r_angle": _SpringChannel(init_st.arm_r_angle),
+            "elbow_r_angle": _SpringChannel(init_st.elbow_r_angle),
             "torso_angle": _SpringChannel(init_st.torso_angle),
             "torso_dy": _SpringChannel(init_st.torso_dy),
             "torso_scale_y": _SpringChannel(init_st.torso_scale_y),
@@ -812,9 +1210,11 @@ class PuppetRig:
             raw_total_h = max(1, bt.height + int(hb.height * 0.85))
         scale = (self.target_height * 0.88) / raw_total_h
 
-        self.parts: dict[str, Image.Image] = {
-            name: _load_rgba_scaled(seg_paths[name], scale) for name in SEGMENT_NAMES
-        }
+        self.parts: dict[str, Image.Image] = {}
+        for name in ALL_SEGMENT_NAMES:
+            sp = seg_paths.get(name)
+            if sp is not None and sp.is_file():
+                self.parts[name] = _load_rgba_scaled(sp, scale)
 
         # Nạp mắt và miệng (đã tách nền trắng + crop + cache)
         self.eyes: dict[str, Image.Image] = {}
@@ -850,29 +1250,30 @@ class PuppetRig:
         self.oneshot_dur = 0.65 if self.anim_oneshot else 0.0
         self.blend_dur = 0.15  # 5 frames @ 30fps
 
-    def _select_loop_action(self) -> str:
+    def _evaluate_main_pose(self, t_sec: float, gt: float, env_val: float) -> PuppetPoseState:
         if self.interaction == "point_chart":
-            return "point_board"
+            return evaluate_pose_preset("point_up", gt, env_val, beat_t=t_sec)
         if self.interaction == "hold_prop":
-            return "hold_prop"
-        return self.anim_loop
+            return evaluate_action_curve("hold_prop", gt, env_val)
+        if self.raw_pose in POSE_PRESETS or self.raw_pose in POSE_ALIASES:
+            return evaluate_pose_preset(self.pose, gt, env_val, beat_t=t_sec)
+        return evaluate_action_curve(self.anim_loop, gt, env_val)
 
     def _raw_pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
-        loop_action = self._select_loop_action()
         gt = self.global_t_offset + t_sec
 
         if t_sec > self.speech_end:
-            idle_state = evaluate_action_curve("idle_breathe", gt, 0.0)
+            idle_state = evaluate_pose_preset("idle_breathe", gt, 0.0, beat_t=t_sec)
             dt_idle = t_sec - self.speech_end
             if dt_idle < self.blend_dur:
-                prev_state = evaluate_action_curve(loop_action, gt, env_val)
+                prev_state = self._evaluate_main_pose(t_sec, gt, env_val)
                 return lerp_pose_state(prev_state, idle_state, dt_idle / self.blend_dur)
             return idle_state
 
         if self.anim_oneshot and t_sec < self.oneshot_dur:
             target_st = evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
         else:
-            loop_state = evaluate_action_curve(loop_action, gt, env_val)
+            loop_state = self._evaluate_main_pose(t_sec, gt, env_val)
             if self.anim_oneshot and t_sec < (self.oneshot_dur + self.blend_dur):
                 alpha = (t_sec - self.oneshot_dur) / self.blend_dur
                 oneshot_tail = evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
@@ -898,7 +1299,13 @@ class PuppetRig:
             head_angle=self._springs["head_angle"].step(head_lag.head_angle, dt, omega=11.0),
             head_dx=self._springs["head_dx"].step(head_lag.head_dx, dt, omega=12.0),
             arm_l_angle=self._springs["arm_l_angle"].step(arm_lag.arm_l_angle, dt, omega=9.5),
+            elbow_l_angle=self._springs["elbow_l_angle"].step(
+                arm_lag.elbow_l_angle, dt, omega=10.5
+            ),
             arm_r_angle=self._springs["arm_r_angle"].step(arm_lag.arm_r_angle, dt, omega=9.5),
+            elbow_r_angle=self._springs["elbow_r_angle"].step(
+                arm_lag.elbow_r_angle, dt, omega=10.5
+            ),
             torso_angle=self._springs["torso_angle"].step(raw_target.torso_angle, dt, omega=14.0),
             torso_dy=self._springs["torso_dy"].step(raw_target.torso_dy, dt, omega=14.0),
             torso_scale_y=self._springs["torso_scale_y"].step(
@@ -947,20 +1354,86 @@ class PuppetRig:
 
         return head
 
+    def _render_upper_arm(
+        self,
+        canvas: Image.Image,
+        side: str,
+        sh_world: tuple[float, float],
+        sh_angle: float,
+        torso_angle: float,
+    ) -> tuple[float, float] | None:
+        """Vẽ bắp tay xoay quanh vai và trả về tọa độ world của khớp khuỷu (fallback 1 đoạn)."""
+        up_img = self.parts.get(f"upper_arm_{side}")
+        fore_img = self.parts.get(f"forearm_{side}")
+        if up_img is not None and fore_img is not None and f"elbow_anchor_{side}" in self.rig_cfg:
+            piv_cfg = self.rig_cfg.get(
+                f"upper_shoulder_{side}_pivot", self.rig_cfg[f"shoulder_{side}_pivot"]
+            )
+            up_piv = (float(piv_cfg[0]) * up_img.width, float(piv_cfg[1]) * up_img.height)
+            total_sh = sh_angle + torso_angle
+            up_rot, up_rpiv = rotate_around_pivot(up_img, total_sh, up_piv)
+            canvas.alpha_composite(
+                up_rot,
+                (int(round(sh_world[0] - up_rpiv[0])), int(round(sh_world[1] - up_rpiv[1]))),
+            )
+            up_rot.close()
+            el_cfg = self.rig_cfg[f"elbow_anchor_{side}"]
+            el_local = (float(el_cfg[0]) * up_img.width, float(el_cfg[1]) * up_img.height)
+            return _transform_anchor_world(el_local, up_piv, sh_world, total_sh)
+
+        # Fallback 1 đoạn nếu người dùng tự nạp bộ segment thủ công chưa tách khuỷu
+        arm_src = self.parts[f"arm_{side}"]
+        arm_piv = (
+            float(self.rig_cfg[f"shoulder_{side}_pivot"][0]) * arm_src.width,
+            float(self.rig_cfg[f"shoulder_{side}_pivot"][1]) * arm_src.height,
+        )
+        arm_rot, arm_rpiv = rotate_around_pivot(arm_src, sh_angle + torso_angle, arm_piv)
+        canvas.alpha_composite(
+            arm_rot,
+            (int(round(sh_world[0] - arm_rpiv[0])), int(round(sh_world[1] - arm_rpiv[1]))),
+        )
+        arm_rot.close()
+        return None
+
+    def _render_forearm(
+        self,
+        canvas: Image.Image,
+        side: str,
+        elbow_world: tuple[float, float] | None,
+        sh_angle: float,
+        elbow_angle: float,
+        torso_angle: float,
+    ) -> None:
+        """Vẽ cẳng tay + găng tay xoay quanh khớp khuỷu nối liền bắp tay."""
+        if elbow_world is None:
+            return
+        fore_img = self.parts.get(f"forearm_{side}")
+        if fore_img is None:
+            return
+        piv_cfg = self.rig_cfg[f"elbow_{side}_pivot"]
+        fore_piv = (float(piv_cfg[0]) * fore_img.width, float(piv_cfg[1]) * fore_img.height)
+        total_fore = sh_angle + elbow_angle + torso_angle
+        fore_rot, fore_rpiv = rotate_around_pivot(fore_img, total_fore, fore_piv)
+        canvas.alpha_composite(
+            fore_rot,
+            (int(round(elbow_world[0] - fore_rpiv[0])), int(round(elbow_world[1] - fore_rpiv[1]))),
+        )
+        fore_rot.close()
+
     def render_frame(self, frame_idx: int, t_sec: float) -> Image.Image:
-        """Dựng 1 frame Puppet RGBA theo cây khớp Cha–Con, chân bám đáy canvas."""
+        """Dựng 1 frame Puppet RGBA theo cây khớp Cha–Con 2 đoạn vai–khuỷu, chân bám đáy."""
         env_val = self.env[frame_idx] if 0 <= frame_idx < len(self.env) else 0.0
         st = self._pose_state_at(t_sec, env_val)
 
         torso_base = self.parts["body_torso"]
         head_local = self._build_head_layer(frame_idx, env_val)
-        arm_l_src = self.parts["arm_left"]
-        arm_r_src = self.parts["arm_right"]
+        arm_l_w = self.parts["arm_left"].width if "arm_left" in self.parts else torso_base.width
+        arm_r_w = self.parts["arm_right"].width if "arm_right" in self.parts else torso_base.width
 
-        # Kích thước canvas cố định đủ rộng cho đầu & tay vung, chân bám đáy
+        # Kích thước canvas cố định đủ rộng cho đầu & tay 2 đoạn vung, chân bám đáy
         cw = max(
-            int(self.target_height * 0.85),
-            torso_base.width + arm_l_src.width + arm_r_src.width + 40,
+            int(self.target_height * 0.95),
+            torso_base.width + arm_l_w + arm_r_w + 64,
         )
         ch = self.target_height
         canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
@@ -985,58 +1458,36 @@ class PuppetRig:
             torso_tl_x = int(round(root_world_x - torso_rot_pivot[0]))
             torso_tl_y = int(round(root_world_y - torso_rot_pivot[1]))
 
-            # Hàm ánh xạ điểm cục bộ của torso sang tọa độ world sau biến đổi của torso
-            theta_t = math.radians(st.torso_angle)
-            cos_t, sin_t = math.cos(theta_t), math.sin(theta_t)
-
             def _torso_anchor_world(norm_xy: list[float]) -> tuple[float, float]:
-                lx = float(norm_xy[0]) * t_w - torso_pivot_local[0]
-                ly = float(norm_xy[1]) * t_h - torso_pivot_local[1]
-                wx = root_world_x + (lx * cos_t + ly * sin_t)
-                wy = root_world_y + (-lx * sin_t + ly * cos_t)
-                return wx, wy
+                lx = float(norm_xy[0]) * t_w
+                ly = float(norm_xy[1]) * t_h
+                return _transform_anchor_world(
+                    (lx, ly), torso_pivot_local, (root_world_x, root_world_y), st.torso_angle
+                )
 
-            # [3] ARM_LEFT
+            # [3] BẮP TAY TRÁI & PHẢI xoay quanh vai
             sh_l_world = _torso_anchor_world(self.rig_cfg["shoulder_left_torso"])
-            arm_l_piv = (
-                float(self.rig_cfg["shoulder_left_pivot"][0]) * arm_l_src.width,
-                float(self.rig_cfg["shoulder_left_pivot"][1]) * arm_l_src.height,
-            )
-            arm_l_rot, arm_l_rpiv = rotate_around_pivot(
-                arm_l_src, st.arm_l_angle + st.torso_angle, arm_l_piv
-            )
-            canvas.alpha_composite(
-                arm_l_rot,
-                (
-                    int(round(sh_l_world[0] - arm_l_rpiv[0])),
-                    int(round(sh_l_world[1] - arm_l_rpiv[1])),
-                ),
-            )
-            arm_l_rot.close()
-
-            # [4] ARM_RIGHT
             sh_r_world = _torso_anchor_world(self.rig_cfg["shoulder_right_torso"])
-            arm_r_piv = (
-                float(self.rig_cfg["shoulder_right_pivot"][0]) * arm_r_src.width,
-                float(self.rig_cfg["shoulder_right_pivot"][1]) * arm_r_src.height,
+            el_l_world = self._render_upper_arm(
+                canvas, "left", sh_l_world, st.arm_l_angle, st.torso_angle
             )
-            arm_r_rot, arm_r_rpiv = rotate_around_pivot(
-                arm_r_src, st.arm_r_angle + st.torso_angle, arm_r_piv
+            el_r_world = self._render_upper_arm(
+                canvas, "right", sh_r_world, st.arm_r_angle, st.torso_angle
             )
-            canvas.alpha_composite(
-                arm_r_rot,
-                (
-                    int(round(sh_r_world[0] - arm_r_rpiv[0])),
-                    int(round(sh_r_world[1] - arm_r_rpiv[1])),
-                ),
-            )
-            arm_r_rot.close()
 
-            # Composite Torso (che đẹp phần giao vai nhờ joint cap)
+            # [4] THÂN (che khớp vai gọn gàng)
             canvas.alpha_composite(torso_rot, (torso_tl_x, torso_tl_y))
             torso_rot.close()
 
-            # [5] HEAD_BLANK + [6] EYES + [7] MOUTH (xoay nguyên khối quanh neck_pivot)
+            # [5] CẲNG TAY + GĂNG TRÁI & PHẢI xoay quanh khuỷu (đặt trước ngực)
+            self._render_forearm(
+                canvas, "left", el_l_world, st.arm_l_angle, st.elbow_l_angle, st.torso_angle
+            )
+            self._render_forearm(
+                canvas, "right", el_r_world, st.arm_r_angle, st.elbow_r_angle, st.torso_angle
+            )
+
+            # [6] HEAD_BLANK + EYES + MOUTH (xoay nguyên khối quanh neck_pivot)
             neck_world = _torso_anchor_world(self.rig_cfg["neck_anchor_torso"])
             head_piv = (
                 float(self.rig_cfg["neck_pivot_head"][0]) * head_local.width,

@@ -362,3 +362,57 @@ def test_continuous_cross_beat_pose_tweening_and_3level_mouth(tmp_path: Path) ->
         assert rig2.last_pose_state.head_angle < -5.0
     finally:
         rig2.close()
+
+
+def test_v2_elbow_segmentation_joint_caps_and_12_presets(tmp_path: Path) -> None:
+    from hbt.stickv.puppet import (
+        ARM_2SEG_NAMES,
+        POSE_PRESETS,
+        SEG_CACHE_VERSION,
+        normalize_stickv_pose,
+    )
+
+    assert SEG_CACHE_VERSION == "v2_elbow"
+    assert len(POSE_PRESETS) == 12
+    assert normalize_stickv_pose("explain") == "present_board"
+    assert normalize_stickv_pose("think") == "think_chin"
+    assert normalize_stickv_pose("shock") == "shock_hands_up"
+
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    res = auto_segment_puppet(
+        lib / "stickman" / "puppet" / "base_character.png",
+        lib / "stickman" / "puppet" / ".segments",
+    )
+    for seg_name in ARM_2SEG_NAMES:
+        p = res["segments"][seg_name]
+        assert p.is_file()
+        assert SEG_CACHE_VERSION in p.name
+    # Kiểm tra vá khớp khuỷu #0B0E14 trên forearm_right
+    with Image.open(res["segments"]["forearm_right"]) as fr:
+        el_piv = res["rig_config"]["elbow_right_pivot"]
+        px = fr.getpixel(
+            (
+                min(fr.width - 1, int(round(el_piv[0] * fr.width))),
+                min(fr.height - 1, int(round(el_piv[1] * fr.height))),
+            )
+        )
+        assert px[3] > 200 and px[0] < 35
+
+    # Render thử đủ 12 hành động bằng xương tay 2 đoạn
+    for pose_name in POSE_PRESETS:
+        rig = PuppetRig(
+            library_dir=lib,
+            assets_dir=assets,
+            target_height=360,
+            pose=pose_name,
+            fps=30,
+            rms_env=[0.6] * 25,
+        )
+        try:
+            f = rig.render_frame(12, 0.4)
+            assert f.mode == "RGBA" and f.height == 360 and f.getbbox() is not None
+            f.close()
+        finally:
+            rig.close()
