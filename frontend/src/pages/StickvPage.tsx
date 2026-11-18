@@ -148,6 +148,9 @@ export function StickvPage() {
   const [rawScript, setRawScript] = useState('');
   const [rawTitle, setRawTitle] = useState('');
   const [topic, setTopic] = useState('science');
+  const [domain, setDomain] = useState<StickvDomain>('paper_classic');
+  const [musicMood, setMusicMood] = useState('curious_science');
+  const [animationMode, setAnimationMode] = useState<StickvAnimationMode>('auto');
   const [aspect, setAspect] = useState<StickvAspect>('9:16');
   const [theme, setTheme] = useState<StickvTheme>('cream');
   const [targetMinutes, setTargetMinutes] = useState<number>(1);
@@ -212,6 +215,10 @@ export function StickvPage() {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;
     if (found) {
       setDraft(found);
+      if (found.domain) setDomain(found.domain);
+      if (found.music_mood) setMusicMood(found.music_mood);
+      if (found.animation_mode) setAnimationMode(found.animation_mode);
+      setTheme(found.theme);
       if (found.beats.length > 0 && !found.beats.some((b) => b.id === selectedBeatId)) {
         setSelectedBeatId(found.beats[0].id);
       }
@@ -277,6 +284,9 @@ export function StickvPage() {
       stickvApi.generate({
         idea: idea.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
         target_minutes: targetMinutes,
@@ -286,6 +296,8 @@ export function StickvPage() {
       void qc.invalidateQueries({ queryKey: ['stickv-list'] });
       setSelectedSlug(project.slug);
       setDraft(project);
+      if (project.domain) setDomain(project.domain);
+      if (project.music_mood) setMusicMood(project.music_mood);
       setSelectedBeatId(project.beats[0]?.id ?? '');
       toast.info(`Đã sinh ${project.beats.length} beat kịch bản StickV`);
     },
@@ -297,6 +309,9 @@ export function StickvPage() {
       stickvApi.importJson({
         raw_json: rawJson.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
       }),
@@ -317,6 +332,9 @@ export function StickvPage() {
         raw_text: rawScript.trim(),
         title: rawTitle.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
       }),
@@ -627,10 +645,14 @@ export function StickvPage() {
                 <span>Bối cảnh sân khấu</span>
                 <select
                   aria-label="Bối cảnh sân khấu"
-                  value={draft?.domain ?? 'paper_classic'}
+                  value={draft?.domain ?? domain}
                   onChange={(e) => {
                     const nextDom = e.target.value as StickvDomain;
-                    if (draft) setDraft({ ...draft, domain: nextDom });
+                    const syncedTheme: StickvTheme =
+                      nextDom === 'paper_classic' || nextDom === 'history_geo' ? 'cream' : 'dark';
+                    setDomain(nextDom);
+                    setTheme(syncedTheme);
+                    if (draft) setDraft({ ...draft, domain: nextDom, theme: syncedTheme });
                   }}
                   className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
                 >
@@ -646,9 +668,10 @@ export function StickvPage() {
                 <span>Tâm trạng nhạc</span>
                 <select
                   aria-label="Tâm trạng nhạc"
-                  value={draft?.music_mood ?? 'curious_science'}
+                  value={draft?.music_mood ?? musicMood}
                   onChange={(e) => {
                     const nextMood = e.target.value;
+                    setMusicMood(nextMood);
                     if (draft) setDraft({ ...draft, music_mood: nextMood });
                   }}
                   className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
@@ -665,9 +688,10 @@ export function StickvPage() {
                 <span>Chế độ diễn hoạt</span>
                 <select
                   aria-label="Chế độ diễn hoạt"
-                  value={draft?.animation_mode ?? 'auto'}
+                  value={draft?.animation_mode ?? animationMode}
                   onChange={(e) => {
                     const nextMode = e.target.value as StickvAnimationMode;
+                    setAnimationMode(nextMode);
                     if (draft) setDraft({ ...draft, animation_mode: nextMode });
                   }}
                   className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
@@ -1050,7 +1074,7 @@ export function StickvPage() {
             ) : (
               <div
                 className={`flex h-full w-full flex-col justify-between p-4 ${
-                  DOMAINS.find((d) => d.id === (draft?.domain ?? 'paper_classic'))?.bgClass ??
+                  DOMAINS.find((d) => d.id === (draft?.domain ?? domain))?.bgClass ??
                   ((draft?.theme ?? theme) === 'cream'
                     ? 'bg-[#FAF7F0] text-slate-900'
                     : 'bg-[#111827] text-slate-50')

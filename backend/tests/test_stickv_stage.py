@@ -419,3 +419,33 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     assert len(timings) == 4
     assert timings[0][1] >= 0.08
     assert timings[-1][2] <= beats[0].duration_sec - 0.45 + 0.02
+
+    # Kiểm tra spoken_segments sidecar + khóa Karaoke không lấn sang khoảng lặng
+    from hbt.stickv.audio import load_beat_spoken_segments
+    from hbt.stickv.backdrops import BackdropRenderer
+    from hbt.stickv.stage import draw_karaoke_strip
+
+    segs = load_beat_spoken_segments(b1_wav)
+    assert len(segs) == 2
+    assert segs[0][2] == "Câu một."
+    assert segs[1][2] == "Câu hai?"
+    # Khoảng giữa câu 1 và câu 2 có gap 0.30s
+    assert segs[1][0] - segs[0][1] >= 0.25
+
+    # Kiểm tra domain="physics_science" sinh phông xanh kỹ thuật khác #FAF7F0
+    bd_phys = BackdropRenderer("physics_science", 360, 640)
+    try:
+        bg_phys = bd_phys.render_frame(0.5)
+        assert bg_phys.getpixel((10, 10)) != (250, 247, 240)
+        bg_phys.close()
+    finally:
+        bd_phys.close()
+
+    # Kiểm tra draw_karaoke_strip ẩn trong khoảng lặng & chỉ hiện trong spoken_segments
+    canvas_sil = Image.new("RGBA", (540, 1200), (0, 0, 0, 0))
+    gap_t = (segs[0][1] + segs[1][0]) / 2.0
+    draw_karaoke_strip(canvas_sil, timings, gap_t, aspect="9:16", spoken_segments=segs)
+    assert canvas_sil.getbbox() is None  # Khoảng lặng giữa 2 câu không vẽ phụ đề
+    draw_karaoke_strip(canvas_sil, timings, segs[0][0] + 0.1, aspect="9:16", spoken_segments=segs)
+    assert canvas_sil.getbbox() is not None  # Đang nói câu 1 có vẽ phụ đề
+    canvas_sil.close()

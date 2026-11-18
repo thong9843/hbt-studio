@@ -89,6 +89,9 @@ def create_stickv_project(
     *,
     title: str,
     topic: str = "science",
+    domain: str = "paper_classic",
+    animation_mode: str = "auto",
+    music_mood: str = "",
     aspect: str = "9:16",
     theme: str = "cream",
     target_minutes: float = 1.0,
@@ -100,9 +103,11 @@ def create_stickv_project(
         slug=slug,
         title=title.strip() or "Video StickV mới",
         topic=topic,
+        domain=domain,  # type: ignore[arg-type]
+        animation_mode=animation_mode,  # type: ignore[arg-type]
         aspect=aspect,  # type: ignore[arg-type]
         theme=theme,  # type: ignore[arg-type]
-        music_mood=topic,
+        music_mood=(music_mood or topic or "curious_science").strip(),
         gemini_model=gemini_model,
         target_minutes=target_minutes,
         beats=beats or [],

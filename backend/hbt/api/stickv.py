@@ -21,7 +21,14 @@ from hbt.stickv.llm import (
     parse_stickv_json_payload,
     split_raw_narration_to_beats,
 )
-from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
+from hbt.stickv.models import (
+    StickvAnimationMode,
+    StickvAspect,
+    StickvBeat,
+    StickvDomain,
+    StickvProject,
+    StickvTheme,
+)
 from hbt.stickv.puppet import PuppetRig, is_puppet_ready
 from hbt.stickv.stage import list_available_poses, resolve_pose_png
 from hbt.stickv.storage import (
@@ -43,6 +50,9 @@ _SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 class StickvCreateBody(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
@@ -53,6 +63,9 @@ class StickvCreateBody(BaseModel):
 class StickvGenerateBody(BaseModel):
     idea: str = Field(min_length=1, max_length=2000)
     topic: str = "science"
+    domain: StickvDomain | None = None
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
@@ -67,6 +80,9 @@ class StickvRenderBody(BaseModel):
 class StickvImportJsonBody(BaseModel):
     raw_json: str = Field(min_length=1)
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
 
@@ -75,6 +91,9 @@ class StickvImportScriptBody(BaseModel):
     raw_text: str = Field(min_length=1)
     title: str = ""
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
 
@@ -152,6 +171,9 @@ def create_stickv(body: StickvCreateBody, state: State) -> dict[str, Any]:
         state.settings.workspace_dir,
         title=body.title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         target_minutes=body.target_minutes,
@@ -178,14 +200,17 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
 
+    chosen_domain = body.domain or meta.get("domain") or "paper_classic"
+    chosen_mood = body.music_mood or str(meta.get("music_mood") or "curious_science")
     if body.slug:
         proj = load_stickv_project(state.settings.workspace_dir, body.slug)
         proj = proj.model_copy(
             update={
                 "title": title,
                 "topic": body.topic,
-                "domain": meta.get("domain", proj.domain),
-                "music_mood": meta.get("music_mood", proj.music_mood),
+                "domain": chosen_domain,
+                "animation_mode": body.animation_mode,
+                "music_mood": chosen_mood,
                 "aspect": body.aspect,
                 "theme": body.theme,
                 "target_minutes": body.target_minutes,
@@ -199,6 +224,9 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
             state.settings.workspace_dir,
             title=title,
             topic=body.topic,
+            domain=chosen_domain,
+            animation_mode=body.animation_mode,
+            music_mood=chosen_mood,
             aspect=body.aspect,
             theme=body.theme,
             target_minutes=body.target_minutes,
@@ -219,6 +247,9 @@ def import_stickv_json(body: StickvImportJsonBody, state: State) -> dict[str, An
         state.settings.workspace_dir,
         title=title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         beats=beats,
@@ -236,6 +267,9 @@ def import_stickv_script(body: StickvImportScriptBody, state: State) -> dict[str
         state.settings.workspace_dir,
         title=title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         beats=beats,

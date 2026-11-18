@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -529,14 +530,34 @@ def draw_karaoke_strip(
     t_sec: float,
     *,
     aspect: StickvAspect,
+    spoken_segments: list[tuple[float, float, str]] | None = None,
 ) -> None:
-    """Vẽ dải phụ đề Karaoke (nền vàng #FFD43B cho từ đang đọc) ở vùng giữa màn hình."""
+    """Vẽ dải phụ đề Karaoke khóa chặt trong từng câu đang nói (không lấn sang khoảng lặng)."""
     if not word_timings:
         return
 
+    filtered_timings = word_timings
+    if spoken_segments:
+        active_seg: tuple[float, float, str] | None = None
+        for st, et, txt in spoken_segments:
+            if st <= t_sec <= et:
+                active_seg = (st, et, txt)
+                break
+        if active_seg is None:
+            # Đang ở khoảng nghỉ đầu/giữa/cuối câu -> ẩn phụ đề để không lấn sang khoảng lặng
+            return
+        seg_st, seg_et, _ = active_seg
+        seg_words = [
+            (wd, wst, wet)
+            for (wd, wst, wet) in word_timings
+            if wst >= (seg_st - 0.01) and wet <= (seg_et + 0.01)
+        ]
+        if seg_words:
+            filtered_timings = seg_words
+
     w, h = frame.size
     active_idx = 0
-    for idx, (_w, st, et) in enumerate(word_timings):
+    for idx, (_w, st, et) in enumerate(filtered_timings):
         if st <= t_sec <= et:
             active_idx = idx
             break
@@ -546,7 +567,7 @@ def draw_karaoke_strip(
     # Nhóm 5-6 từ quanh từ đang đọc để vừa 1 dòng gọn đẹp
     win_size = 5 if aspect == "9:16" else 7
     chunk_idx = active_idx // win_size
-    chunk = word_timings[chunk_idx * win_size : (chunk_idx + 1) * win_size]
+    chunk = filtered_timings[chunk_idx * win_size : (chunk_idx + 1) * win_size]
     if not chunk:
         return
 
@@ -586,7 +607,51 @@ def draw_karaoke_strip(
 
 def _ease_in_out(t: float) -> float:
     t = max(0.0, min(1.0, t))
-    return 0.5 - 0.5 * math.cos(math.pi * t)
+    return t * t * (3.0 - 2.0 * t)
+
+
+@dataclass(frozen=True)
+class BeatStageState:
+    """Trạng thái cuối beat của nhân vật để tween liên tục sang beat tiếp theo."""
+
+    x: float
+    y: float
+    scale: float = 1.0
+    pose_state: Any = None
+
+
+def compute_beat_character_target(
+    w: int,
+    h: int,
+    char_w: int,
+    char_h: int,
+    *,
+    interaction: str,
+    aspect: StickvAspect,
+) -> tuple[float, float, float]:
+    """Tính tọa độ `(target_x, target_y, target_scale)` chuẩn theo interaction và aspect."""
+    scale = 1.0
+    if interaction == "point_chart":
+        target_h = int(h * 0.38)
+        if char_h > target_h and char_h > 0:
+            scale = target_h / char_h
+        eff_w = char_w * scale
+        eff_h = char_h * scale
+        bx = w * 0.24 - eff_w * 0.5
+        by = h - eff_h - (220 if aspect == "9:16" else 140)
+        return bx, by, scale
+    if interaction == "hold_prop":
+        center_x = w * (0.34 if aspect == "9:16" else 0.38)
+        bx = center_x - char_w * 0.5
+        by = h - char_h - (220 if aspect == "9:16" else 160)
+        return bx, by, scale
+    if interaction == "versus_split":
+        bx = (w - char_w) * 0.5
+        by = h - char_h - (220 if aspect == "9:16" else 140)
+        return bx, by, scale
+    if aspect == "9:16":
+        return (w - char_w) * 0.5, float(h - char_h - 220), scale
+    return 90.0, (h - char_h) * 0.5 + 40.0, scale
 
 
 def _draw_versus_split_layer(
@@ -680,8 +745,12 @@ def render_animated_beat_frame(
     duration_sec: float = 2.0,
     draw_board: bool = False,
     extra_dy: float = 0.0,
+    prev_stage_state: BeatStageState | None = None,
+    tween_dur: float = 0.40,
+    spoken_segments: list[tuple[float, float, str]] | None = None,
+    is_puppet: bool = False,
 ) -> Image.Image:
-    """Tổng hợp 1 khung hình động: backdrop + tương tác 2.5D + prop/biểu đồ + nhân vật + karaoke."""
+    """Tổng hợp 1 khung hình động: backdrop + tween liên tục + prop/biểu đồ + nhân vật + karaoke."""
     frame = bg_img.copy()
     w, h = frame.size
     pal = resolve_stage_palette(domain, theme)
@@ -705,46 +774,44 @@ def render_animated_beat_frame(
             _composite_prop_overlay(frame_rgba, prop_img, aspect=aspect, t_sec=t_sec, pal=pal)
 
         if char_img is not None:
-            eff_char = char_img
-            if interaction == "point_chart":
-                target_h = int(h * 0.38)
-                if eff_char.height > target_h:
-                    sc = target_h / max(1, eff_char.height)
-                    eff_char = eff_char.resize(
-                        (max(32, int(round(eff_char.width * sc))), target_h),
-                        Image.Resampling.LANCZOS,
-                    )
-                base_x = int(w * 0.24) - eff_char.width // 2
-                base_y = h - eff_char.height - (220 if aspect == "9:16" else 140)
-            elif interaction == "hold_prop":
-                center_x = int(w * (0.34 if aspect == "9:16" else 0.38))
-                base_x = center_x - eff_char.width // 2
-                base_y = h - eff_char.height - (220 if aspect == "9:16" else 160)
-            elif interaction == "versus_split":
-                base_x = (w - eff_char.width) // 2
-                base_y = h - eff_char.height - (220 if aspect == "9:16" else 140)
-            elif aspect == "9:16":
-                base_x = (w - eff_char.width) // 2
-                base_y = h - eff_char.height - 220
+            target_x, target_y, target_scale = compute_beat_character_target(
+                w,
+                h,
+                char_img.width,
+                char_img.height,
+                interaction=interaction,
+                aspect=aspect,
+            )
+            if prev_stage_state is not None and tween_dur > 0 and t_sec < tween_dur:
+                p = _ease_in_out(t_sec / tween_dur)
+                base_x = prev_stage_state.x + (target_x - prev_stage_state.x) * p
+                base_y = prev_stage_state.y + (target_y - prev_stage_state.y) * p
+                cur_scale = prev_stage_state.scale + (target_scale - prev_stage_state.scale) * p
             else:
-                base_x = 90
-                base_y = (h - eff_char.height) // 2 + 40
+                base_x, base_y, cur_scale = target_x, target_y, target_scale
+
+            eff_char = char_img
+            if abs(cur_scale - 1.0) > 0.01:
+                nw = max(32, int(round(char_img.width * cur_scale)))
+                nh = max(32, int(round(char_img.height * cur_scale)))
+                eff_char = char_img.resize((nw, nh), Image.Resampling.LANCZOS)
 
             dx, dy = 0.0, 0.0
-            if beat.motion == "slide_left":
+            if beat.motion == "slide_left" and prev_stage_state is None:
                 p = _ease_in_out(min(1.0, t_sec / 0.35))
                 dx = (1.0 - p) * (w * 0.45)
-            elif beat.motion == "slide_right":
+            elif beat.motion == "slide_right" and prev_stage_state is None:
                 p = _ease_in_out(min(1.0, t_sec / 0.35))
                 dx = -(1.0 - p) * (w * 0.45)
             elif beat.motion == "shake":
                 dx = math.sin(t_sec * 36.0) * 10.0
-            elif beat.motion == "float":
-                dy = math.sin(t_sec * 3.0) * 12.0
-            elif beat.motion == "bounce":
-                dy = -abs(math.sin(t_sec * 6.0)) * 14.0
+            elif not is_puppet:
+                if beat.motion == "float":
+                    dy = math.sin(t_sec * 3.0) * 12.0
+                elif beat.motion == "bounce":
+                    dy = -abs(math.sin(t_sec * 6.0)) * 14.0
+                dy += math.sin(t_sec * 4.2) * 3.0 - (mouth_open * 6.0) + extra_dy
 
-            dy += math.sin(t_sec * 4.2) * 3.0 - (mouth_open * 6.0) + extra_dy
             px = int(round(base_x + dx))
             py = int(round(base_y + dy))
 
@@ -752,15 +819,21 @@ def render_animated_beat_frame(
             shadow_draw = ImageDraw.Draw(frame_rgba)
             sx0 = px + int(eff_char.width * 0.2)
             sx1 = px + int(eff_char.width * 0.8)
-            sy0 = base_y + eff_char.height - 26
-            sy1 = base_y + eff_char.height + 6
+            sy0 = int(round(base_y)) + eff_char.height - 26
+            sy1 = int(round(base_y)) + eff_char.height + 6
             shadow_draw.ellipse((sx0, sy0, sx1, sy1), fill=(15, 23, 42, 42))
 
             frame_rgba.alpha_composite(eff_char, (px, py))
             if eff_char is not char_img:
                 eff_char.close()
 
-        draw_karaoke_strip(frame_rgba, word_timings, t_sec, aspect=aspect)
+        draw_karaoke_strip(
+            frame_rgba,
+            word_timings,
+            t_sec,
+            aspect=aspect,
+            spoken_segments=spoken_segments,
+        )
         return frame_rgba.convert("RGB")
     finally:
         frame_rgba.close()
@@ -776,12 +849,13 @@ def render_beat_layers(
     library_dir: Path,
     assets_dir: Path,
     project_dir: Path | None = None,
+    domain: str = "paper_classic",
 ) -> tuple[Path, Path | None]:
     """Vẽ lớp nền + bảng minh họa (`bg.png`) và nhân vật (`char.png`), giải phóng RAM ngay."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     w, h = STICKV_ASPECT_SIZES[aspect]
-    pal = THEME_PALETTES[theme]
+    pal = resolve_stage_palette(domain, theme)
 
     bg_path = out_dir / f"{beat.id}_bg.png"
     char_path: Path | None = out_dir / f"{beat.id}_char.png"

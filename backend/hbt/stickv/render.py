@@ -32,12 +32,18 @@ from hbt.stickv.audio import (
     align_beat_karaoke,
     compute_pause_after,
     extract_wav_rms_envelope,
+    load_beat_spoken_segments,
     mix_stickv_audio,
     synth_stickv_beats_audio,
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
-from hbt.stickv.stage import render_animated_beat_frame, render_beat_layers
+from hbt.stickv.stage import (
+    BeatStageState,
+    compute_beat_character_target,
+    render_animated_beat_frame,
+    render_beat_layers,
+)
 
 
 def _stream_beat_frames_to_ffmpeg(
@@ -58,20 +64,27 @@ def _stream_beat_frames_to_ffmpeg(
     animation_mode: str = "auto",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
+    global_frame_offset: int = 0,
+    n_frames_override: int | None = None,
+    prev_stage_state: BeatStageState | None = None,
+    stage_state_out: dict[str, Any] | None = None,
+    backdrop_renderer: BackdropRenderer | None = None,
 ) -> Path:
-    """Stream từng khung hình RGB (backdrop động + animator + prop + karaoke) vào FFmpeg stdin."""
+    """Stream từng khung hình RGB (backdrop liên tục + tween + animator + karaoke) vào FFmpeg."""
     dur = max(1.0, float(beat.duration_sec or 2.0))
-    n_frames = max(1, int(round(dur * fps)))
+    n_frames = n_frames_override if n_frames_override is not None else max(1, int(round(dur * fps)))
     rms_env = extract_wav_rms_envelope(wav_path, fps, dur)
     pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
     lead_in = LEAD_IN_SILENCE_S * pause_scale
     speech_end = max(lead_in + 0.3, dur - pause_after)
+    spoken_segs = load_beat_spoken_segments(wav_path)
     word_timings = align_beat_karaoke(
         beat.narration,
         wav_path,
         dur,
         lead_in_s=lead_in,
         pause_after_s=pause_after,
+        spoken_segments=spoken_segs,
     )
 
     cmd = [
@@ -98,7 +111,10 @@ def _stream_beat_frames_to_ffmpeg(
     ]
 
     norm_domain = normalize_domain(domain)
-    backdrop = BackdropRenderer(norm_domain, w, h)
+    owns_backdrop = backdrop_renderer is None
+    backdrop = (
+        backdrop_renderer if backdrop_renderer is not None else BackdropRenderer(norm_domain, w, h)
+    )
     char_img: Image.Image | None = None
     if char_png is not None and char_png.is_file():
         with Image.open(char_png) as raw_char:
@@ -126,6 +142,8 @@ def _stream_beat_frames_to_ffmpeg(
         beat_id=beat.id,
         animation_mode=animation_mode,
         wav_path=wav_path,
+        prev_pose_state=prev_stage_state.pose_state if prev_stage_state is not None else None,
+        global_t_offset=global_frame_offset / max(1, fps),
     )
 
     prop_img: Image.Image | None = None
@@ -137,6 +155,7 @@ def _stream_beat_frames_to_ffmpeg(
             with Image.open(prop_path) as raw_prop:
                 prop_img = raw_prop.convert("RGBA")
 
+    last_char_size: tuple[int, int] | None = None
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -149,11 +168,14 @@ def _stream_beat_frames_to_ffmpeg(
             if cancel is not None and f_idx % 8 == 0:
                 cancel.check()
             t_sec = f_idx / fps
+            global_t = (global_frame_offset + f_idx) / fps
             mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
             if interaction == "versus_split":
                 animator.facing = "left" if t_sec < dur * 0.5 else "right"
-            bg_frame = backdrop.render_frame(t_sec)
+            bg_frame = backdrop.render_frame(global_t)
             anim_char, motion = animator.frame_at(f_idx, t_sec)
+            if anim_char is not None:
+                last_char_size = anim_char.size
             try:
                 frame = render_animated_beat_frame(
                     bg_img=bg_frame,
@@ -169,6 +191,9 @@ def _stream_beat_frames_to_ffmpeg(
                     duration_sec=dur,
                     draw_board=True,
                     extra_dy=motion.dy if motion.used_fallback else 0.0,
+                    prev_stage_state=prev_stage_state,
+                    spoken_segments=spoken_segs or None,
+                    is_puppet=motion.phase == "puppet",
                 )
             finally:
                 bg_frame.close()
@@ -185,10 +210,26 @@ def _stream_beat_frames_to_ffmpeg(
                 f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
                 f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
             )
+        if stage_state_out is not None:
+            cw, ch_h = last_char_size or (
+                (char_img.width, char_img.height) if char_img is not None else (240, target_char_h)
+            )
+            tx, ty, tsc = compute_beat_character_target(
+                w,
+                h,
+                cw,
+                ch_h,
+                interaction=interaction,
+                aspect=aspect,  # type: ignore[arg-type]
+            )
+            stage_state_out["state"] = BeatStageState(
+                x=tx, y=ty, scale=tsc, pose_state=animator.last_pose_state
+            )
     finally:
         if proc.poll() is None:
             proc.kill()
-        backdrop.close()
+        if owns_backdrop:
+            backdrop.close()
         animator.close()
         if char_img is not None:
             char_img.close()
@@ -240,6 +281,11 @@ def _render_single_beat_clip(
     animation_mode: str = "auto",
     pause_scale: float = 1.0,
     cancel: CancelToken | None = None,
+    global_frame_offset: int = 0,
+    n_frames_override: int | None = None,
+    prev_stage_state: BeatStageState | None = None,
+    stage_state_out: dict[str, Any] | None = None,
+    backdrop_renderer: BackdropRenderer | None = None,
 ) -> Path:
     dur = max(1.0, float(beat.duration_sec or 2.0))
     media_file = _resolve_beat_video_clip(
@@ -286,6 +332,11 @@ def _render_single_beat_clip(
         animation_mode=animation_mode,
         pause_scale=pause_scale,
         cancel=cancel,
+        global_frame_offset=global_frame_offset,
+        n_frames_override=n_frames_override,
+        prev_stage_state=prev_stage_state,
+        stage_state_out=stage_state_out,
+        backdrop_renderer=backdrop_renderer,
     )
 
 
@@ -438,47 +489,72 @@ def render_stickv(
 
         beat_clips: list[Path] = []
         total_b = len(beats)
-        for idx, (beat, (wav_p, _dur)) in enumerate(zip(beats, beat_wavs, strict=True), start=1):
-            check_cancel()
-            pct = 35.0 + (idx / max(1, total_b)) * 45.0
-            emit(pct, f"Đang dựng phân cảnh {idx}/{total_b} (Chương {beat.chapter})...")
+        norm_domain = normalize_domain(getattr(project, "domain", "paper_classic"))
+        shared_backdrop = BackdropRenderer(norm_domain, w, h)
+        global_frame_offset = 0
+        acc_audio_t = 0.0
+        prev_stage_state: BeatStageState | None = None
+        try:
+            for idx, (beat, (wav_p, dur_b)) in enumerate(
+                zip(beats, beat_wavs, strict=True), start=1
+            ):
+                check_cancel()
+                pct = 35.0 + (idx / max(1, total_b)) * 45.0
+                emit(pct, f"Đang dựng phân cảnh {idx}/{total_b} (Chương {beat.chapter})...")
 
-            bg_png, char_png = render_beat_layers(
-                beat,
-                aspect=project.aspect,
-                theme=project.theme,
-                out_dir=chunks_dir,
-                library_dir=library_dir,
-                assets_dir=assets_dir,
-                project_dir=project_dir,
-            )
-            clip_mp4 = chunks_dir / f"beat_{idx:03d}.mp4"
-            _render_single_beat_clip(
-                beat=beat,
-                wav_path=wav_p,
-                bg_png=bg_png,
-                char_png=char_png,
-                out_mp4=clip_mp4,
-                w=w,
-                h=h,
-                fps=fps,
-                aspect=project.aspect,
-                project_dir=project_dir,
-                library_dir=library_dir,
-                assets_dir=assets_dir,
-                domain=getattr(project, "domain", "paper_classic"),
-                theme=project.theme,
-                animation_mode=getattr(project, "animation_mode", "auto"),
-                pause_scale=pause_scale,
-                cancel=cancel,
-            )
-            beat_clips.append(clip_mp4)
+                bg_png, char_png = render_beat_layers(
+                    beat,
+                    aspect=project.aspect,
+                    theme=project.theme,
+                    out_dir=chunks_dir,
+                    library_dir=library_dir,
+                    assets_dir=assets_dir,
+                    project_dir=project_dir,
+                    domain=norm_domain,
+                )
+                clip_mp4 = chunks_dir / f"beat_{idx:03d}.mp4"
+                target_total_frames = max(
+                    global_frame_offset + 1, int(round((acc_audio_t + dur_b) * fps))
+                )
+                n_frames_beat = target_total_frames - global_frame_offset
+                state_box: dict[str, Any] = {}
+                _render_single_beat_clip(
+                    beat=beat,
+                    wav_path=wav_p,
+                    bg_png=bg_png,
+                    char_png=char_png,
+                    out_mp4=clip_mp4,
+                    w=w,
+                    h=h,
+                    fps=fps,
+                    aspect=project.aspect,
+                    project_dir=project_dir,
+                    library_dir=library_dir,
+                    assets_dir=assets_dir,
+                    domain=norm_domain,
+                    theme=project.theme,
+                    animation_mode=getattr(project, "animation_mode", "auto"),
+                    pause_scale=pause_scale,
+                    cancel=cancel,
+                    global_frame_offset=global_frame_offset,
+                    n_frames_override=n_frames_beat,
+                    prev_stage_state=prev_stage_state,
+                    stage_state_out=state_box,
+                    backdrop_renderer=shared_backdrop,
+                )
+                beat_clips.append(clip_mp4)
+                global_frame_offset += n_frames_beat
+                acc_audio_t += float(dur_b)
+                if isinstance(state_box.get("state"), BeatStageState):
+                    prev_stage_state = state_box["state"]
 
-            bg_png.unlink(missing_ok=True)
-            if char_png is not None:
-                char_png.unlink(missing_ok=True)
-            if idx % 3 == 0:
-                gc.collect()
+                bg_png.unlink(missing_ok=True)
+                if char_png is not None:
+                    char_png.unlink(missing_ok=True)
+                if idx % 3 == 0:
+                    gc.collect()
+        finally:
+            shared_backdrop.close()
 
         emit(85.0, "Đang nối chương & gắn watermark HBT...")
         check_cancel()

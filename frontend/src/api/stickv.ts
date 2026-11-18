@@ -1,5 +1,11 @@
 import { apiRequest } from './client';
-import type { StickvAspect, StickvProject, StickvTheme } from './types';
+import type {
+  StickvAnimationMode,
+  StickvAspect,
+  StickvDomain,
+  StickvProject,
+  StickvTheme,
+} from './types';
 
 export interface GeminiModelOption {
   id: string;
@@ -24,6 +30,9 @@ export const stickvApi = {
   create: (body: {
     title: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
     target_minutes?: number;
@@ -33,6 +42,9 @@ export const stickvApi = {
   generate: (body: {
     idea: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
     target_minutes?: number;
@@ -73,6 +85,9 @@ export const stickvApi = {
   importJson: (body: {
     raw_json: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
   }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-json', { json: body }),
@@ -81,6 +96,9 @@ export const stickvApi = {
     raw_text: string;
     title?: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
   }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-script', { json: body }),

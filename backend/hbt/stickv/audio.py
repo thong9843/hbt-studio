@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import wave
@@ -77,39 +78,64 @@ def _assemble_padded_beat_wav(
     lead_s: float,
     gap_s: float,
     tail_s: float,
-) -> float:
-    """Ghép các câu con kèm khoảng lặng đầu (0.10s), giữa câu (0.30s) và cuối beat (0.25-0.45s)."""
+    sentences: list[str] | None = None,
+) -> tuple[float, list[tuple[float, float, str]]]:
+    """Ghép các câu con kèm khoảng lặng đầu/giữa/cuối và trả về `(total_dur, spoken_segments)`."""
     chunks: list[bytes] = []
     sr = 24000
     ch = 1
     sw = 2
 
-    valid_wavs = [p for p in sub_wavs if p.is_file() and p.stat().st_size > 44]
-    if valid_wavs:
+    valid_pairs: list[tuple[Path, str]] = []
+    sent_list = sentences or []
+    for idx, p in enumerate(sub_wavs):
+        if p.is_file() and p.stat().st_size > 44:
+            txt = sent_list[idx] if idx < len(sent_list) else ""
+            valid_pairs.append((p, txt))
+
+    if valid_pairs:
         try:
-            with wave.open(str(valid_wavs[0]), "rb") as wf0:
+            with wave.open(str(valid_pairs[0][0]), "rb") as wf0:
                 sr = wf0.getframerate()
                 ch = wf0.getnchannels()
                 sw = wf0.getsampwidth()
         except (wave.Error, EOFError):
             out_wav.parent.mkdir(parents=True, exist_ok=True)
-            out_wav.write_bytes(valid_wavs[0].read_bytes())
-            return round(lead_s + tail_s + 0.5, 3)
+            out_wav.write_bytes(valid_pairs[0][0].read_bytes())
+            dur = round(lead_s + tail_s + 0.5, 3)
+            txt = valid_pairs[0][1]
+            segs = [(round(lead_s, 4), round(lead_s + 0.5, 4), txt)] if txt else []
+            return dur, segs
 
-    bytes_per_sec = sr * ch * sw
+    bytes_per_sec = max(1, sr * ch * sw)
+    acc_bytes = 0
+    spoken_segments: list[tuple[float, float, str]] = []
 
     def _silence_bytes(sec: float) -> bytes:
         n_samples = max(0, int(round(sec * sr)))
         return b"\x00" * (n_samples * ch * sw)
 
-    chunks.append(_silence_bytes(lead_s))
-    for i, wp in enumerate(valid_wavs):
+    lead_b = _silence_bytes(lead_s)
+    chunks.append(lead_b)
+    acc_bytes += len(lead_b)
+
+    for i, (wp, sent_txt) in enumerate(valid_pairs):
         with wave.open(str(wp), "rb") as wf:
             frames = wf.readframes(wf.getnframes())
-            chunks.append(frames)
-        if i < len(valid_wavs) - 1:
-            chunks.append(_silence_bytes(gap_s))
-    chunks.append(_silence_bytes(tail_s))
+        seg_start = round(acc_bytes / bytes_per_sec, 4)
+        chunks.append(frames)
+        acc_bytes += len(frames)
+        seg_end = round(acc_bytes / bytes_per_sec, 4)
+        if sent_txt:
+            spoken_segments.append((seg_start, seg_end, sent_txt))
+        if i < len(valid_pairs) - 1:
+            gap_b = _silence_bytes(gap_s)
+            chunks.append(gap_b)
+            acc_bytes += len(gap_b)
+
+    tail_b = _silence_bytes(tail_s)
+    chunks.append(tail_b)
+    acc_bytes += len(tail_b)
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     payload = b"".join(chunks)
@@ -118,7 +144,44 @@ def _assemble_padded_beat_wav(
         out_wf.setsampwidth(sw)
         out_wf.setframerate(sr)
         out_wf.writeframes(payload)
-    return round(len(payload) / max(1, bytes_per_sec), 3)
+    return round(len(payload) / bytes_per_sec, 3), spoken_segments
+
+
+def _segments_sidecar_path(wav_path: Path) -> Path:
+    return wav_path.with_suffix(".segments.json")
+
+
+def load_beat_spoken_segments(wav_path: Path) -> list[tuple[float, float, str]]:
+    """Đọc danh sách các đoạn nói thật `(start_s, end_s, text)` đã ghi cạnh file WAV."""
+    sc = _segments_sidecar_path(wav_path)
+    if not sc.is_file():
+        return []
+    try:
+        raw = json.loads(sc.read_text(encoding="utf-8"))
+        out: list[tuple[float, float, str]] = []
+        if isinstance(raw, list):
+            for it in raw:
+                if isinstance(it, dict) and str(it.get("text") or "").strip():
+                    st = float(it.get("start_s") or 0.0)
+                    et = float(it.get("end_s") or st)
+                    if et > st:
+                        out.append((round(st, 4), round(et, 4), str(it["text"]).strip()))
+        return out
+    except Exception:
+        return []
+
+
+def build_global_spoken_segments(
+    beat_wavs: list[tuple[Path, float]],
+) -> list[tuple[float, float, str]]:
+    """Chuyển `spoken_segments` của từng beat sang trục thời gian toàn cục của video."""
+    global_segs: list[tuple[float, float, str]] = []
+    cur_t = 0.0
+    for wav_p, dur in beat_wavs:
+        for st, et, txt in load_beat_spoken_segments(wav_p):
+            global_segs.append((round(cur_t + st, 4), round(cur_t + et, 4), txt))
+        cur_t += float(dur)
+    return global_segs
 
 
 def resolve_sfx_file(
@@ -206,8 +269,18 @@ def align_beat_karaoke(
     *,
     lead_in_s: float = LEAD_IN_SILENCE_S,
     pause_after_s: float = PAUSE_END_SENTENCE_S,
+    spoken_segments: list[tuple[float, float, str]] | None = None,
 ) -> list[tuple[str, float, float]]:
-    """Khóa mốc Karaoke vào đúng vùng có tiếng nói thật bằng `align_silence`, bỏ khoảng lặng."""
+    """Khóa mốc Karaoke chặt vào từng câu trong `spoken_segments` (không lấn khoảng lặng)."""
+    segs = spoken_segments if spoken_segments is not None else load_beat_spoken_segments(wav_path)
+    if segs:
+        timings: list[tuple[str, float, float]] = []
+        for seg_start, seg_end, seg_text in segs:
+            seg_dur = max(0.15, float(seg_end) - float(seg_start))
+            timings.extend(compute_word_timings(seg_text, seg_dur, start_offset_s=float(seg_start)))
+        if timings:
+            return timings
+
     words = [w for w in (narration or "").split() if w]
     if not words:
         return []
@@ -241,7 +314,7 @@ def synth_stickv_beats_audio(
     lead_s = round(LEAD_IN_SILENCE_S * scale, 3)
     gap_s = round(SENTENCE_GAP_S * scale, 3)
 
-    beat_sub_wavs: list[list[Path]] = []
+    beat_sub_wavs: list[tuple[list[Path], list[str]]] = []
     synth_items: list[SynthItem] = []
 
     if voice_provider is not None:
@@ -266,7 +339,7 @@ def synth_stickv_beats_audio(
                 sp = audio_dir / f"{beat.id}_s{s_idx}.wav"
                 sub_paths.append(sp)
                 synth_items.append(SynthItem(text=sent, voice_id=chosen_voice, out=sp))
-            beat_sub_wavs.append(sub_paths)
+            beat_sub_wavs.append((sub_paths, sents))
         if synth_items:
             voice_provider.synthesize_many(synth_items)
     else:
@@ -277,25 +350,34 @@ def synth_stickv_beats_audio(
                 sp = audio_dir / f"{beat.id}_s{s_idx}.wav"
                 _write_fallback_wav(sp, sent)
                 sub_paths.append(sp)
-            beat_sub_wavs.append(sub_paths)
+            beat_sub_wavs.append((sub_paths, sents))
 
     results: list[tuple[Path, float]] = []
-    for beat, sub_paths in zip(beats, beat_sub_wavs, strict=True):
+    for beat, (sub_paths, sents) in zip(beats, beat_sub_wavs, strict=True):
         if voice_provider is not None and sub_paths:
             for sp in sub_paths:
                 if not sp.is_file() or sp.stat().st_size <= 44:
                     raise RuntimeError(f"VieNeu-TTS không tạo được file giọng cho beat {beat.id}")
         wav_p = audio_dir / f"{beat.id}.wav"
         tail_s = compute_pause_after(beat.narration, pause_scale=scale)
-        assembled_dur = _assemble_padded_beat_wav(
+        assembled_dur, spoken_segs = _assemble_padded_beat_wav(
             sub_paths,
             wav_p,
             lead_s=lead_s,
             gap_s=gap_s,
             tail_s=tail_s,
+            sentences=sents,
         )
         for sp in sub_paths:
             sp.unlink(missing_ok=True)
+        _segments_sidecar_path(wav_p).write_text(
+            json.dumps(
+                [{"start_s": st, "end_s": et, "text": tx} for st, et, tx in spoken_segs],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         probed_dur = measure_audio_duration(wav_p)
         anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
         beat.duration_sec = anchored_dur

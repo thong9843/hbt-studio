@@ -77,7 +77,7 @@ export function RenderPlayerModal({
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  href={item.video_url}
+                  href={`${item.video_url}${item.video_url.includes('?') ? '&' : '?'}download=1`}
                   download={`${item.slug || 'video'}.mp4`}
                   className="ui-btn ui-btn-export ui-btn-sm"
                 >

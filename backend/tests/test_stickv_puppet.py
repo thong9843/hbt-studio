@@ -326,3 +326,39 @@ def test_puppet_api_upload_slots_and_preview(tmp_path: Path) -> None:
     with Image.open(BytesIO(r_prev.content)) as im:
         assert im.mode == "RGBA"
         assert im.height == 480
+
+
+def test_continuous_cross_beat_pose_tweening_and_3level_mouth(tmp_path: Path) -> None:
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+
+    # Kiểm tra 3 mức khẩu hình: closed -> half_open -> open
+    s_closed, _, sy_c = compute_mouth_transform(0.08)
+    s_half, _, sy_h = compute_mouth_transform(0.25)
+    s_open, _, sy_o = compute_mouth_transform(0.80)
+    assert s_closed == "mouth_closed" and sy_c == 1.0
+    assert s_half == "mouth_open" and 0.55 <= sy_h <= 0.78
+    assert s_open == "mouth_open" and sy_o > 1.0
+
+    # Beat 1 kết thúc ở trạng thái vung tay lớn; Beat 2 nhận prev_pose_state không reset về 0
+    prev_state = PuppetPoseState(head_angle=-10.0, arm_l_angle=-42.0, arm_r_angle=38.0)
+    rig2 = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="explain",
+        anim_loop="talk_explain",
+        fps=30,
+        rms_env=[0.5] * 30,
+        prev_pose_state=prev_state,
+        global_t_offset=2.5,
+    )
+    try:
+        f0 = rig2.render_frame(0, 0.0)
+        f0.close()
+        # Frame đầu tiên của Beat 2 vẫn giữ quán tính gần prev_state (không nhảy về 0 ngay)
+        assert rig2.last_pose_state.arm_l_angle < -20.0
+        assert rig2.last_pose_state.head_angle < -5.0
+    finally:
+        rig2.close()

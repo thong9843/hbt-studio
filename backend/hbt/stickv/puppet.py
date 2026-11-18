@@ -535,11 +535,18 @@ def compute_smoothed_rms(wav_path: Path, fps: int, duration_sec: float) -> list[
 
 
 def compute_mouth_transform(env_val: float) -> tuple[str, float, float]:
-    """Trả về `(mouth_slot, scale_x, scale_y)` theo quy tắc ngưỡng 0.14 & Squash & Stretch."""
+    """Trả về `(mouth_slot, scale_x, scale_y)` qua 3 mức: closed -> half_open -> open."""
     if env_val < 0.14:
         return "mouth_closed", 1.0, 1.0
-    t = min(1.0, max(0.0, (env_val - 0.14) / 0.70))
-    scale_y = 0.55 + 0.75 * t
+    if env_val < 0.40:
+        # Mức mở vừa (half_open ~55%-78%) giúp không nhấp nháy ở âm lượng nhẹ
+        u = (env_val - 0.14) / 0.26
+        scale_y = 0.55 + 0.23 * u
+        scale_x = 1.03 - 0.04 * u
+        return "mouth_open", round(scale_x, 4), round(scale_y, 4)
+    # Mức mở lớn (open 80%-128%) theo Squash & Stretch
+    t = min(1.0, (env_val - 0.40) / 0.45)
+    scale_y = 0.78 + 0.50 * t
     scale_x = 1.04 - 0.12 * (scale_y - 0.55)
     return "mouth_open", round(scale_x, 4), round(scale_y, 4)
 
@@ -612,8 +619,33 @@ class PuppetPoseState:
     torso_scale_y: float = 1.0
 
 
+def _hermite_smoothstep(t: float) -> float:
+    u = max(0.0, min(1.0, float(t)))
+    return u * u * (3.0 - 2.0 * u)
+
+
+class _SpringChannel:
+    """Bộ lọc giảm chấn lò xo tới hạn (critically damped spring) ổn định mọi fps."""
+
+    def __init__(self, initial: float = 0.0) -> None:
+        self.pos = float(initial)
+        self.vel = 0.0
+
+    def step(self, target: float, dt: float, omega: float = 12.0) -> float:
+        f = 1.0 + 2.0 * omega * dt
+        oo = omega * omega
+        hoo = dt * oo
+        hhoo = dt * hoo
+        det_inv = 1.0 / (f + hhoo)
+        x = f * self.pos + dt * self.vel + hhoo * target
+        v = self.vel + hoo * (target - self.pos)
+        self.pos = x * det_inv
+        self.vel = v * det_inv
+        return self.pos
+
+
 def lerp_pose_state(a: PuppetPoseState, b: PuppetPoseState, alpha: float) -> PuppetPoseState:
-    t = max(0.0, min(1.0, float(alpha)))
+    t = _hermite_smoothstep(alpha)
     return PuppetPoseState(
         head_angle=a.head_angle + (b.head_angle - a.head_angle) * t,
         head_dx=a.head_dx + (b.head_dx - a.head_dx) * t,
@@ -639,18 +671,20 @@ def evaluate_action_curve(action: str, t_sec: float, env_val: float) -> PuppetPo
             torso_scale_y=1.0 + 0.012 * math.sin(2.2 * t),
         )
     if act in ("point_board", "point_chart"):
+        phrase = math.sin(2.4 * t) * (0.4 + 0.6 * env)
         return PuppetPoseState(
-            head_angle=-6.0 - 3.0 * env,
-            arm_l_angle=10.0,
-            arm_r_angle=-52.0 + 6.0 * math.sin(5.0 * t),
-            torso_angle=2.0,
+            head_angle=-6.0 - 3.0 * env + 1.5 * math.sin(2.0 * t),
+            arm_l_angle=10.0 + 4.0 * phrase,
+            arm_r_angle=-52.0 + 9.0 * phrase,
+            torso_angle=2.0 + 0.6 * math.sin(1.8 * t),
         )
     if act == "hold_prop":
+        phrase = math.sin(2.6 * t) * (0.4 + 0.6 * env)
         return PuppetPoseState(
-            head_angle=5.0 - 2.0 * env,
-            arm_l_angle=10.0,
-            arm_r_angle=-42.0 + 4.0 * math.sin(3.0 * t),
-            torso_dy=-2.0 * env,
+            head_angle=5.0 - 2.0 * env + 1.2 * math.sin(2.0 * t),
+            arm_l_angle=10.0 + 3.5 * phrase,
+            arm_r_angle=-42.0 + 7.5 * phrase,
+            torso_dy=-2.5 * env,
         )
     if act in ("talk_excited", "celebrate"):
         return PuppetPoseState(
@@ -727,6 +761,8 @@ class PuppetRig:
         speech_start: float = 0.0,
         speech_end: float = 2.0,
         rms_env: list[float] | None = None,
+        prev_pose_state: PuppetPoseState | None = None,
+        global_t_offset: float = 0.0,
     ) -> None:
         self.target_height = max(120, int(target_height))
         self.pose = pose
@@ -738,6 +774,22 @@ class PuppetRig:
         self.speech_start = max(0.0, float(speech_start))
         self.speech_end = max(self.speech_start, float(speech_end))
         self.env = smooth_rms_envelope(rms_env or [])
+        self.prev_pose_state = prev_pose_state
+        self.global_t_offset = max(0.0, float(global_t_offset))
+        self.tween_dur = 0.40 if prev_pose_state is not None else 0.0
+        init_st = prev_pose_state or PuppetPoseState()
+        self._springs = {
+            "head_angle": _SpringChannel(init_st.head_angle),
+            "head_dx": _SpringChannel(init_st.head_dx),
+            "arm_l_angle": _SpringChannel(init_st.arm_l_angle),
+            "arm_r_angle": _SpringChannel(init_st.arm_r_angle),
+            "torso_angle": _SpringChannel(init_st.torso_angle),
+            "torso_dy": _SpringChannel(init_st.torso_dy),
+            "torso_scale_y": _SpringChannel(init_st.torso_scale_y),
+        }
+        self._follow_history: list[PuppetPoseState] = [init_st, init_st, init_st]
+        self._mouth_sy_smooth: float = 1.0
+        self.last_pose_state: PuppetPoseState = init_st
 
         slot_paths = find_puppet_slot_paths(library_dir, assets_dir)
         base_path = slot_paths["base_character"][0]
@@ -805,26 +857,56 @@ class PuppetRig:
             return "hold_prop"
         return self.anim_loop
 
-    def _pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
+    def _raw_pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
         loop_action = self._select_loop_action()
+        gt = self.global_t_offset + t_sec
 
         if t_sec > self.speech_end:
-            idle_state = evaluate_action_curve("idle_breathe", t_sec, 0.0)
+            idle_state = evaluate_action_curve("idle_breathe", gt, 0.0)
             dt_idle = t_sec - self.speech_end
             if dt_idle < self.blend_dur:
-                prev_state = evaluate_action_curve(loop_action, t_sec, env_val)
+                prev_state = evaluate_action_curve(loop_action, gt, env_val)
                 return lerp_pose_state(prev_state, idle_state, dt_idle / self.blend_dur)
             return idle_state
 
         if self.anim_oneshot and t_sec < self.oneshot_dur:
-            return evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
+            target_st = evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
+        else:
+            loop_state = evaluate_action_curve(loop_action, gt, env_val)
+            if self.anim_oneshot and t_sec < (self.oneshot_dur + self.blend_dur):
+                alpha = (t_sec - self.oneshot_dur) / self.blend_dur
+                oneshot_tail = evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
+                target_st = lerp_pose_state(oneshot_tail, loop_state, alpha)
+            else:
+                target_st = loop_state
 
-        loop_state = evaluate_action_curve(loop_action, t_sec, env_val)
-        if self.anim_oneshot and t_sec < (self.oneshot_dur + self.blend_dur):
-            alpha = (t_sec - self.oneshot_dur) / self.blend_dur
-            oneshot_tail = evaluate_action_curve(self.anim_oneshot, t_sec, env_val)
-            return lerp_pose_state(oneshot_tail, loop_state, alpha)
-        return loop_state
+        if self.prev_pose_state is not None and t_sec < self.tween_dur:
+            return lerp_pose_state(self.prev_pose_state, target_st, t_sec / self.tween_dur)
+        return target_st
+
+    def _pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
+        raw_target = self._raw_pose_state_at(t_sec, env_val)
+        dt = 1.0 / self.fps
+        # Follow-through (~2-3 frames lag): thân dẫn -> đầu trễ 2 frame -> tay trễ 3 frame
+        self._follow_history.append(raw_target)
+        if len(self._follow_history) > 4:
+            self._follow_history.pop(0)
+        head_lag = self._follow_history[-2] if len(self._follow_history) >= 2 else raw_target
+        arm_lag = self._follow_history[0]
+
+        smoothed = PuppetPoseState(
+            head_angle=self._springs["head_angle"].step(head_lag.head_angle, dt, omega=11.0),
+            head_dx=self._springs["head_dx"].step(head_lag.head_dx, dt, omega=12.0),
+            arm_l_angle=self._springs["arm_l_angle"].step(arm_lag.arm_l_angle, dt, omega=9.5),
+            arm_r_angle=self._springs["arm_r_angle"].step(arm_lag.arm_r_angle, dt, omega=9.5),
+            torso_angle=self._springs["torso_angle"].step(raw_target.torso_angle, dt, omega=14.0),
+            torso_dy=self._springs["torso_dy"].step(raw_target.torso_dy, dt, omega=14.0),
+            torso_scale_y=self._springs["torso_scale_y"].step(
+                raw_target.torso_scale_y, dt, omega=13.0
+            ),
+        )
+        self.last_pose_state = smoothed
+        return smoothed
 
     def _build_head_layer(self, frame_idx: int, env_val: float) -> Image.Image:
         """Lắp Eyes & Mouth vào hệ tọa độ cục bộ của Head trước khi xoay khối đầu."""
@@ -845,8 +927,10 @@ class PuppetRig:
             head.alpha_composite(eye_resized, (ex, ey))
             eye_resized.close()
 
-        # 2. Mouth layer (ngưỡng 0.14 + Squash & Stretch)
-        mslot, msx, msy = compute_mouth_transform(env_val)
+        # 2. Mouth layer (3 mức closed -> half_open -> open + làm mượt EMA chống nhấp nháy)
+        mslot, msx, msy_target = compute_mouth_transform(env_val)
+        self._mouth_sy_smooth = 0.60 * msy_target + 0.40 * self._mouth_sy_smooth
+        msy = self._mouth_sy_smooth if mslot == "mouth_open" else 1.0
         mouth_src = self.mouths.get(mslot) or self.mouths.get("mouth_closed")
         if mouth_src is not None:
             base_mw = max(8, int(round(hw * float(self.rig_cfg["mouth_width_ratio"]))))

@@ -215,6 +215,9 @@ export function AssetHubPage() {
   const removeRender = useMutation({
     mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
     onSuccess: (_res, item) => {
+      queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
+        old ? { items: old.items.filter((x) => x.id !== item.id) } : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
       toast.info(`Đã xóa video "${item.title}"`);
       if (previewRender?.id === item.id) setPreviewRender(null);
@@ -528,7 +531,7 @@ export function AssetHubPage() {
                         Xem
                       </Button>
                       <a
-                        href={item.video_url}
+                        href={`${item.video_url}${item.video_url.includes('?') ? '&' : '?'}download=1`}
                         download={`${item.slug || 'video'}.mp4`}
                         className="ui-icon-btn ui-icon-btn-sm bg-soft"
                         title="Tải .mp4"

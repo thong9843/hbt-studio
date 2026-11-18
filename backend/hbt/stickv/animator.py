@@ -13,7 +13,7 @@ from PIL import Image
 
 from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
-from hbt.stickv.puppet import PuppetRig, compute_smoothed_rms, is_puppet_ready
+from hbt.stickv.puppet import PuppetPoseState, PuppetRig, compute_smoothed_rms, is_puppet_ready
 from hbt.stickv.stage import resolve_pose_png
 
 ANIM_VIDEO_EXTS = {".webm", ".mov"}
@@ -283,6 +283,8 @@ class StickmanAnimator:
         beat_id: str = "b001",
         animation_mode: str = "auto",
         wav_path: Path | None = None,
+        prev_pose_state: PuppetPoseState | None = None,
+        global_t_offset: float = 0.0,
     ) -> None:
         self.facing = facing
         self.duration_sec = max(0.5, float(duration_sec))
@@ -316,6 +318,8 @@ class StickmanAnimator:
                     speech_start=self.speech_start,
                     speech_end=self.speech_end,
                     rms_env=puppet_env,
+                    prev_pose_state=prev_pose_state,
+                    global_t_offset=global_t_offset,
                 )
             except Exception:
                 self.puppet_rig = None
@@ -431,6 +435,10 @@ class StickmanAnimator:
         return img, AnimatorMotion(
             dy=dy, tilt_deg=tilt, scale_y=scale_y, phase=phase, used_fallback=True
         )
+
+    @property
+    def last_pose_state(self) -> PuppetPoseState | None:
+        return self.puppet_rig.last_pose_state if self.puppet_rig is not None else None
 
     def close(self) -> None:
         if self.puppet_rig is not None:

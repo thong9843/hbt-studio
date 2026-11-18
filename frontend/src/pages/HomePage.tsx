@@ -274,6 +274,9 @@ export function HomePage() {
   const deleteRenderMut = useMutation({
     mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
     onSuccess: (_res, item) => {
+      queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
+        old ? { items: old.items.filter((x) => x.id !== item.id) } : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
       toast.info(`Đã xóa video "${item.title}"`);
       if (activeRender?.id === item.id) setActiveRender(null);
