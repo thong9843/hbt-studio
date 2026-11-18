@@ -125,5 +125,9 @@ describe('StickvPage', () => {
     const toggle169 = screen.getByRole('button', { name: '16:9 Ngang' });
     fireEvent.click(toggle169);
     expect(screen.getByRole('button', { name: /1920×1080/i })).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Bối cảnh sân khấu')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tâm trạng nhạc')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tương tác sân khấu')).toBeInTheDocument();
   });
 });

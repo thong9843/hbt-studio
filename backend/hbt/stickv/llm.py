@@ -8,11 +8,24 @@ import re
 from typing import Any
 
 from hbt.shared.llm import GEMINI_MODEL, generate_structured_json
+from hbt.stickv.backdrops import normalize_domain
 from hbt.stickv.models import StickvAspect, StickvBeat
 from hbt.stickv.poses_init import DEFAULT_POSES
 
 VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "shake", "float", "static"}
-VALID_BOARD_TYPES = {"none", "bullets", "big_number", "comparison", "flow_steps"}
+VALID_BOARD_TYPES = {
+    "none",
+    "bullets",
+    "big_number",
+    "comparison",
+    "flow_steps",
+    "card",
+    "list",
+    "quote",
+    "bar_compare",
+    "counter_grow",
+}
+VALID_INTERACTIONS = {"none", "hold_prop", "point_chart", "versus_split"}
 VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
 
 
@@ -24,12 +37,18 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
         "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
         "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
-        "để tạo nhịp ngắt tự nhiên, không viết câu ghép dài.\n"
+        "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài.\n"
+        "Phân loại domain phù hợp: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
+        "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
         f"pose: {pose_str}. "
+        "anim_oneshot: null|shock_jump|idea_bulb|point_board|facepalm|nod_agree|celebrate. "
+        "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
+        "interaction: none|hold_prop|point_chart|versus_split (nếu hold_prop thêm prop_query 1-2 từ tiếng Anh). "
         "motion: bounce|slide_left|slide_right|shake|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
-        "board_type: bullets|big_number|comparison|flow_steps|none.\n"
-        "board_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
+        "board_type: bullets|big_number|comparison|flow_steps|bar_compare|counter_grow|card|quote|list|none.\n"
+        "board_data/visual_data: bullets={items:[...],takeaway}, big_number={value,label,sub,takeaway}, "
+        "bar_compare={values:[{label,value}],takeaway}, counter_grow={target,unit,label}, "
         "comparison={left_title,left_items,right_title,right_items,takeaway}, "
         "flow_steps={steps:[...],takeaway}."
     )
@@ -50,9 +69,10 @@ def build_director_prompt(
         f"{sys_p}\n\n"
         f"Chủ đề: {idea}\n"
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
-        'Schema JSON:\n{"title":"Tiêu đề","beats":[{"narration":"1-2 câu tiếng Việt",'
-        '"pose":"explain","facing":"right","motion":"bounce","sfx_tag":"whoosh",'
-        '"board_type":"bullets","board_title":"Tiêu đề bảng",'
+        'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science","music_mood":"curious_science",'
+        '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"explain","anim_oneshot":"idea_bulb",'
+        '"anim_loop":"talk_explain","interaction":"hold_prop","prop_query":"brain","facing":"right",'
+        '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets","board_title":"Tiêu đề bảng",'
         '"board_data":{"items":["Ý 1","Ý 2"],"takeaway":"Chốt lại ngắn"}}]}'
     )
 
@@ -96,6 +116,8 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         if takeaway:
             res["takeaway"] = takeaway
         return res
+    if board_type in ("bar_compare", "counter_grow", "card", "quote", "list"):
+        return dict(raw)
     return {}
 
 
@@ -114,7 +136,7 @@ def sanitize_beats(
     for item in raw_beats:
         if not isinstance(item, dict):
             continue
-        narration = str(item.get("narration") or "").strip()
+        narration = str(item.get("narration") or item.get("text") or "").strip()
         if not narration:
             continue
         pose = str(item.get("pose") or "explain").strip().lower()
@@ -123,12 +145,22 @@ def sanitize_beats(
         motion = str(item.get("motion") or "bounce").strip().lower()
         if motion not in VALID_MOTIONS:
             motion = "bounce"
-        sfx = str(item.get("sfx_tag") or "whoosh").strip().lower()
+        sfx = str(item.get("sfx_tag") or item.get("sfx") or "whoosh").strip().lower()
         if sfx not in VALID_SFX:
             sfx = "whoosh"
-        btype = str(item.get("board_type") or "bullets").strip().lower()
+        btype = str(item.get("board_type") or item.get("visual_type") or "bullets").strip().lower()
         if btype not in VALID_BOARD_TYPES:
             btype = "bullets"
+        interaction = str(item.get("interaction") or "none").strip().lower()
+        if interaction not in VALID_INTERACTIONS:
+            interaction = "none"
+        anim_oneshot = str(item.get("anim_oneshot") or "").strip() or None
+        anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
+        prop_query = str(item.get("prop_query") or "").strip()[:80] or None
+        raw_vdata = item.get("visual_data")
+        vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}
+        raw_items = item.get("board_items")
+        bitems = [str(x).strip()[:90] for x in raw_items if str(x).strip()][:5] if isinstance(raw_items, list) else []
         facing = "left" if str(item.get("facing") or "right").strip().lower() == "left" else "right"
         idx = start_idx + len(out)
         out.append(
@@ -137,12 +169,18 @@ def sanitize_beats(
                 chapter=chapter,
                 narration=narration[:750],
                 pose=pose,
+                anim_oneshot=anim_oneshot,
+                anim_loop=anim_loop,
+                interaction=interaction,  # type: ignore[arg-type]
+                prop_query=prop_query,
                 facing=facing,
                 motion=motion,  # type: ignore[arg-type]
                 sfx_tag=sfx,  # type: ignore[arg-type]
                 board_type=btype,  # type: ignore[arg-type]
                 board_title=str(item.get("board_title") or "").strip()[:80],
+                board_items=bitems,
                 board_data=_sanitize_board_data(btype, item.get("board_data")),
+                visual_data=vdata,
             )
         )
     return out
@@ -278,7 +316,12 @@ def generate_stickv_script(
         beats = sanitize_beats(
             parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
         )
-        return title, beats, {"chapters": 1, **timings}
+        return title, beats, {
+            "chapters": 1,
+            "domain": normalize_domain(parsed.get("domain")),
+            "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
+            **timings,
+        }
 
     num_chapters = max(2, min(6, math.ceil(target_minutes / 2.5)))
     outline_prompt = (

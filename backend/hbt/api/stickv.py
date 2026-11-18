@@ -6,12 +6,14 @@ import re
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
 from hbt.shared.llm import AVAILABLE_GEMINI_MODELS, GEMINI_MODEL, GeminiClientError
+from hbt.shared.online_sources.iconify_props import search_iconify_icons
+from hbt.stickv.animator import list_available_animations
 from hbt.stickv.llm import (
     build_director_prompt,
     generate_stickv_script,
@@ -94,8 +96,19 @@ def list_stickv(state: State) -> dict[str, Any]:
 
 @router.get("/stickv/poses")
 def list_stickv_poses(state: State) -> dict[str, Any]:
-    """Liệt kê động toàn bộ tên dáng nhân vật có trong kho."""
-    return {"poses": _poses_for_state(state)}
+    """Liệt kê động toàn bộ tên dáng nhân vật và animation `.webm` có trong kho."""
+    return {
+        "poses": _poses_for_state(state),
+        "animations": list_available_animations(
+            state.settings.library_dir, state.settings.assets_dir
+        ),
+    }
+
+
+@router.get("/stickv/iconify/search")
+def search_stickv_iconify(q: str = Query(default="")) -> dict[str, Any]:
+    """Tìm nhanh icon PNG trên Iconify API để xem trước trên StickvPage."""
+    return {"items": search_iconify_icons(q, limit=6)}
 
 
 @router.post("/stickv", status_code=201)
@@ -136,6 +149,8 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
             update={
                 "title": title,
                 "topic": body.topic,
+                "domain": meta.get("domain", proj.domain),
+                "music_mood": meta.get("music_mood", proj.music_mood),
                 "aspect": body.aspect,
                 "theme": body.theme,
                 "target_minutes": body.target_minutes,

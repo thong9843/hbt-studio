@@ -937,8 +937,25 @@ export interface UnifiedRenderItem {
 
 export type StickvAspect = '9:16' | '16:9';
 export type StickvTheme = 'cream' | 'dark';
+export type StickvDomain =
+  | 'paper_classic'
+  | 'physics_science'
+  | 'history_geo'
+  | 'psychology_story'
+  | 'cosmos_mystery';
+export type StickvInteraction = 'none' | 'hold_prop' | 'point_chart' | 'versus_split';
 export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
-export type StickvBoardType = 'none' | 'bullets' | 'big_number' | 'comparison' | 'flow_steps';
+export type StickvBoardType =
+  | 'none'
+  | 'bullets'
+  | 'big_number'
+  | 'comparison'
+  | 'flow_steps'
+  | 'card'
+  | 'list'
+  | 'quote'
+  | 'bar_compare'
+  | 'counter_grow';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
@@ -946,12 +963,18 @@ export interface StickvBeat {
   chapter: number;
   narration: string;
   pose: string;
+  anim_oneshot?: string | null;
+  anim_loop?: string;
+  interaction?: StickvInteraction;
+  prop_query?: string | null;
   facing: 'left' | 'right';
   motion: StickvMotion;
   sfx_tag: StickvSfxTag;
   board_type: StickvBoardType;
   board_title: string;
+  board_items?: string[];
   board_data: Record<string, unknown>;
+  visual_data?: Record<string, unknown>;
   media_path: string;
   clip_path?: string;
   duration_sec: number;
@@ -961,6 +984,7 @@ export interface StickvProject {
   slug: string;
   title: string;
   topic: string;
+  domain?: StickvDomain;
   aspect: StickvAspect;
   theme: StickvTheme;
   fps: number;

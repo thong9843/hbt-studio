@@ -123,3 +123,27 @@ def test_default_gemini_model_and_three_input_modes() -> None:
     assert len(b_raw) >= 2
     assert b_raw[0].pose == "shock"
     assert b_raw[-1].pose == "happy"
+
+
+def test_stickv_v7_schema_and_aliases() -> None:
+    from hbt.stickv.models import StickvBeat, StickvProject
+
+    proj = StickvProject(slug="cosmos-1", title="Hố đen", domain="cosmos")  # type: ignore[arg-type]
+    assert proj.domain == "cosmos_mystery"
+
+    beat = StickvBeat(
+        id="b001",
+        text="Não bộ tiêu thụ 20% năng lượng.",
+        visual_type="bar_compare",
+        interaction="hold_prop",
+        prop_query="brain",
+        anim_oneshot="idea_bulb",
+        anim_loop="talk_excited",
+        visual_data={"values": [{"label": "Não", "value": 20}]},
+    )
+    assert beat.narration == "Não bộ tiêu thụ 20% năng lượng."
+    assert beat.board_type == "bar_compare"
+    assert beat.interaction == "hold_prop"
+    assert beat.prop_query == "brain"
+    assert beat.anim_oneshot == "idea_bulb"
+    assert beat.anim_loop == "talk_excited"

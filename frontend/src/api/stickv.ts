@@ -83,4 +83,10 @@ export const stickvApi = {
     aspect?: StickvAspect;
     theme?: StickvTheme;
   }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-script', { json: body }),
+
+  searchIconify: (q: string) =>
+    apiRequest<{ items: Array<{ id: string; prefix: string; name: string; png_url: string }> }>(
+      'GET',
+      `/stickv/iconify/search?q=${encodeURIComponent(q)}`,
+    ),
 };

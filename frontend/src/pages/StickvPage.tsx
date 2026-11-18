@@ -6,6 +6,8 @@ import type {
   StickvAspect,
   StickvBeat,
   StickvBoardType,
+  StickvDomain,
+  StickvInteraction,
   StickvMotion,
   StickvProject,
   StickvSfxTag,
@@ -73,10 +75,38 @@ const SFX_TAGS: { id: StickvSfxTag; label: string }[] = [
 
 const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'bullets', label: 'Gạch đầu dòng' },
-  { id: 'big_number', label: 'Con số lớn' },
-  { id: 'comparison', label: 'So sánh 2 cột' },
+  { id: 'bar_compare', label: 'Biểu đồ cột động' },
+  { id: 'counter_grow', label: 'Bộ đếm số tăng' },
   { id: 'flow_steps', label: 'Sơ đồ bước' },
+  { id: 'comparison', label: 'So sánh 2 cột' },
+  { id: 'big_number', label: 'Con số lớn' },
+  { id: 'card', label: 'Thẻ thông tin' },
+  { id: 'quote', label: 'Trích dẫn' },
+  { id: 'list', label: 'Danh sách' },
   { id: 'none', label: 'Ẩn bảng' },
+];
+
+const DOMAINS: { id: StickvDomain; label: string; bgClass: string }[] = [
+  { id: 'paper_classic', label: 'Giấy kem HBT', bgClass: 'bg-[#FAF7F0] text-slate-900' },
+  { id: 'physics_science', label: 'Khoa học & Vật lý', bgClass: 'bg-[#0F172A] text-slate-50' },
+  { id: 'history_geo', label: 'Lịch sử & Địa lý', bgClass: 'bg-[#F3EAD8] text-stone-900' },
+  { id: 'psychology_story', label: 'Tâm lý & Kể chuyện', bgClass: 'bg-[#14121D] text-slate-50' },
+  { id: 'cosmos_mystery', label: 'Vũ trụ & Bí ẩn', bgClass: 'bg-[#090D16] text-slate-50' },
+];
+
+const MUSIC_MOODS: { id: string; label: string }[] = [
+  { id: 'curious_science', label: 'Tò mò / Khoa học' },
+  { id: 'history_epic', label: 'Sử thi / Kịch tính' },
+  { id: 'funny_quirky', label: 'Vui nhộn / Hài hước' },
+  { id: 'mysterious_tense', label: 'Bí ẩn / Căng thẳng' },
+  { id: 'calm_lofi', label: 'Nhẹ nhàng / Lofi' },
+];
+
+const INTERACTIONS: { id: StickvInteraction; label: string }[] = [
+  { id: 'none', label: 'Toàn cảnh' },
+  { id: 'hold_prop', label: 'Cầm Icon' },
+  { id: 'point_chart', label: 'Chỉ Biểu đồ' },
+  { id: 'versus_split', label: 'So sánh 2 vế' },
 ];
 
 function makeEmptyBeat(index: number): StickvBeat {
@@ -107,6 +137,7 @@ export function StickvPage() {
   const [safeZone, setSafeZone] = useState<SafeZonePlatform>('none');
   const [rendering, setRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState<{ pct: number; step: string } | null>(null);
+  const [propPreviewMap, setPropPreviewMap] = useState<Record<string, string>>({});
   const esRef = useRef<EventSource | null>(null);
 
   // 3 Chế độ kịch bản StickV
@@ -592,6 +623,44 @@ export function StickvPage() {
               </label>
 
               <label className="space-y-1 text-tiny font-bold text-muted">
+                <span>Bối cảnh sân khấu</span>
+                <select
+                  aria-label="Bối cảnh sân khấu"
+                  value={draft?.domain ?? 'paper_classic'}
+                  onChange={(e) => {
+                    const nextDom = e.target.value as StickvDomain;
+                    if (draft) setDraft({ ...draft, domain: nextDom });
+                  }}
+                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
+                >
+                  {DOMAINS.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 text-tiny font-bold text-muted">
+                <span>Tâm trạng nhạc</span>
+                <select
+                  aria-label="Tâm trạng nhạc"
+                  value={draft?.music_mood ?? 'curious_science'}
+                  onChange={(e) => {
+                    const nextMood = e.target.value;
+                    if (draft) setDraft({ ...draft, music_mood: nextMood });
+                  }}
+                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
+                >
+                  {MUSIC_MOODS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 text-tiny font-bold text-muted">
                 <span>Nhóm nhạc</span>
                 <select
                   value={topic}
@@ -844,7 +913,68 @@ export function StickvPage() {
                             </option>
                           ))}
                         </select>
+
+                        <select
+                          aria-label="Tương tác sân khấu"
+                          value={beat.interaction ?? 'none'}
+                          onChange={(e) =>
+                            updateBeat(beat.id, {
+                              interaction: e.target.value as StickvInteraction,
+                            })
+                          }
+                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
+                        >
+                          {INTERACTIONS.map((it) => (
+                            <option key={it.id} value={it.id}>
+                              Tương tác: {it.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
+
+                      {(beat.interaction === 'hold_prop' || beat.prop_query) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            aria-label="Từ khóa Icon (prop_query)"
+                            placeholder="Từ khóa Icon tiếng Anh (vd: brain, earth)..."
+                            value={beat.prop_query ?? ''}
+                            onChange={(e) => updateBeat(beat.id, { prop_query: e.target.value })}
+                            className="min-w-[180px] flex-1 rounded-input border border-line-input bg-card px-2.5 py-1.5 text-tiny text-text"
+                          />
+                          <Button
+                            size="sm"
+                            tone="soft"
+                            onClick={async () => {
+                              const q = (beat.prop_query ?? '').trim();
+                              if (!q) return;
+                              try {
+                                const res = await stickvApi.searchIconify(q);
+                                if (res.items[0]?.png_url) {
+                                  setPropPreviewMap((prev) => ({
+                                    ...prev,
+                                    [beat.id]: res.items[0].png_url,
+                                  }));
+                                  toast.info(`Đã tìm thấy icon "${res.items[0].id}"`);
+                                } else {
+                                  toast.info('Không thấy icon khớp, sẽ dùng huy hiệu dự phòng');
+                                }
+                              } catch (err) {
+                                toast.error(err);
+                              }
+                            }}
+                          >
+                            Tìm Icon thử
+                          </Button>
+                          {propPreviewMap[beat.id] && (
+                            <img
+                              src={propPreviewMap[beat.id]}
+                              alt={beat.prop_query ?? 'icon'}
+                              className="h-8 w-8 rounded border border-line bg-white object-contain p-0.5"
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -903,9 +1033,10 @@ export function StickvPage() {
             ) : (
               <div
                 className={`flex h-full w-full flex-col justify-between p-4 ${
-                  (draft?.theme ?? theme) === 'cream'
+                  DOMAINS.find((d) => d.id === (draft?.domain ?? 'paper_classic'))?.bgClass ??
+                  ((draft?.theme ?? theme) === 'cream'
                     ? 'bg-[#FAF7F0] text-slate-900'
-                    : 'bg-[#111827] text-slate-50'
+                    : 'bg-[#111827] text-slate-50')
                 }`}
               >
                 {activeBeat?.board_type !== 'none' && (
