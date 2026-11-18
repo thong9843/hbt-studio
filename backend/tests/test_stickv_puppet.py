@@ -364,19 +364,28 @@ def test_continuous_cross_beat_pose_tweening_and_3level_mouth(tmp_path: Path) ->
         rig2.close()
 
 
-def test_v2_elbow_segmentation_joint_caps_and_12_presets(tmp_path: Path) -> None:
+def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
     from hbt.stickv.puppet import (
         ARM_2SEG_NAMES,
         POSE_PRESETS,
         SEG_CACHE_VERSION,
+        VALID_EMOTIONS,
         normalize_stickv_pose,
+        resolve_stickv_emotion,
     )
 
-    assert SEG_CACHE_VERSION == "v2_elbow"
-    assert len(POSE_PRESETS) == 12
+    assert SEG_CACHE_VERSION == "v3_expressive"
+    assert len(POSE_PRESETS) == 18
+    assert len(VALID_EMOTIONS) == 10
     assert normalize_stickv_pose("explain") == "present_board"
-    assert normalize_stickv_pose("think") == "think_chin"
-    assert normalize_stickv_pose("shock") == "shock_hands_up"
+    assert normalize_stickv_pose("wave") == "wave_hello"
+    assert normalize_stickv_pose("facepalm") == "facepalm_light"
+    assert normalize_stickv_pose("confused") == "scratch_head"
+    assert normalize_stickv_pose("nod") == "nod_yes"
+    assert normalize_stickv_pose("stop") == "shake_no"
+    assert normalize_stickv_pose("point_high") == "point_board_high"
+    assert resolve_stickv_emotion("auto", "think_chin", "Tại sao?") == "curious"
+    assert resolve_stickv_emotion("idea", "explain", "") == "idea"
 
     lib = tmp_path / "lib"
     assets = tmp_path / "assets"
@@ -400,7 +409,7 @@ def test_v2_elbow_segmentation_joint_caps_and_12_presets(tmp_path: Path) -> None
         )
         assert px[3] > 200 and px[0] < 35
 
-    # Render thử đủ 12 hành động bằng xương tay 2 đoạn
+    # Render thử đủ 18 hành động bằng xương tay 2 đoạn
     for pose_name in POSE_PRESETS:
         rig = PuppetRig(
             library_dir=lib,
@@ -413,6 +422,35 @@ def test_v2_elbow_segmentation_joint_caps_and_12_presets(tmp_path: Path) -> None
         try:
             f = rig.render_frame(12, 0.4)
             assert f.mode == "RGBA" and f.height == 360 and f.getbbox() is not None
+            f.close()
+        finally:
+            rig.close()
+
+    # Render thử đủ 10 biểu cảm khuôn mặt & kiểm tra các ký hiệu màu cảm xúc
+    expected_colors = {
+        "idea": lambda r, g, b, a: a > 200 and r > 220 and g > 180 and b < 60,  # #FACC15
+        "sad": lambda r, g, b, a: a > 200 and b > 210 and r < 100 and g > 150,  # #38BDF8
+        "shock": lambda r, g, b, a: a > 200 and r > 180 and g < 60 and b < 70,  # #D9232E
+        "curious": lambda r, g, b, a: a > 200 and r > 210 and 120 < g < 190 and b < 40,  # #F59E0B
+    }
+    for emo in VALID_EMOTIONS:
+        rig = PuppetRig(
+            library_dir=lib,
+            assets_dir=assets,
+            target_height=420,
+            pose="present_board",
+            emotion=emo,
+            fps=30,
+            rms_env=[0.5] * 20,
+        )
+        try:
+            f = rig.render_frame(8, 0.3)
+            assert f.mode == "RGBA" and f.height == 420
+            if emo in expected_colors:
+                arr = np.array(f)
+                pred = expected_colors[emo]
+                matched = np.any(pred(arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]))
+                assert matched, f"Thiếu ký hiệu màu đặc trưng cho emotion={emo}"
             f.close()
         finally:
             rig.close()

@@ -25,7 +25,7 @@ PUPPET_SLOTS: tuple[str, ...] = (
     "mouth_open",
 )
 
-SEG_CACHE_VERSION = "v2_elbow"
+SEG_CACHE_VERSION = "v3_expressive"
 SEGMENT_NAMES: tuple[str, ...] = ("body_torso", "head_blank", "arm_left", "arm_right")
 ARM_2SEG_NAMES: tuple[str, ...] = (
     "upper_arm_left",
@@ -686,22 +686,40 @@ def compute_mouth_transform(env_val: float) -> tuple[str, float, float]:
     return "mouth_open", round(scale_x, 4), round(scale_y, 4)
 
 
+VALID_EMOTIONS: tuple[str, ...] = (
+    "neutral",
+    "confident",
+    "curious",
+    "idea",
+    "shock",
+    "skeptical",
+    "serious",
+    "sad",
+    "happy",
+    "excited",
+)
+
 POSE_ALIASES: dict[str, str] = {
     "explain": "present_board",
     "think": "think_chin",
     "shock": "shock_hands_up",
     "happy": "present_board",
     "point": "point_up",
+    "point_high": "point_board_high",
     "walk": "walk_explore",
     "sad": "idle_breathe",
     "bored": "idle_breathe",
     "angry": "arms_crossed",
     "strict": "arms_crossed",
     "scared": "shock_hands_up",
-    "confused": "shrug_ask",
+    "confused": "scratch_head",
     "laugh": "present_board",
     "winner": "present_board",
     "idea": "point_up",
+    "wave": "wave_hello",
+    "facepalm": "facepalm_light",
+    "nod": "nod_yes",
+    "stop": "shake_no",
 }
 
 # 12 Hành động biểu cảm kể chuyện dùng hệ xương tay 2 đoạn (vai + khuỷu tay)
@@ -838,19 +856,128 @@ POSE_PRESETS: dict[str, dict[str, Any]] = {
         "eye_override": None,
         "eye_gaze": (0.0, 0.0),
     },
+    # 6 hành động kể chuyện mới (StickV v9)
+    "point_board_high": {
+        "shoulder_l": 14.0,
+        "elbow_l": 10.0,
+        "shoulder_r": -138.0,
+        "elbow_r": -14.0,
+        "head_deg": -8.0,
+        "torso_deg": -4.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (2.0, -5.0),
+    },
+    "wave_hello": {
+        "shoulder_l": 16.0,
+        "elbow_l": 12.0,
+        "shoulder_r": -115.0,
+        "elbow_r": -20.0,
+        "head_deg": -3.0,
+        "torso_deg": 1.0,
+        "dy_px": -2.0,
+        "eye_override": "eyes_happy",
+        "eye_gaze": (0.0, 0.0),
+    },
+    "scratch_head": {
+        "shoulder_l": 16.0,
+        "elbow_l": 12.0,
+        "shoulder_r": -128.0,
+        "elbow_r": 115.0,
+        "head_deg": 10.0,
+        "torso_deg": -1.5,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (3.0, -3.0),
+    },
+    "facepalm_light": {
+        "shoulder_l": 18.0,
+        "elbow_l": 14.0,
+        "shoulder_r": -95.0,
+        "elbow_r": 118.0,
+        "head_deg": 9.0,
+        "torso_deg": 2.0,
+        "dy_px": 2.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 2.0),
+    },
+    "nod_yes": {
+        "shoulder_l": 18.0,
+        "elbow_l": -18.0,
+        "shoulder_r": -28.0,
+        "elbow_r": -42.0,
+        "head_deg": 6.0,
+        "torso_deg": 1.0,
+        "dy_px": -2.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
+    "shake_no": {
+        "shoulder_l": 16.0,
+        "elbow_l": 12.0,
+        "shoulder_r": -38.0,
+        "elbow_r": -47.0,
+        "head_deg": 0.0,
+        "torso_deg": 0.0,
+        "dy_px": 0.0,
+        "eye_override": None,
+        "eye_gaze": (0.0, 0.0),
+    },
 }
 
 
 def normalize_stickv_pose(pose: str | None) -> str:
-    """Chuẩn hóa tên pose (tương thích ngược các tên cũ sang 12 hành động v8)."""
+    """Chuẩn hóa tên pose (tương thích ngược các tên cũ sang 18 hành động v9)."""
     key = (pose or "present_board").strip().lower()
     if key in POSE_PRESETS:
         return key
     return POSE_ALIASES.get(key, "present_board")
 
 
+def resolve_stickv_emotion(
+    emotion: str | None,
+    pose: str | None = None,
+    narration: str = "",
+) -> str:
+    """Giải mã mã `emotion` trong 10 biểu cảm; nếu 'auto' tự suy luận theo pose + lời thoại."""
+    emo = (emotion or "auto").strip().lower()
+    if emo in VALID_EMOTIONS:
+        return emo
+
+    raw_pose = (pose or "").strip().lower()
+    norm_pose = normalize_stickv_pose(pose)
+    if raw_pose in ("happy", "laugh", "winner") or norm_pose == "wave_hello":
+        return "happy"
+    if raw_pose in ("shock", "scared") or norm_pose == "shock_hands_up":
+        return "shock"
+    if raw_pose in ("sad", "cry"):
+        return "sad"
+    if raw_pose in ("angry", "strict") or norm_pose == "arms_crossed":
+        return "serious"
+    if norm_pose in ("think_chin", "scratch_head", "shrug_ask"):
+        return "curious"
+    if norm_pose == "facepalm_light":
+        return "skeptical"
+    if norm_pose == "hands_on_hips":
+        return "confident"
+
+    low = (narration or "").strip().lower()
+    if low:
+        if any(k in low for k in ("sốc", "bất ngờ", "không thể tin", "kinh ngạc")):
+            return "shock"
+        if any(k in low for k in ("ý tưởng", "phát hiện", "bí quyết", "khám phá")):
+            return "idea"
+        if "?" in low or any(k in low for k in ("tại sao", "vì sao", "liệu")):
+            return "curious"
+        if any(k in low for k in ("sai lầm", "lầm tưởng", "thật ra", "ngờ")):
+            return "skeptical"
+        if any(k in low for k in ("cảnh báo", "nguy hiểm", "hậu quả", "nghiêm trọng")):
+            return "serious"
+    return "neutral"
+
+
 class EyeController:
-    """Điều khiển biểu cảm mắt, chớp mắt sinh học 3.2s và liếc mắt theo pose / interaction."""
+    """Điều khiển biểu cảm mắt (10 emotion), chớp mắt sinh học 3.2s và liếc mắt."""
 
     _SHOCK_POSES = {"shock", "shock_hands_up", "scared", "shock_jump", "confused"}
     _HAPPY_POSES = {"happy", "laugh", "winner", "love", "idea", "idea_bulb", "celebrate", "rich"}
@@ -860,6 +987,7 @@ class EyeController:
         self,
         *,
         pose: str,
+        emotion: str = "auto",
         anim_oneshot: str | None = None,
         interaction: str = "none",
         beat_id: str = "b001",
@@ -868,15 +996,25 @@ class EyeController:
         self.fps = max(15, int(fps))
         self.raw_pose = (pose or "").strip().lower()
         self.norm_pose = normalize_stickv_pose(pose)
+        self.emotion = (emotion or "auto").strip().lower()
         self.interaction = (interaction or "none").strip().lower()
-        self.eye_slot = self._resolve_slot(pose, anim_oneshot)
-        # Hạt giống lệch pha ±0.4s theo beat_id
+        self.eye_slot = self._resolve_slot(pose, anim_oneshot, emotion=self.emotion)
         seed_num = sum(ord(ch) for ch in (beat_id or "b001")) % 25
         jitter_s = ((seed_num / 24.0) - 0.5) * 0.8
         self.blink_period_frames = max(30, int(round((3.2 + jitter_s) * self.fps)))
 
     @classmethod
-    def _resolve_slot(cls, pose: str, anim_oneshot: str | None) -> str:
+    def _resolve_slot(cls, pose: str, anim_oneshot: str | None, *, emotion: str = "auto") -> str:
+        emo = (emotion or "auto").strip().lower()
+        if emo in ("happy", "idea"):
+            return "eyes_happy"
+        if emo in ("shock", "excited"):
+            return "eyes_shock"
+        if emo in ("neutral", "confident", "curious", "skeptical", "serious", "sad"):
+            # Nếu emotion chỉ định rõ thì ưu tiên slot mắt của emotion đó
+            if emo in ("skeptical", "serious", "sad", "curious", "confident"):
+                return "eyes_neutral"
+
         norm = normalize_stickv_pose(pose)
         preset_eye = POSE_PRESETS.get(norm, {}).get("eye_override")
         for raw in (anim_oneshot or "", pose or ""):
@@ -902,6 +1040,9 @@ class EyeController:
                 eye_scale_y = 0.12
             elif pos == 2:
                 eye_scale_y = 0.50
+
+        if self.emotion == "skeptical" and eye_scale_y > 0.72:
+            eye_scale_y = 0.72
 
         gaze = POSE_PRESETS.get(self.norm_pose, {}).get("eye_gaze", (0.0, 0.0))
         ox, oy = float(gaze[0]), float(gaze[1])
@@ -1035,6 +1176,29 @@ def evaluate_pose_preset(
         dy = -5.0 * abs(stride)
         torso = 1.6 * stride
         head = 2.0 * stride
+    elif key == "point_board_high":
+        sh_r += 4.0 * math.sin(2.4 * t) * (0.3 + 0.7 * env)
+        el_r += 5.0 * math.sin(2.4 * t) * (0.3 + 0.7 * env)
+        head += -2.0 * env + 1.2 * math.sin(2.0 * t)
+    elif key == "wave_hello":
+        wave = math.sin(2.0 * math.pi * 3.2 * t)
+        el_r = -20.0 + 22.0 * wave
+        sh_r += 5.0 * wave
+        head += 2.0 * math.sin(2.4 * t)
+    elif key == "scratch_head":
+        el_r = 115.0 + 8.0 * math.sin(2.0 * math.pi * 2.5 * t)
+        head = 10.0 + 1.8 * math.sin(2.0 * t)
+    elif key == "facepalm_light":
+        head = 9.0 + 1.5 * math.sin(1.8 * t)
+        dy = 2.0
+    elif key == "nod_yes":
+        nod = 0.5 * (1.0 - math.cos(2.0 * math.pi * 2.2 * t))
+        head = -3.0 + 12.0 * nod
+        el_r = -42.0 + 8.0 * nod
+    elif key == "shake_no":
+        wag = math.sin(2.0 * math.pi * 2.8 * t)
+        head = 10.0 * wag
+        el_r = -47.0 + 18.0 * wag
     else:  # idle_breathe
         breathe = math.sin(1.8 * t)
         sh_l += 3.0 * breathe
@@ -1147,6 +1311,8 @@ class PuppetRig:
         assets_dir: Path,
         target_height: int,
         pose: str = "present_board",
+        emotion: str = "auto",
+        narration: str = "",
         anim_oneshot: str | None = None,
         anim_loop: str = "talk_explain",
         interaction: str = "none",
@@ -1162,6 +1328,7 @@ class PuppetRig:
         self.target_height = max(120, int(target_height))
         self.raw_pose = (pose or "present_board").strip().lower()
         self.pose = normalize_stickv_pose(pose)
+        self.emotion = resolve_stickv_emotion(emotion, pose, narration)
         self.anim_oneshot = (anim_oneshot or "").strip() or None
         self.anim_loop = (anim_loop or "talk_explain").strip() or "talk_explain"
         self.interaction = (interaction or "none").strip().lower()
@@ -1242,6 +1409,7 @@ class PuppetRig:
 
         self.eye_ctrl = EyeController(
             pose=pose,
+            emotion=self.emotion,
             anim_oneshot=self.anim_oneshot,
             interaction=self.interaction,
             beat_id=beat_id,
@@ -1282,8 +1450,38 @@ class PuppetRig:
                 target_st = loop_state
 
         if self.prev_pose_state is not None and t_sec < self.tween_dur:
-            return lerp_pose_state(self.prev_pose_state, target_st, t_sec / self.tween_dur)
-        return target_st
+            st_out = lerp_pose_state(self.prev_pose_state, target_st, t_sec / self.tween_dur)
+        else:
+            st_out = target_st
+
+        # Áp dụng biến đổi hình học đặc trưng theo 10 biểu cảm khuôn mặt
+        dh = 0.0
+        dy_mul = 1.0
+        extra_dy = 0.0
+        if self.emotion == "confident":
+            dh = -3.0
+        elif self.emotion == "curious":
+            dh = 10.0 if abs(st_out.head_angle) < 4.0 else 4.0
+        elif self.emotion == "skeptical":
+            dh = -5.0
+        elif self.emotion == "sad":
+            dh = 7.0
+        elif self.emotion == "excited":
+            dy_mul = 1.3
+            extra_dy = -4.0 * env_val
+        if dh != 0.0 or dy_mul != 1.0 or extra_dy != 0.0:
+            st_out = PuppetPoseState(
+                head_angle=st_out.head_angle + dh,
+                head_dx=st_out.head_dx,
+                arm_l_angle=st_out.arm_l_angle,
+                elbow_l_angle=st_out.elbow_l_angle,
+                arm_r_angle=st_out.arm_r_angle,
+                elbow_r_angle=st_out.elbow_r_angle,
+                torso_angle=st_out.torso_angle,
+                torso_dy=st_out.torso_dy * dy_mul + extra_dy,
+                torso_scale_y=st_out.torso_scale_y,
+            )
+        return st_out
 
     def _pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
         raw_target = self._raw_pose_state_at(t_sec, env_val)
@@ -1315,10 +1513,160 @@ class PuppetRig:
         self.last_pose_state = smoothed
         return smoothed
 
-    def _build_head_layer(self, frame_idx: int, env_val: float) -> Image.Image:
-        """Lắp Eyes & Mouth vào hệ tọa độ cục bộ của Head trước khi xoay khối đầu."""
-        head = self.parts["head_blank"].copy()
-        hw, hh = head.size
+    def _draw_emotion_details(
+        self,
+        head: Image.Image,
+        *,
+        pad_x: int,
+        pad_top: int,
+        hw: int,
+        hh: int,
+        t_sec: float,
+    ) -> None:
+        """Vẽ lông mày & ký hiệu cảm xúc (bóng đèn, ?, !, mồ hôi, tia sáng) trên lề Head."""
+        d = ImageDraw.Draw(head)
+        emo = self.emotion
+        ink = JOINT_CAP_COLOR
+        stroke = max(2, int(round(hw * 0.028)))
+        ecx_l = pad_x + hw * 0.34
+        ecx_r = pad_x + hw * 0.66
+        brow_w = max(8, hw * 0.13)
+        brow_y = pad_top + hh * 0.25
+
+        # 1. Lông mày biểu cảm
+        if emo == "confident":
+            d.line([(ecx_l - brow_w, brow_y), (ecx_l + brow_w, brow_y - 1)], fill=ink, width=stroke)
+            d.arc(
+                (ecx_r - brow_w, brow_y - 10, ecx_r + brow_w, brow_y + 4),
+                start=195,
+                end=345,
+                fill=ink,
+                width=stroke,
+            )
+        elif emo == "curious":
+            d.line([(ecx_l - brow_w, brow_y), (ecx_l + brow_w, brow_y + 2)], fill=ink, width=stroke)
+            d.arc(
+                (ecx_r - brow_w, brow_y - 11, ecx_r + brow_w, brow_y + 3),
+                start=190,
+                end=350,
+                fill=ink,
+                width=stroke,
+            )
+        elif emo == "skeptical":
+            d.line(
+                [(ecx_l - brow_w, brow_y + 4), (ecx_l + brow_w, brow_y + 5)], fill=ink, width=stroke
+            )
+            d.arc(
+                (ecx_r - brow_w, brow_y - 11, ecx_r + brow_w, brow_y + 3),
+                start=190,
+                end=350,
+                fill=ink,
+                width=stroke,
+            )
+        elif emo == "serious":
+            d.line(
+                [(ecx_l - brow_w, brow_y - 3), (ecx_l + brow_w, brow_y + 5)], fill=ink, width=stroke
+            )
+            d.line(
+                [(ecx_r - brow_w, brow_y + 5), (ecx_r + brow_w, brow_y - 3)], fill=ink, width=stroke
+            )
+        elif emo == "sad":
+            d.line(
+                [(ecx_l - brow_w, brow_y + 5), (ecx_l + brow_w, brow_y - 2)], fill=ink, width=stroke
+            )
+            d.line(
+                [(ecx_r - brow_w, brow_y - 2), (ecx_r + brow_w, brow_y + 5)], fill=ink, width=stroke
+            )
+        elif emo in ("happy", "idea", "excited"):
+            for bx in (ecx_l, ecx_r):
+                d.arc(
+                    (bx - brow_w, brow_y - 8, bx + brow_w, brow_y + 6),
+                    start=195,
+                    end=345,
+                    fill=ink,
+                    width=stroke,
+                )
+
+        # 2. Ký hiệu cảm xúc vẽ trên vùng đệm quanh đầu (xoay mượt cùng cổ)
+        if emo == "curious":
+            bob = math.sin(4.0 * t_sec) * 3.5
+            qx = pad_x + hw + max(8, int(hw * 0.14))
+            qy = pad_top + hh * 0.14 + bob
+            r = max(6, int(hw * 0.08))
+            amber = (245, 158, 11, 255)
+            d.arc((qx - r, qy - r, qx + r, qy + r), start=180, end=40, fill=amber, width=stroke + 1)
+            d.line([(qx, qy + r - 1), (qx, qy + r + 5)], fill=amber, width=stroke + 1)
+            d.ellipse((qx - 2, qy + r + 8, qx + 2, qy + r + 12), fill=amber)
+        elif emo == "idea":
+            pop = min(1.0, max(0.35, t_sec / 0.25)) if t_sec < 0.25 else 1.0
+            bx = pad_x + hw * 0.5
+            by = max(14.0, pad_top - hh * 0.16)
+            br = max(8, int(round(hw * 0.11 * pop)))
+            gold = (250, 204, 21, 255)
+            d.ellipse((bx - br, by - br, bx + br, by + br), fill=gold, outline=ink, width=2)
+            d.rectangle(
+                (bx - br * 0.45, by + br - 2, bx + br * 0.45, by + br + 5), fill=(71, 85, 105, 255)
+            )
+            for ang in (-75, -35, 0, 35, 75):
+                rad = math.radians(ang - 90)
+                r0, r1 = br + 3, br + max(6, int(br * 0.7))
+                d.line(
+                    [
+                        (bx + math.cos(rad) * r0, by + math.sin(rad) * r0),
+                        (bx + math.cos(rad) * r1, by + math.sin(rad) * r1),
+                    ],
+                    fill=gold,
+                    width=max(2, stroke),
+                )
+        elif emo == "shock":
+            red = (217, 35, 46, 255)
+            jit = math.sin(18.0 * t_sec) * 2.0
+            for side_x in (pad_x - max(10, int(hw * 0.16)), pad_x + hw + max(10, int(hw * 0.16))):
+                ey0 = pad_top + hh * 0.08 + jit
+                d.line(
+                    [(side_x, ey0), (side_x, ey0 + max(14, hh * 0.22))], fill=red, width=stroke + 1
+                )
+                d.ellipse(
+                    (
+                        side_x - 3,
+                        ey0 + max(18, hh * 0.27),
+                        side_x + 3,
+                        ey0 + max(18, hh * 0.27) + 6,
+                    ),
+                    fill=red,
+                )
+        elif emo == "sad":
+            slide = (t_sec * 14.0) % 10.0
+            tx = pad_x + hw * 0.86
+            ty = pad_top + hh * 0.24 + slide
+            blue = (56, 189, 248, 255)
+            d.polygon([(tx, ty - 8), (tx - 5, ty + 2), (tx + 5, ty + 2)], fill=blue)
+            d.ellipse((tx - 5, ty - 2, tx + 5, ty + 8), fill=blue)
+        elif emo == "excited":
+            gold = (250, 204, 21, 255)
+            pulse = 1.0 + 0.25 * abs(math.sin(6.0 * t_sec))
+            sr = max(5, int(round(hw * 0.07 * pulse)))
+            pts = [
+                (pad_x - 8, pad_top + hh * 0.15),
+                (pad_x + hw + 8, pad_top + hh * 0.15),
+                (pad_x + hw * 0.22, max(10.0, pad_top - 6)),
+                (pad_x + hw * 0.78, max(10.0, pad_top - 6)),
+            ]
+            for sx, sy in pts:
+                d.line([(sx - sr, sy), (sx + sr, sy)], fill=gold, width=max(2, stroke))
+                d.line([(sx, sy - sr), (sx, sy + sr)], fill=gold, width=max(2, stroke))
+
+    def _build_head_layer(
+        self, frame_idx: int, env_val: float, t_sec: float = 0.0
+    ) -> tuple[Image.Image, tuple[float, float]]:
+        """Lắp Eyes, Mouth & Emotion trên Head (có lề an toàn không cắt ký hiệu) + trả pivot."""
+        head_raw = self.parts["head_blank"]
+        hw, hh = head_raw.size
+        pad_x = max(24, int(round(hw * 0.40)))
+        pad_top = max(28, int(round(hh * 0.42)))
+        pad_bot = 4
+        head = Image.new("RGBA", (hw + 2 * pad_x, hh + pad_top + pad_bot), (0, 0, 0, 0))
+        head.alpha_composite(head_raw, (pad_x, pad_top))
 
         # 1. Eyes layer
         eslot, eye_sy, eox, eoy = self.eye_ctrl.state_at(frame_idx)
@@ -1327,15 +1675,18 @@ class PuppetRig:
             ew = max(8, int(round(hw * float(self.rig_cfg["eyes_width_ratio"]))))
             eh = max(2, int(round((ew * eye_src.height / max(1, eye_src.width)) * eye_sy)))
             eye_resized = eye_src.resize((ew, eh), Image.Resampling.LANCZOS)
-            ecx = hw * float(self.rig_cfg["eyes_center_head"][0]) + eox
-            ecy = hh * float(self.rig_cfg["eyes_center_head"][1]) + eoy
-            ex = max(2, min(hw - ew - 2, int(round(ecx - ew / 2))))
-            ey = max(2, min(hh - eh - 2, int(round(ecy - eh / 2))))
+            ecx = pad_x + hw * float(self.rig_cfg["eyes_center_head"][0]) + eox
+            ecy = pad_top + hh * float(self.rig_cfg["eyes_center_head"][1]) + eoy
+            ex = max(pad_x + 2, min(pad_x + hw - ew - 2, int(round(ecx - ew / 2))))
+            ey = max(pad_top + 2, min(pad_top + hh - eh - 2, int(round(ecy - eh / 2))))
             head.alpha_composite(eye_resized, (ex, ey))
             eye_resized.close()
 
-        # 2. Mouth layer (3 mức closed -> half_open -> open + làm mượt EMA chống nhấp nháy)
+        # 2. Mouth layer (3 mức closed -> half_open -> open + độ mở 1.18x khi shock/excited)
         mslot, msx, msy_target = compute_mouth_transform(env_val)
+        if self.emotion in ("shock", "excited"):
+            msy_target *= 1.18
+            mslot = "mouth_open" if env_val >= 0.08 or self.emotion == "shock" else mslot
         self._mouth_sy_smooth = 0.60 * msy_target + 0.40 * self._mouth_sy_smooth
         msy = self._mouth_sy_smooth if mslot == "mouth_open" else 1.0
         mouth_src = self.mouths.get(mslot) or self.mouths.get("mouth_closed")
@@ -1343,16 +1694,21 @@ class PuppetRig:
             base_mw = max(8, int(round(hw * float(self.rig_cfg["mouth_width_ratio"]))))
             base_mh = max(4, int(round(base_mw * mouth_src.height / max(1, mouth_src.width))))
             mw = max(4, min(int(hw * 0.65), int(round(base_mw * msx))))
-            mh = max(3, min(int(hh * 0.40), int(round(base_mh * msy))))
+            mh = max(3, min(int(hh * 0.42), int(round(base_mh * msy))))
             mouth_resized = mouth_src.resize((mw, mh), Image.Resampling.LANCZOS)
-            mcx = hw * float(self.rig_cfg["mouth_center_head"][0])
-            mcy = hh * float(self.rig_cfg["mouth_center_head"][1])
-            mx = max(2, min(hw - mw - 2, int(round(mcx - mw / 2))))
-            my = max(2, min(hh - mh - 2, int(round(mcy - mh / 2))))
+            mcx = pad_x + hw * float(self.rig_cfg["mouth_center_head"][0])
+            mcy = pad_top + hh * float(self.rig_cfg["mouth_center_head"][1])
+            mx = max(pad_x + 2, min(pad_x + hw - mw - 2, int(round(mcx - mw / 2))))
+            my = max(pad_top + 2, min(pad_top + hh - mh - 2, int(round(mcy - mh / 2))))
             head.alpha_composite(mouth_resized, (mx, my))
             mouth_resized.close()
 
-        return head
+        self._draw_emotion_details(head, pad_x=pad_x, pad_top=pad_top, hw=hw, hh=hh, t_sec=t_sec)
+        head_piv = (
+            pad_x + float(self.rig_cfg["neck_pivot_head"][0]) * hw,
+            pad_top + float(self.rig_cfg["neck_pivot_head"][1]) * hh,
+        )
+        return head, head_piv
 
     def _render_upper_arm(
         self,
@@ -1426,7 +1782,7 @@ class PuppetRig:
         st = self._pose_state_at(t_sec, env_val)
 
         torso_base = self.parts["body_torso"]
-        head_local = self._build_head_layer(frame_idx, env_val)
+        head_local, head_piv = self._build_head_layer(frame_idx, env_val, t_sec=t_sec)
         arm_l_w = self.parts["arm_left"].width if "arm_left" in self.parts else torso_base.width
         arm_r_w = self.parts["arm_right"].width if "arm_right" in self.parts else torso_base.width
 
@@ -1489,10 +1845,6 @@ class PuppetRig:
 
             # [6] HEAD_BLANK + EYES + MOUTH (xoay nguyên khối quanh neck_pivot)
             neck_world = _torso_anchor_world(self.rig_cfg["neck_anchor_torso"])
-            head_piv = (
-                float(self.rig_cfg["neck_pivot_head"][0]) * head_local.width,
-                float(self.rig_cfg["neck_pivot_head"][1]) * head_local.height,
-            )
             head_rot, head_rpiv = rotate_around_pivot(
                 head_local, st.head_angle + st.torso_angle, head_piv
             )

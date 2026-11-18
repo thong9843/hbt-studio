@@ -20,6 +20,19 @@ StickvInteraction = Literal["none", "hold_prop", "point_chart", "versus_split"]
 StickvAnimationMode = Literal["auto", "static"]
 StickvMotion = Literal["bounce", "slide_left", "slide_right", "float", "static"]
 StickvCameraShot = Literal["wide_stage", "focus_board", "closeup_react"]
+StickvEmotion = Literal[
+    "auto",
+    "neutral",
+    "confident",
+    "curious",
+    "idea",
+    "shock",
+    "skeptical",
+    "serious",
+    "sad",
+    "happy",
+    "excited",
+]
 StickvBoardType = Literal[
     "none",
     "bullets",
@@ -34,6 +47,7 @@ StickvBoardType = Literal[
     "timeline_era",
     "location_map",
     "myth_vs_fact",
+    "recap_card",
 ]
 StickvSfxTag = Literal["none", "whoosh", "pop", "vine_boom", "ding"]
 StickvFacing = Literal["left", "right"]
@@ -56,6 +70,7 @@ class StickvBeat(BaseModel):
     chapter_title: str = Field(default="", max_length=120)
     narration: str = Field(default="", max_length=1200)
     pose: str = Field(default="present_board", max_length=120)
+    emotion: StickvEmotion = "auto"
     anim_oneshot: str | None = Field(default=None, max_length=120)
     anim_loop: str = Field(default="talk_explain", max_length=120)
     interaction: StickvInteraction = "none"
@@ -67,6 +82,7 @@ class StickvBeat(BaseModel):
     board_type: StickvBoardType = "bullets"
     board_title: str = Field(default="", max_length=120)
     board_items: list[str] = Field(default_factory=list)
+    takeaway: str = Field(default="", max_length=160)
     board_data: dict[str, Any] = Field(default_factory=dict)
     visual_data: dict[str, Any] = Field(default_factory=dict)
     media_path: str = Field(default="", max_length=260)
@@ -87,6 +103,36 @@ class StickvBeat(BaseModel):
             out["sfx_tag"] = out["sfx"]
         if str(out.get("motion") or "").strip().lower() == "shake":
             out["motion"] = "float"
+
+        # Alias v9: bullets -> board_data.items, takeaway ở cấp beat -> board_data.takeaway
+        bdata = dict(out.get("board_data") or {}) if isinstance(out.get("board_data"), dict) else {}
+        if isinstance(out.get("bullets"), list) and "items" not in bdata:
+            bdata["items"] = [str(x).strip() for x in out["bullets"] if str(x).strip()]
+            if "board_items" not in out:
+                out["board_items"] = list(bdata["items"])
+        if str(out.get("takeaway") or "").strip() and "takeaway" not in bdata:
+            bdata["takeaway"] = str(out["takeaway"]).strip()[:160]
+        elif (
+            str(bdata.get("takeaway") or "").strip() and not str(out.get("takeaway") or "").strip()
+        ):
+            out["takeaway"] = str(bdata["takeaway"]).strip()[:160]
+        out["board_data"] = bdata
+
+        raw_emo = str(out.get("emotion") or "auto").strip().lower()
+        valid_emos = {
+            "auto",
+            "neutral",
+            "confident",
+            "curious",
+            "idea",
+            "shock",
+            "skeptical",
+            "serious",
+            "sad",
+            "happy",
+            "excited",
+        }
+        out["emotion"] = raw_emo if raw_emo in valid_emos else "auto"
         return out
 
 

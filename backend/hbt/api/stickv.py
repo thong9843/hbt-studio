@@ -131,11 +131,12 @@ def list_stickv_poses(state: State) -> dict[str, Any]:
 @router.get("/stickv/puppet/preview")
 def preview_stickv_puppet(
     state: State,
-    pose: str = Query(default="explain"),
+    pose: str = Query(default="present_board"),
+    emotion: str = Query(default="auto"),
     interaction: str = Query(default="none"),
     facing: str = Query(default="right"),
 ) -> Response:
-    """Dựng 1 ảnh PNG xem trước nhân vật Puppet 2D đã lắp ráp đầy đủ mắt + miệng."""
+    """Dựng 1 ảnh PNG xem trước nhân vật Puppet 2D đã lắp ráp đầy đủ mắt + miệng + biểu cảm."""
     lib_dir = state.settings.library_dir
     assets_dir = state.settings.assets_dir
     if not is_puppet_ready(lib_dir, assets_dir):
@@ -145,6 +146,7 @@ def preview_stickv_puppet(
         assets_dir=assets_dir,
         target_height=480,
         pose=pose,
+        emotion=emotion,
         interaction=interaction,
         facing="left" if facing == "left" else "right",
         rms_env=[0.35],
