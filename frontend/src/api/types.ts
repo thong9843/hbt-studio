@@ -881,6 +881,7 @@ export interface AssetHubItem {
   width?: number;
   height?: number;
   thumb_url?: string | null;
+  anim_group?: 'pose' | 'oneshot' | 'loop' | '';
 }
 
 export interface OnlinePixabayItem {

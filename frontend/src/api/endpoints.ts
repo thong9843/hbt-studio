@@ -399,9 +399,16 @@ export const api = {
 
   listAssetHub: (category: AssetHubCategory) =>
     apiGet<{ category: AssetHubCategory; items: AssetHubItem[] }>(`/asset-hub/${enc(category)}`),
-  uploadAssetHub: (category: AssetHubCategory, file: File) => {
+  uploadAssetHub: (
+    category: AssetHubCategory,
+    file: File,
+    animGroup?: 'pose' | 'oneshot' | 'loop',
+  ) => {
     const form = new FormData();
     form.set('file', file);
+    if (animGroup && category === 'stickman') {
+      form.set('anim_group', animGroup);
+    }
     return apiRequest<{ ok: boolean; item: AssetHubItem }>('POST', `/asset-hub/${enc(category)}`, {
       form,
     });

@@ -88,6 +88,8 @@ export function AssetHubPage() {
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [playingAudioUrl, setPlayingAudioUrl] = useState<string | null>(null);
   const [hoveredStickman, setHoveredStickman] = useState<string | null>(null);
+  const [stickmanAnimGroup, setStickmanAnimGroup] = useState<'pose' | 'oneshot' | 'loop'>('pose');
+  const [stickmanFilter, setStickmanFilter] = useState<'all' | 'pose' | 'oneshot' | 'loop'>('all');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
@@ -150,7 +152,11 @@ export function AssetHubPage() {
     mutationFn: async (files: File[]) => {
       if (isRendersTab) return files;
       for (const f of files) {
-        await api.uploadAssetHub(activeTab as AssetHubCategory, f);
+        await api.uploadAssetHub(
+          activeTab as AssetHubCategory,
+          f,
+          activeTab === 'stickman' ? stickmanAnimGroup : undefined,
+        );
       }
       return files;
     },
@@ -278,6 +284,20 @@ export function AssetHubPage() {
 
         {!isRendersTab && (
           <div className="flex flex-wrap items-center gap-2.5">
+            {activeTab === 'stickman' && (
+              <select
+                aria-label="Loại tài nguyên Stickman khi tải lên"
+                value={stickmanAnimGroup}
+                onChange={(e) =>
+                  setStickmanAnimGroup(e.target.value as 'pose' | 'oneshot' | 'loop')
+                }
+                className="rounded-inner border border-line bg-card px-3 py-2 text-small font-semibold text-text"
+              >
+                <option value="pose">Ảnh Pose tĩnh</option>
+                <option value="oneshot">Animation Phản ứng (One-shot)</option>
+                <option value="loop">Animation Lặp (Loop)</option>
+              </select>
+            )}
             {supportsOnline && (
               <Button tone="postv" onClick={() => setOnlineOpen(true)}>
                 🌐 Tìm &amp; Tải Online
@@ -739,32 +759,78 @@ export function AssetHubPage() {
           <p className="text-body font-bold text-text">{T.empty}</p>
         </Card>
       ) : (
-        /* 5b. Tab Sticker */
-        <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {items.map((item) => {
-            const cardKey = `${item.source}-${item.name}`;
-            const isVideo = item.kind === 'video' || item.media_type === 'video';
-            const isHovered = hoveredStickman === cardKey;
-            return (
-              <Card
-                key={cardKey}
-                as="li"
-                padded={false}
-                className="group overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
-                onMouseEnter={() => isVideo && setHoveredStickman(cardKey)}
-                onMouseLeave={() => isVideo && setHoveredStickman(null)}
-              >
+        /* 5b. Tab Sticker / Stickman */
+        <div className="space-y-4">
+          {activeTab === 'stickman' && (
+            <div className="flex flex-wrap items-center gap-2">
+              {(
+                [
+                  { id: 'all', label: 'Tất cả' },
+                  { id: 'pose', label: 'Pose tĩnh' },
+                  { id: 'oneshot', label: 'One-shot' },
+                  { id: 'loop', label: 'Loop' },
+                ] as const
+              ).map((f) => (
                 <button
+                  key={f.id}
                   type="button"
-                  onClick={() => setPreviewItem(item)}
-                  className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-soft"
-                  aria-label={`Xem ${item.name}`}
-                >
-                  {isVideo && (
-                    <span className="absolute left-2 top-2 z-10 rounded-pill bg-black/75 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                      VIDEO{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
-                    </span>
+                  onClick={() => setStickmanFilter(f.id)}
+                  className={cx(
+                    'rounded-pill px-3 py-1 text-tiny font-bold transition-colors',
+                    stickmanFilter === f.id
+                      ? 'bg-primary text-on-primary'
+                      : 'bg-soft text-muted hover:text-text',
                   )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            {(activeTab === 'stickman' && stickmanFilter !== 'all'
+              ? items.filter((it) => (it.anim_group || 'pose') === stickmanFilter)
+              : items
+            ).map((item) => {
+              const cardKey = `${item.source}-${item.name}`;
+              const isVideo = item.kind === 'video' || item.media_type === 'video';
+              const isHovered = hoveredStickman === cardKey;
+              const animGroup = item.anim_group;
+              return (
+                <Card
+                  key={cardKey}
+                  as="li"
+                  padded={false}
+                  className="group overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
+                  onMouseEnter={() => isVideo && setHoveredStickman(cardKey)}
+                  onMouseLeave={() => isVideo && setHoveredStickman(null)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPreviewItem(item)}
+                    className={cx(
+                      'relative flex aspect-square w-full items-center justify-center overflow-hidden',
+                      activeTab === 'stickman'
+                        ? 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:12px_12px] bg-soft'
+                        : 'bg-soft',
+                    )}
+                    aria-label={`Xem ${item.name}`}
+                  >
+                    {activeTab === 'stickman' && animGroup === 'oneshot' && (
+                      <span className="absolute left-2 top-2 z-10 rounded-pill bg-red-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                        ONE-SHOT{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                      </span>
+                    )}
+                    {activeTab === 'stickman' && animGroup === 'loop' && (
+                      <span className="absolute left-2 top-2 z-10 rounded-pill bg-amber-400 px-2 py-0.5 text-[10px] font-extrabold text-black">
+                        LOOP{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                      </span>
+                    )}
+                    {isVideo && animGroup !== 'oneshot' && animGroup !== 'loop' && (
+                      <span className="absolute left-2 top-2 z-10 rounded-pill bg-black/75 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                        VIDEO{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                      </span>
+                    )}
                   {isVideo ? (
                     isHovered || !item.thumb_url ? (
                       <video
@@ -840,9 +906,10 @@ export function AssetHubPage() {
                   </div>
                 </div>
               </Card>
-            );
-          })}
-        </ul>
+              );
+            })}
+          </ul>
+        </div>
       )}
 
       {/* Drawer Tìm & Tải Online */}

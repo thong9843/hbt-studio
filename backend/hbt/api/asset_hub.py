@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -237,6 +237,7 @@ def _serialize_item(
         "width": int(m.get("width") or 0),
         "height": int(m.get("height") or 0),
         "thumb_url": thumb_url,
+        "anim_group": str(m.get("anim_group") or ""),
     }
 
 
@@ -278,14 +279,22 @@ def _collect_dir_items(
                     f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
                     f"/thumbs/{quote(thumb_file.name)}"
                 )
-        elif category == "stickman" and _file_kind(p) == "video":
-            dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
-            meta = {**(meta or {}), "duration_sec": dur, "width": vw, "height": vh}
-            if thumb_file is not None:
-                thumb_url = (
-                    f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
-                    f"/thumbs/{quote(thumb_file.name)}"
-                )
+        elif category == "stickman":
+            anim_group = "pose"
+            if rel.startswith("animations/oneshot/"):
+                anim_group = "oneshot"
+            elif rel.startswith("animations/loop/"):
+                anim_group = "loop"
+            if _file_kind(p) == "video":
+                dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
+                meta = {**(meta or {}), "duration_sec": dur, "width": vw, "height": vh, "anim_group": anim_group}
+                if thumb_file is not None:
+                    thumb_url = (
+                        f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
+                        f"/thumbs/{quote(thumb_file.name)}"
+                    )
+            else:
+                meta = {**(meta or {}), "anim_group": anim_group}
         out.append(
             _serialize_item(
                 category,
@@ -693,8 +702,20 @@ async def upload_asset_hub_item(
     category: str,
     state: State,
     file: Annotated[UploadFile, File(...)],
+    anim_group: Annotated[str, Form()] = "pose",
 ) -> dict[str, Any]:
-    folder = _category_dir(state, category)
+    clean_group = anim_group if anim_group in {"pose", "oneshot", "loop"} else "pose"
+    is_anim_slot = category == "stickman" and clean_group in {"oneshot", "loop"}
+    if is_anim_slot:
+        base_lib = state.settings.library_dir / "stickman"
+        folder = base_lib / "animations" / clean_group
+        folder.mkdir(parents=True, exist_ok=True)
+        dest_source = "library"
+    else:
+        base_lib = _category_dir(state, category)
+        folder = base_lib
+        dest_source = "assets"
+
     safe_name = _safe_filename(file.filename or "asset.bin")
     target = folder / safe_name
 
@@ -710,24 +731,30 @@ async def upload_asset_hub_item(
     content = await file.read()
     target.write_bytes(content)
 
-    meta_override: dict[str, Any] | None = None
+    meta_override: dict[str, Any] | None = {"anim_group": clean_group} if category == "stickman" else None
     thumb_url: str | None = None
-    if category == "stickman" and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+    if category == "stickman" and not is_anim_slot and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
         png_target = target.with_suffix(".png")
         final_path, _ = remove_white_background(target, png_target)
         if final_path != target and target.is_file() and final_path.is_file():
             target.unlink(missing_ok=True)
             target = final_path
     elif category == "stickman" and target.suffix.lower() in VIDEO_EXTS:
-        dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, folder / "thumbs")
-        meta_override = {"duration_sec": dur, "width": vw, "height": vh}
+        dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, base_lib / "thumbs")
+        meta_override = {"duration_sec": dur, "width": vw, "height": vh, "anim_group": clean_group}
         if thumb_file is not None:
-            thumb_url = f"/api/asset-hub/file/assets/stickman/thumbs/{quote(thumb_file.name)}"
+            thumb_url = f"/api/asset-hub/file/{quote(dest_source)}/stickman/thumbs/{quote(thumb_file.name)}"
 
+    relpath = f"animations/{clean_group}/{target.name}" if is_anim_slot else None
     return {
         "ok": True,
         "item": _serialize_item(
-            category, target, source="assets", meta=meta_override, thumb_url=thumb_url
+            category,
+            target,
+            source=dest_source,
+            relpath=relpath,
+            meta=meta_override,
+            thumb_url=thumb_url,
         ),
     }
 
@@ -797,8 +824,20 @@ def delete_asset_hub_item(
     candidates: list[Path] = []
     if source in (None, "assets"):
         candidates.append(folder)
+        if category == "stickman":
+            candidates.extend([
+                folder / "animations" / "oneshot",
+                folder / "animations" / "loop",
+            ])
     if source in (None, "library"):
-        candidates.append(state.settings.library_dir / category)
+        lib_cat = state.settings.library_dir / category
+        candidates.append(lib_cat)
+        if category == "stickman":
+            candidates.extend([
+                lib_cat / "poses",
+                lib_cat / "animations" / "oneshot",
+                lib_cat / "animations" / "loop",
+            ])
 
     for base in candidates:
         base_res = base.resolve()
