@@ -147,3 +147,30 @@ def test_stickv_v7_schema_and_aliases() -> None:
     assert beat.prop_query == "brain"
     assert beat.anim_oneshot == "idea_bulb"
     assert beat.anim_loop == "talk_excited"
+
+
+def test_v8_pose_diversity_and_chunked_grouping(tmp_path: Path) -> None:
+    from hbt.stickv.llm import enforce_pose_diversity
+    from hbt.stickv.models import StickvBeat
+    from hbt.stickv.render import group_beats_into_chunks
+
+    raw = [
+        StickvBeat(id=f"b{i:03d}", chapter=1 + i // 4, narration=f"Beat {i}", pose="point_up")
+        for i in range(6)
+    ]
+    diversified = enforce_pose_diversity(raw)
+    for a, b in zip(diversified, diversified[1:], strict=False):
+        assert a.pose != b.pose
+
+    # 6 beats x 18s -> gom thành các cụm ~36s/cụm
+    wavs = [(tmp_path / f"{b.id}.wav", 18.0) for b in diversified]
+    chunks = group_beats_into_chunks(
+        diversified,
+        wavs,
+        project_dir=tmp_path,
+        library_dir=tmp_path,
+        assets_dir=tmp_path,
+        max_chunk_sec=40.0,
+    )
+    assert len(chunks) >= 3
+    assert sum(len(items) for _, items in chunks) == 6

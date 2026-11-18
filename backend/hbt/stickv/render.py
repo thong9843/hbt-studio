@@ -41,6 +41,8 @@ from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, St
 from hbt.stickv.stage import (
     BeatStageState,
     compute_beat_character_target,
+    compute_camera_state,
+    infer_auto_prop_query,
     render_animated_beat_frame,
     render_beat_layers,
 )
@@ -371,6 +373,313 @@ def _resolve_outro_clip(brand_dir: Path, fps: int) -> Path | None:
     return None
 
 
+def group_beats_into_chunks(
+    beats: list[StickvBeat],
+    beat_wavs: list[tuple[Path, float]],
+    *,
+    project_dir: Path,
+    library_dir: Path,
+    assets_dir: Path,
+    max_chunk_sec: float = 48.0,
+    min_chapter_split_sec: float = 24.0,
+) -> list[tuple[str, list[tuple[int, StickvBeat, Path, float]]]]:
+    """Gom các beat thành cụm theo chương (~30–60s/cụm) để render dài không tràn RAM."""
+    chunks: list[tuple[str, list[tuple[int, StickvBeat, Path, float]]]] = []
+    cur_items: list[tuple[int, StickvBeat, Path, float]] = []
+    cur_dur = 0.0
+    cur_chapter: int | None = None
+
+    for g_idx, (beat, (wav_p, dur_b)) in enumerate(zip(beats, beat_wavs, strict=True)):
+        dur_val = max(1.0, float(dur_b or 2.0))
+        media_clip = _resolve_beat_video_clip(
+            beat, project_dir=project_dir, library_dir=library_dir, assets_dir=assets_dir
+        )
+        if media_clip is not None:
+            if cur_items:
+                chunks.append(("stream", cur_items))
+                cur_items = []
+                cur_dur = 0.0
+                cur_chapter = None
+            chunks.append(("video", [(g_idx, beat, wav_p, dur_val)]))
+            continue
+
+        crossed_chapter = cur_chapter is not None and beat.chapter != cur_chapter
+        if cur_items and (
+            (cur_dur + dur_val > max_chunk_sec)
+            or (crossed_chapter and cur_dur >= min_chapter_split_sec)
+        ):
+            chunks.append(("stream", cur_items))
+            cur_items = []
+            cur_dur = 0.0
+
+        cur_items.append((g_idx, beat, wav_p, dur_val))
+        cur_dur += dur_val
+        cur_chapter = beat.chapter
+
+    if cur_items:
+        chunks.append(("stream", cur_items))
+    return chunks
+
+
+def _stream_chunk_frames_to_ffmpeg(
+    *,
+    chunk_items: list[tuple[int, StickvBeat, Path, float]],
+    all_beats: list[StickvBeat],
+    out_mp4: Path,
+    w: int,
+    h: int,
+    fps: int,
+    aspect: str,
+    project_dir: Path,
+    library_dir: Path,
+    assets_dir: Path,
+    chunks_dir: Path,
+    domain: str,
+    theme: StickvTheme,
+    animation_mode: str,
+    pause_scale: float,
+    cancel: CancelToken | None,
+    global_frame_offset: int,
+    acc_audio_t: float,
+    prev_stage_state: BeatStageState | None,
+    backdrop_renderer: BackdropRenderer,
+) -> tuple[int, float, BeatStageState | None]:
+    """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
+    cmd = [
+        ffmpeg_exe(),
+        "-y",
+        *FFMPEG_RESOURCE_CLAMP,
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{w}x{h}",
+        "-r",
+        str(fps),
+        "-i",
+        "pipe:0",
+        "-an",
+        *FFMPEG_ENCODE_CLAMP,
+        "-pix_fmt",
+        "yuv420p",
+        "-profile:v",
+        "high",
+        "-level",
+        "4.1",
+        str(out_mp4),
+    ]
+
+    norm_domain = normalize_domain(domain)
+    total_chapters = max((b.chapter for b in all_beats), default=1)
+    accent = DOMAIN_PALETTES[norm_domain]["accent"]
+
+    cur_frame_offset = global_frame_offset
+    cur_audio_t = acc_audio_t
+    cur_state = prev_stage_state
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert proc.stdin is not None
+        for g_idx, beat, wav_p, dur_b in chunk_items:
+            if cancel is not None:
+                cancel.check()
+            target_total_frames = max(cur_frame_offset + 1, int(round((cur_audio_t + dur_b) * fps)))
+            n_frames_beat = target_total_frames - cur_frame_offset
+
+            bg_png, char_png = render_beat_layers(
+                beat,
+                aspect=aspect,  # type: ignore[arg-type]
+                theme=theme,
+                out_dir=chunks_dir,
+                library_dir=library_dir,
+                assets_dir=assets_dir,
+                project_dir=project_dir,
+                domain=norm_domain,
+            )
+
+            char_img: Image.Image | None = None
+            if char_png is not None and char_png.is_file():
+                with Image.open(char_png) as raw_char:
+                    char_img = raw_char.convert("RGBA")
+
+            target_char_h = (
+                char_img.height
+                if char_img is not None
+                else int(h * (0.48 if aspect == "9:16" else 0.64))
+            )
+            interaction = getattr(beat, "interaction", "none") or "none"
+            rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
+            pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
+            lead_in = LEAD_IN_SILENCE_S * pause_scale
+            speech_end = max(lead_in + 0.3, dur_b - pause_after)
+            spoken_segs = load_beat_spoken_segments(wav_p)
+            word_timings = align_beat_karaoke(
+                beat.narration,
+                wav_p,
+                dur_b,
+                lead_in_s=lead_in,
+                pause_after_s=pause_after,
+                spoken_segments=spoken_segs,
+            )
+
+            animator = StickmanAnimator(
+                pose=beat.pose,
+                anim_oneshot=getattr(beat, "anim_oneshot", None),
+                anim_loop=getattr(beat, "anim_loop", None),
+                facing=beat.facing,
+                duration_sec=dur_b,
+                speech_start=lead_in,
+                speech_end=speech_end,
+                fps=fps,
+                rms_env=rms_env,
+                library_dir=library_dir,
+                assets_dir=assets_dir,
+                target_height=target_char_h,
+                char_img_fallback=char_img,
+                interaction=interaction,
+                beat_id=beat.id,
+                animation_mode=animation_mode,
+                wav_path=wav_p,
+                prev_pose_state=cur_state.pose_state if cur_state is not None else None,
+                global_t_offset=cur_frame_offset / max(1, fps),
+            )
+
+            prop_img: Image.Image | None = None
+            raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
+            if not raw_prop_q and beat.board_type == "none":
+                raw_prop_q = infer_auto_prop_query(beat.narration)
+            if (interaction == "hold_prop" or beat.board_type == "none") and raw_prop_q:
+                try:
+                    prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
+                    if prop_path.is_file():
+                        with Image.open(prop_path) as raw_prop:
+                            prop_img = raw_prop.convert("RGBA")
+                except Exception:
+                    prop_img = None
+
+            next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
+            has_next_diff_title = next_beat is None or (
+                (next_beat.board_title or "").strip() != (beat.board_title or "").strip()
+                or not (beat.board_title or "").strip()
+            )
+            prev_ch = cur_state.last_chapter if cur_state is not None else None
+            show_chapter_banner = bool((getattr(beat, "chapter_title", "") or "").strip()) and (
+                g_idx == 0 or beat.chapter != prev_ch
+            )
+
+            last_char_size: tuple[int, int] | None = None
+            last_cam = (1.0, 0.5, 0.5)
+            try:
+                for f_idx in range(n_frames_beat):
+                    if cancel is not None and f_idx % 8 == 0:
+                        cancel.check()
+                    t_sec = f_idx / fps
+                    global_t = (cur_frame_offset + f_idx) / fps
+                    mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
+                    if interaction == "versus_split":
+                        animator.facing = "left" if t_sec < dur_b * 0.5 else "right"
+                    bg_frame = backdrop_renderer.render_frame(global_t)
+                    anim_char, motion = animator.frame_at(f_idx, t_sec)
+                    if anim_char is not None:
+                        last_char_size = anim_char.size
+                    try:
+                        frame = render_animated_beat_frame(
+                            bg_img=bg_frame,
+                            char_img=anim_char,
+                            beat=beat,
+                            aspect=aspect,  # type: ignore[arg-type]
+                            t_sec=t_sec,
+                            mouth_open=0.0 if motion.phase == "puppet" else mouth,
+                            word_timings=word_timings,
+                            prop_img=prop_img,
+                            domain=norm_domain,
+                            theme=theme,
+                            duration_sec=dur_b,
+                            draw_board=True,
+                            extra_dy=motion.dy if motion.used_fallback else 0.0,
+                            prev_stage_state=cur_state,
+                            spoken_segments=spoken_segs or None,
+                            is_puppet=motion.phase == "puppet",
+                            total_chapters=total_chapters,
+                            has_next_diff_title=has_next_diff_title,
+                            show_chapter_banner=show_chapter_banner,
+                        )
+                    finally:
+                        bg_frame.close()
+                        if anim_char is not None:
+                            anim_char.close()
+                    try:
+                        proc.stdin.write(frame.tobytes())
+                    finally:
+                        frame.close()
+
+                last_cam = compute_camera_state(
+                    getattr(beat, "camera_shot", "wide_stage"),
+                    aspect=aspect,  # type: ignore[arg-type]
+                    t_sec=max(0.0, (n_frames_beat - 1) / max(1, fps)),
+                    prev_stage_state=cur_state,
+                )
+                cw, ch_h = last_char_size or (
+                    (char_img.width, char_img.height)
+                    if char_img is not None
+                    else (240, target_char_h)
+                )
+                tx, ty, tsc = compute_beat_character_target(
+                    w,
+                    h,
+                    cw,
+                    ch_h,
+                    interaction=interaction,
+                    aspect=aspect,  # type: ignore[arg-type]
+                )
+                cur_state = BeatStageState(
+                    x=tx,
+                    y=ty,
+                    scale=tsc,
+                    pose_state=animator.last_pose_state,
+                    camera_zoom=last_cam[0],
+                    camera_pan_x=last_cam[1],
+                    camera_pan_y=last_cam[2],
+                    last_board_title=(beat.board_title or "").strip(),
+                    last_board_type=beat.board_type,
+                    last_chapter=beat.chapter,
+                )
+            finally:
+                animator.close()
+                if char_img is not None:
+                    char_img.close()
+                if prop_img is not None:
+                    prop_img.close()
+                bg_png.unlink(missing_ok=True)
+                if char_png is not None:
+                    char_png.unlink(missing_ok=True)
+
+            cur_frame_offset += n_frames_beat
+            cur_audio_t += dur_b
+            gc.collect()
+
+        proc.stdin.close()
+        _, stderr_b = proc.communicate()
+        if proc.returncode != 0:
+            raise FFmpegError(
+                f"FFmpeg stream chunk lỗi ({proc.returncode}): "
+                f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
+            )
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+    return cur_frame_offset, cur_audio_t, cur_state
+
+
 def _append_outro(
     *,
     main_mp4: Path,
@@ -502,72 +811,106 @@ def render_stickv(
             workspace_dir=project_dir.parent.parent,
         )
 
-        beat_clips: list[Path] = []
-        total_b = len(beats)
+        chunks = group_beats_into_chunks(
+            beats,
+            beat_wavs,
+            project_dir=project_dir,
+            library_dir=library_dir,
+            assets_dir=assets_dir,
+        )
+        chunk_clips: list[Path] = []
+        total_chunks = max(1, len(chunks))
         norm_domain = normalize_domain(getattr(project, "domain", "paper_classic"))
         shared_backdrop = BackdropRenderer(norm_domain, w, h)
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
         try:
-            for idx, (beat, (wav_p, dur_b)) in enumerate(
-                zip(beats, beat_wavs, strict=True), start=1
-            ):
+            for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
-                pct = 35.0 + (idx / max(1, total_b)) * 45.0
-                emit(pct, f"Đang dựng phân cảnh {idx}/{total_b} (Chương {beat.chapter})...")
+                pct = 35.0 + (c_idx / total_chunks) * 45.0
+                first_b = c_items[0][1]
+                emit(
+                    pct,
+                    f"Đang dựng cụm {c_idx}/{total_chunks} (Chương {first_b.chapter})...",
+                )
+                chunk_mp4 = chunks_dir / f"chunk_{c_idx:03d}.mp4"
 
-                bg_png, char_png = render_beat_layers(
-                    beat,
-                    aspect=project.aspect,
-                    theme=project.theme,
-                    out_dir=chunks_dir,
-                    library_dir=library_dir,
-                    assets_dir=assets_dir,
-                    project_dir=project_dir,
-                    domain=norm_domain,
-                )
-                clip_mp4 = chunks_dir / f"beat_{idx:03d}.mp4"
-                target_total_frames = max(
-                    global_frame_offset + 1, int(round((acc_audio_t + dur_b) * fps))
-                )
-                n_frames_beat = target_total_frames - global_frame_offset
-                state_box: dict[str, Any] = {}
-                _render_single_beat_clip(
-                    beat=beat,
-                    wav_path=wav_p,
-                    bg_png=bg_png,
-                    char_png=char_png,
-                    out_mp4=clip_mp4,
-                    w=w,
-                    h=h,
-                    fps=fps,
-                    aspect=project.aspect,
-                    project_dir=project_dir,
-                    library_dir=library_dir,
-                    assets_dir=assets_dir,
-                    domain=norm_domain,
-                    theme=project.theme,
-                    animation_mode=getattr(project, "animation_mode", "auto"),
-                    pause_scale=pause_scale,
-                    cancel=cancel,
-                    global_frame_offset=global_frame_offset,
-                    n_frames_override=n_frames_beat,
-                    prev_stage_state=prev_stage_state,
-                    stage_state_out=state_box,
-                    backdrop_renderer=shared_backdrop,
-                )
-                beat_clips.append(clip_mp4)
-                global_frame_offset += n_frames_beat
-                acc_audio_t += float(dur_b)
-                if isinstance(state_box.get("state"), BeatStageState):
-                    prev_stage_state = state_box["state"]
-
-                bg_png.unlink(missing_ok=True)
-                if char_png is not None:
-                    char_png.unlink(missing_ok=True)
-                if idx % 3 == 0:
-                    gc.collect()
+                if c_kind == "video":
+                    _g_idx, beat, wav_p, dur_b = c_items[0]
+                    bg_png, char_png = render_beat_layers(
+                        beat,
+                        aspect=project.aspect,
+                        theme=project.theme,
+                        out_dir=chunks_dir,
+                        library_dir=library_dir,
+                        assets_dir=assets_dir,
+                        project_dir=project_dir,
+                        domain=norm_domain,
+                    )
+                    target_total_frames = max(
+                        global_frame_offset + 1, int(round((acc_audio_t + dur_b) * fps))
+                    )
+                    n_frames_beat = target_total_frames - global_frame_offset
+                    state_box: dict[str, Any] = {}
+                    _render_single_beat_clip(
+                        beat=beat,
+                        wav_path=wav_p,
+                        bg_png=bg_png,
+                        char_png=char_png,
+                        out_mp4=chunk_mp4,
+                        w=w,
+                        h=h,
+                        fps=fps,
+                        aspect=project.aspect,
+                        project_dir=project_dir,
+                        library_dir=library_dir,
+                        assets_dir=assets_dir,
+                        domain=norm_domain,
+                        theme=project.theme,
+                        animation_mode=getattr(project, "animation_mode", "auto"),
+                        pause_scale=pause_scale,
+                        cancel=cancel,
+                        global_frame_offset=global_frame_offset,
+                        n_frames_override=n_frames_beat,
+                        prev_stage_state=prev_stage_state,
+                        stage_state_out=state_box,
+                        backdrop_renderer=shared_backdrop,
+                    )
+                    global_frame_offset += n_frames_beat
+                    acc_audio_t += float(dur_b)
+                    if isinstance(state_box.get("state"), BeatStageState):
+                        prev_stage_state = state_box["state"]
+                    bg_png.unlink(missing_ok=True)
+                    if char_png is not None:
+                        char_png.unlink(missing_ok=True)
+                else:
+                    global_frame_offset, acc_audio_t, prev_stage_state = (
+                        _stream_chunk_frames_to_ffmpeg(
+                            chunk_items=c_items,
+                            all_beats=beats,
+                            out_mp4=chunk_mp4,
+                            w=w,
+                            h=h,
+                            fps=fps,
+                            aspect=project.aspect,
+                            project_dir=project_dir,
+                            library_dir=library_dir,
+                            assets_dir=assets_dir,
+                            chunks_dir=chunks_dir,
+                            domain=norm_domain,
+                            theme=project.theme,
+                            animation_mode=getattr(project, "animation_mode", "auto"),
+                            pause_scale=pause_scale,
+                            cancel=cancel,
+                            global_frame_offset=global_frame_offset,
+                            acc_audio_t=acc_audio_t,
+                            prev_stage_state=prev_stage_state,
+                            backdrop_renderer=shared_backdrop,
+                        )
+                    )
+                chunk_clips.append(chunk_mp4)
+                gc.collect()
         finally:
             shared_backdrop.close()
 
@@ -575,7 +918,7 @@ def render_stickv(
         check_cancel()
         concat_txt = chunks_dir / "concat.txt"
         concat_txt.write_text(
-            "\n".join(f"file '{p.resolve().as_posix()}'" for p in beat_clips),
+            "\n".join(f"file '{p.resolve().as_posix()}'" for p in chunk_clips),
             encoding="utf-8",
         )
         video_only = chunks_dir / "video_only.mp4"

@@ -12,7 +12,22 @@ from hbt.stickv.backdrops import normalize_domain
 from hbt.stickv.models import StickvAspect, StickvBeat
 from hbt.stickv.poses_init import DEFAULT_POSES
 
+POSES_V8: tuple[str, ...] = (
+    "point_up",
+    "think_chin",
+    "arms_crossed",
+    "hands_on_hips",
+    "shrug_ask",
+    "present_board",
+    "emphatic_chop",
+    "shock_hands_up",
+    "lean_secret",
+    "count_points",
+    "walk_explore",
+    "idle_breathe",
+)
 VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "float", "static"}
+VALID_CAMERA_SHOTS = {"wide_stage", "focus_board", "closeup_react"}
 VALID_BOARD_TYPES = {
     "none",
     "bullets",
@@ -24,38 +39,59 @@ VALID_BOARD_TYPES = {
     "quote",
     "bar_compare",
     "counter_grow",
+    "timeline_era",
+    "location_map",
+    "myth_vs_fact",
 }
 VALID_INTERACTIONS = {"none", "hold_prop", "point_chart", "versus_split"}
 VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
 
 
 def _build_system_prompt(available_poses: list[str] | None = None) -> str:
-    poses = available_poses or list(DEFAULT_POSES)
-    pose_str = "|".join(poses[:40])
+    extra = [p for p in (available_poses or []) if p not in POSES_V8]
+    pose_str = "|".join([*POSES_V8, *extra[:20]])
     return (
         "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
         "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
         "4.Bài học cốt lõi -> 5.Câu hỏi & CTA. Trả về JSON thuần, không markdown.\n"
         "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
         "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài.\n"
+        "LUẬT ĐA DẠNG: Không dùng cùng 1 pose cho 2 beat đứng liền kề.\n"
         "Phân loại domain phù hợp: "
         "paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
-        f"pose: {pose_str}. "
+        f"pose (ưu tiên 12 hành động 2-đoạn khuỷu tay): {pose_str}. "
         "anim_oneshot: null|shock_jump|idea_bulb|point_board|facepalm|nod_agree|celebrate. "
         "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
         "interaction: none|hold_prop|point_chart|versus_split "
         "(nếu hold_prop thêm prop_query 1-2 từ tiếng Anh). "
+        "camera_shot: wide_stage|focus_board|closeup_react. "
         "motion: bounce|slide_left|slide_right|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
         "board_type: bullets|big_number|comparison|flow_steps|"
-        "bar_compare|counter_grow|card|quote|list|none.\n"
-        "board_data/visual_data: bullets={items:[...],takeaway}, "
+        "bar_compare|counter_grow|timeline_era|location_map|myth_vs_fact|card|quote|list|none.\n"
+        "board_data: bullets={items:[...],takeaway}, "
         "big_number={value,label,sub,takeaway}, "
         "bar_compare={values:[{label,value}],takeaway}, counter_grow={target,unit,label}, "
+        "timeline_era={events:[{year,title}],takeaway}, "
+        "location_map={location,coordinates,takeaway}, "
+        "myth_vs_fact={myth,fact,takeaway}, "
         "comparison={left_title,left_items,right_title,right_items,takeaway}, "
         "flow_steps={steps:[...],takeaway}."
     )
+
+
+def _target_beat_count(target_minutes: float) -> int:
+    m = max(0.5, float(target_minutes))
+    if m <= 1.2:
+        return 10
+    if m <= 3.5:
+        return 24
+    if m <= 5.5:
+        return 40
+    if m <= 8.5:
+        return 60
+    return max(70, min(85, round(m * 7.8)))
 
 
 def build_director_prompt(
@@ -67,7 +103,7 @@ def build_director_prompt(
     available_poses: list[str] | None = None,
 ) -> str:
     """Tạo Prompt Đạo diễn chuẩn 5 chặng để người dùng copy sang Web Gemini Pro (0 Token API)."""
-    beat_count = max(6, min(14, round(target_minutes * 7)))
+    beat_count = _target_beat_count(target_minutes)
     sys_p = _build_system_prompt(available_poses)
     return (
         f"{sys_p}\n\n"
@@ -75,9 +111,10 @@ def build_director_prompt(
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
         'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science",'
         '"music_mood":"curious_science",'
-        '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"explain","anim_oneshot":"idea_bulb",'
-        '"anim_loop":"talk_explain","interaction":"hold_prop","prop_query":"brain","facing":"right",'
-        '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets","board_title":"Tiêu đề bảng",'
+        '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"point_up","camera_shot":"wide_stage",'
+        '"anim_oneshot":"idea_bulb","anim_loop":"talk_explain","interaction":"hold_prop",'
+        '"prop_query":"brain","facing":"right","motion":"bounce","sfx_tag":"whoosh",'
+        '"board_type":"bullets","board_title":"Tiêu đề bảng",'
         '"board_data":{"items":["Ý 1","Ý 2"],"takeaway":"Chốt lại ngắn"}}]}'
     )
 
@@ -121,22 +158,54 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         if takeaway:
             res["takeaway"] = takeaway
         return res
-    if board_type in ("bar_compare", "counter_grow", "card", "quote", "list"):
+    if board_type in (
+        "bar_compare",
+        "counter_grow",
+        "card",
+        "quote",
+        "list",
+        "timeline_era",
+        "location_map",
+        "myth_vs_fact",
+    ):
         return dict(raw)
     return {}
+
+
+def enforce_pose_diversity(beats: list[StickvBeat]) -> list[StickvBeat]:
+    """Đảm bảo không bao giờ có 2 beat đứng liền kề lặp lại cùng một `pose`."""
+    if len(beats) <= 1:
+        return beats
+    from hbt.stickv.puppet import normalize_stickv_pose
+
+    out: list[StickvBeat] = [beats[0]]
+    cycle_idx = 0
+    for b in beats[1:]:
+        prev_norm = normalize_stickv_pose(out[-1].pose)
+        cur_norm = normalize_stickv_pose(b.pose)
+        if cur_norm == prev_norm:
+            cand = POSES_V8[cycle_idx % len(POSES_V8)]
+            cycle_idx += 1
+            if cand == prev_norm:
+                cand = POSES_V8[cycle_idx % len(POSES_V8)]
+                cycle_idx += 1
+            b = b.model_copy(update={"pose": cand})
+        out.append(b)
+    return out
 
 
 def sanitize_beats(
     raw_beats: Any,
     *,
     chapter: int = 1,
+    chapter_title: str = "",
     start_idx: int = 1,
     allowed_poses: set[str] | None = None,
 ) -> list[StickvBeat]:
     """Chuẩn hóa danh sách beat từ Gemini JSON thành StickvBeat hợp lệ."""
     if not isinstance(raw_beats, list):
         return []
-    valid_poses = allowed_poses or set(DEFAULT_POSES)
+    valid_poses = (allowed_poses or set(DEFAULT_POSES)) | set(POSES_V8)
     out: list[StickvBeat] = []
     for item in raw_beats:
         if not isinstance(item, dict):
@@ -161,6 +230,9 @@ def sanitize_beats(
         interaction = str(item.get("interaction") or "none").strip().lower()
         if interaction not in VALID_INTERACTIONS:
             interaction = "none"
+        camera_shot = str(item.get("camera_shot") or "wide_stage").strip().lower()
+        if camera_shot not in VALID_CAMERA_SHOTS:
+            camera_shot = "wide_stage"
         anim_oneshot = str(item.get("anim_oneshot") or "").strip() or None
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
         prop_query = str(item.get("prop_query") or "").strip()[:80] or None
@@ -174,15 +246,18 @@ def sanitize_beats(
         )
         facing = "left" if str(item.get("facing") or "right").strip().lower() == "left" else "right"
         idx = start_idx + len(out)
+        c_title = str(item.get("chapter_title") or (chapter_title if len(out) == 0 else "")).strip()
         out.append(
             StickvBeat(
                 id=f"b{idx:03d}",
                 chapter=chapter,
+                chapter_title=c_title[:120],
                 narration=narration[:750],
                 pose=pose,
                 anim_oneshot=anim_oneshot,
                 anim_loop=anim_loop,
                 interaction=interaction,  # type: ignore[arg-type]
+                camera_shot=camera_shot,  # type: ignore[arg-type]
                 prop_query=prop_query,
                 facing=facing,
                 motion=motion,  # type: ignore[arg-type]
@@ -313,36 +388,40 @@ def generate_stickv_script(
     allowed_set = set(available_poses) if available_poses else None
 
     if target_minutes <= 2.5:
-        beat_count = max(5, min(14, round(target_minutes * 7)))
+        beat_count = _target_beat_count(target_minutes)
         user_prompt = (
             f"Chủ đề: {clean_idea} | Nhóm: {topic} | Khung: {aspect} | {beat_count} beat.\n"
-            'JSON: {"title":"...","beats":[{"narration":"...","pose":"explain","facing":"right",'
-            '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets","board_title":"...",'
-            '"board_data":{"items":["..."],"takeaway":"..."}}]}'
+            'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+            '"beats":[{"narration":"...","pose":"point_up","camera_shot":"wide_stage",'
+            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
+            '"board_title":"...","board_data":{"items":["..."],"takeaway":"..."}}]}'
         )
         parsed, timings = generate_structured_json(
             sys_prompt, user_prompt, model=chosen_model, timeout=60.0
         )
         title = str(parsed.get("title") or clean_idea[:80]).strip()
-        beats = sanitize_beats(
-            parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
+        beats = enforce_pose_diversity(
+            sanitize_beats(parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set)
         )
         return (
             title,
             beats,
             {
                 "chapters": 1,
+                "chapter_list": [],
                 "domain": normalize_domain(parsed.get("domain")),
                 "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
                 **timings,
             },
         )
 
-    num_chapters = max(2, min(6, math.ceil(target_minutes / 2.5)))
+    num_chapters = max(4, min(8, round(target_minutes * 0.8)))
+    beats_per_ch = max(7, min(12, math.ceil(_target_beat_count(target_minutes) / num_chapters)))
     outline_prompt = (
-        f"Video {target_minutes:.0f}p ({aspect}, {topic}): {clean_idea}. "
-        f"Lập dàn ý {num_chapters} chương theo cấu trúc 5 chặng.\n"
-        'JSON: {"title":"...","chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
+        f"Video khám phá {target_minutes:.0f}p ({aspect}, {topic}): {clean_idea}. "
+        f"Lập dàn ý {num_chapters} chương hấp dẫn.\n"
+        'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+        '"chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
     )
     outline, t0 = generate_structured_json(
         sys_prompt, outline_prompt, model=chosen_model, timeout=60.0
@@ -356,15 +435,17 @@ def generate_stickv_script(
         ]
 
     all_beats: list[StickvBeat] = []
+    chapter_list: list[dict[str, Any]] = []
     total_llm_s = float(t0.get("llm_s") or 0.0)
     for ch_idx, ch in enumerate(raw_chapters[:num_chapters], start=1):
         heading = str((ch or {}).get("heading") or f"Chương {ch_idx}")
         summary = str((ch or {}).get("summary") or clean_idea)
+        chapter_list.append({"chapter": ch_idx, "heading": heading, "summary": summary})
         ch_prompt = (
-            f"Video: {title} | Chương {ch_idx}/{num_chapters}: {heading} ({summary}). "
-            "Viết 7-9 beat.\n"
-            'JSON: {"beats":[{"narration":"...","pose":"explain","facing":"right",'
-            '"motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
+            f"Video: {title} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
+            f"{heading} ({summary}). Viết {beats_per_ch} beat chi tiết, chuyển góc máy linh hoạt.\n"
+            'JSON: {"beats":[{"narration":"...","pose":"point_up","camera_shot":"focus_board",'
+            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
             '"board_title":"...","board_data":{}}]}'
         )
         ch_parsed, ch_t = generate_structured_json(
@@ -374,16 +455,21 @@ def generate_stickv_script(
         ch_beats = sanitize_beats(
             ch_parsed.get("beats"),
             chapter=ch_idx,
+            chapter_title=heading,
             start_idx=len(all_beats) + 1,
             allowed_poses=allowed_set,
         )
         all_beats.extend(ch_beats)
 
+    all_beats = enforce_pose_diversity(all_beats)
     return (
         title,
         all_beats,
         {
             "chapters": len(raw_chapters[:num_chapters]),
+            "chapter_list": chapter_list,
+            "domain": normalize_domain(outline.get("domain")),
+            "music_mood": str(outline.get("music_mood") or "curious_science").strip(),
             "llm_s": round(total_llm_s, 3),
             "model": chosen_model,
         },

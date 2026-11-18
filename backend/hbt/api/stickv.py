@@ -202,6 +202,7 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
 
     chosen_domain = body.domain or meta.get("domain") or "paper_classic"
     chosen_mood = body.music_mood or str(meta.get("music_mood") or "curious_science")
+    chap_list = meta.get("chapter_list") if isinstance(meta.get("chapter_list"), list) else []
     if body.slug:
         proj = load_stickv_project(state.settings.workspace_dir, body.slug)
         proj = proj.model_copy(
@@ -215,6 +216,7 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
                 "theme": body.theme,
                 "target_minutes": body.target_minutes,
                 "gemini_model": body.model or GEMINI_MODEL,
+                "chapters": chap_list,
                 "beats": beats,
             }
         )
@@ -233,6 +235,11 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
             gemini_model=body.model or GEMINI_MODEL,
             beats=beats,
         )
+        if chap_list:
+            proj = save_stickv_project(
+                state.settings.workspace_dir,
+                proj.model_copy(update={"chapters": chap_list}),
+            )
     return {"project": proj.model_dump(mode="json"), "meta": meta}
 
 

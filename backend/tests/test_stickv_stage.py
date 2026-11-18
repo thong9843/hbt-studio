@@ -108,15 +108,15 @@ def test_synth_and_render_cleans_up_chunks_dir(tmp_path: Path) -> None:
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         Path(cmd[-1]).write_bytes(b"fake-media-bytes")
 
-    def fake_stream(*, out_mp4: Path, **kwargs):
+    def fake_stream_chunk(*, out_mp4: Path, global_frame_offset: int, acc_audio_t: float, **kwargs):
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
         out_mp4.write_bytes(b"fake-media-bytes")
-        return out_mp4
+        return global_frame_offset + 60, acc_audio_t + 2.4, None
 
     with (
         patch("hbt.stickv.audio.run_ffmpeg", side_effect=fake_ffmpeg),
         patch("hbt.stickv.render.run_ffmpeg", side_effect=fake_ffmpeg),
-        patch("hbt.stickv.render._stream_beat_frames_to_ffmpeg", side_effect=fake_stream),
+        patch("hbt.stickv.render._stream_chunk_frames_to_ffmpeg", side_effect=fake_stream_chunk),
         patch("hbt.stickv.render.measure_audio_duration", return_value=3.2),
     ):
         res = render_stickv(
@@ -360,8 +360,8 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     )
 
     assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một.", "Câu hai?"]
-    assert compute_pause_after("Kết thúc câu.") == pytest.approx(0.45)
-    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(0.25)
+    assert compute_pause_after("Kết thúc câu.") == pytest.approx(0.14)
+    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(0.14)
 
     def _write_tone_wav(out_path: Path, dur_s: float = 0.80, sr: int = 24000) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)

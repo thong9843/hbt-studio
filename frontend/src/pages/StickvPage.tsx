@@ -7,6 +7,7 @@ import type {
   StickvAspect,
   StickvBeat,
   StickvBoardType,
+  StickvCameraShot,
   StickvDomain,
   StickvInteraction,
   StickvMotion,
@@ -24,17 +25,29 @@ import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 
 const DEFAULT_POSE_OPTIONS = [
-  { id: 'explain', label: 'Giải thích' },
-  { id: 'think', label: 'Suy nghĩ' },
-  { id: 'shock', label: 'Bất ngờ / Sốc' },
-  { id: 'happy', label: 'Vui vẻ' },
-  { id: 'run', label: 'Chạy nhanh' },
-  { id: 'rich', label: 'Giàu có' },
-  { id: 'sad', label: 'Buồn bã' },
-  { id: 'angry', label: 'Tức giận' },
+  { id: 'point_up', label: 'Chỉ tay lên bảng' },
+  { id: 'think_chin', label: 'Vắt tay lên cằm' },
+  { id: 'arms_crossed', label: 'Khoanh tay phân tích' },
+  { id: 'hands_on_hips', label: 'Chống nạnh khẳng định' },
+  { id: 'shrug_ask', label: 'Nhún vai đặt câu hỏi' },
+  { id: 'present_board', label: 'Xòe tay giới thiệu' },
+  { id: 'emphatic_chop', label: 'Đánh nhịp nhấn ý' },
+  { id: 'shock_hands_up', label: 'Giơ tay sửng sốt' },
+  { id: 'lean_secret', label: 'Thì thầm bật mí' },
+  { id: 'count_points', label: 'Đếm ý trên tay' },
+  { id: 'walk_explore', label: 'Sải bước khám phá' },
+  { id: 'idle_breathe', label: 'Đứng thở tự nhiên' },
 ];
 
 const EXTRA_POSE_LABELS: Record<string, string> = {
+  explain: 'Giải thích (Cũ)',
+  think: 'Suy nghĩ (Cũ)',
+  shock: 'Bất ngờ / Sốc (Cũ)',
+  happy: 'Vui vẻ (Cũ)',
+  run: 'Chạy nhanh',
+  rich: 'Giàu có',
+  sad: 'Buồn bã',
+  angry: 'Tức giận',
   idea: 'Ý tưởng / Sáng kiến',
   confused: 'Bối rối / Khó hiểu',
   detective: 'Thám tử / Điều tra',
@@ -75,6 +88,9 @@ const SFX_TAGS: { id: StickvSfxTag; label: string }[] = [
 
 const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'bullets', label: 'Gạch đầu dòng' },
+  { id: 'timeline_era', label: 'Trục niên đại (Lịch sử)' },
+  { id: 'location_map', label: 'Bản đồ địa danh' },
+  { id: 'myth_vs_fact', label: 'Lầm tưởng vs Sự thật' },
   { id: 'bar_compare', label: 'Biểu đồ cột động' },
   { id: 'counter_grow', label: 'Bộ đếm số tăng' },
   { id: 'flow_steps', label: 'Sơ đồ bước' },
@@ -83,7 +99,7 @@ const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'card', label: 'Thẻ thông tin' },
   { id: 'quote', label: 'Trích dẫn' },
   { id: 'list', label: 'Danh sách' },
-  { id: 'none', label: 'Ẩn bảng' },
+  { id: 'none', label: 'Thẻ tự động (Icon)' },
 ];
 
 const DOMAINS: { id: StickvDomain; label: string; bgClass: string }[] = [
@@ -102,6 +118,12 @@ const MUSIC_MOODS: { id: string; label: string }[] = [
   { id: 'calm_lofi', label: 'Nhẹ nhàng / Lofi' },
 ];
 
+const CAMERA_SHOTS: { id: StickvCameraShot; label: string }[] = [
+  { id: 'wide_stage', label: 'Toàn cảnh' },
+  { id: 'focus_board', label: 'Zoom Bảng' },
+  { id: 'closeup_react', label: 'Cận cảnh biểu cảm' },
+];
+
 const INTERACTIONS: { id: StickvInteraction; label: string }[] = [
   { id: 'none', label: 'Toàn cảnh' },
   { id: 'hold_prop', label: 'Cầm Icon' },
@@ -114,7 +136,8 @@ function makeEmptyBeat(index: number): StickvBeat {
     id: `b${String(index).padStart(3, '0')}`,
     chapter: 1,
     narration: '',
-    pose: 'explain',
+    pose: 'present_board',
+    camera_shot: 'wide_stage',
     facing: 'right',
     motion: 'bounce',
     sfx_tag: 'whoosh',
@@ -635,8 +658,8 @@ export function StickvPage() {
                   <option value={1}>~1 phút (Shorts)</option>
                   <option value={3}>~3 phút</option>
                   <option value={5}>~5 phút (Long)</option>
+                  <option value={8}>~8 phút (Long)</option>
                   <option value={10}>~10 phút (Long)</option>
-                  <option value={15}>~15 phút (Long)</option>
                 </select>
               </label>
 
@@ -834,7 +857,8 @@ export function StickvPage() {
                     >
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <span className="rounded-pill bg-card px-2.5 py-0.5 text-tiny font-extrabold text-text shadow-sm">
-                          #{idx + 1} · Chương {beat.chapter} ({beat.id})
+                          #{idx + 1} · Chương {beat.chapter}
+                          {beat.chapter_title ? `: ${beat.chapter_title}` : ''} ({beat.id})
                         </span>
                         <div className="flex items-center gap-2">
                           <label className="inline-flex cursor-pointer items-center gap-1 rounded-pill bg-card px-2.5 py-1 text-tiny font-semibold text-text-2 hover:bg-soft">
@@ -967,6 +991,23 @@ export function StickvPage() {
                           {INTERACTIONS.map((it) => (
                             <option key={it.id} value={it.id}>
                               Tương tác: {it.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <select
+                          aria-label="Góc máy ảo"
+                          value={beat.camera_shot ?? 'wide_stage'}
+                          onChange={(e) =>
+                            updateBeat(beat.id, {
+                              camera_shot: e.target.value as StickvCameraShot,
+                            })
+                          }
+                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
+                        >
+                          {CAMERA_SHOTS.map((cam) => (
+                            <option key={cam.id} value={cam.id}>
+                              Cam: {cam.label}
                             </option>
                           ))}
                         </select>

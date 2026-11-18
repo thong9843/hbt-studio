@@ -964,6 +964,7 @@ export interface PuppetStatusResponse {
   slots: Record<PuppetSlotKey, PuppetSlotStatus>;
 }
 export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'float' | 'static';
+export type StickvCameraShot = 'wide_stage' | 'focus_board' | 'closeup_react';
 export type StickvBoardType =
   | 'none'
   | 'bullets'
@@ -974,17 +975,22 @@ export type StickvBoardType =
   | 'list'
   | 'quote'
   | 'bar_compare'
-  | 'counter_grow';
+  | 'counter_grow'
+  | 'timeline_era'
+  | 'location_map'
+  | 'myth_vs_fact';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
   id: string;
   chapter: number;
+  chapter_title?: string;
   narration: string;
   pose: string;
   anim_oneshot?: string | null;
   anim_loop?: string;
   interaction?: StickvInteraction;
+  camera_shot?: StickvCameraShot;
   prop_query?: string | null;
   facing: 'left' | 'right';
   motion: StickvMotion;
@@ -1013,6 +1019,7 @@ export interface StickvProject {
   outro?: boolean;
   gemini_model: string;
   target_minutes: number;
+  chapters?: Array<Record<string, unknown>>;
   beats: StickvBeat[];
   created_at: string;
   updated_at: string;
