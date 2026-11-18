@@ -17,4 +17,8 @@ def get_app_settings(state: State):
 
 @router.put("/settings/app", response_model=AppSettings)
 def put_app_settings(body: AppSettings, state: State):
-    return state.app_settings.save(body)
+    from hbt.api.asset_hub import clear_online_search_cache
+
+    saved = state.app_settings.save(body)
+    clear_online_search_cache()
+    return saved

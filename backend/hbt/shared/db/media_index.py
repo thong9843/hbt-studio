@@ -241,6 +241,40 @@ def update_stage(
         conn.close()
 
 
+def _deleted_renders_path(db_path: Path | None = None) -> Path:
+    target = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
+    return target.parent / "deleted_renders.json"
+
+
+def load_deleted_render_paths(db_path: Path | None = None) -> set[str]:
+    """Đọc danh sách `file_path` đã xóa khỏi UI nhưng đang chờ hệ điều hành nhả khóa."""
+    p = _deleted_renders_path(db_path)
+    if not p.is_file():
+        return set()
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            return {str(x).strip() for x in raw if str(x).strip()}
+    except Exception:
+        pass
+    return set()
+
+
+def _save_deleted_render_paths(paths: set[str], db_path: Path | None = None) -> None:
+    p = _deleted_renders_path(db_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(sorted(paths), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def record_deleted_render_path(file_path: str, db_path: Path | None = None) -> None:
+    norm = str(file_path or "").strip()
+    if not norm:
+        return
+    cur = load_deleted_render_paths(db_path)
+    cur.add(norm)
+    _save_deleted_render_paths(cur, db_path)
+
+
 def delete_render(render_id: str, db_path: Path | None = None) -> bool:
     """Xoá bản ghi video khỏi chỉ mục SQLite."""
     conn = init_db(db_path)
@@ -329,6 +363,22 @@ def sync_renders_from_disk(
     )
     existing_resolved: set[Path] = set()
 
+    # Thử dọn các file đã đánh dấu xóa nhưng từng bị Windows khóa (WinError 32)
+    pending_deleted = load_deleted_render_paths(db_path)
+    still_locked: set[str] = set()
+    for norm_p in pending_deleted:
+        abs_p = resolve_media_path(norm_p, base_dir=base_dir)
+        if not abs_p.is_file():
+            continue
+        try:
+            abs_p.unlink(missing_ok=True)
+        except PermissionError:
+            still_locked.add(norm_p)
+        except OSError:
+            still_locked.add(norm_p)
+    if pending_deleted != still_locked:
+        _save_deleted_render_paths(still_locked, db_path)
+
     # Đọc cache duration từ DB hiện có để tránh chạy ffprobe lặp lại
     cached_durs: dict[Path, float] = {}
     conn = init_db(db_path)
@@ -354,6 +404,8 @@ def sync_renders_from_disk(
         nonlocal added_or_updated
         resolved = mp4.resolve()
         if resolved in existing_resolved:
+            return
+        if normalize_media_path(resolved, base_dir=base_dir) in still_locked:
             return
         existing_resolved.add(resolved)
         dur = duration_sec if duration_sec > 0.0 else cached_durs.get(resolved, 0.0)

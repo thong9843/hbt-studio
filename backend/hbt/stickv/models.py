@@ -18,7 +18,7 @@ StickvDomain = Literal[
 ]
 StickvInteraction = Literal["none", "hold_prop", "point_chart", "versus_split"]
 StickvAnimationMode = Literal["auto", "static"]
-StickvMotion = Literal["bounce", "slide_left", "slide_right", "shake", "float", "static"]
+StickvMotion = Literal["bounce", "slide_left", "slide_right", "float", "static"]
 StickvBoardType = Literal[
     "none",
     "bullets",
@@ -79,6 +79,8 @@ class StickvBeat(BaseModel):
             out["narration"] = out["text"]
         if "sfx" in out and "sfx_tag" not in out:
             out["sfx_tag"] = out["sfx"]
+        if str(out.get("motion") or "").strip().lower() == "shake":
+            out["motion"] = "float"
         return out
 
 

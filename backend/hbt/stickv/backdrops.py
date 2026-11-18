@@ -64,17 +64,17 @@ DOMAIN_PALETTES: dict[StickvDomain, dict[str, tuple[int, int, int, int]]] = {
         "takeaway_bg": (15, 23, 42, 255),
     },
     "history_geo": {
-        "bg": (243, 234, 216, 255),
-        "grid": (200, 182, 150, 255),
-        "card": (252, 248, 238, 250),
-        "card_border": (200, 182, 150, 255),
-        "text": (28, 25, 23, 255),
-        "muted": (87, 83, 78, 255),
-        "accent": (185, 28, 28, 255),
-        "amber": (217, 119, 6, 255),
-        "pill_bg": (254, 243, 199, 255),
-        "pill_text": (120, 53, 15, 255),
-        "takeaway_bg": (245, 238, 220, 255),
+        "bg": (222, 196, 152, 255),
+        "grid": (162, 128, 78, 255),
+        "card": (250, 240, 218, 248),
+        "card_border": (162, 128, 78, 255),
+        "text": (38, 26, 16, 255),
+        "muted": (92, 70, 46, 255),
+        "accent": (168, 36, 28, 255),
+        "amber": (196, 124, 24, 255),
+        "pill_bg": (244, 224, 182, 255),
+        "pill_text": (108, 48, 14, 255),
+        "takeaway_bg": (236, 216, 178, 255),
     },
     "psychology_story": {
         "bg": (20, 18, 29, 255),
@@ -135,6 +135,28 @@ class BackdropRenderer:
             arr = (c0 + (c1 - c0) * glow[..., None]).astype(np.uint8)
             return Image.fromarray(arr, mode="RGB")
 
+        if self.domain == "history_geo":
+            # Giấy da cổ sepia ấm (#E5CFA8 -> #CBB082) + vignette tối cổ điển
+            yy, xx = np.mgrid[0 : self.height, 0 : self.width]
+            ny = yy / max(1, self.height - 1)
+            c_top = np.array([229, 207, 168], dtype=np.float32)  # #E5CFA8
+            c_bot = np.array([203, 176, 130], dtype=np.float32)  # #CBB082
+            grad = c_top + (c_bot - c_top) * ny[..., None]
+            cx = self.width * 0.5
+            cy = self.height * 0.5
+            dist = np.sqrt(((xx - cx) / max(1.0, cx)) ** 2 + ((yy - cy) / max(1.0, cy)) ** 2)
+            vig = np.clip(1.0 - 0.34 * np.clip((dist - 0.45) / 0.85, 0.0, 1.0) ** 1.6, 0.62, 1.0)
+            arr = np.clip(grad * vig[..., None], 0, 255).astype(np.uint8)
+            img = Image.fromarray(arr, mode="RGB")
+            draw = ImageDraw.Draw(img)
+            pad = 22
+            draw.rectangle(
+                (pad, pad, self.width - pad, self.height - pad),
+                outline=(138, 104, 62),
+                width=3,
+            )
+            return img
+
         img = Image.new("RGB", (self.width, self.height), bg_rgb)
         if self.domain == "paper_classic":
             draw = ImageDraw.Draw(img)
@@ -179,19 +201,56 @@ class BackdropRenderer:
                 draw.ellipse((px - 5, py - 5, px + 5, py + 5), fill=(56, 189, 248, 95))
 
         elif self.domain == "history_geo":
+            # Đường kinh tuyến / vĩ tuyến bản đồ cổ trôi nhẹ
             step = 110
             ox = int(round(phase * step))
-            line_c = (200, 182, 150, 130)
+            line_c = (146, 114, 68, 120)
             for x in range(ox - step, w + step, step):
                 draw.line([(x, 0), (x, h)], fill=line_c, width=1)
             for y in range(0, h, step):
                 draw.line([(0, y), (w, y)], fill=line_c, width=1)
-            # La bàn xoay mờ ở góc trên phải
-            cx, cy, r = w - 110, 110, 56
-            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(185, 28, 28, 65), width=2)
-            nx = cx + int(math.cos(angle) * (r - 8))
-            ny = cy + int(math.sin(angle) * (r - 8))
-            draw.line([(cx, cy), (nx, ny)], fill=(185, 28, 28, 90), width=3)
+
+            # Đường nét đứt hành trình uốn lượn
+            route_y = int(h * 0.36)
+            for i in range(0, w + 40, 36):
+                rx0 = (i + ox) % (w + 40) - 20
+                ry0 = route_y + int(math.sin((rx0 / max(1, w)) * math.pi * 2.0) * 26)
+                draw.line([(rx0, ry0), (rx0 + 18, ry0)], fill=(168, 36, 28, 110), width=3)
+
+            # Dãy cột đền cổ & kim tự tháp trôi parallax chậm ở chân trời dưới
+            horizon_y = int(h * 0.84)
+            par_shift = int(round(phase * 180))
+            sil_c = (132, 98, 56, 78)
+            for k in range(-1, (w // 180) + 3):
+                bx = k * 180 - par_shift
+                # Kim tự tháp
+                draw.polygon(
+                    [(bx, horizon_y), (bx + 55, horizon_y - 78), (bx + 110, horizon_y)],
+                    fill=sil_c,
+                )
+                # Cột đền cổ
+                col_x = bx + 124
+                draw.rectangle((col_x, horizon_y - 68, col_x + 14, horizon_y), fill=sil_c)
+                draw.rectangle((col_x + 22, horizon_y - 68, col_x + 36, horizon_y), fill=sil_c)
+                draw.rectangle((col_x - 6, horizon_y - 76, col_x + 42, horizon_y - 66), fill=sil_c)
+
+            # La bàn cổ xoay nhẹ ở góc trên phải
+            cx, cy, r = w - 96, 96, 52
+            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(146, 86, 36, 130), width=3)
+            draw.ellipse(
+                (cx - r + 10, cy - r + 10, cx + r - 10, cy + r - 10),
+                outline=(146, 86, 36, 95),
+                width=1,
+            )
+            nx = cx + int(math.cos(angle) * (r - 10))
+            ny = cy + int(math.sin(angle) * (r - 10))
+            draw.line([(cx, cy), (nx, ny)], fill=(168, 36, 28, 175), width=4)
+
+            # Hạt bụi ánh nắng vàng trôi lơ lửng
+            for idx in range(10):
+                px = int(((idx * 0.13 + phase * 0.25) % 1.0) * w)
+                py = int(((idx * 0.19 + math.sin(angle + idx) * 0.04) % 1.0) * h)
+                draw.ellipse((px - 3, py - 3, px + 3, py + 3), fill=(255, 232, 168, 120))
 
         elif self.domain == "psychology_story":
             pulse = 0.5 + 0.5 * math.sin(angle)

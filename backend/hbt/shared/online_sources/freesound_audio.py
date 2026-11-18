@@ -15,6 +15,14 @@ from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
 
 FREESOUND_SEARCH_API = "https://freesound.org/apiv2/search/text/"
 
+FREESOUND_MOOD_QUERIES: dict[str, str] = {
+    "curious_science": "ambient electronic documentary music",
+    "history_epic": "cinematic orchestral epic music",
+    "funny_quirky": "quirky comedy happy music",
+    "mysterious_tense": "mystery dark suspense ambient",
+    "calm_lofi": "chillout lofi acoustic music",
+}
+
 
 def _safe_slug(raw: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "freesound").strip()).strip("-")
@@ -48,6 +56,7 @@ async def search_freesound_audio(
     query: str = "",
     *,
     kind: Literal["music", "sfx"] = "music",
+    mood: str = "",
     api_key: str = "",
     page_size: int = 15,
     client: httpx.AsyncClient | None = None,
@@ -57,16 +66,31 @@ async def search_freesound_audio(
     if not key:
         return []
 
-    q = (query or "").strip() or ("ambient" if kind == "music" else "whoosh")
-    params = {
+    mood_key = (mood or "").strip().lower()
+    q = (query or "").strip()
+    if not q and mood_key in FREESOUND_MOOD_QUERIES:
+        q = FREESOUND_MOOD_QUERIES[mood_key]
+    elif q in FREESOUND_MOOD_QUERIES:
+        q = FREESOUND_MOOD_QUERIES[q]
+    elif not q:
+        q = "ambient music" if kind == "music" else "whoosh"
+
+    params: dict[str, Any] = {
         "query": q,
         "token": key,
         "fields": "id,name,duration,previews,tags,license,username",
         "page_size": max(1, min(30, int(page_size))),
     }
+    if kind == "music":
+        params["filter"] = "duration:[15 TO 300]"
 
     async def _do(c: httpx.AsyncClient) -> list[dict[str, Any]]:
         resp = await c.get(FREESOUND_SEARCH_API, params=params)
+        if resp.status_code in (401, 403):
+            raise ValueError(
+                "FREESOUND_API_KEY không hợp lệ hoặc chưa được kích hoạt. "
+                "Vui lòng kiểm tra lại trong Cài đặt."
+            )
         resp.raise_for_status()
         data = resp.json()
         rows = data.get("results") if isinstance(data, dict) else []

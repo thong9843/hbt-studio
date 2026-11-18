@@ -12,7 +12,7 @@ from hbt.stickv.backdrops import normalize_domain
 from hbt.stickv.models import StickvAspect, StickvBeat
 from hbt.stickv.poses_init import DEFAULT_POSES
 
-VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "shake", "float", "static"}
+VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "float", "static"}
 VALID_BOARD_TYPES = {
     "none",
     "bullets",
@@ -46,7 +46,7 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
         "interaction: none|hold_prop|point_chart|versus_split "
         "(nếu hold_prop thêm prop_query 1-2 từ tiếng Anh). "
-        "motion: bounce|slide_left|slide_right|shake|float|static. "
+        "motion: bounce|slide_left|slide_right|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
         "board_type: bullets|big_number|comparison|flow_steps|"
         "bar_compare|counter_grow|card|quote|list|none.\n"
@@ -148,7 +148,9 @@ def sanitize_beats(
         if pose not in valid_poses:
             pose = "explain"
         motion = str(item.get("motion") or "bounce").strip().lower()
-        if motion not in VALID_MOTIONS:
+        if motion == "shake":
+            motion = "float"
+        elif motion not in VALID_MOTIONS:
             motion = "bounce"
         sfx = str(item.get("sfx_tag") or item.get("sfx") or "whoosh").strip().lower()
         if sfx not in VALID_SFX:
@@ -258,7 +260,7 @@ def split_raw_narration_to_beats(raw_text: str, *, title: str = "") -> tuple[str
         elif any(k in low for k in ("tiền", "giàu", "lương", "lãi")):
             pose, motion, sfx = "rich", "bounce", "ding"
         elif any(k in low for k in ("sai lầm", "mất", "nguy hiểm", "tức", "cảnh báo")):
-            pose, motion, sfx = "angry", "shake", "vine_boom"
+            pose, motion, sfx = "angry", "bounce", "vine_boom"
         else:
             pose, motion, sfx = "explain", "bounce", "whoosh"
 

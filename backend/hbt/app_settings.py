@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from hbt.config import DEFAULT_FPS
+from hbt.config import DEFAULT_FPS, REPO_ROOT, _read_env_file
 from hbt.models import HEX_COLOR
 from hbt.shared.pipeline.watermark import WatermarkSettings
 
@@ -42,15 +42,14 @@ class AppSettings(BaseModel):
     watermark: WatermarkSettings = Field(default_factory=WatermarkSettings)
     pixabay_api_key: str = ""
     giphy_api_key: str = ""
-    jamendo_client_id: str = ""
     freesound_api_key: str = ""
 
 
 def resolve_online_api_key(
-    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY", "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"],
+    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY", "FREESOUND_API_KEY"],
     workspace_dir: Path | None = None,
 ) -> str:
-    """Đọc API key từ .env trước, sau đó fallback sang workspace/settings/app.json."""
+    """Đọc API key từ os.environ -> workspace/settings/app.json -> .env (không cần restart)."""
     val = os.environ.get(env_name, "").strip()
     if val:
         return val
@@ -60,11 +59,10 @@ def resolve_online_api_key(
             return s.pixabay_api_key.strip()
         if env_name == "GIPHY_API_KEY" and s.giphy_api_key.strip():
             return s.giphy_api_key.strip()
-        if env_name == "JAMENDO_CLIENT_ID" and s.jamendo_client_id.strip():
-            return s.jamendo_client_id.strip()
         if env_name == "FREESOUND_API_KEY" and s.freesound_api_key.strip():
             return s.freesound_api_key.strip()
-    return ""
+    env_map = _read_env_file(REPO_ROOT / ".env")
+    return env_map.get(env_name, "").strip()
 
 
 class AppSettingsStore:

@@ -803,11 +803,9 @@ def render_animated_beat_frame(
             elif beat.motion == "slide_right" and prev_stage_state is None:
                 p = _ease_in_out(min(1.0, t_sec / 0.35))
                 dx = -(1.0 - p) * (w * 0.45)
-            elif beat.motion == "shake":
-                dx = math.sin(t_sec * 36.0) * 10.0
             elif not is_puppet:
-                if beat.motion == "float":
-                    dy = math.sin(t_sec * 3.0) * 12.0
+                if beat.motion in ("float", "shake"):
+                    dy = math.sin(t_sec * 3.0) * 10.0
                 elif beat.motion == "bounce":
                     dy = -abs(math.sin(t_sec * 6.0)) * 14.0
                 dy += math.sin(t_sec * 4.2) * 3.0 - (mouth_open * 6.0) + extra_dy

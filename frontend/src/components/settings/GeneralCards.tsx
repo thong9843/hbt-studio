@@ -195,46 +195,73 @@ export function StudioEnginesCard({ health }: { health: { vieneu?: boolean } | u
   );
 }
 
-/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Pixabay, Giphy, Jamendo, Freesound). */
+function ApiKeyStatusBadge({ configured }: { configured: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-bold ${
+        configured ? 'bg-tint-grn text-on-tint-grn' : 'bg-soft text-muted'
+      }`}
+    >
+      {configured ? 'Đã cấu hình' : 'Chưa cấu hình'}
+    </span>
+  );
+}
+
+/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Freesound, Pixabay, Giphy). */
 export function OnlineApiKeysCard({ value, onChange }: Props) {
+  const hasFreesound = (value.freesound_api_key ?? '').trim().length > 0;
+  const hasPixabay = (value.pixabay_api_key ?? '').trim().length > 0;
+  const hasGiphy = (value.giphy_api_key ?? '').trim().length > 0;
+
   return (
     <Card as="section" aria-label="API Kho Tài Nguyên Trực Tuyến" className="space-y-4">
       <div>
         <h2 className="text-h2 font-bold">API Kho Tài Nguyên Trực Tuyến</h2>
         <p className="mt-1 text-small text-muted">
-          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm nhạc Jamendo,
-          Freesound, Pixabay và sticker động Giphy ngay trong Thư viện.
+          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm nhạc nền & SFX
+          Freesound, Giphy Stickers ngay trong Thư viện. Thay đổi có hiệu lực ngay sau khi bấm Lưu.
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Input
-          label="JAMENDO_CLIENT_ID (Nhạc không lời 600k+ bài)"
-          type="password"
-          placeholder="Nhập Jamendo Client ID (devportal.jamendo.com)..."
-          value={value.jamendo_client_id ?? ''}
-          onChange={(e) => onChange({ jamendo_client_id: e.target.value })}
-        />
-        <Input
-          label="FREESOUND_API_KEY (Ambience & SFX CC0)"
-          type="password"
-          placeholder="Nhập Freesound API Key (freesound.org/apiv2/apply)..."
-          value={value.freesound_api_key ?? ''}
-          onChange={(e) => onChange({ freesound_api_key: e.target.value })}
-        />
-        <Input
-          label="PIXABAY_API_KEY (Nhạc & SFX)"
-          type="password"
-          placeholder="Nhập Pixabay API Key..."
-          value={value.pixabay_api_key ?? ''}
-          onChange={(e) => onChange({ pixabay_api_key: e.target.value })}
-        />
-        <Input
-          label="GIPHY_API_KEY (Giphy Stickers)"
-          type="password"
-          placeholder="Nhập Giphy API Key..."
-          value={value.giphy_api_key ?? ''}
-          onChange={(e) => onChange({ giphy_api_key: e.target.value })}
-        />
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Freesound</span>
+            <ApiKeyStatusBadge configured={hasFreesound} />
+          </div>
+          <Input
+            label="FREESOUND_API_KEY (Nhạc nền, Ambience & SFX CC0)"
+            type="password"
+            placeholder="Nhập Freesound API Key (freesound.org/apiv2/apply)..."
+            value={value.freesound_api_key ?? ''}
+            onChange={(e) => onChange({ freesound_api_key: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Pixabay</span>
+            <ApiKeyStatusBadge configured={hasPixabay} />
+          </div>
+          <Input
+            label="PIXABAY_API_KEY (Kho ảnh / media Pixabay)"
+            type="password"
+            placeholder="Nhập Pixabay API Key..."
+            value={value.pixabay_api_key ?? ''}
+            onChange={(e) => onChange({ pixabay_api_key: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Giphy</span>
+            <ApiKeyStatusBadge configured={hasGiphy} />
+          </div>
+          <Input
+            label="GIPHY_API_KEY (Giphy Stickers)"
+            type="password"
+            placeholder="Nhập Giphy API Key..."
+            value={value.giphy_api_key ?? ''}
+            onChange={(e) => onChange({ giphy_api_key: e.target.value })}
+          />
+        </div>
       </div>
     </Card>
   );

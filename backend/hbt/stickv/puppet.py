@@ -705,7 +705,7 @@ def evaluate_action_curve(action: str, t_sec: float, env_val: float) -> PuppetPo
         jump_dy = -26.0 * math.sin(math.pi * t / 0.45) if t < 0.45 else 0.0
         return PuppetPoseState(
             head_angle=-8.0 * damp,
-            head_dx=4.0 * math.sin(32.0 * t) * damp,
+            head_dx=0.0,
             arm_l_angle=-48.0 * damp,
             arm_r_angle=48.0 * damp,
             torso_dy=jump_dy,

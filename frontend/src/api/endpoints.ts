@@ -463,15 +463,6 @@ export const api = {
     kind: 'music' | 'sfx';
     tags: string[];
   }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/pixabay/import', { json: body }),
-  importJamendoOnline: (body: {
-    item_id: string;
-    title: string;
-    artist: string;
-    download_url: string;
-    tags: string[];
-    moods?: string[];
-    license_url?: string;
-  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/jamendo/import', { json: body }),
   importFreesoundOnline: (body: {
     item_id: string;
     title: string;

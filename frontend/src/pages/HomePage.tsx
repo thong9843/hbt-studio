@@ -27,6 +27,7 @@ import { useNewProject } from '../hooks/newProject';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
+import { releaseVideoElementLocks } from '../utils/media';
 import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus } from '../utils/projectStatus';
 import { readiness } from '../utils/readiness';
@@ -272,7 +273,11 @@ export function HomePage() {
   });
 
   const deleteRenderMut = useMutation({
-    mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
+    mutationFn: (item: UnifiedRenderItem) => {
+      if (activeRender?.id === item.id) setActiveRender(null);
+      releaseVideoElementLocks(item.video_url);
+      return api.deleteUnifiedRender(item.id);
+    },
     onSuccess: (_res, item) => {
       queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
         old ? { items: old.items.filter((x) => x.id !== item.id) } : old,

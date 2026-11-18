@@ -28,6 +28,7 @@ import { Card } from '../components/ui/Card';
 import { Dialog } from '../components/ui/Dialog';
 import { Skeleton } from '../components/ui/Skeleton';
 import { cx } from '../components/ui/cx';
+import { releaseVideoElementLocks } from '../utils/media';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { Dropzone } from '../shared';
@@ -213,7 +214,11 @@ export function AssetHubPage() {
   });
 
   const removeRender = useMutation({
-    mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
+    mutationFn: (item: UnifiedRenderItem) => {
+      if (previewRender?.id === item.id) setPreviewRender(null);
+      releaseVideoElementLocks(item.video_url);
+      return api.deleteUnifiedRender(item.id);
+    },
     onSuccess: (_res, item) => {
       queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
         old ? { items: old.items.filter((x) => x.id !== item.id) } : old,

@@ -37,7 +37,6 @@ class Settings:
     assets_dir: Path = (
         REPO_ROOT / "assets"
     )  # kho tài nguyên Asset Hub (stickers, memes, backgrounds, renders)
-    jamendo_client_id: str = ""
     freesound_api_key: str = ""
 
 
@@ -72,7 +71,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
         chatting_model=env.get("CHATTING_MODEL", "gemini-3.8-flash"),
         models_dir=path("MODELS_DIR", "./models"),
         assets_dir=path("ASSETS_DIR", "./assets"),
-        jamendo_client_id=env.get("JAMENDO_CLIENT_ID", ""),
         freesound_api_key=env.get("FREESOUND_API_KEY", ""),
     )
 
@@ -86,6 +84,5 @@ _KEYS = (
     "MODELS_DIR",
     "ASSETS_DIR",
     "CHATTING_MODEL",
-    "JAMENDO_CLIENT_ID",
     "FREESOUND_API_KEY",
 )

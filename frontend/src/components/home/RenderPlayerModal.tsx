@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { UnifiedRenderItem } from '../../api/types';
 import { formatDuration } from '../../utils/format';
+import { releaseVideoElementLocks } from '../../utils/media';
 import { CopyIcon, DownloadIcon, TrashIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -104,7 +105,10 @@ export function RenderPlayerModal({
                 size="sm"
                 tone="danger"
                 icon={<TrashIcon size={14} />}
-                onClick={() => onRequestDelete(item)}
+                onClick={() => {
+                  releaseVideoElementLocks(item.video_url);
+                  onRequestDelete(item);
+                }}
               >
                 Xóa video
               </Button>

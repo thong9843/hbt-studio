@@ -21,7 +21,10 @@ from hbt.shared.ffmpeg_utils import (
     build_acrossfade_filter_graph,
     measure_audio_duration,
 )
-from hbt.shared.online_sources.jamendo_music import import_jamendo_music, search_jamendo_music
+from hbt.shared.online_sources.freesound_audio import (
+    import_freesound_audio,
+    search_freesound_audio,
+)
 from hbt.shared.tts_client import DEFAULT_VIENEU_VOICE, resolve_voice_id
 from hbt.stickv.models import StickvBeat
 
@@ -392,27 +395,31 @@ def auto_resolve_mood_bgm(
     *,
     workspace_dir: Path | None = None,
 ) -> list[Path]:
-    """Ưu tiên nhạc trong `library/music/` khớp `music_mood`; thiếu thì tự tải từ Jamendo."""
+    """Ưu tiên nhạc trong `library/music/` khớp `music_mood`; thiếu thì tự tải từ Freesound."""
     tracks = build_topic_bgm_playlist(library_dir, total_dur, topic=music_mood)
     if tracks:
         return tracks
-    cid = resolve_online_api_key("JAMENDO_CLIENT_ID", workspace_dir)
-    if not cid:
+    fkey = resolve_online_api_key("FREESOUND_API_KEY", workspace_dir)
+    if not fkey:
         return []
     try:
 
         async def _fetch() -> list[Path]:
-            hits = await search_jamendo_music(mood=music_mood, client_id=cid, limit=5)
+            hits = await search_freesound_audio(
+                kind="music", mood=music_mood, api_key=fkey, page_size=5
+            )
             if not hits:
                 return []
             first = hits[0]
-            res = await import_jamendo_music(
+            res = await import_freesound_audio(
                 item_id=str(first.get("id") or ""),
-                title=str(first.get("title") or "Jamendo BGM"),
-                artist=str(first.get("artist") or "Jamendo Artist"),
+                title=str(first.get("title") or "Freesound BGM"),
+                artist=str(first.get("artist") or "Freesound Creator"),
                 download_url=str(first.get("download_url") or first.get("preview_url") or ""),
-                tags=list(first.get("tags") or []),
-                moods=[music_mood] if music_mood else [],
+                kind="music",
+                tags=list(dict.fromkeys([*(first.get("tags") or []), music_mood]))
+                if music_mood
+                else list(first.get("tags") or []),
                 license_url=str(first.get("license") or ""),
                 library_dir=library_dir,
             )

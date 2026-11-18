@@ -108,3 +108,22 @@ def test_stage_interactions_hold_prop_point_chart_versus_split() -> None:
         bg.close()
         char.close()
         prop.close()
+
+
+def test_history_geo_backdrop_uses_rich_antique_sepia_not_pale_cream() -> None:
+    paper = BackdropRenderer("paper_classic", 360, 640)
+    ancient = BackdropRenderer("history_geo", 360, 640)
+    try:
+        f_paper = paper.render_frame(0.5)
+        f_ancient = ancient.render_frame(0.5)
+        p_paper = f_paper.getpixel((180, 320))
+        p_ancient = f_ancient.getpixel((180, 320))
+        # Màu giấy cổ tách biệt rõ rệt với giấy kem #FAF7F0 và ngả vàng/sepia ấm
+        assert p_ancient != p_paper
+        assert abs(p_ancient[0] - p_paper[0]) + abs(p_ancient[2] - p_paper[2]) > 40
+        assert p_ancient[0] > p_ancient[2] + 30
+        f_paper.close()
+        f_ancient.close()
+    finally:
+        paper.close()
+        ancient.close()

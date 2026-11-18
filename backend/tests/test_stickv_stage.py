@@ -449,3 +449,21 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     draw_karaoke_strip(canvas_sil, timings, segs[0][0] + 0.1, aspect="9:16", spoken_segments=segs)
     assert canvas_sil.getbbox() is not None  # Đang nói câu 1 có vẽ phụ đề
     canvas_sil.close()
+
+
+def test_mp4_compat_flags_and_legacy_shake_motion_normalized() -> None:
+    from hbt.stickv.llm import VALID_MOTIONS, sanitize_beats
+    from hbt.stickv.render import STICKV_MP4_COMPAT_FLAGS
+
+    flags_str = " ".join(STICKV_MP4_COMPAT_FLAGS)
+    assert "-pix_fmt yuv420p" in flags_str
+    assert "-profile:v high" in flags_str
+    assert "-movflags +faststart" in flags_str
+    assert "-ar 48000" in flags_str
+
+    assert "shake" not in VALID_MOTIONS
+    legacy = StickvBeat(id="b_old", narration="Kiểm tra", motion="shake")
+    assert legacy.motion == "float"
+
+    sanitized = sanitize_beats([{"narration": "Một câu", "motion": "shake"}])
+    assert sanitized[0].motion == "float"

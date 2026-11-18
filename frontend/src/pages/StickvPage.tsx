@@ -61,7 +61,6 @@ const MOTIONS: { id: StickvMotion; label: string }[] = [
   { id: 'bounce', label: 'Nhún nhịp' },
   { id: 'slide_left', label: 'Trượt từ phải' },
   { id: 'slide_right', label: 'Trượt từ trái' },
-  { id: 'shake', label: 'Rung mạnh' },
   { id: 'float', label: 'Lơ lửng' },
   { id: 'static', label: 'Đứng yên' },
 ];
@@ -90,7 +89,7 @@ const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
 const DOMAINS: { id: StickvDomain; label: string; bgClass: string }[] = [
   { id: 'paper_classic', label: 'Giấy kem HBT', bgClass: 'bg-[#FAF7F0] text-slate-900' },
   { id: 'physics_science', label: 'Khoa học & Vật lý', bgClass: 'bg-[#0F172A] text-slate-50' },
-  { id: 'history_geo', label: 'Lịch sử & Địa lý', bgClass: 'bg-[#F3EAD8] text-stone-900' },
+  { id: 'history_geo', label: 'Cổ đại / Lịch sử', bgClass: 'bg-[#DFC69B] text-stone-900' },
   { id: 'psychology_story', label: 'Tâm lý & Kể chuyện', bgClass: 'bg-[#14121D] text-slate-50' },
   { id: 'cosmos_mystery', label: 'Vũ trụ & Bí ẩn', bgClass: 'bg-[#090D16] text-slate-50' },
 ];

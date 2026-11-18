@@ -45,6 +45,24 @@ from hbt.stickv.stage import (
     render_beat_layers,
 )
 
+# Chuẩn mã hóa tương thích tuyệt đối với Windows Media Player & mọi thiết bị di động
+STICKV_MP4_COMPAT_FLAGS: tuple[str, ...] = (
+    "-pix_fmt",
+    "yuv420p",
+    "-profile:v",
+    "high",
+    "-level",
+    "4.1",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-ar",
+    "48000",
+    "-movflags",
+    "+faststart",
+)
+
 
 def _stream_beat_frames_to_ffmpeg(
     *,
@@ -412,11 +430,8 @@ def _append_outro(
             "[vout]",
             "-map",
             "[aout]",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
             *FFMPEG_ENCODE_CLAMP,
+            *STICKV_MP4_COMPAT_FLAGS,
             str(out_mp4),
         ]
     )
@@ -611,12 +626,9 @@ def render_stickv(
                     "[vout]",
                     "-map",
                     "1:a",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
                     "-shortest",
                     *FFMPEG_ENCODE_CLAMP,
+                    *STICKV_MP4_COMPAT_FLAGS,
                     str(body_mp4),
                 ]
             )
@@ -628,13 +640,9 @@ def render_stickv(
                     str(video_only),
                     "-i",
                     str(mixed_wav),
-                    "-c:v",
-                    "copy",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
                     "-shortest",
+                    *FFMPEG_ENCODE_CLAMP,
+                    *STICKV_MP4_COMPAT_FLAGS,
                     str(body_mp4),
                 ]
             )

@@ -25,7 +25,7 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
   const [audioKind, setAudioKind] = useState<'music' | 'sfx'>('sfx');
-  const [musicSource, setMusicSource] = useState<'jamendo' | 'freesound' | 'pixabay'>('jamendo');
+  const [musicSource, setMusicSource] = useState<'freesound' | 'pixabay'>('freesound');
   const [sfxSource, setSfxSource] = useState<'tuna' | 'freesound' | 'pixabay'>('tuna');
   const [stickerMode, setStickerMode] = useState<'giphy' | 'sigstick'>('giphy');
   const [sigstickUrl, setSigstickUrl] = useState('');
@@ -38,7 +38,7 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
       duration: number;
       preview_url: string;
       download_url: string;
-      source: 'tuna' | 'pixabay' | 'jamendo' | 'freesound';
+      source: 'tuna' | 'pixabay' | 'freesound';
       kind: 'music' | 'sfx';
       artist: string;
       tags: string[];
@@ -85,18 +85,16 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
       if (activeCategory === 'music' || activeCategory === 'sfx') {
         const mapped = (res.items ?? []).map((raw) => {
           const src = String(res.source ?? raw.source ?? 'pixabay') as
-            'tuna' | 'pixabay' | 'jamendo' | 'freesound';
+            'tuna' | 'pixabay' | 'freesound';
           return {
             id: String(raw.id ?? ''),
             title: String(raw.title ?? 'Âm thanh'),
             subtitle:
               src === 'tuna'
                 ? 'Voicemod Tuna'
-                : src === 'jamendo'
-                  ? `Jamendo · ${String(raw.artist ?? '')}`
-                  : src === 'freesound'
-                    ? `Freesound · ${String(raw.artist ?? '')}`
-                    : String(raw.artist ?? 'Pixabay'),
+                : src === 'freesound'
+                  ? `Freesound · ${String(raw.artist ?? '')}`
+                  : String(raw.artist ?? 'Pixabay'),
             duration: Number(raw.duration_sec ?? raw.duration ?? 0),
             preview_url: String(raw.preview_url ?? ''),
             download_url: String(raw.download_url ?? raw.preview_url ?? ''),
@@ -140,16 +138,6 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
           title: it.title,
           preview_url: it.preview_url,
           tags: it.tags,
-        });
-      }
-      if (it.source === 'jamendo') {
-        return api.importJamendoOnline({
-          item_id: it.id,
-          title: it.title,
-          artist: it.artist,
-          download_url: it.download_url,
-          tags: it.tags,
-          license_url: it.license,
         });
       }
       if (it.source === 'freesound') {
@@ -261,9 +249,8 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
               <div className="flex flex-wrap gap-1.5">
                 {(
                   [
-                    { id: 'jamendo', label: 'Jamendo Music' },
-                    { id: 'freesound', label: 'Freesound Ambience' },
-                    { id: 'pixabay', label: 'Pixabay Music' },
+                    { id: 'freesound', label: 'Freesound Music & Ambience' },
+                    { id: 'pixabay', label: 'Pixabay Audio' },
                   ] as const
                 ).map((s) => (
                   <button

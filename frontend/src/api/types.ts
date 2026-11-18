@@ -265,7 +265,6 @@ export interface AppSettings {
   watermark?: WatermarkSettings;
   pixabay_api_key?: string;
   giphy_api_key?: string;
-  jamendo_client_id?: string;
   freesound_api_key?: string;
 }
 
@@ -963,7 +962,7 @@ export interface PuppetStatusResponse {
   total: number;
   slots: Record<PuppetSlotKey, PuppetSlotStatus>;
 }
-export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
+export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'float' | 'static';
 export type StickvBoardType =
   | 'none'
   | 'bullets'
