@@ -398,29 +398,29 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
         pause_scale=1.0,
     )
 
-    # b1: 0.10 lead + 0.80 s1 + 0.30 gap + 0.80 s2 + 0.45 pause_after = 2.45s
-    assert beats[0].duration_sec == pytest.approx(2.45, abs=0.05)
-    assert out_beats[0][1] == pytest.approx(2.45, abs=0.05)
-    # b2: 0.10 lead + 0.80 s1 + 0.25 pause_after = 1.15s (clamped >= 1.2s)
+    # b1: 0.06 lead + 0.80 s1 + 0.16 gap + 0.80 s2 + 0.14 pause_after = 1.96s
+    assert beats[0].duration_sec == pytest.approx(1.96, abs=0.05)
+    assert out_beats[0][1] == pytest.approx(1.96, abs=0.05)
+    # b2: 0.06 lead + 0.80 s1 + 0.14 pause_after = 1.00s (clamped >= 1.2s)
     assert beats[1].duration_sec >= 1.15
 
     b1_wav = audio_dir / "b1.wav"
     env = extract_wav_rms_envelope(b1_wav, fps=20, duration_sec=beats[0].duration_sec)
-    # Last 0.40s (8 frames at 20fps) are inside the 0.45s trailing pause -> silent
-    assert max(env[-8:]) == 0.0
+    # 0.10s cuối nằm trong 0.14s trailing pause -> im lặng
+    assert max(env[-2:]) == 0.0
 
     timings = align_beat_karaoke(
         "Câu một. Câu hai?",
         b1_wav,
         beats[0].duration_sec,
-        lead_in_s=0.10,
-        pause_after_s=0.45,
+        lead_in_s=0.06,
+        pause_after_s=0.14,
     )
     assert len(timings) == 4
-    assert timings[0][1] >= 0.08
-    assert timings[-1][2] <= beats[0].duration_sec - 0.45 + 0.02
+    assert timings[0][1] >= 0.04
+    assert timings[-1][2] <= beats[0].duration_sec - 0.14 + 0.02
 
-    # Kiểm tra spoken_segments sidecar + khóa Karaoke không lấn sang khoảng lặng
+    # Kiểm tra spoken_segments sidecar + khóa Karaoke qua khoảng nghỉ
     from hbt.stickv.audio import load_beat_spoken_segments
     from hbt.stickv.backdrops import BackdropRenderer
     from hbt.stickv.stage import draw_karaoke_strip
@@ -429,8 +429,8 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     assert len(segs) == 2
     assert segs[0][2] == "Câu một."
     assert segs[1][2] == "Câu hai?"
-    # Khoảng giữa câu 1 và câu 2 có gap 0.30s
-    assert segs[1][0] - segs[0][1] >= 0.25
+    # Khoảng giữa câu 1 và câu 2 có gap ~0.16s (nhịp kể liên tục)
+    assert segs[1][0] - segs[0][1] == pytest.approx(0.16, abs=0.03)
 
     # Kiểm tra domain="physics_science" sinh phông xanh kỹ thuật khác #FAF7F0
     bd_phys = BackdropRenderer("physics_science", 360, 640)
@@ -441,14 +441,128 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     finally:
         bd_phys.close()
 
-    # Kiểm tra draw_karaoke_strip ẩn trong khoảng lặng & chỉ hiện trong spoken_segments
+    # Khoảng lặng cuối câu ẩn phụ đề; ngắt <= 0.22s giữ ổn định nền mờ; đang nói vẽ đầy đủ
     canvas_sil = Image.new("RGBA", (540, 1200), (0, 0, 0, 0))
+    draw_karaoke_strip(
+        canvas_sil, timings, beats[0].duration_sec - 0.04, aspect="9:16", spoken_segments=segs
+    )
+    assert canvas_sil.getbbox() is None
     gap_t = (segs[0][1] + segs[1][0]) / 2.0
     draw_karaoke_strip(canvas_sil, timings, gap_t, aspect="9:16", spoken_segments=segs)
-    assert canvas_sil.getbbox() is None  # Khoảng lặng giữa 2 câu không vẽ phụ đề
+    assert canvas_sil.getbbox() is not None  # Giữ ổn định nền mờ trong khoảng ngắt <= 0.22s
     draw_karaoke_strip(canvas_sil, timings, segs[0][0] + 0.1, aspect="9:16", spoken_segments=segs)
-    assert canvas_sil.getbbox() is not None  # Đang nói câu 1 có vẽ phụ đề
+    assert canvas_sil.getbbox() is not None
     canvas_sil.close()
+
+
+def test_v8_stage_100pct_coverage_3_history_cards_virtual_cam_and_16x9() -> None:
+    from hbt.stickv.stage import (
+        BeatStageState,
+        compute_beat_character_target,
+        compute_camera_state,
+        infer_auto_prop_query,
+    )
+
+    assert infer_auto_prop_query("Kim tự tháp Giza năm 2560 TCN") == "pyramid"
+
+    # 1. board_type="none" vẫn dựng Thẻ Minh Họa Tự Động (nửa trên không bao giờ trống trơn)
+    bg_916 = Image.new("RGB", (540, 960), (229, 207, 168))
+    char_916 = Image.new("RGBA", (140, 280), (11, 14, 20, 255))
+    try:
+        b_none = StickvBeat(
+            id="b_auto",
+            chapter=2,
+            narration="Kim tự tháp Giza xây năm 2560 TCN.",
+            board_type="none",
+        )
+        out_none = render_animated_beat_frame(
+            bg_img=bg_916,
+            char_img=char_916,
+            beat=b_none,
+            aspect="9:16",
+            t_sec=0.5,
+            mouth_open=0.4,
+            word_timings=[],
+            draw_board=True,
+            domain="history_geo",
+            duration_sec=2.0,
+        )
+        # Vùng thẻ nửa trên khác màu nền phẳng nhờ thẻ minh họa tự động
+        crop_top = out_none.crop((80, 120, 460, 420))
+        assert crop_top.getcolors(maxcolors=2048) is None or len(crop_top.getcolors(2048) or []) > 5
+        crop_top.close()
+        out_none.close()
+
+        # 2. 3 mẫu thẻ lịch sử & cross-fade khi trùng board_title
+        prev_st = BeatStageState(x=200.0, y=520.0, last_board_title="Ai Cập Cổ Đại")
+        for bt, bdata in (
+            (
+                "timeline_era",
+                {"events": [{"year": "2560 TCN", "title": "Xây Kim Tự Tháp"}]},
+            ),
+            (
+                "location_map",
+                {"location": "Cao nguyên Giza", "coordinates": "29.9792° N, 31.1342° E"},
+            ),
+            (
+                "myth_vs_fact",
+                {"myth": "Nô lệ xây dựng", "fact": "Thợ lành nghề được trả lương"},
+            ),
+        ):
+            b_hist = StickvBeat(
+                id=f"b_{bt}",
+                narration="Khám phá sự thật",
+                board_type=bt,  # type: ignore[arg-type]
+                board_title="Ai Cập Cổ Đại",
+                board_data=bdata,
+                camera_shot="focus_board",
+            )
+            f_h = render_animated_beat_frame(
+                bg_img=bg_916,
+                char_img=char_916,
+                beat=b_hist,
+                aspect="9:16",
+                t_sec=0.20,
+                mouth_open=0.2,
+                word_timings=[],
+                draw_board=True,
+                prev_stage_state=prev_st,
+                show_chapter_banner=True,
+            )
+            assert f_h.size == (540, 960)
+            f_h.close()
+    finally:
+        bg_916.close()
+        char_916.close()
+
+    # 3. Nội suy 3 camera_shot mượt 0.55s & layout 16:9 Stickman đứng bên trái
+    z0, _, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.0,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    z_mid, _, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.275,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    z1, px1, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.55,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    assert z0 == pytest.approx(1.0)
+    assert 1.10 < z_mid < 1.20
+    assert z1 == pytest.approx(1.28)
+    assert px1 < 0.30
+
+    tx_169, _, _ = compute_beat_character_target(
+        1920, 1080, 300, 690, interaction="none", aspect="16:9"
+    )
+    assert tx_169 < 420.0  # Stickman đứng bên trái màn hình 16:9
 
 
 def test_mp4_compat_flags_and_legacy_shake_motion_normalized() -> None:

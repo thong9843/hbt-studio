@@ -30,10 +30,10 @@ from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
 
-LEAD_IN_SILENCE_S = 0.10
-SENTENCE_GAP_S = 0.30
-PAUSE_END_SENTENCE_S = 0.45
-PAUSE_MID_CLAUSE_S = 0.25
+LEAD_IN_SILENCE_S = 0.06
+SENTENCE_GAP_S = 0.16
+PAUSE_END_SENTENCE_S = 0.14
+PAUSE_MID_CLAUSE_S = 0.14
 
 SFX_TAG_KEYWORDS: dict[str, tuple[str, ...]] = {
     "whoosh": ("swoosh", "whoosh", "swipe"),

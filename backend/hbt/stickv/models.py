@@ -19,6 +19,7 @@ StickvDomain = Literal[
 StickvInteraction = Literal["none", "hold_prop", "point_chart", "versus_split"]
 StickvAnimationMode = Literal["auto", "static"]
 StickvMotion = Literal["bounce", "slide_left", "slide_right", "float", "static"]
+StickvCameraShot = Literal["wide_stage", "focus_board", "closeup_react"]
 StickvBoardType = Literal[
     "none",
     "bullets",
@@ -30,6 +31,9 @@ StickvBoardType = Literal[
     "quote",
     "bar_compare",
     "counter_grow",
+    "timeline_era",
+    "location_map",
+    "myth_vs_fact",
 ]
 StickvSfxTag = Literal["none", "whoosh", "pop", "vine_boom", "ding"]
 StickvFacing = Literal["left", "right"]
@@ -49,11 +53,13 @@ class StickvBeat(BaseModel):
 
     id: str = Field(min_length=1, max_length=64)
     chapter: int = Field(default=1, ge=1, le=50)
+    chapter_title: str = Field(default="", max_length=120)
     narration: str = Field(default="", max_length=1200)
-    pose: str = Field(default="explain", max_length=120)
+    pose: str = Field(default="present_board", max_length=120)
     anim_oneshot: str | None = Field(default=None, max_length=120)
     anim_loop: str = Field(default="talk_explain", max_length=120)
     interaction: StickvInteraction = "none"
+    camera_shot: StickvCameraShot = "wide_stage"
     prop_query: str | None = Field(default=None, max_length=120)
     facing: StickvFacing = "right"
     motion: StickvMotion = "bounce"
@@ -101,6 +107,7 @@ class StickvProject(BaseModel):
     outro: bool = True
     gemini_model: str = Field(default="", max_length=120)
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
+    chapters: list[dict[str, Any]] = Field(default_factory=list)
     beats: list[StickvBeat] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
