@@ -12,6 +12,7 @@ export interface StickvListResponse {
   default_model: string;
   director_prompt?: string;
   poses?: string[];
+  puppet_ready?: boolean;
 }
 
 export const stickvApi = {

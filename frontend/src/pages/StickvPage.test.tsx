@@ -127,6 +127,7 @@ describe('StickvPage', () => {
     expect(screen.getByRole('button', { name: /1920×1080/i })).toBeInTheDocument();
 
     expect(screen.getByLabelText('Bối cảnh sân khấu')).toBeInTheDocument();
+    expect(screen.getByLabelText('Chế độ diễn hoạt')).toBeInTheDocument();
     expect(screen.getByLabelText('Tâm trạng nhạc')).toBeInTheDocument();
     expect(screen.getByLabelText('Tương tác sân khấu')).toBeInTheDocument();
   });

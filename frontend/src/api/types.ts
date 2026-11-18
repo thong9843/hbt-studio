@@ -940,6 +940,29 @@ export type StickvTheme = 'cream' | 'dark';
 export type StickvDomain =
   'paper_classic' | 'physics_science' | 'history_geo' | 'psychology_story' | 'cosmos_mystery';
 export type StickvInteraction = 'none' | 'hold_prop' | 'point_chart' | 'versus_split';
+export type StickvAnimationMode = 'auto' | 'static';
+export type PuppetSlotKey =
+  | 'base_character'
+  | 'eyes_neutral'
+  | 'eyes_happy'
+  | 'eyes_shock'
+  | 'eyes_angry'
+  | 'mouth_closed'
+  | 'mouth_open';
+
+export interface PuppetSlotStatus {
+  found: boolean;
+  name: string;
+  source: string;
+  url: string | null;
+}
+
+export interface PuppetStatusResponse {
+  ready: boolean;
+  present_count: number;
+  total: number;
+  slots: Record<PuppetSlotKey, PuppetSlotStatus>;
+}
 export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
 export type StickvBoardType =
   | 'none'
@@ -981,6 +1004,7 @@ export interface StickvProject {
   title: string;
   topic: string;
   domain?: StickvDomain;
+  animation_mode?: StickvAnimationMode;
   aspect: StickvAspect;
   theme: StickvTheme;
   fps: number;

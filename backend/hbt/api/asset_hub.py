@@ -55,6 +55,12 @@ from hbt.stickv.poses_init import (
     ensure_default_poses,
     remove_white_background,
 )
+from hbt.stickv.puppet import (
+    PUPPET_SLOTS,
+    auto_segment_puppet,
+    clean_puppet_sprite,
+    get_puppet_status,
+)
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
 router = APIRouter(tags=["asset_hub"])
@@ -262,7 +268,11 @@ def _collect_dir_items(
     for p in iterator:
         if not p.is_file() or p.name.startswith("."):
             continue
-        if p.name == "index.json" or "thumbs" in p.relative_to(folder).parts:
+        if (
+            p.name == "index.json"
+            or "thumbs" in p.relative_to(folder).parts
+            or any(part.startswith(".") for part in p.relative_to(folder).parts)
+        ):
             continue
         ext = p.suffix.lower()
         if allowed_exts is not None and ext not in allowed_exts:
@@ -638,6 +648,53 @@ def patch_meme_endpoint(meme_id: str, body: MemePatchBody, state: State) -> dict
     if updated is None:
         raise NotFound(f"Không tìm thấy meme '{meme_id}'")
     return {"ok": True, "item": updated}
+
+
+@router.get("/asset-hub/stickman/puppet")
+def get_stickman_puppet_status(state: State) -> dict[str, Any]:
+    """Trạng thái bộ linh kiện 7 mảnh Puppet 2D trong thư viện."""
+    return get_puppet_status(state.settings.library_dir, state.settings.assets_dir)
+
+
+@router.post("/asset-hub/stickman/puppet/{slot}", status_code=201)
+async def upload_stickman_puppet_slot(
+    slot: str,
+    state: State,
+    file: Annotated[UploadFile, File(...)],
+) -> dict[str, Any]:
+    """Tải lên 1 mảnh linh kiện Puppet 2D vào `library/stickman/puppet/<slot>.png`."""
+    if slot not in PUPPET_SLOTS:
+        raise Unprocessable(f"Slot Puppet không hợp lệ: '{slot}'")
+
+    puppet_dir = state.settings.library_dir / "stickman" / "puppet"
+    puppet_dir.mkdir(parents=True, exist_ok=True)
+    raw_bytes = await file.read()
+    tmp_raw = puppet_dir / f".raw_{slot}_{_safe_filename(file.filename or 'part.png')}"
+    tmp_raw.write_bytes(raw_bytes)
+    target = puppet_dir / f"{slot}.png"
+    try:
+        from PIL import Image
+
+        with Image.open(tmp_raw) as raw_img:
+            cleaned = clean_puppet_sprite(raw_img, padding=4)
+        try:
+            cleaned.save(target, format="PNG")
+        finally:
+            cleaned.close()
+    finally:
+        tmp_raw.unlink(missing_ok=True)
+
+    segmented = False
+    if slot == "base_character":
+        auto_segment_puppet(target, puppet_dir / ".segments")
+        segmented = True
+
+    return {
+        "ok": True,
+        "slot": slot,
+        "segmented": segmented,
+        "status": get_puppet_status(state.settings.library_dir, state.settings.assets_dir),
+    }
 
 
 @router.get("/asset-hub/{category}")

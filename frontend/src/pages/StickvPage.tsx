@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
 import type {
+  StickvAnimationMode,
   StickvAspect,
   StickvBeat,
   StickvBoardType,
@@ -661,6 +662,22 @@ export function StickvPage() {
               </label>
 
               <label className="space-y-1 text-tiny font-bold text-muted">
+                <span>Chế độ diễn hoạt</span>
+                <select
+                  aria-label="Chế độ diễn hoạt"
+                  value={draft?.animation_mode ?? 'auto'}
+                  onChange={(e) => {
+                    const nextMode = e.target.value as StickvAnimationMode;
+                    if (draft) setDraft({ ...draft, animation_mode: nextMode });
+                  }}
+                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
+                >
+                  <option value="auto">Tự động (Puppet 2D → WebM → PNG)</option>
+                  <option value="static">Chỉ dùng Ảnh Pose tĩnh</option>
+                </select>
+              </label>
+
+              <label className="space-y-1 text-tiny font-bold text-muted">
                 <span>Nhóm nhạc</span>
                 <select
                   value={topic}
@@ -1073,16 +1090,29 @@ export function StickvPage() {
                     />
                   ) : (
                     <img
-                      src={currentPoseUrl}
+                      src={
+                        listQuery.data?.puppet_ready && (draft?.animation_mode ?? 'auto') === 'auto'
+                          ? `/api/stickv/puppet/preview?pose=${encodeURIComponent(
+                              activeBeat?.pose ?? 'explain',
+                            )}&interaction=${encodeURIComponent(
+                              activeBeat?.interaction ?? 'none',
+                            )}&facing=${encodeURIComponent(activeBeat?.facing ?? 'right')}`
+                          : currentPoseUrl
+                      }
                       alt={activeBeat?.pose ?? 'explain'}
                       onError={(e) => {
                         if (!e.currentTarget.dataset.fb) {
                           e.currentTarget.dataset.fb = '1';
-                          e.currentTarget.src = '/api/stickv/poses/explain';
+                          e.currentTarget.src = currentPoseUrl || '/api/stickv/poses/explain';
                         }
                       }}
-                      className={`h-32 w-auto object-contain ${
-                        activeBeat?.facing === 'left' ? '-scale-x-100' : ''
+                      className={`h-36 w-auto object-contain ${
+                        !(
+                          listQuery.data?.puppet_ready &&
+                          (draft?.animation_mode ?? 'auto') === 'auto'
+                        ) && activeBeat?.facing === 'left'
+                          ? '-scale-x-100'
+                          : ''
                       }`}
                     />
                   )}

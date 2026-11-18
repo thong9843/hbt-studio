@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,7 @@ from hbt.stickv.llm import (
     split_raw_narration_to_beats,
 )
 from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
+from hbt.stickv.puppet import PuppetRig, is_puppet_ready
 from hbt.stickv.stage import list_available_poses, resolve_pose_png
 from hbt.stickv.storage import (
     create_stickv_project,
@@ -91,6 +93,7 @@ def list_stickv(state: State) -> dict[str, Any]:
         "default_model": GEMINI_MODEL,
         "director_prompt": build_director_prompt(available_poses=poses),
         "poses": poses,
+        "puppet_ready": is_puppet_ready(state.settings.library_dir, state.settings.assets_dir),
     }
 
 
@@ -102,7 +105,39 @@ def list_stickv_poses(state: State) -> dict[str, Any]:
         "animations": list_available_animations(
             state.settings.library_dir, state.settings.assets_dir
         ),
+        "puppet_ready": is_puppet_ready(state.settings.library_dir, state.settings.assets_dir),
     }
+
+
+@router.get("/stickv/puppet/preview")
+def preview_stickv_puppet(
+    state: State,
+    pose: str = Query(default="explain"),
+    interaction: str = Query(default="none"),
+    facing: str = Query(default="right"),
+) -> Response:
+    """Dựng 1 ảnh PNG xem trước nhân vật Puppet 2D đã lắp ráp đầy đủ mắt + miệng."""
+    lib_dir = state.settings.library_dir
+    assets_dir = state.settings.assets_dir
+    if not is_puppet_ready(lib_dir, assets_dir):
+        raise NotFound("Bộ linh kiện Puppet 2D chưa sẵn sàng")
+    rig = PuppetRig(
+        library_dir=lib_dir,
+        assets_dir=assets_dir,
+        target_height=480,
+        pose=pose,
+        interaction=interaction,
+        facing="left" if facing == "left" else "right",
+        rms_env=[0.35],
+    )
+    try:
+        frame = rig.render_frame(0, 0.0)
+        buf = BytesIO()
+        frame.save(buf, format="PNG")
+        frame.close()
+        return Response(content=buf.getvalue(), media_type="image/png")
+    finally:
+        rig.close()
 
 
 @router.get("/stickv/iconify/search")

@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/endpoints';
-import type { AssetHubCategory, AssetHubItem, UnifiedRenderItem } from '../api/types';
+import type {
+  AssetHubCategory,
+  AssetHubItem,
+  PuppetSlotKey,
+  UnifiedRenderItem,
+} from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
 import { RenderPlayerModal } from '../components/home/RenderPlayerModal';
 import {
@@ -76,6 +81,16 @@ const MEME_TAG_FILTERS = [
   { id: 'drama', label: 'Drama' },
 ] as const;
 
+const PUPPET_SLOT_META: readonly { key: PuppetSlotKey; label: string; hint: string }[] = [
+  { key: 'base_character', label: 'Thân gốc (A-Pose)', hint: 'Đầu tròn trắng không mặt' },
+  { key: 'eyes_neutral', label: 'Mắt bình thường', hint: 'Mặc định / giải thích' },
+  { key: 'eyes_happy', label: 'Mắt cười (^_^)', hint: 'Vui vẻ / ăn mừng' },
+  { key: 'eyes_shock', label: 'Mắt sốc', hint: 'Bất ngờ / hoảng hốt' },
+  { key: 'eyes_angry', label: 'Mắt giận / nhíu mày', hint: 'Nghiêm túc / cảnh báo' },
+  { key: 'mouth_closed', label: 'Miệng khép / mỉm', hint: 'Khi ngắt hơi / im lặng' },
+  { key: 'mouth_open', label: 'Miệng mở nói', hint: 'Co giãn theo giọng nói' },
+];
+
 export function AssetHubPage() {
   const [activeTab, setActiveTab] = useState<LibraryTab>('renders');
   const [previewItem, setPreviewItem] = useState<AssetHubItem | null>(null);
@@ -121,6 +136,26 @@ export function AssetHubPage() {
   const stickmanQuery = useQuery({
     queryKey: ['asset-hub', 'stickman'],
     queryFn: () => api.listAssetHub('stickman'),
+  });
+  const puppetQuery = useQuery({
+    queryKey: ['asset-hub', 'stickman-puppet'],
+    queryFn: () => api.getStickmanPuppetStatus(),
+    enabled: activeTab === 'stickman',
+    retry: false,
+  });
+  const uploadPuppetMut = useMutation({
+    mutationFn: ({ slot, file }: { slot: PuppetSlotKey; file: File }) =>
+      api.uploadStickmanPuppetSlot(slot, file),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'stickman-puppet'] });
+      void queryClient.invalidateQueries({ queryKey: ['asset-hub', 'stickman'] });
+      toast.info(
+        res.segmented
+          ? `Đã nạp "${res.slot}" & tự động tách khớp vai/cổ!`
+          : `Đã nạp linh kiện "${res.slot}"!`,
+      );
+    },
+    onError: (e) => toast.error(e),
   });
   const watermarkQuery = useQuery({
     queryKey: ['asset-hub', 'watermarks'],
@@ -761,6 +796,72 @@ export function AssetHubPage() {
       ) : (
         /* 5b. Tab Sticker / Stickman */
         <div className="space-y-4">
+          {activeTab === 'stickman' && (
+            <Card className="space-y-3 border-engine-stickv/25 bg-soft/60">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-body font-extrabold text-text">
+                    Bộ Linh Kiện Puppet 2D (7 mảnh)
+                  </h2>
+                  <p className="text-tiny text-muted">
+                    Tự động tách nền trắng, cắt khớp A-Pose &amp; nhép miệng 30fps theo giọng
+                    VieNeu.
+                  </p>
+                </div>
+                {puppetQuery.data && (
+                  <Badge tone={puppetQuery.data.ready ? 'ok' : 'yel'}>
+                    {puppetQuery.data.ready
+                      ? `Sẵn sàng diễn hoạt tự động (${puppetQuery.data.present_count}/${puppetQuery.data.total} mảnh)`
+                      : `Chưa đủ bộ tối thiểu (${puppetQuery.data.present_count}/${puppetQuery.data.total} mảnh)`}
+                  </Badge>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
+                {PUPPET_SLOT_META.map((slotMeta) => {
+                  const info = puppetQuery.data?.slots?.[slotMeta.key];
+                  return (
+                    <label
+                      key={slotMeta.key}
+                      className={cx(
+                        'flex cursor-pointer flex-col items-center justify-between gap-1.5 rounded-inner border p-2 text-center transition-colors hover:border-primary',
+                        info?.found
+                          ? 'border-emerald-500/40 bg-card'
+                          : 'border-dashed border-line bg-card/60',
+                      )}
+                      title={slotMeta.hint}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) {
+                            uploadPuppetMut.mutate({ slot: slotMeta.key, file: f });
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                      <div className="flex h-14 w-full items-center justify-center overflow-hidden rounded bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:10px_10px]">
+                        {info?.found && info.url ? (
+                          <img
+                            src={info.url}
+                            alt={slotMeta.label}
+                            className="h-full w-full object-contain p-1"
+                          />
+                        ) : (
+                          <span className="text-[11px] font-bold text-muted">+ Tải lên</span>
+                        )}
+                      </div>
+                      <span className="line-clamp-1 text-[11px] font-bold text-text">
+                        {slotMeta.label}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
           {activeTab === 'stickman' && (
             <div className="flex flex-wrap items-center gap-2">
               {(

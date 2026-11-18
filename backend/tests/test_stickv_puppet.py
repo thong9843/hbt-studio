@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import wave
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from hbt.config import Settings
+from hbt.main import create_app
 from hbt.stickv.animator import StickmanAnimator
 from hbt.stickv.puppet import (
     EyeController,
@@ -266,3 +270,54 @@ def test_lerp_pose_state_and_prefix_discovery_and_three_tier_fallback(tmp_path: 
         f3.close()
     finally:
         anim3.close()
+
+
+def test_puppet_api_upload_slots_and_preview(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace_dir=tmp_path / "ws",
+        assets_dir=tmp_path / "assets",
+        library_dir=tmp_path / "lib",
+        whisper_model="small",
+        whisper_device="cpu",
+        default_fps=50,
+    )
+    app = create_app(settings)
+    client = TestClient(app)
+
+    r0 = client.get("/api/asset-hub/stickman/puppet")
+    assert r0.status_code == 200
+    assert r0.json()["ready"] is False
+    assert r0.json()["present_count"] == 0
+
+    def _to_bytes(src_path: Path) -> bytes:
+        return src_path.read_bytes()
+
+    base_p = _draw_synthetic_a_pose(tmp_path / "raw_base.png")
+    eye_p = _draw_eyes(tmp_path / "raw_eye.png")
+    mouth_p = _draw_mouth(tmp_path / "raw_mouth.png", open_style=False)
+
+    r_base = client.post(
+        "/api/asset-hub/stickman/puppet/base_character",
+        files={"file": ("base.png", _to_bytes(base_p), "image/png")},
+    )
+    assert r_base.status_code == 201
+    assert r_base.json()["segmented"] is True
+
+    client.post(
+        "/api/asset-hub/stickman/puppet/eyes_neutral",
+        files={"file": ("eyes.png", _to_bytes(eye_p), "image/png")},
+    )
+    r_mouth = client.post(
+        "/api/asset-hub/stickman/puppet/mouth_closed",
+        files={"file": ("mouth.png", _to_bytes(mouth_p), "image/png")},
+    )
+    assert r_mouth.status_code == 201
+    assert r_mouth.json()["status"]["ready"] is True
+    assert r_mouth.json()["status"]["present_count"] == 3
+
+    r_prev = client.get("/api/stickv/puppet/preview?pose=explain&facing=right")
+    assert r_prev.status_code == 200
+    assert r_prev.headers["content-type"] == "image/png"
+    with Image.open(BytesIO(r_prev.content)) as im:
+        assert im.mode == "RGBA"
+        assert im.height == 480

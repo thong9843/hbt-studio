@@ -81,6 +81,20 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
       'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
       'GET /api/asset-hub/memes': { category: 'memes', items: [] },
       'GET /api/asset-hub/watermarks': { category: 'watermarks', items: [] },
+      'GET /api/asset-hub/stickman/puppet': {
+        ready: true,
+        present_count: 7,
+        total: 7,
+        slots: {
+          base_character: { found: true, name: 'base_character.png', source: 'library', url: null },
+          eyes_neutral: { found: true, name: 'eyes_neutral.png', source: 'library', url: null },
+          eyes_happy: { found: true, name: 'eyes_happy.png', source: 'library', url: null },
+          eyes_shock: { found: true, name: 'eyes_shock.png', source: 'library', url: null },
+          eyes_angry: { found: true, name: 'eyes_angry.png', source: 'library', url: null },
+          mouth_closed: { found: true, name: 'mouth_closed.png', source: 'library', url: null },
+          mouth_open: { found: true, name: 'mouth_open.png', source: 'library', url: null },
+        },
+      },
       'GET /api/renders': { items: renders },
       'DELETE /api/asset-hub/stickers/shock.png': () => {
         stickers = [];
@@ -139,8 +153,12 @@ describe('AssetHubPage (Thư viện tài nguyên)', () => {
     expect(screen.getByRole('button', { name: 'Pixabay SFX' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
 
-    // Chuyển sang tab Nhân vật Stickman và kiểm tra nút Tách nền trắng
+    // Chuyển sang tab Nhân vật Stickman và kiểm tra thẻ Puppet 2D + nút Tách nền trắng
     await user.click(screen.getByRole('tab', { name: /Nhân vật Stickman/i }));
+    expect(await screen.findByText('Bộ Linh Kiện Puppet 2D (7 mảnh)')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Sẵn sàng diễn hoạt tự động \(7\/7 mảnh\)/i),
+    ).toBeInTheDocument();
     expect(await screen.findByText('explain.png')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Tách nền trắng explain.png/i })).toBeInTheDocument();
   });

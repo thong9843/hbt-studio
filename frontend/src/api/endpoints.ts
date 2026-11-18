@@ -55,6 +55,8 @@ import type {
   OnlineGreenMemeItem,
   OnlinePixabayItem,
   OnlineTunaItem,
+  PuppetSlotKey,
+  PuppetStatusResponse,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -522,4 +524,16 @@ export const api = {
       'POST',
       `/asset-hub/stickman/${enc(filename)}/set-default`,
     ),
+
+  getStickmanPuppetStatus: () => apiGet<PuppetStatusResponse>('/asset-hub/stickman/puppet'),
+  uploadStickmanPuppetSlot: (slot: PuppetSlotKey, file: File) => {
+    const form = new FormData();
+    form.set('file', file);
+    return apiRequest<{
+      ok: boolean;
+      slot: PuppetSlotKey;
+      segmented: boolean;
+      status: PuppetStatusResponse;
+    }>('POST', `/asset-hub/stickman/puppet/${enc(slot)}`, { form });
+  },
 };
