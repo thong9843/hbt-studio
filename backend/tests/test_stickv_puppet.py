@@ -68,7 +68,7 @@ def _draw_mouth(dest: Path, *, open_style: bool) -> Path:
     d = ImageDraw.Draw(img)
     if open_style:
         d.chord(
-            (15, 10, 85, 52), start=0, end=180, fill=(220, 40, 60), outline=(11, 14, 20), width=4
+            (15, 10, 85, 52), start=0, end=180, fill=(240, 60, 180), outline=(11, 14, 20), width=4
         )
     else:
         d.arc((20, 18, 80, 44), start=15, end=165, fill=(11, 14, 20), width=5)
@@ -151,11 +151,16 @@ def test_rotate_around_pivot_and_head_child_lock(tmp_path: Path) -> None:
         frame = rig.render_frame(4, 0.15)
         assert frame.mode == "RGBA"
         assert frame.height == 420
-        # Đảm bảo miệng đỏ (từ mouth_open) chỉ nằm trong vùng đầu phía trên (y < 50% height)
+        # Đảm bảo miệng từ mouth_open chỉ nằm trong vùng đầu phía trên (y < 45% height)
         arr = np.array(frame)
-        red_mouth = (arr[:, :, 0] > 180) & (arr[:, :, 1] < 80) & (arr[:, :, 3] > 200)
-        assert np.any(red_mouth)
-        ys, _ = np.nonzero(red_mouth)
+        mouth_px = (
+            (arr[:, :, 0] > 180)
+            & (arr[:, :, 1] < 100)
+            & (arr[:, :, 2] > 140)
+            & (arr[:, :, 3] > 200)
+        )
+        assert np.any(mouth_px)
+        ys, _ = np.nonzero(mouth_px)
         assert int(ys.max()) < int(frame.height * 0.45)
         frame.close()
     finally:
