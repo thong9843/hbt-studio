@@ -266,6 +266,7 @@ export interface AppSettings {
   pixabay_api_key?: string;
   giphy_api_key?: string;
   freesound_api_key?: string;
+  voicemod_tuna_api_key?: string;
 }
 
 export interface SensitiveCategory {

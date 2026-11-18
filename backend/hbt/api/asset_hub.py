@@ -407,7 +407,8 @@ async def online_search_unified(
 
     try:
         if category == "sfx" and chosen_src == "tuna":
-            items = await search_tuna_sfx(q or "meme")
+            tuna_key = resolve_online_api_key("VOICEMOD_TUNA_API_KEY", state.settings.workspace_dir)
+            items = await search_tuna_sfx(q or "meme", api_key=tuna_key)
             res: dict[str, Any] = {
                 "items": items,
                 "missing_key": False,

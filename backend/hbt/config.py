@@ -38,6 +38,7 @@ class Settings:
         REPO_ROOT / "assets"
     )  # kho tài nguyên Asset Hub (stickers, memes, backgrounds, renders)
     freesound_api_key: str = ""
+    voicemod_tuna_api_key: str = ""
 
 
 WHISPER_MODELS = ("auto", "small", "medium", "large-v3")
@@ -72,6 +73,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         models_dir=path("MODELS_DIR", "./models"),
         assets_dir=path("ASSETS_DIR", "./assets"),
         freesound_api_key=env.get("FREESOUND_API_KEY", ""),
+        voicemod_tuna_api_key=env.get("VOICEMOD_TUNA_API_KEY", ""),
     )
 
 
@@ -85,4 +87,5 @@ _KEYS = (
     "ASSETS_DIR",
     "CHATTING_MODEL",
     "FREESOUND_API_KEY",
+    "VOICEMOD_TUNA_API_KEY",
 )

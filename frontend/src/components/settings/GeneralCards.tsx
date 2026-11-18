@@ -207,8 +207,9 @@ function ApiKeyStatusBadge({ configured }: { configured: boolean }) {
   );
 }
 
-/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Freesound, Pixabay, Giphy). */
+/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Voicemod Tuna, Freesound, Pixabay, Giphy). */
 export function OnlineApiKeysCard({ value, onChange }: Props) {
+  const hasTuna = (value.voicemod_tuna_api_key ?? '').trim().length > 0;
   const hasFreesound = (value.freesound_api_key ?? '').trim().length > 0;
   const hasPixabay = (value.pixabay_api_key ?? '').trim().length > 0;
   const hasGiphy = (value.giphy_api_key ?? '').trim().length > 0;
@@ -218,11 +219,25 @@ export function OnlineApiKeysCard({ value, onChange }: Props) {
       <div>
         <h2 className="text-h2 font-bold">API Kho Tài Nguyên Trực Tuyến</h2>
         <p className="mt-1 text-small text-muted">
-          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm nhạc nền & SFX
-          Freesound, Giphy Stickers ngay trong Thư viện. Thay đổi có hiệu lực ngay sau khi bấm Lưu.
+          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm Meme SFX
+          Voicemod Tuna, nhạc nền & SFX Freesound, Giphy Stickers ngay trong Thư viện. Thay đổi có
+          hiệu lực ngay sau khi bấm Lưu.
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Voicemod Tuna</span>
+            <ApiKeyStatusBadge configured={hasTuna} />
+          </div>
+          <Input
+            label="VOICEMOD_TUNA_API_KEY (Meme SFX)"
+            type="password"
+            placeholder="Nhập Voicemod Tuna API Key (tùy chọn)..."
+            value={value.voicemod_tuna_api_key ?? ''}
+            onChange={(e) => onChange({ voicemod_tuna_api_key: e.target.value })}
+          />
+        </div>
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-tiny font-bold text-muted">Trạng thái Freesound</span>
