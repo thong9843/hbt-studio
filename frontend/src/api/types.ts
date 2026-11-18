@@ -265,6 +265,8 @@ export interface AppSettings {
   watermark?: WatermarkSettings;
   pixabay_api_key?: string;
   giphy_api_key?: string;
+  jamendo_client_id?: string;
+  freesound_api_key?: string;
 }
 
 export interface SensitiveCategory {

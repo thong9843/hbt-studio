@@ -423,6 +423,8 @@ def render_stickv(
             library_dir=library_dir,
             assets_dir=assets_dir,
             out_wav=mixed_wav,
+            music_mood=project.music_mood,
+            workspace_dir=project_dir.parent.parent,
         )
 
         beat_clips: list[Path] = []

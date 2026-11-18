@@ -42,10 +42,14 @@ class AppSettings(BaseModel):
     watermark: WatermarkSettings = Field(default_factory=WatermarkSettings)
     pixabay_api_key: str = ""
     giphy_api_key: str = ""
+    jamendo_client_id: str = ""
+    freesound_api_key: str = ""
 
 
 def resolve_online_api_key(
-    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY"],
+    env_name: Literal[
+        "PIXABAY_API_KEY", "GIPHY_API_KEY", "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"
+    ],
     workspace_dir: Path | None = None,
 ) -> str:
     """Đọc API key từ .env trước, sau đó fallback sang workspace/settings/app.json."""
@@ -58,6 +62,10 @@ def resolve_online_api_key(
             return s.pixabay_api_key.strip()
         if env_name == "GIPHY_API_KEY" and s.giphy_api_key.strip():
             return s.giphy_api_key.strip()
+        if env_name == "JAMENDO_CLIENT_ID" and s.jamendo_client_id.strip():
+            return s.jamendo_client_id.strip()
+        if env_name == "FREESOUND_API_KEY" and s.freesound_api_key.strip():
+            return s.freesound_api_key.strip()
     return ""
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import wave
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from hbt.app_settings import resolve_online_api_key
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.align import align_silence
 from hbt.pipeline.ffutil import run_ffmpeg
@@ -18,6 +20,7 @@ from hbt.shared.ffmpeg_utils import (
     build_acrossfade_filter_graph,
     measure_audio_duration,
 )
+from hbt.shared.online_sources.jamendo_music import import_jamendo_music, search_jamendo_music
 from hbt.shared.tts_client import DEFAULT_VIENEU_VOICE, resolve_voice_id
 from hbt.stickv.models import StickvBeat
 
@@ -300,6 +303,44 @@ def synth_stickv_beats_audio(
     return results
 
 
+def auto_resolve_mood_bgm(
+    library_dir: Path,
+    total_dur: float,
+    music_mood: str,
+    *,
+    workspace_dir: Path | None = None,
+) -> list[Path]:
+    """Ưu tiên nhạc trong `library/music/` khớp `music_mood`; thiếu thì tự tải từ Jamendo."""
+    tracks = build_topic_bgm_playlist(library_dir, total_dur, topic=music_mood)
+    if tracks:
+        return tracks
+    cid = resolve_online_api_key("JAMENDO_CLIENT_ID", workspace_dir)
+    if not cid:
+        return []
+    try:
+        async def _fetch() -> list[Path]:
+            hits = await search_jamendo_music(mood=music_mood, client_id=cid, limit=5)
+            if not hits:
+                return []
+            first = hits[0]
+            res = await import_jamendo_music(
+                item_id=str(first.get("id") or ""),
+                title=str(first.get("title") or "Jamendo BGM"),
+                artist=str(first.get("artist") or "Jamendo Artist"),
+                download_url=str(first.get("download_url") or first.get("preview_url") or ""),
+                tags=list(first.get("tags") or []),
+                moods=[music_mood] if music_mood else [],
+                license_url=str(first.get("license") or ""),
+                library_dir=library_dir,
+            )
+            p = Path(str(res.get("path") or ""))
+            return [p] if p.is_file() else []
+
+        return asyncio.run(_fetch())
+    except Exception:
+        return []
+
+
 def mix_stickv_audio(
     *,
     beats: list[StickvBeat],
@@ -309,8 +350,10 @@ def mix_stickv_audio(
     assets_dir: Path,
     out_wav: Path,
     bgm_volume: float = 0.16,
+    music_mood: str = "",
+    workspace_dir: Path | None = None,
 ) -> Path:
-    """Ghép giọng đọc theo neo thời gian + SFX + nhạc nền ducking + chuẩn hoá -14 LUFS."""
+    """Ghép giọng đọc theo neo thời gian + SFX (-16 LUFS) + nhạc nền (-27 LUFS) + master -14 LUFS."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     total_dur = round(sum(d for _, d in beat_wavs), 3)
     if total_dur <= 0:
@@ -358,12 +401,16 @@ def mix_stickv_audio(
 
     if sfx_labels:
         filter_parts.append(
-            f"[voice_bus]{''.join(sfx_labels)}amix=inputs={1 + len(sfx_labels)}:normalize=0[fg_bus]"
+            f"{''.join(sfx_labels)}amix=inputs={len(sfx_labels)}:normalize=0,"
+            "loudnorm=I=-16:TP=-1.5:LRA=11[sfx_bus];"
+            "[voice_bus][sfx_bus]amix=inputs=2:normalize=0[fg_bus]"
         )
     else:
         filter_parts.append("[voice_bus]acopy[fg_bus]")
 
-    bgm_tracks = build_topic_bgm_playlist(library_dir, total_dur, topic=topic)
+    bgm_tracks = auto_resolve_mood_bgm(
+        library_dir, total_dur, music_mood or topic, workspace_dir=workspace_dir
+    )
     if bgm_tracks:
         bgm_start_idx = next_idx
         for t in bgm_tracks:
@@ -373,7 +420,8 @@ def mix_stickv_audio(
             bgm_fc = bgm_fc.replace(f"[{k}:a]", f"[{bgm_start_idx + k}:a]")
         filter_parts.append(bgm_fc)
         filter_parts.append(
-            f"{bgm_lbl}aresample=44100,volume={bgm_volume:.2f}[bgm_low];"
+            f"{bgm_lbl}aresample=44100,loudnorm=I=-27:TP=-2.0:LRA=11,"
+            f"volume={bgm_volume:.2f}[bgm_low];"
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
             "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=20:release=250[bgm_duck];"
             "[fg_mix][bgm_duck]amix=inputs=2:normalize=0,"

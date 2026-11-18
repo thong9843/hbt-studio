@@ -35,13 +35,17 @@ from hbt.shared.db.media_index import (
 )
 from hbt.shared.online_sources import (
     batch_auto_tag_memes,
+    import_freesound_audio,
     import_giphy_sticker,
     import_greenmeme,
+    import_jamendo_music,
     import_pixabay_audio,
     import_sigstick_pack,
     import_tuna_sfx,
+    search_freesound_audio,
     search_giphy_stickers,
     search_greenmeme,
+    search_jamendo_music,
     search_pixabay_audio,
     search_tuna_sfx,
     update_meme_metadata,
@@ -341,6 +345,26 @@ class TunaImportBody(BaseModel):
     tags: list[str] = []
 
 
+class JamendoImportBody(BaseModel):
+    item_id: str
+    title: str
+    artist: str = "Jamendo Artist"
+    download_url: str
+    tags: list[str] = []
+    moods: list[str] = []
+    license_url: str = ""
+
+
+class FreesoundImportBody(BaseModel):
+    item_id: str
+    title: str
+    artist: str = "Freesound Creator"
+    download_url: str
+    kind: Literal["music", "sfx"] = "music"
+    tags: list[str] = []
+    license_url: str = ""
+
+
 class MemePatchBody(BaseModel):
     tags: list[str] | None = None
     topic: str | None = None
@@ -381,6 +405,38 @@ async def online_search_unified(
                 "missing_key": False,
                 "source": "tuna",
                 "category": "sfx",
+            }
+        elif category == "music" and chosen_src == "jamendo":
+            cid = resolve_online_api_key("JAMENDO_CLIENT_ID", state.settings.workspace_dir)
+            if not cid:
+                return {
+                    "items": [],
+                    "missing_key": True,
+                    "source": "jamendo",
+                    "category": "music",
+                }
+            items = await search_jamendo_music(q, client_id=cid)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "jamendo",
+                "category": "music",
+            }
+        elif category in ("music", "sfx") and chosen_src == "freesound":
+            fkey = resolve_online_api_key("FREESOUND_API_KEY", state.settings.workspace_dir)
+            if not fkey:
+                return {
+                    "items": [],
+                    "missing_key": True,
+                    "source": "freesound",
+                    "category": category,
+                }
+            items = await search_freesound_audio(q, kind=category, api_key=fkey)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "freesound",
+                "category": category,
             }
         elif category in ("music", "sfx"):
             api_key = resolve_online_api_key("PIXABAY_API_KEY", state.settings.workspace_dir)
@@ -468,6 +524,34 @@ async def online_import_tuna(body: TunaImportBody, state: State) -> dict[str, An
         title=body.title,
         preview_url=body.preview_url,
         tags=body.tags,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.post("/asset-hub/online/jamendo/import")
+async def online_import_jamendo(body: JamendoImportBody, state: State) -> dict[str, Any]:
+    return await import_jamendo_music(
+        item_id=body.item_id,
+        title=body.title,
+        artist=body.artist,
+        download_url=body.download_url,
+        tags=body.tags,
+        moods=body.moods,
+        license_url=body.license_url,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.post("/asset-hub/online/freesound/import")
+async def online_import_freesound(body: FreesoundImportBody, state: State) -> dict[str, Any]:
+    return await import_freesound_audio(
+        item_id=body.item_id,
+        title=body.title,
+        artist=body.artist,
+        download_url=body.download_url,
+        kind=body.kind,
+        tags=body.tags,
+        license_url=body.license_url,
         library_dir=state.settings.library_dir,
     )
 
