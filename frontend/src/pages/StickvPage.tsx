@@ -17,6 +17,7 @@ import type {
   StickvTheme,
 } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
+import { CinemaInspectorPanel } from '../components/cinema/CinemaInspectorPanel';
 import { CopyIcon, PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from '../components/icons';
 import type { SafeZonePlatform } from '../components/SafeZoneOverlay';
 import { PhonePreviewStage } from '../components/studio/PhonePreviewStage';
@@ -1248,6 +1249,14 @@ export function StickvPage() {
               </div>
             )}
           </PhonePreviewStage>
+
+          {draft && (
+            <CinemaInspectorPanel
+              stickvProject={draft}
+              beatId={activeBeat?.id}
+              disabled={rendering || job.running}
+            />
+          )}
         </div>
       </div>
     </div>

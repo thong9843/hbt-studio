@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
 import { useSafeZone } from '../SafeZoneOverlay';
+import { CinemaInspectorPanel } from '../cinema/CinemaInspectorPanel';
 import { PhonePreviewStage } from '../studio/PhonePreviewStage';
 import type {
   HbtCoreGeminiModel,
@@ -934,6 +935,17 @@ export function HbtCoreWorkspace({
             </p>
           </div>
         </PhonePreviewStage>
+
+        <CinemaInspectorPanel
+          coreScript={{
+            title,
+            topic,
+            total_segments: segments.length,
+            segments,
+          }}
+          beatIndex={safeIndex}
+          disabled={rendering || v2Loading}
+        />
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
         {(v2Loading || rendering || resultVideoUrl || renderError) &&

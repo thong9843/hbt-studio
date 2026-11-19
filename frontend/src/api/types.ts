@@ -1046,3 +1046,76 @@ export interface StickvProject {
     preview: boolean;
   } | null;
 }
+
+export type CinemaShotType =
+  'desk_wide' | 'card_hero' | 'split_compare' | 'data_spotlight' | 'puppet_closeup' | 'recap_grid';
+
+export interface CinemaHardwareProfile {
+  mode: 'cpu' | 'gpu' | string;
+  video_encoder: string;
+  gpu_name: string | null;
+  nvenc_probed: boolean;
+  nvenc_probe_error: string | null;
+  layer_cache_mb: number;
+  ffmpeg_threads: number;
+}
+
+export interface CinemaPreflightIssue {
+  beat_id: string | null;
+  beat_index: number | null;
+  code: string;
+  severity: 'error' | 'warn';
+  message: string;
+  auto_fixed: boolean;
+}
+
+export interface CinemaPreflightReport {
+  ok: boolean;
+  errors: CinemaPreflightIssue[];
+  warnings: CinemaPreflightIssue[];
+  fixed_count: number;
+  repaired_spec: {
+    slug: string;
+    title: string;
+    aspect: StickvAspect;
+    fps: number;
+    preflight_passed: boolean;
+    beats: Array<{
+      id: string;
+      shot_type: CinemaShotType;
+      transition_in: string;
+    }>;
+  };
+  stats: {
+    initial_errors?: number;
+    remaining_errors?: number;
+    bbox_reflows?: number;
+    anti_parrot_rewrites?: number;
+    pacing_diversifications?: number;
+    recap_conversions?: number;
+  };
+}
+
+export interface CinemaContactSheetResponse {
+  ok: boolean;
+  filename: string;
+  url: string;
+  preflight_ok: boolean;
+  preflight_fixed: number;
+  width: number;
+  height: number;
+  beats_rendered: number;
+  elapsed_ms: number;
+}
+
+export interface CinemaRenderBeatResponse {
+  ok: boolean;
+  beat_id: string;
+  cache_hit: boolean;
+  cache_key: string;
+  filename: string;
+  url: string;
+  elapsed_ms: number;
+  width: number;
+  height: number;
+}
