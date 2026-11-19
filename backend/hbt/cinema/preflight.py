@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from hbt.cinema.schema import AspectRatio, BBox, BeatSpec, ShotType, TimelineSpec
 
-ANTI_PARROT_THRESHOLD = 0.65
+ANTI_PARROT_THRESHOLD = 0.55
 
 SAFE_ZONES: dict[AspectRatio, dict[str, BBox]] = {
     "9:16": {
@@ -149,7 +149,7 @@ def _is_cta_narration(text: str) -> bool:
 
 
 def _rewrite_anti_parrot_board(beat: BeatSpec) -> tuple[str, list[str], str]:
-    """Chuyển bảng chép lời thoại thành thẻ phân tích cô đọng, đảm bảo overlap <= 0.65."""
+    """Chuyển bảng chép lời thoại thành thẻ phân tích cô đọng, đảm bảo overlap <= 0.55."""
     nar = (beat.narration or "").strip()
     nums = re.findall(
         r"\d[\d.,]*\s*(?:%|ms|giây|phút|năm|tcn|triệu|tỷ|nghìn|lần|km|°)?",
@@ -158,35 +158,43 @@ def _rewrite_anti_parrot_board(beat: BeatSpec) -> tuple[str, list[str], str]:
     )
     takeaway = (beat.board.takeaway or "").strip()
 
-    # Dùng từ khóa phân tích mang ngữ nghĩa kiến trúc mới để kéo overlap <= 0.65
     new_title = "DỮ KIỆN PHÂN TÍCH"
-    bullets: list[str] = []
+    for cand_t in ("DỮ KIỆN PHÂN TÍCH", "TỔNG HỢP KHOA HỌC", "BẢN ĐỒ Ý CHÍNH", "HỒ SƠ PHÂN TÍCH"):
+        if word_overlap_ratio(nar, cand_t) <= ANTI_PARROT_THRESHOLD:
+            new_title = cand_t
+            break
+
+    raw_bullets: list[str] = []
     if nums:
         metric = nums[0].strip()
-        bullets.append(f"Thông số đo: **{metric}** (mốc kiểm chứng)")
+        raw_bullets.append(f"Thông số đo: **{metric}** (mốc kiểm chứng thực tế)")
     else:
-        bullets.append("Bản chất cơ chế: **Nguyên nhân -> Hệ quả**")
+        raw_bullets.append("Bản chất cơ chế: **Nguyên nhân dẫn tới hệ quả**")
 
     if takeaway and word_overlap_ratio(nar, takeaway) <= ANTI_PARROT_THRESHOLD:
-        bullets.append(f"Kết luận cốt lõi: **{takeaway[:48]}**")
+        raw_bullets.append(f"Kết luận cốt lõi: **{takeaway[:48]}**")
     else:
-        bullets.append("Điểm phân biệt: **Góc nhìn thực nghiệm**")
-        bullets.append("Ứng dụng nhanh: **Ghi nhớ theo mô hình**")
+        raw_bullets.append("Điểm phân biệt: **Góc nhìn thực nghiệm khách quan**")
+    raw_bullets.append("Ứng dụng nhanh: **Ghi nhớ theo mô hình chuẩn**")
 
-    joined = f"{new_title} {' '.join(bullets)}"
-    if word_overlap_ratio(nar, joined) > ANTI_PARROT_THRESHOLD:
-        new_title = "TỔNG HỢP KHOA HỌC"
-        bullets = [
-            "Trục số liệu: **Định lượng kiểm chứng**",
-            "Chuỗi tác động: **Cơ chế nền tảng**",
-            "Ghi chú chuyên môn: **Thực tế đối chiếu**",
-        ]
-        joined = f"{new_title} {' '.join(bullets)}"
-    if word_overlap_ratio(nar, joined) > ANTI_PARROT_THRESHOLD:
+    bullets = [b for b in raw_bullets if word_overlap_ratio(nar, b) <= ANTI_PARROT_THRESHOLD]
+    safe_fallbacks = (
+        "Trục số liệu: **Định lượng kiểm chứng khách quan**",
+        "Chuỗi tác động: **Cơ chế nền tảng xuyên suốt**",
+        "Ghi chú chuyên môn: **Thực tế đối chiếu chuẩn xác**",
+    )
+    for fb in safe_fallbacks:
+        if len(bullets) >= 3:
+            break
+        if word_overlap_ratio(nar, fb) <= ANTI_PARROT_THRESHOLD and fb not in bullets:
+            bullets.append(fb)
+
+    if word_overlap_ratio(nar, f"{new_title} {' '.join(bullets)}") > ANTI_PARROT_THRESHOLD:
         new_title = "BẢN ĐỒ Ý CHÍNH"
         bullets = [
-            "Mốc #1: **Nguyên nhân gốc**",
+            "Mốc #1: **Nguyên nhân gốc rễ**",
             "Mốc #2: **Hệ quả trực tiếp**",
+            "Mốc #3: **Áp dụng thực tiễn**",
         ]
     new_takeaway = takeaway or "Tập trung cơ chế cốt lõi thay vì học thuộc"
     return new_title, bullets[:3], new_takeaway[:160]
@@ -302,17 +310,29 @@ def _inspect_timeline(spec: TimelineSpec) -> list[PreflightIssue]:
                 )
             )
 
-        # 5. Kiểm tra Anti-Parrot (>65% trùng từ)
+        # 5. Kiểm tra Anti-Parrot (>55% trùng từ trên tiêu đề, từng mục hoặc toàn bảng)
         if beat.board.board_type not in ("none", "recap_card", "big_number", "counter_grow"):
             joined = _board_joined_text(beat)
-            if joined and word_overlap_ratio(beat.narration, joined) > ANTI_PARROT_THRESHOLD:
+            title_hit = bool(beat.board.title) and (
+                word_overlap_ratio(beat.narration, beat.board.title) > ANTI_PARROT_THRESHOLD
+            )
+            bullet_hit = any(
+                word_overlap_ratio(beat.narration, bl) > ANTI_PARROT_THRESHOLD
+                for bl in beat.board.bullets
+                if bl and bl.strip()
+            )
+            if (
+                title_hit
+                or bullet_hit
+                or (joined and word_overlap_ratio(beat.narration, joined) > ANTI_PARROT_THRESHOLD)
+            ):
                 issues.append(
                     PreflightIssue(
                         beat_id=beat.id,
                         beat_index=idx,
                         code="ANTI_PARROT",
                         severity="error",
-                        message="Nội dung bảng trùng lời thoại >65% (vi phạm luật Anti-Parrot)",
+                        message="Nội dung bảng trùng lời thoại >55% (vi phạm luật Anti-Parrot)",
                     )
                 )
 
@@ -426,10 +446,24 @@ class PreflightQualityGate:
                 cur.shot_type = _pick_diverse_shot(cur, prev_shot, next_shot)
                 pacing_diversifications += 1
 
-            # C. Anti-Parrot >65%
+            # C. Anti-Parrot >55% (kiểm cả tiêu đề, từng ý và tổng bảng)
             if cur.board.board_type not in ("none", "recap_card", "big_number", "counter_grow"):
                 joined = _board_joined_text(cur)
-                if joined and word_overlap_ratio(cur.narration, joined) > ANTI_PARROT_THRESHOLD:
+                title_hit = bool(cur.board.title) and (
+                    word_overlap_ratio(cur.narration, cur.board.title) > ANTI_PARROT_THRESHOLD
+                )
+                bullet_hit = any(
+                    word_overlap_ratio(cur.narration, bl) > ANTI_PARROT_THRESHOLD
+                    for bl in cur.board.bullets
+                    if bl and bl.strip()
+                )
+                if (
+                    title_hit
+                    or bullet_hit
+                    or (
+                        joined and word_overlap_ratio(cur.narration, joined) > ANTI_PARROT_THRESHOLD
+                    )
+                ):
                     nt, nb, nk = _rewrite_anti_parrot_board(cur)
                     cur.board = cur.board.model_copy(
                         update={"title": nt, "bullets": nb, "takeaway": nk}
@@ -488,6 +522,25 @@ class PreflightQualityGate:
                 cur.karaoke_bbox = k_box
 
             repaired_beats.append(cur)
+
+        # Hợp nhất 2 beat cuối nếu cùng là recap_card -> duy nhất 1 nội dung tóm tắt nhất quán
+        if (
+            len(repaired_beats) >= 2
+            and repaired_beats[-2].board.board_type == "recap_card"
+            and repaired_beats[-1].board.board_type == "recap_card"
+        ):
+            src_board = repaired_beats[-2].board
+            repaired_beats[-1] = repaired_beats[-1].model_copy(
+                update={
+                    "board": repaired_beats[-1].board.model_copy(
+                        update={
+                            "title": src_board.title or "TÓM TẮT 3 Ý CỐT LÕI",
+                            "bullets": list(src_board.bullets),
+                            "takeaway": src_board.takeaway,
+                        }
+                    )
+                }
+            )
 
         repaired_spec = spec.model_copy(update={"beats": repaired_beats})
         remaining = _inspect_timeline(repaired_spec)

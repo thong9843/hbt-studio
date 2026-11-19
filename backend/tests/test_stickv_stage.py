@@ -687,3 +687,206 @@ def test_mp4_compat_flags_and_legacy_shake_motion_normalized() -> None:
 
     sanitized = sanitize_beats([{"narration": "Một câu", "motion": "shake"}])
     assert sanitized[0].motion == "float"
+
+
+def test_phase9_zero_raw_markdown_across_all_board_templates_and_shots() -> None:
+    """Mọi mẫu bảng StickV & 6 góc máy Cinema Core tuyệt đối không in ký tự `**` thô."""
+    from PIL import ImageDraw
+
+    from hbt.cinema.schema import BeatSpec, BoardSpec
+    from hbt.cinema.shots import bake_static_shot_layer, compute_shot_layout
+    from hbt.stickv.stage import (
+        _draw_smart_board_content,
+        parse_rich_spans,
+        resolve_stage_palette,
+    )
+
+    # Kiểm thử trực tiếp parse_rich_spans cả trường hợp thiếu dấu đóng **
+    spans = parse_rich_spans("1. **Vi chấn thương** sợi cơ và **mảnh cắt dở")
+    assert all("**" not in seg for seg, _ in spans)
+    assert any(seg == "Vi chấn thương" and hl for seg, hl in spans)
+
+    drawn_texts: list[str] = []
+    orig_text = ImageDraw.ImageDraw.text
+
+    def spy_text(self, xy, text, *args, **kwargs):
+        drawn_texts.append(str(text))
+        return orig_text(self, xy, text, *args, **kwargs)
+
+    board_cases: list[tuple[str, dict]] = [
+        (
+            "bullets",
+            {
+                "items": ["**Vi chấn thương** tạo tín hiệu tái tạo sợi cơ"],
+                "takeaway": "**Ngủ đủ** mới tăng cơ",
+            },
+        ),
+        (
+            "flow_steps",
+            {
+                "steps": [
+                    "**Bước 1:** Vi chấn thương cơ học",
+                    "**Bước 2:** Tổng hợp protein khi ngủ",
+                ]
+            },
+        ),
+        (
+            "comparison",
+            {
+                "left_title": "**Cách cũ**",
+                "left_items": ["**Ép đau** không nghỉ"],
+                "right_title": "**Khoa học**",
+                "right_items": ["**Tải tăng tiến** + ngủ sâu"],
+            },
+        ),
+        (
+            "myth_vs_fact",
+            {
+                "myth": "**Đau mới hiệu quả:** Ngộ nhận phổ biến khiến người tập dễ chấn thương",
+                "fact": "**Áp lực cơ học:** Mới là tín hiệu kích thích tổng hợp sợi cơ bền vững",
+            },
+        ),
+        (
+            "big_number",
+            {
+                "value": "**48h**",
+                "label": "Chu kỳ **phục hồi** sợi cơ",
+                "sub": "**Tổng hợp** protein tối ưu",
+            },
+        ),
+        ("counter_grow", {"target": "**72**", "unit": "**giờ**", "label": "Ngưỡng **tái tạo** mô"}),
+        (
+            "bar_compare",
+            {
+                "values": [
+                    {"label": "**Ngủ 8h**", "value": 95},
+                    {"label": "**Ngủ 5h**", "value": 45},
+                ]
+            },
+        ),
+        (
+            "timeline_era",
+            {"events": [{"year": "**2560 TCN**", "title": "**Xây dựng** Kim Tự Tháp Giza"}]},
+        ),
+        ("location_map", {"location": "**Cao nguyên Giza**", "coordinates": "**29.97° N**"}),
+        ("quote", {"quote": "Cơ bắp chỉ **lớn lên** trong giấc ngủ sâu."}),
+        (
+            "recap_card",
+            {"items": ["**Ý 1:** Cơ chế gốc", "**Ý 2:** Ngủ đủ 8h", "**Ý 3:** Dinh dưỡng"]},
+        ),
+        ("none", {"items": ["**Auto Card** xử lý markdown sạch"]}),
+    ]
+
+    pal = resolve_stage_palette("physics_science", "dark")
+    with patch.object(ImageDraw.ImageDraw, "text", spy_text):
+        for bt, bdata in board_cases:
+            canvas = Image.new("RGBA", (1080, 1920), pal["bg"])
+            try:
+                beat = StickvBeat(
+                    id=f"b_{bt}",
+                    narration="Cơ chế **vi chấn thương** và phục hồi.",
+                    board_type=bt,  # type: ignore[arg-type]
+                    board_title="**Tiêu đề** bảng kiểm định",
+                    takeaway="Ghi nhớ **nguyên lý** cốt lõi",
+                    board_data=bdata,
+                )
+                _draw_smart_board_content(canvas, beat, (56, 125, 1024, 830), pal)
+            finally:
+                canvas.close()
+
+        for shot_t in (
+            "desk_wide",
+            "card_hero",
+            "split_compare",
+            "data_spotlight",
+            "puppet_closeup",
+            "recap_grid",
+        ):
+            bs = BeatSpec(
+                id=f"c_{shot_t}",
+                narration="Kiểm thử Cinema Core.",
+                shot_type=shot_t,  # type: ignore[arg-type]
+                board=BoardSpec(
+                    board_type="myth_vs_fact" if shot_t == "split_compare" else "bullets",
+                    title="**Tiêu đề** Tactile Desk",
+                    bullets=["**Điểm 1:** Không lộ dấu sao", "**Điểm 2:** Đậm rõ từ khóa"],
+                    takeaway="**Chốt lại** không lộ sao",
+                ),
+            )
+            lay = compute_shot_layout(shot_t, "9:16", beat=bs, width=540, height=960)  # type: ignore[arg-type]
+            baked = bake_static_shot_layer(bs, lay, width=540, height=960)
+            baked.close()
+
+    assert len(drawn_texts) > 30
+    leaked = [t for t in drawn_texts if "**" in t]
+    assert leaked == [], f"Phát hiện ký tự '**' thô bị vẽ ra màn hình: {leaked}"
+
+
+def test_phase9_karaoke_highlight_box_clearance_and_closeup_quote_banner() -> None:
+    """Hộp highlight Karaoke cách từ kế cận >= 10px (không dính chữ) & closeup có Quote."""
+    from hbt.stickv.stage import compute_karaoke_word_boxes, draw_karaoke_strip
+
+    words = ["Khoa", "học", "lại", "chứng", "minh"]
+    for aspect, frame_w in (("9:16", 1080), ("16:9", 1920)):
+        for active_idx in range(len(words)):
+            _font, _strip, items = compute_karaoke_word_boxes(
+                words,
+                active_idx,
+                frame_w=frame_w,
+                base_y=900,
+                aspect=aspect,  # type: ignore[arg-type]
+            )
+            hl_box = items[active_idx]["highlight_box"]
+            assert hl_box is not None
+            # Kiểm tra khoảng hở tối thiểu >= 10px với từ bên trái và bên phải
+            if active_idx > 0:
+                left_box = items[active_idx - 1]["text_box"]
+                assert hl_box[0] - left_box[2] >= 10, f"Dính từ trái ở idx={active_idx}"
+            if active_idx + 1 < len(items):
+                right_box = items[active_idx + 1]["text_box"]
+                assert right_box[0] - hl_box[2] >= 10, f"Dính từ phải ở idx={active_idx}"
+
+    # Vẽ thực tế draw_karaoke_strip lên RGBA 1080x1920 không lỗi
+    canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    try:
+        timings = [(w, i * 0.3, (i + 1) * 0.3) for i, w in enumerate(words)]
+        draw_karaoke_strip(canvas, timings, 0.45, aspect="9:16")
+        assert canvas.getbbox() is not None
+    finally:
+        canvas.close()
+
+    # Kiểm tra closeup_react hiển thị dải Quote/Keyword ở vùng trên (không để trống hoác)
+    bg = Image.new("RGB", (1080, 1920), (20, 26, 38))
+    char = Image.new("RGBA", (280, 560), (255, 255, 255, 255))
+    try:
+        b_close = StickvBeat(
+            id="b_quote",
+            chapter=1,
+            chapter_title="Sự thật bất ngờ",
+            narration="Cơ bắp chỉ to lên khi bạn ngủ đủ giấc mỗi đêm.",
+            camera_shot="closeup_react",
+            board_type="bullets",
+            board_title="**Ngủ sâu** xây cơ bắp",
+            takeaway="Giấc ngủ sâu mới tạo mô cơ",
+        )
+        out_f = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_close,
+            aspect="9:16",
+            t_sec=0.5,
+            mouth_open=0.3,
+            word_timings=[],
+            draw_board=True,
+            domain="physics_science",
+            theme="dark",
+        )
+        # Vùng banner Quote y=180..360 trên 1080x1920 phải có nhiều màu (không trống nền phẳng)
+        quote_crop = out_f.crop((100, 180, 980, 360))
+        colors = quote_crop.getcolors(maxcolors=2048)
+        assert colors is None or len(colors) > 8
+        quote_crop.close()
+        out_f.close()
+    finally:
+        bg.close()
+        char.close()

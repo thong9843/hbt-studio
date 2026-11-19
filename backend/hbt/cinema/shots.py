@@ -13,7 +13,12 @@ from hbt.cinema.layer_cache import FontCache
 from hbt.cinema.preflight import default_boxes_for_shot
 from hbt.cinema.schema import ASPECT_DIMENSIONS, AspectRatio, BBox, BeatSpec, CinemaTheme, ShotType
 from hbt.config import REPO_ROOT
-from hbt.stickv.stage import BOARD_BADGES, resolve_stage_palette
+from hbt.stickv.stage import (
+    BOARD_BADGES,
+    parse_rich_spans,
+    resolve_stage_palette,
+    strip_rich_markup,
+)
 
 FONTS_DIR = REPO_ROOT / "backend" / "hbt" / "fonts"
 FONT_EXTRABOLD = FONTS_DIR / "BeVietnamPro-ExtraBold.ttf"
@@ -37,8 +42,6 @@ _SHOT_TO_STYLE: dict[ShotType, CardStyle] = {
     "puppet_closeup": "topic_pill",
     "recap_grid": "recap_grid",
 }
-
-_BOLD_SEG_RE = re.compile(r"(\*\*[^*]+\*\*)")
 
 
 class ShotLayout(BaseModel):
@@ -102,12 +105,9 @@ def _draw_rich_line(
     hi_color: tuple[int, int, int, int],
 ) -> None:
     x, y = pos
-    parts = _BOLD_SEG_RE.split(line)
-    for part in parts:
-        if not part:
+    for txt, is_hi in parse_rich_spans(line):
+        if not txt:
             continue
-        is_hi = part.startswith("**") and part.endswith("**") and len(part) > 4
-        txt = part[2:-2] if is_hi else part
         fnt = font_bold if is_hi else font_reg
         col = hi_color if is_hi else base_color
         draw.text((x, y), txt, font=fnt, fill=col)
@@ -196,7 +196,9 @@ def _draw_topic_pill_content(
         width=max(1, int(round(2 * scale))),
     )
     f_pill = font_cache.get_font(FONT_BOLD, max(12, int(round(28 * scale))))
-    label = (beat.chapter_title or beat.board.title or f"Chương {beat.chapter}").strip()[:42]
+    label = strip_rich_markup(beat.chapter_title or beat.board.title or f"Chương {beat.chapter}")[
+        :42
+    ]
     bb = draw.textbbox((0, 0), label, font=f_pill)
     tx = int(box.x + (box.w - (bb[2] - bb[0])) / 2)
     ty = int(box.y + (box.h - (bb[3] - bb[1])) / 2 - bb[1])
@@ -337,7 +339,9 @@ def _draw_data_big_body(
     font_cache: FontCache,
 ) -> None:
     ix0, iy0, ix1, iy1 = inner
-    raw_val = str(beat.board.data.get("number") or beat.board.data.get("value") or "").strip()
+    raw_val = strip_rich_markup(
+        str(beat.board.data.get("number") or beat.board.data.get("value") or "")
+    ).strip()
     if not raw_val:
         joined = " ".join(beat.board.bullets)
         m = re.search(r"\d[\d.,]*\s*(?:%|ms|s|km|x|lần|năm|tỷ|triệu)?", joined, re.I)
@@ -471,10 +475,19 @@ def bake_static_shot_layer(
         fill=pal["pill_text"],
     )
 
-    title_txt = (beat.board.title or beat.chapter_title or "Phân tích chuyên sâu").strip()[:44]
+    title_raw = (beat.board.title or beat.chapter_title or "Phân tích chuyên sâu").strip()
+    title_txt = strip_rich_markup(title_raw)[:44]
     f_title = fc.get_font(FONT_EXTRABOLD, max(13, int(round(38 * scale))))
     title_y = header_y + bh + max(8, int(round(14 * scale)))
-    draw.text((int(box.x + pad), title_y), title_txt, font=f_title, fill=pal["text"])
+    _draw_rich_line(
+        draw,
+        (int(box.x + pad), title_y),
+        title_raw[:54],
+        font_reg=f_title,
+        font_bold=f_title,
+        base_color=pal["text"],
+        hi_color=pal["accent"],
+    )
     tbb = draw.textbbox((0, 0), title_txt, font=f_title)
     body_top = title_y + (tbb[3] - tbb[1]) + max(10, int(round(18 * scale)))
 
@@ -504,16 +517,19 @@ def bake_static_shot_layer(
             width=max(1, int(round(2 * scale))),
         )
         f_tk = fc.get_font(FONT_BOLD, max(10, int(round(22 * scale))))
-        tk_txt = f"CHỐT LẠI: {takeaway[:52]}"
-        t_bb = draw.textbbox((0, 0), tk_txt, font=f_tk)
-        draw.text(
+        tk_clean = strip_rich_markup(takeaway)[:52]
+        t_bb = draw.textbbox((0, 0), f"CHỐT LẠI: {tk_clean}", font=f_tk)
+        _draw_rich_line(
+            draw,
             (
                 int(box.x + pad + max(8, int(round(14 * scale)))),
                 ty0 + max(4, (take_h - (t_bb[3] - t_bb[1])) // 2 - t_bb[1]),
             ),
-            tk_txt,
-            font=f_tk,
-            fill=pal["text"],
+            f"**CHỐT LẠI:** {takeaway[:58]}",
+            font_reg=f_tk,
+            font_bold=f_tk,
+            base_color=pal["text"],
+            hi_color=pal["accent"],
         )
 
     return canvas

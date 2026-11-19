@@ -313,6 +313,77 @@ def _highlight_color_for_card(
     return (250, 204, 21, 255) if luma < 128 else (185, 28, 28, 255)
 
 
+def parse_rich_spans(text: str) -> list[tuple[str, bool]]:
+    """Tách chuỗi chứa `**từ khóa**` thành danh sách `(văn_bản_sạch, is_highlight)`.
+
+    Đảm bảo triệt tiêu 100% ký tự `**` thô kể cả khi chuỗi bị cắt nửa chừng không cân xứng.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    spans: list[tuple[str, bool]] = []
+    pos = 0
+    for m in re.finditer(r"\*\*(.+?)\*\*", raw):
+        if m.start() > pos:
+            plain = raw[pos : m.start()].replace("**", "")
+            if plain:
+                spans.append((plain, False))
+        inner = m.group(1).replace("**", "")
+        if inner:
+            spans.append((inner, True))
+        pos = m.end()
+    if pos < len(raw):
+        tail = raw[pos:].replace("**", "")
+        if tail:
+            spans.append((tail, False))
+    return spans
+
+
+def strip_rich_markup(text: str) -> str:
+    """Trả về chuỗi thuần không còn bất kỳ dấu `**` nào để đo kích thước hoặc vẽ nhãn đơn sắc."""
+    return "".join(seg for seg, _ in parse_rich_spans(text)).replace("**", "")
+
+
+def draw_rich_text_line(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    xy: tuple[int, int],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    highlight_fill: tuple[int, int, int, int],
+    *,
+    bold_font: ImageFont.FreeTypeFont | ImageFont.ImageFont | None = None,
+    max_width_px: int | None = None,
+) -> int:
+    """Vẽ một dòng văn bản hỗ trợ `**từ khóa**` (0% lộ `**`), trả về tọa độ x cuối dòng."""
+    spans = parse_rich_spans(text)
+    if not spans:
+        return xy[0]
+    x, y = xy
+    hl_font = bold_font or font
+    for seg, is_hl in spans:
+        fnt = hl_font if is_hl else font
+        col = highlight_fill if is_hl else fill
+        if max_width_px is not None:
+            rem = max_width_px - (x - xy[0])
+            if rem <= 12:
+                break
+            cur_seg = seg
+            bb = draw.textbbox((0, 0), cur_seg, font=fnt)
+            if (bb[2] - bb[0]) > rem:
+                while len(cur_seg) > 1:
+                    cur_seg = cur_seg[:-1]
+                    tbb = draw.textbbox((0, 0), cur_seg.rstrip() + "…", font=fnt)
+                    if (tbb[2] - tbb[0]) <= rem:
+                        cur_seg = cur_seg.rstrip() + "…"
+                        break
+                seg = cur_seg
+        draw.text((x, y), seg, font=fnt, fill=col)
+        bb = draw.textbbox((0, 0), seg, font=fnt)
+        x += max(1, bb[2] - bb[0])
+    return x
+
+
 def _draw_rich_wrapped_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -323,20 +394,14 @@ def _draw_rich_wrapped_text(
     *,
     max_width_px: int,
     line_gap: int = 10,
+    max_lines: int | None = None,
 ) -> int:
-    """Vẽ chữ tự xuống dòng hỗ trợ tô màu các cụm `**từ khóa**`."""
+    """Vẽ chữ tự xuống dòng qua `parse_rich_spans` (tô màu `**từ khóa**`, 0% lộ `**`)."""
     tokens: list[tuple[str, bool]] = []
-    pos = 0
-    for m in re.finditer(r"\*\*(.+?)\*\*", (text or "").strip()):
-        if m.start() > pos:
-            for w in text[pos : m.start()].split():
-                tokens.append((w, False))
-        for w in m.group(1).split():
-            tokens.append((w, True))
-        pos = m.end()
-    if pos < len(text or ""):
-        for w in (text or "")[pos:].split():
-            tokens.append((w, False))
+    for seg, is_hl in parse_rich_spans(text):
+        for w in seg.split():
+            if w:
+                tokens.append((w, is_hl))
     if not tokens:
         return xy[1]
 
@@ -345,20 +410,59 @@ def _draw_rich_wrapped_text(
     x0, cur_y = xy
     cur_x = x0
     line_h = 0
+    lines_drawn = 1
 
     for idx, (word, is_hl) in enumerate(tokens):
         bb = draw.textbbox((0, 0), word, font=font)
         ww = bb[2] - bb[0]
         wh = bb[3] - bb[1]
         if idx > 0 and cur_x + ww > x0 + max_width_px:
-            cur_y += max(26, line_h) + line_gap
+            if max_lines is not None and lines_drawn >= max_lines:
+                break
+            cur_y += max(24, line_h) + line_gap
             cur_x = x0
             line_h = 0
+            lines_drawn += 1
         draw.text((cur_x, cur_y), word, font=font, fill=highlight_fill if is_hl else fill)
         cur_x += ww + space_w
         line_h = max(line_h, wh)
 
-    return cur_y + max(26, line_h) + line_gap
+    return cur_y + max(24, line_h) + line_gap
+
+
+def _measure_rich_wrapped_height(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    *,
+    max_width_px: int,
+    line_gap: int = 10,
+    max_lines: int | None = None,
+) -> int:
+    """Đo chính xác chiều cao khối văn bản sau khi tách `parse_rich_spans` và xuống dòng."""
+    words = strip_rich_markup(text).split()
+    if not words:
+        return 0
+    space_bb = draw.textbbox((0, 0), " ", font=font)
+    space_w = max(5, space_bb[2] - space_bb[0])
+    cur_x = 0
+    line_h = 0
+    total_h = 0
+    lines_cnt = 1
+    for idx, word in enumerate(words):
+        bb = draw.textbbox((0, 0), word, font=font)
+        ww = bb[2] - bb[0]
+        wh = bb[3] - bb[1]
+        if idx > 0 and cur_x + ww > max_width_px:
+            if max_lines is not None and lines_cnt >= max_lines:
+                break
+            total_h += max(24, line_h) + line_gap
+            cur_x = 0
+            line_h = 0
+            lines_cnt += 1
+        cur_x += ww + space_w
+        line_h = max(line_h, wh)
+    return total_h + max(24, line_h) + line_gap
 
 
 def _draw_topic_circle_badge(
@@ -440,7 +544,9 @@ def _draw_smart_board_content(
         _extract_highlight_keyword(beat.narration) if beat.board_type == "none" else ""
     )
     if eff_title:
-        _, th = _measure_wrapped_height(tmp_draw, eff_title, f_title, max(16, (bw - 120) // 25), 10)
+        th = _measure_rich_wrapped_height(
+            tmp_draw, eff_title, f_title, max_width_px=max(200, bw - 140), line_gap=8
+        )
         est_h += max(58, th + 16)
 
     if beat.board_type in ("none", "bullets", "list", "card"):
@@ -453,8 +559,8 @@ def _draw_smart_board_content(
             ]
             items = clauses[:2] or [beat.narration[:70]]
         for it in items:
-            _, ih = _measure_wrapped_height(
-                tmp_draw, re.sub(r"\*\*", "", it), f_body, max(16, (bw - 130) // 21), 10
+            ih = _measure_rich_wrapped_height(
+                tmp_draw, it, f_body, max_width_px=max(200, bw - 96), line_gap=8
             )
             est_h += max(56, ih) + 22
     elif beat.board_type == "recap_card":
@@ -463,12 +569,29 @@ def _draw_smart_board_content(
         est_h += 240
     elif beat.board_type == "quote":
         q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
-        _, qh = _measure_wrapped_height(tmp_draw, q_txt, f_body, max(18, (bw - 120) // 22), 12)
+        qh = _measure_rich_wrapped_height(
+            tmp_draw, q_txt, f_body, max_width_px=max(200, bw - 110), line_gap=12
+        )
         est_h += max(140, qh + 64)
     elif beat.board_type == "comparison":
-        left_n = len((data.get("left_items") or [])[:4])
-        right_n = len((data.get("right_items") or [])[:4])
-        est_h += 86 + max(1, left_n, right_n) * 66
+        left_items = [str(x) for x in (data.get("left_items") or []) if str(x).strip()][:4]
+        right_items = [str(x) for x in (data.get("right_items") or []) if str(x).strip()][:4]
+        col_w_px = max(140, (bw - 120) // 2)
+        lh = sum(
+            _measure_rich_wrapped_height(
+                tmp_draw, f"• {x}", f_sub, max_width_px=col_w_px, line_gap=6
+            )
+            + 8
+            for x in left_items
+        )
+        rh = sum(
+            _measure_rich_wrapped_height(
+                tmp_draw, f"✓ {x}", f_sub, max_width_px=col_w_px, line_gap=6
+            )
+            + 8
+            for x in right_items
+        )
+        est_h += 96 + max(110, lh, rh)
     elif beat.board_type == "bar_compare":
         bars = (data.get("values") or data.get("bars") or [])[:4]
         est_h += max(230, len(bars) * 82 + 44)
@@ -476,20 +599,33 @@ def _draw_smart_board_content(
         steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
             :4
         ]
-        est_h += len(steps) * 96
+        for stp in steps:
+            sh = _measure_rich_wrapped_height(
+                tmp_draw, stp, f_sub, max_width_px=max(180, bw - 160), line_gap=6, max_lines=2
+            )
+            est_h += max(78, sh + 34) + 14
     elif beat.board_type == "timeline_era":
         ev_count = max(2, len((data.get("events") or data.get("items") or [])[:4]))
-        est_h += ev_count * 84 + 24
+        est_h += ev_count * 88 + 24
     elif beat.board_type == "location_map":
         est_h += 260
     elif beat.board_type == "myth_vs_fact":
-        est_h += 280
+        m_txt = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
+        f_txt = str(data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế")
+        mh = _measure_rich_wrapped_height(
+            tmp_draw, m_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
+        )
+        fh = _measure_rich_wrapped_height(
+            tmp_draw, f_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
+        )
+        est_h += max(108, mh + 64) + max(108, fh + 64) + 28
 
     if takeaway:
         est_h += 92
 
-    # Lấp đầy cân đối ~84% khung bảng tri thức (không để thẻ lọt thỏm hay trống thừa)
-    min_card_h = max(280, int(round((max_y1 - y0) * 0.84)))
+    # Co giãn thông minh theo mật độ thực tế (đủ đầy đặn nhưng không dư khoảng trống > 25%)
+    min_ratio = 0.68 if beat.board_type in ("myth_vs_fact", "comparison") else 0.84
+    min_card_h = max(280, int(round((max_y1 - y0) * min_ratio)))
     card_h = min(max_y1 - y0, max(min_card_h, est_h + 36))
     y1 = y0 + card_h
 
@@ -554,16 +690,17 @@ def _draw_smart_board_content(
                 )
             cur_y = max(cur_y + 12, y0 + 156)
         elif eff_title:
-            cur_y = _draw_wrapped_text(
+            cur_y = _draw_rich_wrapped_text(
                 draw,
                 eff_title,
                 (x0 + 36, cur_y),
                 f_title,
                 pal["text"],
-                width_chars=max(18, bw // 26),
+                hl_fill,
+                max_width_px=max(200, bw - 72),
                 line_gap=10,
             )
-            cur_y += 14
+            cur_y += 10
 
         content_bottom = y1 - (96 if takeaway else 28)
 
@@ -643,23 +780,26 @@ def _draw_smart_board_content(
         elif beat.board_type == "quote":
             q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
             draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
-            _draw_wrapped_text(
+            _draw_rich_wrapped_text(
                 draw,
                 f'"{q_txt}"',
                 (x0 + 68, cur_y + 8),
                 f_body,
                 pal["text"],
-                width_chars=max(18, (bw - 110) // 22),
+                hl_fill,
+                max_width_px=max(200, bw - 110),
                 line_gap=12,
             )
 
         elif beat.board_type == "counter_grow":
             raw_target = data.get("target", data.get("value", 100))
             try:
-                target_num = float(str(raw_target).replace(",", "").replace("%", "").strip())
+                target_num = float(
+                    strip_rich_markup(str(raw_target)).replace(",", "").replace("%", "").strip()
+                )
             except ValueError:
                 target_num = 100.0
-            unit = str(data.get("unit") or "").strip()
+            unit = strip_rich_markup(str(data.get("unit") or "")).strip()
             cur_num = target_num * _ease_in_out(prog)
             if abs(target_num - round(target_num)) < 1e-6:
                 num_str = f"{int(round(cur_num)):,}".replace(",", ".")
@@ -671,8 +811,15 @@ def _draw_smart_board_content(
             cur_y = bbox[3] + 22
             lbl = str(data.get("label") or "")
             if lbl:
-                _draw_wrapped_text(
-                    draw, lbl, (x0 + 44, cur_y), f_title, pal["text"], width_chars=max(16, bw // 26)
+                _draw_rich_wrapped_text(
+                    draw,
+                    lbl,
+                    (x0 + 44, cur_y),
+                    f_title,
+                    pal["text"],
+                    hl_fill,
+                    max_width_px=max(200, bw - 88),
+                    line_gap=8,
                 )
 
         elif beat.board_type == "bar_compare":
@@ -697,7 +844,15 @@ def _draw_smart_board_content(
                 cur_val = val * eased
                 fill_w = max(16, int(round((cur_val / max_val) * bar_max_w)))
                 bar_color = pal["accent"] if idx % 2 == 0 else pal["amber"]
-                draw.text((x0 + 40, cur_y), lbl[:28], font=f_sub, fill=pal["text"])
+                draw_rich_text_line(
+                    draw,
+                    lbl,
+                    (x0 + 40, cur_y),
+                    f_sub,
+                    pal["text"],
+                    hl_fill,
+                    max_width_px=max(120, bw - 190),
+                )
                 val_txt = (
                     f"{int(round(cur_val))}" if abs(val - round(val)) < 1e-6 else f"{cur_val:.1f}"
                 )
@@ -716,61 +871,112 @@ def _draw_smart_board_content(
                 cur_y += 78
 
         elif beat.board_type == "big_number":
-            val = str(data.get("value") or "100%")
+            val = strip_rich_markup(str(data.get("value") or "100%"))
             lbl = str(data.get("label") or "")
             sub = str(data.get("sub") or "")
             draw.text((x0 + 44, cur_y + 4), val, font=f_big, fill=pal["accent"])
             bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_big)
             cur_y = bbox[3] + 22
             if lbl:
-                cur_y = _draw_wrapped_text(
-                    draw, lbl, (x0 + 44, cur_y), f_title, pal["text"], width_chars=max(16, bw // 26)
+                cur_y = _draw_rich_wrapped_text(
+                    draw,
+                    lbl,
+                    (x0 + 44, cur_y),
+                    f_title,
+                    pal["text"],
+                    hl_fill,
+                    max_width_px=max(200, bw - 88),
+                    line_gap=8,
                 )
             if sub:
-                _draw_wrapped_text(
+                _draw_rich_wrapped_text(
                     draw,
                     sub,
                     (x0 + 44, cur_y + 6),
                     f_sub,
                     pal["muted"],
-                    width_chars=max(20, bw // 19),
+                    hl_fill,
+                    max_width_px=max(200, bw - 88),
+                    line_gap=8,
                 )
 
         elif beat.board_type == "comparison":
             mid_x = (x0 + x1) // 2
-            draw.line(
-                [(mid_x, cur_y + 12), (mid_x, content_bottom - 12)],
-                fill=pal["card_border"],
-                width=3,
+            col_gap = 18
+            lx0, lx1 = x0 + 32, mid_x - col_gap
+            rx0, rx1 = mid_x + col_gap, x1 - 32
+            col_w_px = max(120, lx1 - lx0 - 32)
+            box_bottom = max(cur_y + 120, content_bottom - 10)
+            draw.rounded_rectangle(
+                (lx0, cur_y, lx1, box_bottom),
+                radius=18,
+                fill=pal["takeaway_bg"],
+                outline=pal["card_border"],
+                width=2,
             )
-            draw.ellipse((mid_x - 28, cur_y - 2, mid_x + 28, cur_y + 54), fill=pal["accent"])
-            draw.text((mid_x - 16, cur_y + 12), "VS", font=f_badge, fill=(255, 255, 255, 255))
+            draw.rounded_rectangle(
+                (rx0, cur_y, rx1, box_bottom),
+                radius=18,
+                fill=pal["pill_bg"],
+                outline=pal["accent"],
+                width=2,
+            )
+            draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
+            draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
 
             left_t = str(data.get("left_title") or "Trước")
             right_t = str(data.get("right_title") or "Sau")
-            draw.text((x0 + 36, cur_y + 8), left_t, font=f_body, fill=pal["muted"])
-            draw.text((mid_x + 42, cur_y + 8), right_t, font=f_body, fill=pal["accent"])
-            ly = cur_y + 64
-            ry = cur_y + 64
-            col_chars = max(12, (bw // 2 - 80) // 19)
+            draw_rich_text_line(
+                draw,
+                left_t,
+                (lx0 + 16, cur_y + 14),
+                f_body,
+                pal["muted"],
+                hl_fill,
+                max_width_px=col_w_px,
+            )
+            draw_rich_text_line(
+                draw,
+                right_t,
+                (rx0 + 16, cur_y + 14),
+                f_body,
+                pal["accent"],
+                hl_fill,
+                max_width_px=col_w_px,
+            )
+            ly = cur_y + 66
+            ry = cur_y + 66
             for item in (data.get("left_items") or [])[:4]:
+                if ly > box_bottom - 34:
+                    break
                 ly = (
-                    _draw_wrapped_text(
-                        draw, f"• {item}", (x0 + 36, ly), f_sub, pal["text"], width_chars=col_chars
-                    )
-                    + 10
-                )
-            for item in (data.get("right_items") or [])[:4]:
-                ry = (
-                    _draw_wrapped_text(
+                    _draw_rich_wrapped_text(
                         draw,
-                        f"✓ {item}",
-                        (mid_x + 42, ry),
+                        f"• {item}",
+                        (lx0 + 16, ly),
                         f_sub,
                         pal["text"],
-                        width_chars=col_chars,
+                        hl_fill,
+                        max_width_px=col_w_px,
+                        line_gap=6,
                     )
-                    + 10
+                    + 8
+                )
+            for item in (data.get("right_items") or [])[:4]:
+                if ry > box_bottom - 34:
+                    break
+                ry = (
+                    _draw_rich_wrapped_text(
+                        draw,
+                        f"✓ {item}",
+                        (rx0 + 16, ry),
+                        f_sub,
+                        pal["text"],
+                        hl_fill,
+                        max_width_px=col_w_px,
+                        line_gap=6,
+                    )
+                    + 8
                 )
 
         elif beat.board_type == "flow_steps":
@@ -778,26 +984,55 @@ def _draw_smart_board_content(
                 str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()
             ][:4]
             active_count = max(1, int(math.ceil(prog * max(1, len(steps)))))
+            n_steps = max(1, len(steps))
+            avail_h = max(160, content_bottom - cur_y - 8)
+            step_gap = 14
+            max_slot_h = max(72, (avail_h - step_gap * (n_steps - 1)) // n_steps)
+            text_max_w = max(180, bw - 168)
             for idx, step in enumerate(steps, start=1):
-                if cur_y > content_bottom - 60:
+                if cur_y > content_bottom - 58:
                     break
                 lit = idx <= active_count
                 fill_c = pal["pill_bg"] if lit else pal["takeaway_bg"]
                 out_c = pal["accent"] if lit else pal["card_border"]
+                needed_h = _measure_rich_wrapped_height(
+                    draw, step, f_sub, max_width_px=text_max_w, line_gap=6, max_lines=2
+                )
+                box_h = min(max_slot_h, max(72, needed_h + 24))
+                cy1 = min(content_bottom - 6, cur_y + box_h)
                 draw.rounded_rectangle(
-                    (x0 + 36, cur_y, x1 - 36, cur_y + 74),
+                    (x0 + 36, cur_y, x1 - 36, cy1),
                     radius=18,
                     fill=fill_c,
                     outline=out_c,
                     width=3 if lit else 2,
                 )
-                draw.text(
-                    (x0 + 56, cur_y + 18),
-                    f"{idx}. {step[:40]}",
-                    font=f_body,
-                    fill=pal["pill_text"],
+                badge_r = 20
+                bx = x0 + 68
+                by = (cur_y + cy1) // 2
+                draw.ellipse(
+                    (bx - badge_r, by - badge_r, bx + badge_r, by + badge_r),
+                    fill=pal["accent"] if lit else pal["amber"],
                 )
-                cur_y += 94
+                nbb = draw.textbbox((0, 0), str(idx), font=f_badge)
+                draw.text(
+                    (bx - (nbb[2] - nbb[0]) // 2, by - (nbb[3] - nbb[1]) // 2 - nbb[1]),
+                    str(idx),
+                    font=f_badge,
+                    fill=(255, 255, 255, 255),
+                )
+                _draw_rich_wrapped_text(
+                    draw,
+                    step,
+                    (x0 + 104, cur_y + 14),
+                    f_sub,
+                    pal["pill_text"],
+                    hl_fill,
+                    max_width_px=text_max_w,
+                    line_gap=6,
+                    max_lines=2,
+                )
+                cur_y = cy1 + step_gap
 
         elif beat.board_type == "timeline_era":
             raw_ev = data.get("events") or data.get("items") or []
@@ -806,7 +1041,9 @@ def _draw_smart_board_content(
                 if isinstance(ev, dict):
                     events.append(
                         (
-                            str(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"),
+                            strip_rich_markup(
+                                str(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}")
+                            ),
                             str(ev.get("title") or ev.get("label") or ev.get("text") or ""),
                         )
                     )
@@ -814,13 +1051,13 @@ def _draw_smart_board_content(
                     s = str(ev)
                     if ":" in s:
                         yr, tt = s.split(":", 1)
-                        events.append((yr.strip(), tt.strip()))
+                        events.append((strip_rich_markup(yr).strip(), tt.strip()))
                     else:
                         events.append((f"Mốc {idx + 1}", s))
             if not events:
                 events = [("Cổ đại", _extract_highlight_keyword(beat.narration))]
             spine_x = x0 + 62
-            end_y = min(content_bottom - 18, cur_y + len(events) * 80 - 20)
+            end_y = min(content_bottom - 18, cur_y + len(events) * 86 - 20)
             draw.line([(spine_x, cur_y + 18), (spine_x, end_y)], fill=pal["amber"], width=5)
             lit_n = max(1, int(math.ceil(prog * len(events))))
             for idx, (era_lbl, ev_txt) in enumerate(events, start=1):
@@ -835,21 +1072,26 @@ def _draw_smart_board_content(
                     width=3,
                 )
                 draw.text((spine_x + 28, cur_y + 2), era_lbl[:22], font=f_badge, fill=pal["accent"])
-                _draw_wrapped_text(
+                _draw_rich_wrapped_text(
                     draw,
-                    ev_txt[:68],
+                    ev_txt,
                     (spine_x + 28, cur_y + 30),
                     f_sub,
                     pal["text"],
-                    width_chars=max(14, (bw - 150) // 17),
+                    hl_fill,
+                    max_width_px=max(160, bw - 130),
+                    line_gap=6,
+                    max_lines=2,
                 )
-                cur_y += 80
+                cur_y += 84
 
         elif beat.board_type == "location_map":
             loc_name = str(
                 data.get("location") or data.get("place") or eff_title or "Di tích cổ đại"
             )
-            coords = str(data.get("coordinates") or data.get("region") or "29.9792° N, 31.1342° E")
+            coords = strip_rich_markup(
+                str(data.get("coordinates") or data.get("region") or "29.9792° N, 31.1342° E")
+            )
             map_x0, map_y0, map_x1, map_y1 = x0 + 36, cur_y + 4, x1 - 36, content_bottom - 10
             draw.rounded_rectangle(
                 (map_x0, map_y0, map_x1, map_y1),
@@ -858,7 +1100,6 @@ def _draw_smart_board_content(
                 outline=pal["amber"],
                 width=2,
             )
-            # Lưới tọa độ bản đồ + điểm ghim địa danh
             for gx in range(map_x0 + 48, map_x1, 72):
                 draw.line([(gx, map_y0 + 10), (gx, map_y1 - 10)], fill=pal["card_border"], width=1)
             for gy in range(map_y0 + 42, map_y1, 56):
@@ -872,49 +1113,88 @@ def _draw_smart_board_content(
                 width=3,
             )
             draw.ellipse((pin_x - 10, pin_y - 10, pin_x + 10, pin_y + 10), fill=pal["accent"])
-            draw.text((map_x0 + 20, map_y0 + 14), loc_name[:36], font=f_body, fill=pal["text"])
+            draw_rich_text_line(
+                draw,
+                loc_name,
+                (map_x0 + 20, map_y0 + 14),
+                f_body,
+                pal["text"],
+                hl_fill,
+                max_width_px=max(140, (map_x1 - map_x0) - 40),
+            )
             draw.text((map_x0 + 20, map_y1 - 40), coords[:40], font=f_badge, fill=pal["pill_text"])
 
         elif beat.board_type == "myth_vs_fact":
-            myth_txt = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
-            fact_txt = str(
-                data.get("fact") or data.get("right") or beat.narration or "Sự thật lịch sử"
+            myth_title = str(data.get("myth_title") or "").strip()
+            fact_title = str(data.get("fact_title") or "").strip()
+            myth_raw = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến").strip()
+            fact_raw = str(
+                data.get("fact") or data.get("right") or beat.narration or "Sự thật khoa học"
+            ).strip()
+            myth_full = f"**{myth_title}:** {myth_raw}" if myth_title else myth_raw
+            fact_full = f"**{fact_title}:** {fact_raw}" if fact_title else fact_raw
+
+            text_w = max(200, bw - 116)
+            m_text_h = _measure_rich_wrapped_height(
+                draw, myth_full, f_sub, max_width_px=text_w, line_gap=8, max_lines=4
             )
-            half_h = max(92, (content_bottom - cur_y - 18) // 2)
+            f_text_h = _measure_rich_wrapped_height(
+                draw, fact_full, f_sub, max_width_px=text_w, line_gap=8, max_lines=4
+            )
+            avail_h = max(200, content_bottom - cur_y - 16)
+            m_want = max(96, m_text_h + 56)
+            f_want = max(96, f_text_h + 56)
+            total_want = m_want + f_want
+            if total_want > avail_h:
+                ratio = avail_h / total_want
+                m_h = max(84, int(round(m_want * ratio)))
+                f_h = max(84, avail_h - m_h)
+            else:
+                # Co giãn gọn gàng quanh chiều cao nội dung (trống thừa <= 25%)
+                slack = min(int(round(total_want * 0.20)), avail_h - total_want)
+                m_h = m_want + slack // 2
+                f_h = f_want + (slack - slack // 2)
+
             # Tầng LẦM TƯỞNG
             draw.rounded_rectangle(
-                (x0 + 36, cur_y, x1 - 36, cur_y + half_h),
+                (x0 + 36, cur_y, x1 - 36, cur_y + m_h),
                 radius=18,
-                fill=(254, 226, 226, 230),
+                fill=(254, 226, 226, 235),
                 outline=(220, 38, 38, 255),
                 width=2,
             )
             draw.text((x0 + 54, cur_y + 12), "✕ LẦM TƯỞNG", font=f_badge, fill=(185, 28, 28, 255))
-            _draw_wrapped_text(
+            _draw_rich_wrapped_text(
                 draw,
-                myth_txt[:85],
-                (x0 + 54, cur_y + 42),
+                myth_full,
+                (x0 + 54, cur_y + 44),
                 f_sub,
                 (69, 10, 10, 255),
-                width_chars=max(16, (bw - 120) // 17),
+                (185, 28, 28, 255),
+                max_width_px=text_w,
+                line_gap=8,
+                max_lines=4,
             )
             # Tầng SỰ THẬT
-            fy0 = cur_y + half_h + 14
+            fy0 = cur_y + m_h + 14
             draw.rounded_rectangle(
-                (x0 + 36, fy0, x1 - 36, fy0 + half_h),
+                (x0 + 36, fy0, x1 - 36, fy0 + f_h),
                 radius=18,
-                fill=(209, 250, 229, 235),
+                fill=(209, 250, 229, 240),
                 outline=(5, 150, 105, 255),
                 width=2,
             )
             draw.text((x0 + 54, fy0 + 12), "✓ SỰ THẬT", font=f_badge, fill=(4, 120, 87, 255))
-            _draw_wrapped_text(
+            _draw_rich_wrapped_text(
                 draw,
-                fact_txt[:85],
-                (x0 + 54, fy0 + 42),
+                fact_full,
+                (x0 + 54, fy0 + 44),
                 f_sub,
                 (6, 78, 59, 255),
-                width_chars=max(16, (bw - 120) // 17),
+                (4, 120, 87, 255),
+                max_width_px=text_w,
+                line_gap=8,
+                max_lines=4,
             )
 
         if takeaway:
@@ -926,11 +1206,14 @@ def _draw_smart_board_content(
                 outline=pal["amber"],
                 width=2,
             )
-            draw.text(
+            draw_rich_text_line(
+                draw,
+                f"**CHỐT LẠI:** {takeaway}",
                 (x0 + 46, ty0 + 16),
-                f"CHỐT LẠI: {takeaway[:54]}",
-                font=f_sub,
-                fill=pal["pill_text"],
+                f_sub,
+                pal["pill_text"],
+                hl_fill,
+                max_width_px=max(180, bw - 92),
             )
 
         if inner_layer is not canvas:
@@ -979,11 +1262,13 @@ def _composite_transitioned_board(
     if cam_board_alpha <= 0.015:
         return
 
-    cur_title = (beat.board_title or "").strip()
-    same_title = (
-        prev_stage_state is not None
-        and bool(cur_title)
-        and cur_title == (getattr(prev_stage_state, "last_board_title", "") or "").strip()
+    cur_title = strip_rich_markup(beat.board_title or "").strip()
+    prev_title = strip_rich_markup(getattr(prev_stage_state, "last_board_title", "") or "").strip()
+    same_title = prev_stage_state is not None and bool(cur_title) and cur_title == prev_title
+    same_recap = (
+        same_title
+        and beat.board_type == "recap_card"
+        and (getattr(prev_stage_state, "last_board_type", "") or "") == "recap_card"
     )
 
     if (
@@ -992,7 +1277,11 @@ def _composite_transitioned_board(
         and cam_board_alpha > 0.99
         and clamp_bounds is None
     ):
-        c_alpha = _ease_out_cubic(min(1.0, t_sec / 0.25)) if t_sec < 0.25 else 1.0
+        c_alpha = (
+            1.0
+            if same_recap
+            else (_ease_out_cubic(min(1.0, t_sec / 0.22)) if t_sec < 0.22 else 1.0)
+        )
         _draw_smart_board_content(
             frame_rgba,
             beat,
@@ -1006,16 +1295,16 @@ def _composite_transitioned_board(
         )
         return
 
-    enter_t = 0.35
-    exit_t = 0.30
+    enter_t = 0.30
+    exit_t = 0.22
     scale = float(cam_board_scale)
     dy_px = 0.0
     alpha = float(cam_board_alpha)
     if not same_title:
         if t_sec < enter_t:
             u = _ease_out_cubic(t_sec / enter_t)
-            scale *= 0.94 + 0.06 * u
-            dy_px = 28.0 * (1.0 - u)
+            scale *= 0.96 + 0.04 * u
+            dy_px = 18.0 * (1.0 - u)
             alpha *= u
         elif (
             has_next_diff_title
@@ -1023,7 +1312,7 @@ def _composite_transitioned_board(
             and t_sec > (duration_sec - exit_t)
         ):
             u = _ease_in_cubic((t_sec - (duration_sec - exit_t)) / exit_t)
-            dy_px = -18.0 * u
+            dy_px = -14.0 * u
             alpha *= 1.0 - u
 
     if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
@@ -1101,6 +1390,85 @@ def _composite_transitioned_board(
         layer.close()
 
 
+def compute_karaoke_word_boxes(
+    words: list[str],
+    active_local_idx: int,
+    *,
+    frame_w: int,
+    base_y: int,
+    aspect: StickvAspect,
+    pad_x: int = 12,
+    space_w: int = 18,
+) -> tuple[
+    ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    tuple[int, int, int, int],
+    list[dict[str, Any]],
+]:
+    """Tính tọa độ hộp chữ & hộp highlight Karaoke: khoảng hở hộp highlight <-> từ kế >= 14px."""
+    clean_words = [strip_rich_markup(w) for w in words]
+    eff_pad_x = max(10, int(pad_x))
+    eff_space = max(14, int(space_w))
+    font_sz = 42 if aspect == "9:16" else 38
+    if frame_w < 720:
+        scale_f = frame_w / (1080.0 if aspect == "9:16" else 1920.0)
+        font_sz = max(22, int(round(font_sz * scale_f)))
+
+    probe_img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    try:
+        probe_draw = ImageDraw.Draw(probe_img)
+        while True:
+            font = _load_font(FONT_EXTRABOLD, font_sz)
+            widths: list[int] = []
+            max_h = 0
+            for w_txt in clean_words:
+                bb = probe_draw.textbbox((0, 0), w_txt, font=font)
+                widths.append(max(1, bb[2] - bb[0]))
+                max_h = max(max_h, bb[3] - bb[1])
+            slot_widths = [
+                ww + (2 * eff_pad_x if idx == active_local_idx else 0)
+                for idx, ww in enumerate(widths)
+            ]
+            total_w = sum(slot_widths) + eff_space * max(0, len(clean_words) - 1)
+            if total_w <= max(180, frame_w - 64) or font_sz <= 20:
+                break
+            font_sz -= 2
+    finally:
+        probe_img.close()
+
+    line_h = max(28, max_h)
+    cur_x = (frame_w - total_w) // 2
+    strip_box = (
+        max(18, cur_x - 22),
+        base_y - 10,
+        min(frame_w - 18, cur_x + total_w + 22),
+        base_y + line_h + 16,
+    )
+
+    items: list[dict[str, Any]] = []
+    for idx, (w_txt, ww) in enumerate(zip(clean_words, widths, strict=True)):
+        is_active = idx == active_local_idx
+        if is_active:
+            pill_box = (cur_x, base_y - 6, cur_x + ww + 2 * eff_pad_x, base_y + line_h + 10)
+            text_x = cur_x + eff_pad_x
+            text_box = (text_x, base_y, text_x + ww, base_y + line_h)
+            cur_x = pill_box[2] + eff_space
+        else:
+            pill_box = None
+            text_x = cur_x
+            text_box = (text_x, base_y, text_x + ww, base_y + line_h)
+            cur_x = text_box[2] + eff_space
+        items.append(
+            {
+                "word": w_txt,
+                "active": is_active,
+                "text_xy": (text_x, base_y),
+                "text_box": text_box,
+                "highlight_box": pill_box,
+            }
+        )
+    return font, strip_box, items
+
+
 def draw_karaoke_strip(
     frame: Image.Image,
     word_timings: list[tuple[str, float, float]],
@@ -1110,7 +1478,7 @@ def draw_karaoke_strip(
     spoken_segments: list[tuple[float, float, str]] | None = None,
     camera_shot: str = "wide_stage",
 ) -> None:
-    """Vẽ dải phụ đề Karaoke khóa câu đang nói + né đầu Stickman ở closeup_react."""
+    """Vẽ dải phụ đề Karaoke khóa câu đang nói, có đệm highlight >= 14px chống dính chữ."""
     if not word_timings:
         return
 
@@ -1126,7 +1494,7 @@ def draw_karaoke_strip(
             for idx in range(len(spoken_segments) - 1):
                 g_start = spoken_segments[idx][1]
                 g_end = spoken_segments[idx + 1][0]
-                if g_start < t_sec < g_end and (g_end - g_start) <= 0.22:
+                if g_start < t_sec < g_end and (g_end - g_start) <= 0.24:
                     micro_gap_hold = True
                     break
             if not micro_gap_hold:
@@ -1176,41 +1544,35 @@ def draw_karaoke_strip(
     if not chunk:
         return
 
-    font = _load_font(FONT_EXTRABOLD, 42 if aspect == "9:16" else 38)
-    space_w = 14
-    widths: list[int] = []
-    for word, _, _ in chunk:
-        bb = draw.textbbox((0, 0), word, font=font)
-        widths.append(bb[2] - bb[0])
-    total_w = sum(widths) + space_w * max(0, len(chunk) - 1)
-
-    cur_x = (w - total_w) // 2
-    draw.rounded_rectangle(
-        (max(24, cur_x - 22), base_y - 10, min(w - 24, cur_x + total_w + 22), base_y + 56),
-        radius=18,
-        fill=(15, 23, 42, 130),
+    active_local = active_idx - chunk_idx * win_size
+    font, strip_box, layout_items = compute_karaoke_word_boxes(
+        [wd for wd, _, _ in chunk],
+        active_local,
+        frame_w=w,
+        base_y=base_y,
+        aspect=aspect,
     )
+    draw.rounded_rectangle(strip_box, radius=18, fill=(15, 23, 42, 145))
 
-    for local_i, ((word, _, _), ww) in enumerate(zip(chunk, widths, strict=True)):
-        global_i = chunk_idx * win_size + local_i
-        is_active = global_i == active_idx
-        if is_active:
+    for item in layout_items:
+        word = item["word"]
+        tx, ty = item["text_xy"]
+        if item["active"] and item["highlight_box"] is not None:
             draw.rounded_rectangle(
-                (cur_x - 10, base_y - 6, cur_x + ww + 10, base_y + 52),
+                item["highlight_box"],
                 radius=12,
                 fill=(255, 212, 59, 255),  # #FFD43B
             )
-            draw.text((cur_x, base_y), word, font=font, fill=(15, 23, 42, 255))
+            draw.text((tx, ty), word, font=font, fill=(15, 23, 42, 255))
         else:
             draw.text(
-                (cur_x, base_y),
+                (tx, ty),
                 word,
                 font=font,
                 fill=(255, 255, 255, 255),
                 stroke_width=4,
                 stroke_fill=(15, 23, 42, 255),
             )
-        cur_x += ww + space_w
 
 
 def _ease_in_out(t: float) -> float:
@@ -1422,6 +1784,20 @@ def compute_layered_camera_layout(
     )
 
 
+def _extract_closeup_quote(board_title: str, takeaway: str, narration: str) -> str:
+    """Trích 2–6 từ khóa/quote đắt giá nổi bật cho dải trên khi `closeup_react`."""
+    for src in (board_title, takeaway, narration):
+        clean = strip_rich_markup(src or "").strip(" .,:;!?…\"'“”")
+        if not clean:
+            continue
+        words = clean.split()
+        if 2 <= len(words) <= 6:
+            return " ".join(words)
+        if len(words) > 6:
+            return " ".join(words[:6])
+    return "ĐIỂM NHẤN CỐT LÕI"
+
+
 def _draw_compact_topic_pill(
     frame_rgba: Image.Image,
     *,
@@ -1430,30 +1806,83 @@ def _draw_compact_topic_pill(
     board_title: str,
     pal: dict[str, tuple[int, int, int, int]],
     aspect: StickvAspect,
+    narration: str = "",
+    takeaway: str = "",
 ) -> None:
-    """Giữ lại thanh pill tên Chương/Chủ đề gọn ở y=125px khi closeup_react ẩn bảng lớn."""
+    """Vẽ huy hiệu Chương + dải Quote/Từ khóa nổi bật (2–6 từ) ở vùng trên khi `closeup_react`."""
     w, h = frame_rgba.size
     sy = h / (1920.0 if aspect == "9:16" else 1080.0)
-    raw_lbl = (chapter_title or board_title or f"Chương {chapter}").strip()
+    sx = w / (1080.0 if aspect == "9:16" else 1920.0)
+    raw_lbl = strip_rich_markup(chapter_title or f"Chương {chapter}").strip()
     label = (
-        f"CHƯƠNG {chapter}: {raw_lbl[:34]}"
+        f"CHƯƠNG {chapter} · {raw_lbl[:28].upper()}"
         if raw_lbl and f"{chapter}" not in raw_lbl
-        else raw_lbl[:38]
+        else raw_lbl[:34].upper()
     )
-    f_pill = _load_font(FONT_EXTRABOLD, 24)
+    f_pill = _load_font(FONT_EXTRABOLD, max(12, int(round(22 * sy))))
     d = ImageDraw.Draw(frame_rgba)
     bb = d.textbbox((0, 0), label, font=f_pill)
-    pill_w = min(w - 80, (bb[2] - bb[0]) + 44)
+    pill_h = max(24, int(round(44 * sy)))
+    pill_w = min(w - int(round(80 * sx)), (bb[2] - bb[0]) + int(round(44 * sx)))
     x0 = (w - pill_w) // 2
-    y0 = int(round(125 * sy))
+    y0 = int(round(118 * sy))
     d.rounded_rectangle(
-        (x0, y0, x0 + pill_w, y0 + 48),
+        (x0, y0, x0 + pill_w, y0 + pill_h),
         radius=999,
         fill=pal["pill_bg"],
         outline=pal["accent"],
-        width=2,
+        width=max(1, int(round(2 * sy))),
     )
-    d.text((x0 + 22, y0 + 10), label, font=f_pill, fill=pal["pill_text"])
+    tx = x0 + (pill_w - (bb[2] - bb[0])) // 2
+    ty = y0 + (pill_h - (bb[3] - bb[1])) // 2 - bb[1]
+    d.text((tx, ty), label, font=f_pill, fill=pal["pill_text"])
+
+    # Dải Quote/Từ khóa nổi bật ở vùng trên (y=178..365 theo chuẩn 1080x1920)
+    quote_txt = _extract_closeup_quote(board_title, takeaway, narration).upper()
+    card_x0 = int(round(72 * sx))
+    card_x1 = w - int(round(72 * sx))
+    card_y0 = y0 + pill_h + int(round(18 * sy))
+    card_h = int(round(176 * sy))
+    card_y1 = card_y0 + card_h
+    d.rounded_rectangle(
+        (card_x0, card_y0, card_x1, card_y1),
+        radius=max(12, int(round(26 * sy))),
+        fill=pal["card"],
+        outline=pal["accent"],
+        width=max(1, int(round(3 * sy))),
+    )
+    bar_w = int(round(96 * sx))
+    bar_x0 = (w - bar_w) // 2
+    d.rounded_rectangle(
+        (bar_x0, card_y0 + int(round(14 * sy)), bar_x0 + bar_w, card_y0 + int(round(21 * sy))),
+        radius=999,
+        fill=pal["amber"],
+    )
+    f_quote = _load_font(FONT_EXTRABOLD, max(16, int(round(44 * sy))))
+    inner_w = max(120, (card_x1 - card_x0) - int(round(48 * sx)))
+    words = quote_txt.split()
+    lines: list[str] = []
+    cur = ""
+    for wd in words:
+        cand = f"{cur} {wd}".strip()
+        cbb = d.textbbox((0, 0), cand, font=f_quote)
+        if cur and (cbb[2] - cbb[0]) > inner_w and len(lines) < 1:
+            lines.append(cur)
+            cur = wd
+        else:
+            cur = cand
+    if cur:
+        lines.append(cur)
+    lines = lines[:2]
+    line_step = max(20, int(round(52 * sy)))
+    total_th = len(lines) * line_step
+    start_y = card_y0 + int(round(28 * sy)) + max(0, (card_h - int(round(36 * sy)) - total_th) // 2)
+    hl_fill = _highlight_color_for_card(pal)
+    for li, ln in enumerate(lines):
+        lbb = d.textbbox((0, 0), ln, font=f_quote)
+        lx = (w - (lbb[2] - lbb[0])) // 2
+        ly = start_y + li * line_step
+        d.text((lx, ly), ln, font=f_quote, fill=hl_fill if li == 0 else pal["text"])
 
 
 def _draw_chapter_banner(
@@ -1577,9 +2006,13 @@ def _draw_versus_split_layer(
     )
 
     f_lbl = _load_font(FONT_EXTRABOLD, 40 if aspect == "9:16" else 36)
-    _draw_wrapped_text(draw, left_lbl, (64, top_y + 32), f_lbl, pal["text"], width_chars=14)
-    _draw_wrapped_text(
-        draw, right_lbl, (mid_x + 44, top_y + 32), f_lbl, pal["text"], width_chars=14
+    hl_fill = _highlight_color_for_card(pal)
+    col_w = max(120, mid_x - 96)
+    _draw_rich_wrapped_text(
+        draw, left_lbl, (64, top_y + 32), f_lbl, pal["text"], hl_fill, max_width_px=col_w
+    )
+    _draw_rich_wrapped_text(
+        draw, right_lbl, (mid_x + 44, top_y + 32), f_lbl, pal["text"], hl_fill, max_width_px=col_w
     )
 
     draw.ellipse((mid_x - 36, top_y + 18, mid_x + 36, top_y + 90), fill=pal["accent"])
@@ -1691,6 +2124,9 @@ def render_animated_beat_frame(
                 board_title=beat.board_title,
                 pal=pal,
                 aspect=aspect,
+                narration=beat.narration,
+                takeaway=getattr(beat, "takeaway", "")
+                or str((beat.board_data or {}).get("takeaway") or ""),
             )
 
         if interaction == "hold_prop" and prop_img is not None and cam_layout.board_alpha > 0.1:

@@ -64,16 +64,18 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "4.Bài học cốt lõi -> 5.Tóm tắt & CTA. Trả về JSON thuần, không markdown.\n"
         "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
         "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài.\n"
-        "LUẬT CẤM CHÉP LỜI THOẠI (ANTI-PARROT): Cấm tuyệt đối chép lại nguyên văn "
-        "narration lên bảng! "
-        "`board_data` là Tấm Bảng Bằng Chứng & Ghi Chú Khoa Học chứa SỐ LIỆU ĐỊNH LƯỢNG THẬT, "
-        "chuỗi cơ chế (Nguyên nhân -> Cơ chế -> Hệ quả), so sánh (Lầm tưởng vs Sự thật), "
-        "hoặc thuật ngữ + giải thích + `takeaway`. Cấm cụm sáo rỗng như "
-        "'100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'. "
-        "Dùng `**từ khóa**` trong `items` để tô sáng từ khóa chính.\n"
-        "THẺ CUỐI VIDEO (CTA): 1-2 beat cuối (bình luận / đăng ký kênh) BẮT BUỘC đặt "
-        "`board_type='recap_card'`, `board_title='TÓM TẮT 3 Ý CỐT LÕI'`, `items` đúc kết 3 ý "
-        "giá trị nhất từ cả video (tuyệt đối không ghi câu kêu gọi đăng ký kênh lên bảng).\n"
+        "LUẬT CẤM CHÉP LỜI THOẠI (ANTI-PARROT <= 55%): Cấm tuyệt đối chép lại nguyên văn "
+        "narration lên `board_title` hay `items` (trùng từ <= 55%)! "
+        "`board_data` là Tấm Bảng Bằng Chứng & Ghi Chú Khoa Học giàu thông tin:\n"
+        "- `myth_vs_fact` / `comparison`: mỗi ô (LẦM TƯỞNG / SỰ THẬT) BẮT BUỘC có Tiêu đề ngắn "
+        "(4-7 từ) + 1 câu giải thích cơ chế/số liệu cụ thể (10-18 từ), không viết 3 chữ cụt lủn.\n"
+        "- `bullets` / `flow_steps`: đủ 3 ý (8-15 từ/ý) dạng `**Thuật ngữ/Con số:** cơ chế "
+        "hoặc tác động cụ thể`, kèm `takeaway` ở đáy thẻ.\n"
+        "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
+        "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
+        "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
+        "(`board_title='TÓM TẮT 3 Ý CỐT LÕI'`, đúng 3 ý đúc kết giá trị nhất, không đổi bảng "
+        "tóm tắt thứ hai và không ghi câu đăng ký kênh lên bảng).\n"
         "LUẬT ĐA DẠNG: Không dùng cùng 1 `pose` hoặc 1 `emotion` cho 2 beat đứng liền kề.\n"
         "domain: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
@@ -142,7 +144,7 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         raw = {}
     takeaway = str(raw.get("takeaway") or "").strip()[:90]
     if board_type == "bullets":
-        items = [str(x).strip()[:90] for x in (raw.get("items") or []) if str(x).strip()][:5]
+        items = [str(x).strip()[:130] for x in (raw.get("items") or []) if str(x).strip()][:5]
         res: dict[str, Any] = {"items": items or ["Điểm chính cần nhớ"]}
         if takeaway:
             res["takeaway"] = takeaway
@@ -150,35 +152,35 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
     if board_type == "big_number":
         res = {
             "value": str(raw.get("value") or "100%").strip()[:24],
-            "label": str(raw.get("label") or "").strip()[:60],
-            "sub": str(raw.get("sub") or "").strip()[:90],
+            "label": str(raw.get("label") or "").strip()[:80],
+            "sub": str(raw.get("sub") or "").strip()[:120],
         }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "comparison":
         res = {
-            "left_title": str(raw.get("left_title") or "Trước").strip()[:32],
+            "left_title": str(raw.get("left_title") or "Trước").strip()[:40],
             "left_items": [
-                str(x).strip()[:70] for x in (raw.get("left_items") or []) if str(x).strip()
+                str(x).strip()[:120] for x in (raw.get("left_items") or []) if str(x).strip()
             ][:4],
-            "right_title": str(raw.get("right_title") or "Sau").strip()[:32],
+            "right_title": str(raw.get("right_title") or "Sau").strip()[:40],
             "right_items": [
-                str(x).strip()[:70] for x in (raw.get("right_items") or []) if str(x).strip()
+                str(x).strip()[:120] for x in (raw.get("right_items") or []) if str(x).strip()
             ][:4],
         }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "flow_steps":
-        steps = [str(x).strip()[:50] for x in (raw.get("steps") or []) if str(x).strip()][:4]
+        steps = [str(x).strip()[:120] for x in (raw.get("steps") or []) if str(x).strip()][:4]
         res = {"steps": steps or ["Bước 1", "Bước 2"]}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "recap_card":
         raw_items = raw.get("items") or raw.get("bullets") or []
-        items = [str(x).strip()[:90] for x in raw_items if str(x).strip()][:3]
+        items = [str(x).strip()[:120] for x in raw_items if str(x).strip()][:3]
         res = {"items": items or ["Ghi nhớ cơ chế cốt lõi"]}
         if takeaway:
             res["takeaway"] = takeaway
@@ -196,6 +198,8 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         return dict(raw)
     return {}
 
+
+ANTI_PARROT_THRESHOLD = 0.55
 
 _CLICHE_PATTERNS = (
     "100% mức độ cảnh báo",
@@ -217,6 +221,15 @@ _CTA_KEYWORDS = (
     "nhấn chuông",
     "ý kiến của bạn",
 )
+_SUMMARY_KEYWORDS = (
+    "tóm lại",
+    "tổng kết",
+    "3 ý",
+    "ba ý",
+    "đúc kết",
+    "chốt lại",
+    "nhớ kỹ",
+)
 
 
 def _word_overlap_ratio(a: str, b: str) -> float:
@@ -227,35 +240,149 @@ def _word_overlap_ratio(a: str, b: str) -> float:
     return len(wa & wb) / max(1, min(len(wa), len(wb)))
 
 
+def _rewrite_non_parrot_title(narration: str) -> str:
+    has_num = bool(re.search(r"\d", narration or ""))
+    candidates = (
+        ("DỮ KIỆN ĐỊNH LƯỢNG", "PHÂN TÍCH CƠ CHẾ", "BẢN ĐỒ Ý CHÍNH", "GÓC NHÌN THỰC NGHIỆM")
+        if has_num
+        else ("PHÂN TÍCH CƠ CHẾ", "BẢN ĐỒ Ý CHÍNH", "GÓC NHÌN THỰC NGHIỆM", "TỔNG HỢP KHOA HỌC")
+    )
+    for cand in candidates:
+        if _word_overlap_ratio(narration, cand) <= ANTI_PARROT_THRESHOLD:
+            return cand
+    return "HỒ SƠ PHÂN TÍCH"
+
+
 def _condense_to_keyword_bullets(narration: str, takeaway: str) -> list[str]:
+    """Rút gọn bảng Anti-Parrot thành 3 ý cấu trúc `**Thuật ngữ:** cơ chế` (overlap <= 0.55)."""
     clean = (narration or "").strip()
-    num_hits = re.findall(r"\d[\d.,]*\s*(?:%|ms|giây|phút|năm|tcn|triệu|tỷ|lần|km|°)?", clean, re.I)
-    clauses = [c.strip() for c in re.split(r"[.;:!?…]", clean) if len(c.strip().split()) >= 2]
+    num_hits = re.findall(
+        r"\d[\d.,]*\s*(?:%|ms|giây|phút|năm|tcn|triệu|tỷ|nghìn|lần|km|°)?",
+        clean,
+        re.I,
+    )
     out: list[str] = []
-    if num_hits and clauses:
+    if num_hits:
         hl = num_hits[0].strip()
-        short_c = " ".join(clauses[0].split()[:8])
-        if hl and hl in short_c:
-            short_c = short_c.replace(hl, f"**{hl}**", 1)
-        out.append(short_c)
+        cand1 = f"**Mốc {hl}:** Thông số kiểm chứng phản ánh cơ chế gốc."
+        if _word_overlap_ratio(clean, cand1) <= ANTI_PARROT_THRESHOLD:
+            out.append(cand1)
+    if not out:
+        cand1 = "**Cơ chế gốc:** Phản ứng vận hành theo quy luật tự nhiên."
+        if _word_overlap_ratio(clean, cand1) <= ANTI_PARROT_THRESHOLD:
+            out.append(cand1)
+        else:
+            out.append("**Quy luật gốc:** Chuỗi nhân quả kiểm chứng thực nghiệm.")
+
+    tk_clean = (takeaway or "").strip().replace("**", "")
+    if tk_clean and _word_overlap_ratio(clean, tk_clean) <= ANTI_PARROT_THRESHOLD:
+        out.append(f"**Điểm chốt:** {tk_clean[:54]}")
     else:
-        for cl in clauses[:2]:
-            words = cl.split()
-            if len(words) >= 3:
-                out.append(f"**{words[0]} {words[1]}** {' '.join(words[2:8])}".strip())
-    if takeaway:
-        out.append(f"Cốt lõi: **{takeaway[:45]}**")
-    return out[:3] or ["Phân tích cơ chế thực tế"]
+        cand2 = "**Hệ quả trực tiếp:** Quyết định tốc độ thích nghi và phục hồi dài hạn."
+        if _word_overlap_ratio(clean, cand2) <= ANTI_PARROT_THRESHOLD:
+            out.append(cand2)
+        else:
+            out.append("**Tác động chính:** Biến đổi cấu trúc bền vững qua từng chu kỳ.")
+
+    cand3 = "**Ứng dụng thực tiễn:** Đối chiếu dữ kiện đo lường thay vì đoán cảm tính."
+    if _word_overlap_ratio(clean, cand3) <= ANTI_PARROT_THRESHOLD:
+        out.append(cand3)
+    else:
+        out.append("**Ghi nhớ nhanh:** Nắm trục nguyên lý cốt lõi để áp dụng chuẩn.")
+
+    # Bảo đảm độ dài gọn gàng & tỷ lệ trùng từ từng mục và tổng thể <= ANTI_PARROT_THRESHOLD
+    safe_out: list[str] = []
+    for item in out[:3]:
+        if _word_overlap_ratio(clean, item) <= ANTI_PARROT_THRESHOLD:
+            safe_out.append(item)
+    if len(safe_out) < 3:
+        fallbacks = (
+            "**Trục định lượng:** Bằng chứng đo lường khách quan.",
+            "**Chuỗi cơ chế:** Nguyên nhân trực tiếp dẫn tới hệ quả.",
+            "**Áp dụng chuẩn:** Tối ưu hành động dựa trên thực nghiệm.",
+        )
+        for fb in fallbacks:
+            if len(safe_out) >= 3:
+                break
+            if fb not in safe_out:
+                safe_out.append(fb)
+    return safe_out[:3]
+
+
+def _enrich_myth_vs_fact(
+    bdata: dict[str, Any],
+    narration: str,
+    takeaway: str,
+) -> dict[str, Any]:
+    """Đảm bảo thẻ `myth_vs_fact` có tiêu đề ngắn + giải thích cơ chế cụ thể (không cụt 3 chữ)."""
+    updated = dict(bdata)
+    myth = str(updated.get("myth") or updated.get("left") or "").strip()
+    fact = str(updated.get("fact") or updated.get("right") or "").strip()
+
+    myth_plain = myth.replace("**", "").strip(" .,:;")
+    if not myth_plain:
+        myth = "**Ngộ nhận phổ biến:** Nhiều người đánh giá hiệu quả chỉ qua cảm giác tức thời."
+    elif len(myth_plain.split()) < 7:
+        myth = (
+            f"**{myth_plain}:** Quan niệm truyền miệng thiếu căn cứ đo lường, "
+            "dễ dẫn tới cách làm phản tác dụng."
+        )
+    elif _word_overlap_ratio(narration, myth) > ANTI_PARROT_THRESHOLD:
+        head = " ".join(myth_plain.split()[:5])
+        myth = f"**Ngộ nhận '{head}':** Cách nhìn cảm tính không phản ánh đúng bản chất cơ chế."
+
+    fact_plain = fact.replace("**", "").strip(" .,:;")
+    tk_plain = (takeaway or "").replace("**", "").strip(" .,:;")
+    if not fact_plain:
+        detail = (
+            tk_plain
+            if (tk_plain and len(tk_plain.split()) >= 5)
+            else "Quá trình thích nghi chỉ hiệu quả khi đủ cơ chế nền tảng và chu kỳ phục hồi."
+        )
+        fact = f"**Bản chất khoa học:** {detail}"
+    elif len(fact_plain.split()) < 7:
+        extra = (
+            tk_plain
+            if (tk_plain and _word_overlap_ratio(narration, tk_plain) <= ANTI_PARROT_THRESHOLD)
+            else "Cơ chế thực tế vận hành nhờ kích thích đúng ngưỡng kết hợp tái tạo bền vững."
+        )
+        fact = f"**{fact_plain}:** {extra}"
+    elif _word_overlap_ratio(narration, fact) > ANTI_PARROT_THRESHOLD:
+        detail = (
+            tk_plain
+            if (tk_plain and _word_overlap_ratio(narration, tk_plain) <= ANTI_PARROT_THRESHOLD)
+            else "Bằng chứng thực nghiệm chỉ ra hệ quả đến từ chuỗi phản ứng sinh học chuẩn xác."
+        )
+        fact = f"**Cơ chế kiểm chứng:** {detail}"
+
+    updated["myth"] = myth[:175]
+    updated["fact"] = fact[:175]
+    return updated
+
+
+def _is_tail_recap_or_cta(beat: StickvBeat) -> bool:
+    low_nar = (beat.narration or "").lower()
+    low_title = (beat.board_title or "").lower()
+    if beat.board_type == "recap_card":
+        return True
+    if any(kw in low_nar for kw in _CTA_KEYWORDS):
+        return True
+    return any(kw in low_nar or kw in low_title for kw in _SUMMARY_KEYWORDS)
 
 
 def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
-    """Hậu kiểm bảng tri thức: chống lặp sáo rỗng/chép lời thoại & ép CTA cuối thành recap_card."""
+    """Hậu kiểm bảng tri thức GĐ9: Anti-Parrot <= 55%, bảng đủ mật độ & duy nhất 1 recap_card."""
     if not beats:
         return beats
 
     out: list[StickvBeat] = []
     collected_insights: list[str] = []
     n_total = len(beats)
+    tail_start = max(0, n_total - 2)
+    tail_recap_indices = {
+        idx for idx in range(tail_start, n_total) if _is_tail_recap_or_cta(beats[idx])
+    }
+    canonical_recap: tuple[list[str], str] | None = None
 
     for idx, beat in enumerate(beats):
         bdata = dict(beat.board_data or {})
@@ -271,60 +398,101 @@ def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
         if any(cl in btitle.lower() for cl in _CLICHE_PATTERNS):
             btitle = ""
 
-        # 2. Phát hiện CTA ở 1-2 beat cuối -> chuyển bắt buộc sang recap_card 3 ý cốt lõi
-        is_tail = idx >= max(0, n_total - 2)
-        low_nar = (beat.narration or "").lower()
-        is_cta = is_tail and any(kw in low_nar for kw in _CTA_KEYWORDS)
-        if is_cta:
-            recap_pts = list(dict.fromkeys(collected_insights))[-3:]
-            if len(recap_pts) < 3:
-                for prev_b in beats[:idx]:
-                    pt = str(prev_b.board_title or "").strip()
-                    if (
-                        pt
-                        and pt not in recap_pts
-                        and not any(k in pt.lower() for k in _CTA_KEYWORDS)
-                    ):
-                        recap_pts.append(f"**{pt}**")
+        # 2. Vùng tổng kết / CTA ở 1-2 beat cuối -> dùng CHUNG DUY NHẤT 1 recap_card nhất quán
+        if idx in tail_recap_indices:
+            if canonical_recap is None:
+                seed_pts = [
+                    it
+                    for it in items
+                    if beat.board_type == "recap_card"
+                    and not any(k in it.lower() for k in _CTA_KEYWORDS)
+                ]
+                recap_pts = list(dict.fromkeys([*seed_pts, *collected_insights]))[-3:]
+                if len(recap_pts) < 3:
+                    for prev_b in out:
+                        pt = str(prev_b.board_title or "").strip().replace("**", "")
+                        if (
+                            pt
+                            and pt not in recap_pts
+                            and not any(k in pt.lower() for k in _CTA_KEYWORDS)
+                            and not any(cl in pt.lower() for cl in _CLICHE_PATTERNS)
+                        ):
+                            recap_pts.append(f"**{pt}:** Điểm mấu chốt cần ghi nhớ xuyên suốt.")
+                        if len(recap_pts) >= 3:
+                            break
+                defaults = [
+                    "**Nguyên lý gốc:** Hiểu đúng cơ chế vận hành thay vì cảm tính.",
+                    "**Phá bỏ ngộ nhận:** Đối chiếu bằng dữ kiện khoa học kiểm chứng.",
+                    "**Ứng dụng thực tiễn:** Áp dụng đều đặn để tạo kết quả bền vững.",
+                ]
+                for d_pt in defaults:
                     if len(recap_pts) >= 3:
                         break
-            recap_pts = (
-                recap_pts
-                or ["Hiểu rõ **nguyên lý gốc**", "Nhận diện **lầm tưởng**", "Áp dụng **thực tế**"]
-            )[:3]
-            bdata["items"] = recap_pts
-            if not takeaway:
-                takeaway = "Lưu lại để áp dụng ngay hôm nay"
-            bdata["takeaway"] = takeaway
+                    recap_pts.append(d_pt)
+                recap_pts = recap_pts[:3]
+                recap_tk = (
+                    takeaway
+                    if (takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS))
+                    else "Lưu lại 3 nguyên tắc cốt lõi để áp dụng ngay hôm nay"
+                )
+                canonical_recap = (recap_pts, recap_tk)
+
+            recap_pts, recap_tk = canonical_recap
+            recap_data = {**bdata, "items": list(recap_pts), "takeaway": recap_tk}
             out.append(
                 beat.model_copy(
                     update={
                         "board_type": "recap_card",
                         "board_title": "TÓM TẮT 3 Ý CỐT LÕI",
-                        "board_items": recap_pts,
-                        "takeaway": takeaway,
-                        "board_data": bdata,
+                        "board_items": list(recap_pts),
+                        "takeaway": recap_tk,
+                        "board_data": recap_data,
                     }
                 )
             )
             continue
 
-        # 3. Anti-Parrot Rule: bảng dạng chữ trùng >70% từ với lời thoại -> rút gọn từ khóa/cơ chế
-        if btype in ("bullets", "list", "card") and items:
+        # 3. Kiểm tra Anti-Parrot (<= 55%) trên `board_title`
+        if btitle and _word_overlap_ratio(beat.narration, btitle) > ANTI_PARROT_THRESHOLD:
+            btitle = _rewrite_non_parrot_title(beat.narration)
+
+        # 4. Nâng mật độ & Anti-Parrot theo từng loại bảng
+        if btype == "myth_vs_fact":
+            bdata = _enrich_myth_vs_fact(bdata, beat.narration, takeaway)
+        elif btype == "flow_steps":
+            steps = [
+                str(s).strip()
+                for s in (bdata.get("steps") or items or [])
+                if str(s).strip() and not any(cl in str(s).lower() for cl in _CLICHE_PATTERNS)
+            ]
+            too_similar = not steps or any(
+                _word_overlap_ratio(beat.narration, st) > ANTI_PARROT_THRESHOLD for st in steps
+            )
+            if too_similar or len(steps) < 3:
+                steps = _condense_to_keyword_bullets(beat.narration, takeaway)
+            bdata["steps"] = steps[:3]
+        elif btype in ("bullets", "list", "card"):
             joined = f"{btitle} {' '.join(items)}".strip()
-            if _word_overlap_ratio(beat.narration, joined) > 0.70:
+            item_parrots = any(
+                _word_overlap_ratio(beat.narration, it) > ANTI_PARROT_THRESHOLD for it in items
+            )
+            if (
+                not items
+                or item_parrots
+                or _word_overlap_ratio(beat.narration, joined) > ANTI_PARROT_THRESHOLD
+            ):
                 items = _condense_to_keyword_bullets(beat.narration, takeaway)
                 bdata["items"] = items
-
-        if btype in ("bullets", "list", "card") and not items:
-            items = _condense_to_keyword_bullets(beat.narration, takeaway)
-            bdata["items"] = items
+            else:
+                bdata["items"] = items
 
         # Thu thập ý giá trị để nạp cho recap_card cuối video
         if takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(takeaway[:72])
+            collected_insights.append(takeaway[:84])
+        elif btype == "myth_vs_fact" and bdata.get("fact"):
+            collected_insights.append(str(bdata["fact"])[:84])
         elif items and not any(k in items[0].lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(items[0][:72])
+            collected_insights.append(items[0][:84])
 
         if takeaway:
             bdata["takeaway"] = takeaway
