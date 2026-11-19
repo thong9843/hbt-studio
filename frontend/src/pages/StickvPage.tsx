@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
 import type {
@@ -18,13 +19,26 @@ import type {
 } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
 import { CinemaInspectorPanel } from '../components/cinema/CinemaInspectorPanel';
-import { CopyIcon, PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from '../components/icons';
+import {
+  CopyIcon,
+  PlusIcon,
+  SparklesIcon,
+  StopIcon,
+  TrashIcon,
+  UploadIcon,
+} from '../components/icons';
 import type { SafeZonePlatform } from '../components/SafeZoneOverlay';
 import { PhonePreviewStage } from '../components/studio/PhonePreviewStage';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Progress } from '../components/ui/Progress';
 import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
+import { useRemainingText } from '../hooks/useRemaining';
+import { vi } from '../i18n/vi';
+
+/** Ghi nhớ các job StickV đã hoàn tất đã thông báo trong phiên để tránh toast trùng khi re-render. */
+const seenCompletedStickvJobs = new Set<string>();
 
 const DEFAULT_POSE_OPTIONS = [
   { id: 'point_up', label: 'Chỉ tay lên bảng' },
@@ -177,15 +191,15 @@ export function StickvPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const job = useRenderJob();
+  const remaining = useRemainingText();
+  const [searchParams] = useSearchParams();
+  const urlSlug = (searchParams.get('slug') ?? '').trim();
 
-  const [selectedSlug, setSelectedSlug] = useState<string>('');
+  const [selectedSlug, setSelectedSlug] = useState<string>(urlSlug);
   const [draft, setDraft] = useState<StickvProject | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string>('');
   const [safeZone, setSafeZone] = useState<SafeZonePlatform>('none');
-  const [rendering, setRendering] = useState(false);
-  const [renderProgress, setRenderProgress] = useState<{ pct: number; step: string } | null>(null);
   const [propPreviewMap, setPropPreviewMap] = useState<Record<string, string>>({});
-  const esRef = useRef<EventSource | null>(null);
 
   // 3 Chế độ kịch bản StickV
   const [inputMode, setInputMode] = useState<'ai' | 'json' | 'script'>('ai');
@@ -252,10 +266,72 @@ export function StickvPage() {
   }, [geminiModel, listQuery.data?.default_model]);
 
   useEffect(() => {
+    if (urlSlug && urlSlug !== selectedSlug) {
+      setSelectedSlug(urlSlug);
+    }
+  }, [urlSlug, selectedSlug]);
+
+  useEffect(() => {
     if (!selectedSlug && projects.length > 0) {
       setSelectedSlug(projects[0].slug);
     }
   }, [selectedSlug, projects]);
+
+  // Đồng bộ job StickV bền vững khi mount / quay lại trang hoặc đổi dự án
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs({ includeRecent: true })
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const stickvJobs = rows.filter((r) => r.kind === 'stickv');
+        const activeTarget =
+          stickvJobs.find(
+            (r) =>
+              (r.status === 'running' || r.status === 'queued') &&
+              (!selectedSlug || r.slug === selectedSlug),
+          ) ??
+          stickvJobs.find((r) => r.status === 'running' || r.status === 'queued') ??
+          null;
+
+        if (activeTarget) {
+          if (!selectedSlug && activeTarget.slug) {
+            setSelectedSlug(activeTarget.slug);
+          }
+          job.attachJob({
+            jobId: activeTarget.id,
+            slug: activeTarget.slug,
+            kind: 'stickv',
+            preview: activeTarget.mode === 'preview',
+            progress: activeTarget.progress,
+            step: activeTarget.step,
+            stage: activeTarget.stage || activeTarget.step,
+            currentBeat: activeTarget.current_beat ?? null,
+            totalBeats: activeTarget.total_beats ?? null,
+            startedAt: activeTarget.started_at ?? null,
+          });
+          return;
+        }
+
+        // Nếu có job StickV vừa hoàn tất trong lúc người dùng ở trang khác -> tự nạp lại video
+        const recentDone = stickvJobs.find(
+          (r) =>
+            r.status === 'done' &&
+            !seenCompletedStickvJobs.has(r.id) &&
+            (!selectedSlug || r.slug === selectedSlug),
+        );
+        if (recentDone) {
+          seenCompletedStickvJobs.add(recentDone.id);
+          void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+          void qc.invalidateQueries({ queryKey: ['unified-renders'] });
+          toast.info(vi.stickvJob.renderDoneAway);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSlug, job.attachJob, qc, toast]);
 
   useEffect(() => {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;
@@ -419,60 +495,45 @@ export function StickvPage() {
     mutationFn: async (preview: boolean) => {
       if (!draft) throw new Error('Chưa có dự án để dựng');
       await stickvApi.save(draft.slug, draft);
-      return stickvApi.render(draft.slug, preview);
+      const res = await stickvApi.render(draft.slug, preview);
+      return {
+        job_id: res.job_id,
+        slug: draft.slug,
+        preview,
+        totalBeats: preview ? Math.min(3, draft.beats.length) : draft.beats.length,
+      };
     },
-    onSuccess: ({ job_id }) => {
-      setRendering(true);
-      setRenderProgress({ pct: 2, step: 'Đang khởi động...' });
+    onSuccess: ({ job_id, slug, preview, totalBeats }) => {
+      seenCompletedStickvJobs.delete(job_id);
+      job.attachJob({
+        jobId: job_id,
+        slug,
+        kind: 'stickv',
+        preview,
+        progress: 2,
+        step: 'Sinh giọng VieNeu-TTS',
+        stage: 'Sinh giọng VieNeu-TTS',
+        message: vi.stickvJob.queued,
+        currentBeat: 0,
+        totalBeats,
+        startedAt: Date.now() / 1000,
+        estimateSeconds: Math.max(15, totalBeats * (preview ? 8 : 18)),
+      });
       toast.info('Đã đưa StickV vào hàng đợi dựng');
-      if (typeof EventSource !== 'undefined') {
-        esRef.current?.close();
-        const es = new EventSource(`/api/jobs/${encodeURIComponent(job_id)}/events`);
-        esRef.current = es;
-        es.addEventListener('progress', (ev) => {
-          try {
-            const d = JSON.parse((ev as MessageEvent).data) as {
-              progress?: number;
-              step?: string;
-              text?: string;
-            };
-            setRenderProgress({
-              pct: Math.round(d.progress ?? 0),
-              step: d.text || d.step || 'Đang dựng...',
-            });
-          } catch {
-            // ignore
-          }
-        });
-        es.addEventListener('end', (ev) => {
-          es.close();
-          esRef.current = null;
-          setRendering(false);
-          setRenderProgress(null);
-          try {
-            const d = JSON.parse((ev as MessageEvent).data) as { status?: string; error?: string };
-            if (d.status === 'done') {
-              void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-              void qc.invalidateQueries({ queryKey: ['unified-renders'] });
-              toast.info('Đã dựng xong video StickV!');
-            } else if (d.status === 'failed') {
-              toast.error(d.error || 'Dựng video StickV thất bại');
-            }
-          } catch {
-            void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-          }
-        });
-        es.onerror = () => {
-          es.close();
-          esRef.current = null;
-          setRendering(false);
-        };
-      }
     },
     onError: (e: Error) => toast.error(e),
   });
 
-  useEffect(() => () => esRef.current?.close(), []);
+  // Ghi nhận job StickV vừa hoàn tất từ RenderJobProvider để tránh toast trùng khi mount lại
+  useEffect(() => {
+    if (job.finished && (job.kind === 'stickv' || job.finished.kind === 'stickv')) {
+      seenCompletedStickvJobs.add(job.finished.id);
+    }
+  }, [job.finished, job.kind]);
+
+  const isStickvJobRunning = job.running && job.kind === 'stickv';
+  const liveStickvPct = Math.max(0, Math.min(100, Math.round(job.percent)));
+  const liveStickvStage = job.stage || job.step || vi.stickvJob.working;
 
   const updateBeat = (beatId: string, patch: Partial<StickvBeat>) => {
     if (!draft) return;
@@ -547,6 +608,58 @@ export function StickvPage() {
       </header>
 
       {listQuery.isError && <ErrorNote error={listQuery.error} />}
+
+      {isStickvJobRunning && (
+        <Card
+          as="section"
+          aria-label={vi.stickvJob.panelTitle}
+          className="space-y-3 border-brand/40 bg-card"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex h-2.5 w-2.5 rounded-full bg-brand"
+                  aria-hidden="true"
+                />
+                <span className="text-small font-extrabold text-text">
+                  {vi.stickvJob.panelTitle}
+                </span>
+                <span className="rounded-pill bg-soft px-2.5 py-0.5 text-tiny font-bold text-text-2">
+                  {job.options.preview ? vi.stickvJob.modePreview : vi.stickvJob.modeFinal}
+                </span>
+                {job.slug && (
+                  <span className="truncate text-tiny font-semibold text-muted">· {job.slug}</span>
+                )}
+              </div>
+              <p className="text-small font-bold text-text">
+                <span className="num mr-2 text-brand">{liveStickvPct}%</span>
+                <span>{liveStickvStage}</span>
+                {job.totalBeats != null && job.totalBeats > 0 && job.currentBeat != null && (
+                  <span className="ml-2 text-tiny font-semibold text-muted tabular-nums">
+                    ({vi.stickvJob.beatProgress(job.currentBeat, job.totalBeats)})
+                  </span>
+                )}
+              </p>
+              {job.message && <p className="truncate text-tiny text-muted">{job.message}</p>}
+            </div>
+            <div className="flex items-center gap-3">
+              {remaining && (
+                <span className="text-tiny font-semibold text-muted tabular-nums">{remaining}</span>
+              )}
+              <Button
+                tone="soft"
+                size="sm"
+                icon={<StopIcon size={14} />}
+                onClick={() => void job.cancel()}
+              >
+                {vi.stickvJob.cancelBtn}
+              </Button>
+            </div>
+          </div>
+          <Progress value={liveStickvPct} label={vi.stickvJob.panelTitle} />
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.35fr_380px]">
         {/* Cột trái: Sinh kịch bản AI + Danh sách Beat */}
@@ -1140,16 +1253,16 @@ export function StickvPage() {
               if (draft) setDraft({ ...draft, aspect: nextAspect });
             }}
             estimateText={
-              renderProgress
-                ? `${renderProgress.pct}% · ${renderProgress.step}`
+              isStickvJobRunning
+                ? `${liveStickvPct}% · ${liveStickvStage}`
                 : draft
                   ? `${draft.beats.length} beat · ${draft.aspect} · ${draft.fps}fps`
                   : 'Chưa chọn dự án'
             }
-            previewBusy={renderMutation.isPending || rendering || job.running}
-            exportBusy={renderMutation.isPending || rendering || job.running}
-            previewDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
-            exportDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
+            previewBusy={renderMutation.isPending || job.running}
+            exportBusy={renderMutation.isPending || job.running}
+            previewDisabled={!draft || draft.beats.length === 0 || job.running}
+            exportDisabled={!draft || draft.beats.length === 0 || job.running}
             onPreview={() => renderMutation.mutate(true)}
             onExport={() => renderMutation.mutate(false)}
             exportLabel={`Xuất bản đẹp (${(draft?.aspect ?? aspect) === '16:9' ? '1920×1080' : '1080×1920'})`}
@@ -1254,7 +1367,7 @@ export function StickvPage() {
             <CinemaInspectorPanel
               stickvProject={draft}
               beatId={activeBeat?.id}
-              disabled={rendering || job.running}
+              disabled={job.running}
             />
           )}
         </div>

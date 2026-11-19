@@ -35,17 +35,39 @@ class JobCreated(BaseModel):
     job_id: str
 
 
+def _public_kind(job: Job) -> str:
+    raw = getattr(job, "kind", "render")
+    if raw in ("stickv", "stickv_render"):
+        return "stickv"
+    if raw in ("postv_quick", "postv_auto", "voice", "hbt_core_auto"):
+        return raw
+    return "preview" if job.preview else "final"
+
+
+def _format_output_url(val: object) -> object:
+    if isinstance(val, str) and val.startswith("/api/"):
+        return val
+    return file_url(val) if isinstance(val, str) or val is None else val
+
+
 def job_view(job: Job) -> dict:
     output = None
     if job.output is not None:
-        output = {k: (file_url(v) if k in URL_KEYS else v) for k, v in job.output.items()}
+        output = {k: (_format_output_url(v) if k in URL_KEYS else v) for k, v in job.output.items()}
     return {
         "id": job.id,
         "project": job.slug,
-        "kind": getattr(job, "kind", "render"),
+        "slug": job.slug,
+        "kind": _public_kind(job)
+        if getattr(job, "kind", "") in ("stickv", "stickv_render")
+        else getattr(job, "kind", "render"),
+        "mode": getattr(job, "mode", "") or ("preview" if job.preview else "final"),
         "status": job.status,
         "progress": round(job.progress, 1),
         "step": job.step,
+        "stage": getattr(job, "stage", "") or job.step,
+        "current_beat": getattr(job, "current_beat", None),
+        "total_beats": getattr(job, "total_beats", None),
         "log_tail": job.log_tail(),
         "output": output,
         "error": job.error,
@@ -56,6 +78,26 @@ def job_view(job: Job) -> dict:
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
+    }
+
+
+def _job_list_row(j: Job) -> dict:
+    view_out = job_view(j)["output"] if j.output is not None else None
+    return {
+        "id": j.id,
+        "slug": j.slug,
+        "kind": _public_kind(j),
+        "mode": getattr(j, "mode", "") or ("preview" if j.preview else "final"),
+        "status": j.status,
+        "progress": round(j.progress, 1),
+        "step": j.step,
+        "stage": getattr(j, "stage", "") or j.step,
+        "current_beat": getattr(j, "current_beat", None),
+        "total_beats": getattr(j, "total_beats", None),
+        "started_at": j.started_at,
+        "finished_at": j.finished_at,
+        "output": view_out,
+        "error": j.error,
     }
 
 
@@ -75,23 +117,10 @@ def start_render(slug: str, state: State, body: RenderRequest | None = None):
 
 
 @router.get("/jobs")
-def list_active_jobs(state: State):
-    """Chỉ đọc: job đang chạy và đang chờ (để giao diện nối lại sau khi tải lại trang)."""
-    return [
-        {
-            "id": j.id,
-            "slug": j.slug,
-            "kind": (
-                j.kind
-                if j.kind in ("postv_quick", "postv_auto", "voice", "hbt_core_auto")
-                else ("preview" if j.preview else "final")
-            ),
-            "status": j.status,
-            "progress": round(j.progress, 1),
-            "step": j.step,
-        }
-        for j in state.jobs.active()
-    ]
+def list_active_jobs(state: State, include_recent: bool = False):
+    """Chỉ đọc: job đang chạy/chờ; thêm `include_recent=true` để kèm các job vừa hoàn tất."""
+    jobs_list = state.jobs.recent() if include_recent else state.jobs.active()
+    return [_job_list_row(j) for j in jobs_list]
 
 
 @router.get("/jobs/{job_id}")

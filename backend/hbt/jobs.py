@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import threading
 import time
@@ -94,7 +95,11 @@ class Job:
     _events: list = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _done: threading.Event = field(default_factory=threading.Event)
-    kind: str = "render"  # "render" (dựng video) | "voice" (sinh giọng PostV)
+    kind: str = "render"  # "render" | "voice" | "stickv" | ...
+    mode: str = ""  # "preview" | "final"
+    stage: str = ""
+    current_beat: int | None = None
+    total_beats: int | None = None
 
     @property
     def finished(self) -> bool:
@@ -120,6 +125,14 @@ class Job:
         with self._lock:
             self.last_heartbeat = time.time()
             self.progress, self.step = pct, step
+            if "stage" in extra and isinstance(extra["stage"], str):
+                self.stage = extra["stage"]
+            elif step:
+                self.stage = step
+            if "current_beat" in extra:
+                self.current_beat = extra["current_beat"]
+            if "total_beats" in extra:
+                self.total_beats = extra["total_beats"]
             if message:
                 self._log.append(message)
             payload = format_sse_progress(pct, step, message, **extra)
@@ -314,6 +327,20 @@ class JobManager:
         with self._lock:
             jobs = [j for j in self._jobs.values() if not j.finished]
         return sorted(jobs, key=lambda j: j.created_at)
+
+    def recent(self, limit: int = 15) -> list[Job]:
+        """Trả job đang chạy/chờ (cũ nhất trước) kèm tối đa `limit` job vừa hoàn tất gần nhất."""
+        with self._lock:
+            active_jobs = sorted(
+                (j for j in self._jobs.values() if not j.finished),
+                key=lambda j: j.created_at,
+            )
+            done_jobs = sorted(
+                (j for j in self._jobs.values() if j.finished),
+                key=lambda j: j.finished_at or j.created_at,
+                reverse=True,
+            )[: max(0, int(limit))]
+        return [*active_jobs, *done_jobs]
 
     # ---------------------------------------------------------------- tạo / huỷ
     def submit(
@@ -536,7 +563,7 @@ class JobManager:
             if job.kind == "hbt_core_auto":
                 self._run_hbt_core_auto(job)
                 return
-            if job.kind == "stickv_render":
+            if job.kind in ("stickv", "stickv_render"):
                 self._run_stickv_render(job)
                 return
             folder = self.storage.project_dir(job.slug)
@@ -1184,12 +1211,47 @@ class JobManager:
             log.exception("Lỗi job hbt_core_auto: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
+    @staticmethod
+    def _resolve_stickv_stage(
+        pct: float,
+        msg: str,
+        *,
+        total_beats: int | None = None,
+    ) -> tuple[str, int | None, int | None]:
+        """Chuẩn hóa pha tiến độ StickV tiếng Việt và trích chỉ số beat/cụm."""
+        low = (msg or "").lower()
+        cur_b: int | None = None
+        tot_b: int | None = total_beats
+        m = re.search(r"(?:beat|cụm|cảnh)\s+(\d+)\s*/\s*(\d+)", low)
+        if m:
+            cur_b = int(m.group(1))
+            tot_b = int(m.group(2))
+
+        if "giọng" in low or "vieneu" in low or pct < 20.0:
+            return "Sinh giọng VieNeu-TTS", cur_b, tot_b
+        if "căn chỉnh" in low or "kiểm định" in low or "preflight" in low:
+            return "Căn chỉnh & Kiểm định", cur_b, tot_b
+        if "trộn" in low or "lufs" in low or "sfx" in low or pct < 34.0:
+            return "Trộn âm thanh -14 LUFS", cur_b, tot_b
+        if "outro" in low or "watermark" in low or "nối" in low or "hoàn tất" in low or pct >= 85.0:
+            return "Ghép Outro & Hoàn tất", cur_b, tot_b
+        return "Dựng khung hình", cur_b, tot_b
+
     def submit_stickv_render(self, slug: str, *, preview: bool = False) -> Job:
-        """Đưa job dựng video StickV vào hàng đợi 1 luồng chung."""
+        """Đưa job dựng video StickV vào hàng đợi 1 luồng chung kèm đầy đủ metadata."""
         if self.is_busy(slug):
             raise Conflict("Dự án StickV đang bận, hãy đợi xong hoặc huỷ")
         if self._tool_check is not None:
             self._tool_check()
+        total_beats: int | None = None
+        try:
+            from hbt.stickv.storage import load_stickv_project
+
+            proj = load_stickv_project(self.storage.workspace_dir, slug)
+            total_beats = len(proj.beats[:3] if preview else proj.beats)
+        except Exception:
+            total_beats = None
+
         job = Job(
             uuid.uuid4().hex[:12],
             slug,
@@ -1197,7 +1259,11 @@ class JobManager:
             None,
             None,
             False,
-            kind="stickv_render",
+            kind="stickv",
+            mode="preview" if preview else "final",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -1206,7 +1272,7 @@ class JobManager:
         return job
 
     def _run_stickv_render(self, job: Job) -> None:
-        """Thực thi job stickv_render và ghi chỉ mục vào workspace/studio.db."""
+        """Thực thi job stickv và ghi chỉ mục vào workspace/studio.db."""
         from hbt.stickv.render import render_stickv
         from hbt.stickv.storage import (
             load_stickv_project,
@@ -1215,13 +1281,25 @@ class JobManager:
         )
 
         def on_progress(pct: float, msg: str) -> None:
-            job._progress(pct, "render", msg)
-            job._emit("progress", {"percent": pct, "text": msg})
+            stage_lbl, cur_b, tot_b = self._resolve_stickv_stage(
+                pct, msg, total_beats=job.total_beats
+            )
+            job._progress(
+                pct,
+                stage_lbl,
+                msg,
+                stage=stage_lbl,
+                current_beat=cur_b,
+                total_beats=tot_b,
+                percent=round(float(pct), 1),
+                text=msg,
+            )
 
         try:
             ws = self.storage.workspace_dir
             assets_dir = ws.parent / "assets"
             proj = load_stickv_project(ws, job.slug)
+            job.total_beats = len(proj.beats[:3] if job.preview else proj.beats)
             pdir = stickv_project_dir(ws, job.slug)
             wm = self.app_settings.load().watermark if self.app_settings is not None else None
 
@@ -1261,6 +1339,8 @@ class JobManager:
                 duration_sec=float(res["duration_sec"] or 0.0),
             )
 
+            job.stage = "Ghép Outro & Hoàn tất"
+            job.progress = 100.0
             job._finish(
                 DONE,
                 output={
@@ -1274,5 +1354,5 @@ class JobManager:
         except RenderCancelled:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
-            log.exception("Lỗi job stickv_render: %s", e)
+            log.exception("Lỗi job stickv: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)

@@ -6,9 +6,13 @@ export interface JobProgress {
   progress: number;
   step: string;
   message: string;
+  stage?: string;
   current?: number;
   total?: number;
+  current_beat?: number | null;
+  total_beats?: number | null;
   percent?: number;
+  text?: string;
 }
 
 const EMPTY: JobProgress = { progress: 0, step: '', message: '' };
@@ -17,18 +21,36 @@ const EMPTY: JobProgress = { progress: 0, step: '', message: '' };
  * Theo dõi một job dựng video qua SSE (`/api/jobs/{id}/events`). Khi có sự kiện `end` (hoặc mất kết
  * nối) thì đọc lại `GET /jobs/{id}` để có URL file đầu ra.
  */
-export function useJob(jobId: string | null, onFinished?: (job: Job) => void) {
+export function useJob(
+  jobId: string | null,
+  onFinished?: (job: Job) => void,
+  seedProgress?: Partial<JobProgress> | null,
+) {
   const [progress, setProgress] = useState<JobProgress>(EMPTY);
   const [job, setJob] = useState<Job | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const finishedRef = useRef(onFinished);
+  const seedRef = useRef(seedProgress);
+  seedRef.current = seedProgress;
 
   useEffect(() => {
     finishedRef.current = onFinished;
   }, [onFinished]);
 
   useEffect(() => {
-    setProgress(EMPTY);
+    const seed = seedRef.current;
+    setProgress(
+      jobId && seed
+        ? {
+            progress: seed.progress ?? 0,
+            step: seed.step ?? seed.stage ?? '',
+            message: seed.message ?? '',
+            stage: seed.stage ?? seed.step ?? '',
+            current_beat: seed.current_beat ?? null,
+            total_beats: seed.total_beats ?? null,
+          }
+        : EMPTY,
+    );
     setJob(null);
     setConnectionError(null);
     if (!jobId) return;
@@ -53,14 +75,17 @@ export function useJob(jobId: string | null, onFinished?: (job: Job) => void) {
     source.addEventListener('progress', (ev) => {
       try {
         const data = JSON.parse((ev as MessageEvent<string>).data) as Partial<JobProgress>;
-        setProgress({
-          progress: data.progress ?? 0,
-          step: data.step ?? '',
-          message: data.message ?? '',
+        setProgress((prev) => ({
+          progress: data.progress ?? data.percent ?? prev.progress,
+          step: data.step ?? data.stage ?? prev.step,
+          stage: data.stage ?? data.step ?? prev.stage,
+          message: data.message ?? data.text ?? '',
           current: data.current,
           total: data.total,
+          current_beat: data.current_beat !== undefined ? data.current_beat : prev.current_beat,
+          total_beats: data.total_beats !== undefined ? data.total_beats : prev.total_beats,
           percent: data.percent,
-        });
+        }));
       } catch {
         // Bỏ qua sự kiện hỏng.
       }

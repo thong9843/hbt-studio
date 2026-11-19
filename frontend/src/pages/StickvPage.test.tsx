@@ -1,9 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../api/endpoints';
+import { stickvApi } from '../api/stickv';
+import { GlobalJobDock } from '../components/layout/GlobalJobDock';
 import { RenderJobProvider } from '../components/RenderJobProvider';
 import { ToastProvider } from '../components/Toast';
+import { FakeEventSource } from '../test/fakes';
 import { StickvPage } from './StickvPage';
 
 vi.mock('../api/stickv', () => ({
@@ -83,8 +87,19 @@ vi.mock('../api/endpoints', async (importOriginal) => {
           { id: 'Thanh Bình', label: 'Thanh Bình' },
         ],
       }),
+      listActiveJobs: vi.fn().mockResolvedValue([]),
+      listJobs: vi.fn().mockResolvedValue([]),
     },
   };
+});
+
+beforeEach(() => {
+  FakeEventSource.instances = [];
+  vi.stubGlobal('EventSource', FakeEventSource);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('StickvPage', () => {
@@ -130,5 +145,89 @@ describe('StickvPage', () => {
     expect(screen.getByLabelText('Chế độ diễn hoạt')).toBeInTheDocument();
     expect(screen.getByLabelText('Tâm trạng nhạc')).toBeInTheDocument();
     expect(screen.getByLabelText('Tương tác sân khấu')).toBeInTheDocument();
+  });
+
+  it('persists live StickV SSE progress across route unmount/remount and shows GlobalJobDock link', async () => {
+    vi.mocked(stickvApi.save).mockResolvedValue({ project: {} as never });
+    vi.mocked(stickvApi.render).mockResolvedValue({
+      job_id: 'sv-job-99',
+      slug: 'demo-stickv',
+      preview: false,
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([]);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/stickv']}>
+          <ToastProvider>
+            <RenderJobProvider>
+              <nav>
+                <Link to="/library">Đi tới Thư viện</Link>
+              </nav>
+              <Routes>
+                <Route path="/stickv" element={<StickvPage />} />
+                <Route path="/library" element={<div>Trang Thư viện</div>} />
+              </Routes>
+              <GlobalJobDock />
+            </RenderJobProvider>
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const exportBtn = await screen.findByRole('button', { name: /Xuất bản đẹp/i });
+    fireEvent.click(exportBtn);
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.instances[0].url).toBe('/api/jobs/sv-job-99/events');
+
+    // Phát sự kiện tiến độ 48%
+    act(() => {
+      FakeEventSource.instances[0].emit('progress', {
+        progress: 48,
+        step: 'Dựng khung hình',
+        stage: 'Dựng khung hình',
+        message: 'Đang dựng cụm 2/4',
+        current_beat: 2,
+        total_beats: 4,
+      });
+    });
+
+    expect(await screen.findByLabelText('Tiến trình dựng video StickV')).toBeInTheDocument();
+    expect(screen.getAllByText(/48%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Dựng khung hình/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Beat 2\/4/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: /Xuất bản đẹp/i })).toBeDisabled();
+
+    // Chuyển sang trang khác (unmount StickvPage hoàn toàn)
+    fireEvent.click(screen.getByRole('link', { name: 'Đi tới Thư viện' }));
+    expect(await screen.findByText('Trang Thư viện')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Tiến trình dựng video StickV')).not.toBeInTheDocument();
+
+    // GlobalJobDock vẫn bám sống tiến độ + có nút nhảy về đúng dự án StickV
+    const dockLink = screen.getByRole('link', { name: /Xem tiến trình StickV/i });
+    expect(dockLink).toHaveAttribute('href', '/stickv?slug=demo-stickv');
+
+    // Tiến độ tăng lên 74% trong lúc đang ở trang khác
+    act(() => {
+      FakeEventSource.instances[0].emit('progress', {
+        progress: 74,
+        step: 'Trộn âm thanh -14 LUFS',
+        stage: 'Trộn âm thanh -14 LUFS',
+        message: 'Đang nén âm chuẩn -14 LUFS',
+      });
+    });
+    expect(screen.getByText(/74%/)).toBeInTheDocument();
+
+    // Bấm nút trong GlobalJobDock để quay về /stickv (remount StickvPage)
+    fireEvent.click(dockLink);
+
+    expect(await screen.findByLabelText('Tiến trình dựng video StickV')).toBeInTheDocument();
+    expect(screen.getAllByText(/74%/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Trộn âm thanh -14 LUFS/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: /Xuất bản đẹp/i })).toBeDisabled();
+    // Không tạo thêm EventSource trùng lặp khi remount
+    expect(FakeEventSource.instances).toHaveLength(1);
   });
 });

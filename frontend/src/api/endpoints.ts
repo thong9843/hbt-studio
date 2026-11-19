@@ -330,6 +330,8 @@ export const api = {
       json: { voice_id: voiceId },
     }),
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
+  listJobs: (opts?: { includeRecent?: boolean }) =>
+    apiGet<ActiveJob[]>(opts?.includeRecent ? '/jobs?include_recent=true' : '/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
   startPostvQuick: (body: {

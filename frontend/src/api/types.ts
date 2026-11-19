@@ -212,9 +212,17 @@ export interface JobOutput {
 export interface Job {
   id: string;
   project: string;
+  slug?: string;
+  kind?: string;
+  mode?: 'preview' | 'final';
   status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
   log_tail: string[];
   output: JobOutput | null;
   error: string | null;
@@ -225,14 +233,22 @@ export interface Job {
   preview_seconds: number | null;
 }
 
-/** Một dòng của `GET /jobs`: job đang chạy hoặc đang chờ. */
+/** Một dòng của `GET /jobs`: job đang chạy/chờ (hoặc vừa hoàn tất khi `include_recent=true`). */
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto';
-  status: 'queued' | 'running' | 'waiting_pick';
+  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto' | 'stickv';
+  mode?: 'preview' | 'final';
+  status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  output?: Record<string, unknown> | null;
+  error?: string | null;
 }
 
 export type AspectMode = 'fill' | 'fit';
