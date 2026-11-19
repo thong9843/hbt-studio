@@ -39,6 +39,7 @@ class HardwareProfile(BaseModel):
 
 _CACHE_LOCK = threading.Lock()
 _CACHED_PROFILE: HardwareProfile | None = None
+_CACHED_SCRIPT_FLAG: str | None = None
 
 
 def _run_popen_quiet(cmd: list[str], timeout: float) -> tuple[int, str]:
@@ -181,8 +182,49 @@ def detect_hardware(
         return _CACHED_PROFILE
 
 
+def resolve_filter_complex_script_flag(
+    *,
+    ffmpeg_bin: str | None = None,
+    help_output: str | None = None,
+) -> str:
+    """Chọn cờ filtergraph theo FFmpeg (`-/filter_complex` 7+ vs `-filter_complex_script` 6)."""
+    global _CACHED_SCRIPT_FLAG
+
+    if help_output is not None:
+        return (
+            "-filter_complex_script"
+            if "-filter_complex_script" in help_output
+            else "-/filter_complex"
+        )
+
+    if ffmpeg_bin is None:
+        with _CACHE_LOCK:
+            if _CACHED_SCRIPT_FLAG is not None:
+                return _CACHED_SCRIPT_FLAG
+
+    exe = ffmpeg_bin or shutil.which("ffmpeg")
+    if exe is None:
+        return "-filter_complex_script"
+
+    try:
+        rc, out = _run_popen_quiet([exe, "-hide_banner", "-h", "long"], timeout=5.0)
+    except OSError:
+        return "-filter_complex_script"
+
+    flag = (
+        "-filter_complex_script"
+        if (rc == 0 and "-filter_complex_script" in out)
+        else "-/filter_complex"
+    )
+    if ffmpeg_bin is None:
+        with _CACHE_LOCK:
+            _CACHED_SCRIPT_FLAG = flag
+    return flag
+
+
 def reset_hardware_cache() -> None:
     """Xóa cache phần cứng (chủ yếu dùng trong unit test)."""
-    global _CACHED_PROFILE
+    global _CACHED_PROFILE, _CACHED_SCRIPT_FLAG
     with _CACHE_LOCK:
         _CACHED_PROFILE = None
+        _CACHED_SCRIPT_FLAG = None

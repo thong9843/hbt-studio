@@ -17,6 +17,7 @@ from hbt.cinema.hardware import (
     detect_hardware,
     probe_nvenc_one_frame,
     reset_hardware_cache,
+    resolve_filter_complex_script_flag,
 )
 from hbt.cinema.layer_cache import FontCache, LayerCache, estimate_image_bytes
 from hbt.cinema.schema import (
@@ -68,4 +69,5 @@ __all__ = [
     "estimate_image_bytes",
     "probe_nvenc_one_frame",
     "reset_hardware_cache",
+    "resolve_filter_complex_script_flag",
 ]

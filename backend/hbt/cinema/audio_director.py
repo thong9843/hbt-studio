@@ -13,7 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from hbt.cinema.hardware import HardwareProfile, detect_hardware
+from hbt.cinema.hardware import (
+    HardwareProfile,
+    detect_hardware,
+    resolve_filter_complex_script_flag,
+)
 from hbt.cinema.schema import BeatSpec, TimelineSpec
 from hbt.core.audio import build_topic_bgm_playlist, render_smart_bgm_wav
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe
@@ -494,6 +498,7 @@ def mix_cinema_audio(
         if profile.ffmpeg_resource_clamp
         else list(FFMPEG_RESOURCE_CLAMP)
     )
+    script_flag = resolve_filter_complex_script_flag()
     cmd = [
         ffmpeg_exe(),
         "-hide_banner",
@@ -502,7 +507,7 @@ def mix_cinema_audio(
         "-y",
         *clamp,
         *in_args,
-        "-filter_complex_script",
+        script_flag,
         str(script_path),
         "-map",
         "[aout]",
@@ -547,6 +552,7 @@ def mix_cinema_audio(
     return {
         "file_path": str(out_path),
         "filtergraph_path": str(script_path),
+        "script_flag": script_flag,
         "duration_sec": measure_audio_duration(out_path) or total_dur,
         "breath_saved_ms": round(breath_saved_ms, 2),
         "silence_drops": silence_drops,

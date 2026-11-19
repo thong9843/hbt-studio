@@ -11,7 +11,11 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from hbt.cinema.cache import BeatCache, build_normalized_beat_flags
-from hbt.cinema.hardware import HardwareProfile, detect_hardware
+from hbt.cinema.hardware import (
+    HardwareProfile,
+    detect_hardware,
+    resolve_filter_complex_script_flag,
+)
 from hbt.cinema.layer_cache import FontCache, LayerCache
 from hbt.cinema.motion import ease_out_back, ease_out_cubic
 from hbt.cinema.preflight import PreflightQualityGate
@@ -586,6 +590,7 @@ class DirtyRectCompositor:
                     fc_tmp.unlink(missing_ok=True)
 
             tmp_wm_out = out_path.with_name(f"{out_path.stem}.tmp.mp4")
+            script_flag = resolve_filter_complex_script_flag()
             cmd = [
                 ffmpeg_exe(),
                 "-hide_banner",
@@ -597,7 +602,7 @@ class DirtyRectCompositor:
                 str(joined_mp4),
                 "-i",
                 str(wm_png),
-                "-filter_complex_script",
+                script_flag,
                 str(fc_txt),
                 "-map",
                 "[v_wm]",

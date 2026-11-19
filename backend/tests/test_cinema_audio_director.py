@@ -22,7 +22,7 @@ from hbt.cinema.director_ai import (
     build_pass2_editorial_prompt,
     direct_timeline,
 )
-from hbt.cinema.hardware import detect_hardware
+from hbt.cinema.hardware import detect_hardware, resolve_filter_complex_script_flag
 from hbt.cinema.schema import AudioCue, BeatSpec, BoardSpec, TimelineSpec
 
 
@@ -113,6 +113,13 @@ def test_mix_cinema_audio_runs_ffmpeg_with_script_and_ci_fallbacks(tmp_path: Pat
             ),
         ],
     )
+    assert resolve_filter_complex_script_flag(help_output="-filter_complex_script <f>") == (
+        "-filter_complex_script"
+    )
+    assert resolve_filter_complex_script_flag(help_output="-filter_complex <g>") == (
+        "-/filter_complex"
+    )
+
     hw = detect_hardware(probe_fn=lambda: (False, "cpu test"))
     out_wav = tmp_path / "mixed_cinema.wav"
     res = mix_cinema_audio(
@@ -125,6 +132,7 @@ def test_mix_cinema_audio_runs_ffmpeg_with_script_and_ci_fallbacks(tmp_path: Pat
     )
     assert out_wav.is_file()
     assert Path(res["filtergraph_path"]).is_file()
+    assert res["script_flag"] in ("-filter_complex_script", "-/filter_complex")
     assert res["foley_count"] >= 2
     assert res["bgm_used"] is False
     with wave.open(str(out_wav), "rb") as wf:
