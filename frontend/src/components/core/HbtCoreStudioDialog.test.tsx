@@ -195,12 +195,11 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     const user = userEvent.setup();
     renderDialog();
 
-    const modelSelect = (await screen.findByLabelText(
-      'Mô hình Gemini (Model)',
-    )) as HTMLSelectElement;
-    expect(modelSelect.value).toBe('gemini-3.8-flash');
-    await user.selectOptions(modelSelect, 'gemini-3.5-flash-lite');
-    expect(modelSelect.value).toBe('gemini-3.5-flash-lite');
+    const modelSelect = await screen.findByRole('combobox', { name: 'Mô hình Gemini (Model)' });
+    expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.8-flash');
+    await user.click(modelSelect);
+    await user.click(screen.getByRole('option', { name: /Gemini 3\.5 Flash Lite/i }));
+    expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.5-flash-lite');
 
     await user.type(
       screen.getByLabelText('Câu nhắc 1-Click Prompt'),

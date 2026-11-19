@@ -8,10 +8,13 @@ export default {
       colors: {
         bg: 'var(--bg)',
         card: 'var(--card)',
+        'surface-card': 'var(--surface-card)',
+        elevated: 'var(--bg-elevated)',
         nav: 'var(--nav)',
         soft: 'var(--soft)',
         'soft-2': 'var(--soft-2)',
         line: 'var(--line)',
+        'border-subtle': 'var(--border-subtle)',
         'line-input': 'var(--line-input)',
         text: 'var(--text)',
         'text-2': 'var(--text-2)',

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
-import { Select } from '../../components/ui/Select';
+import { StudioSelect } from '../../components/ui/StudioSelect';
 import { FilmIcon, MessagesSquareIcon, TrashIcon } from '../../components/icons';
 
 const BACKGROUND_OPTIONS = [
@@ -185,60 +185,48 @@ export function ChattingHome() {
             <span className="ml-4 text-tiny font-semibold text-muted">
               {vi.chatting.background}:
             </span>
-            <Select
+            <StudioSelect
               aria-label={vi.chatting.background}
               variant="pill"
               autoWidth
               value={background}
-              onChange={(e) => setBackground(e.target.value)}
-            >
-              {BACKGROUND_OPTIONS.map((bg) => (
-                <option key={bg.id} value={bg.id}>
-                  {bg.label}
-                </option>
-              ))}
-            </Select>
+              onChange={(val) => setBackground(val)}
+              options={BACKGROUND_OPTIONS.map((bg) => ({ value: bg.id, label: bg.label }))}
+              className="min-w-[165px]"
+            />
 
             {!isDirectScript && (
               <>
                 <span className="ml-3 text-tiny font-semibold text-muted">Model Gemini:</span>
-                <Select
+                <StudioSelect
                   aria-label="Model Gemini"
                   variant="pill"
                   autoWidth
                   value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                >
-                  {(
+                  onChange={(val) => setSelectedModel(val)}
+                  options={(
                     status?.models ?? [
                       { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
                       { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
                       { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
                       { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
                     ]
-                  ).map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
+                  ).map((m) => ({ value: m.id, label: m.name }))}
+                  className="min-w-[170px]"
+                />
               </>
             )}
 
             <span className="ml-3 text-tiny font-semibold text-muted">Thời lượng:</span>
-            <Select
+            <StudioSelect
               aria-label="Thời lượng video"
               variant="pill"
               autoWidth
               value={targetDuration}
-              onChange={(e) => setTargetDuration(e.target.value)}
-            >
-              {DURATION_OPTIONS.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </Select>
+              onChange={(val) => setTargetDuration(val)}
+              options={DURATION_OPTIONS.map((d) => ({ value: d.id, label: d.label }))}
+              className="min-w-[160px]"
+            />
           </div>
 
           <Button
@@ -273,7 +261,7 @@ export function ChattingHome() {
                           {p.platform}
                         </span>
                         {isJobRunning && (
-                          <span className="animate-pulse rounded-full bg-accent/20 px-2 py-0.5 text-tiny font-bold text-accent">
+                          <span className="rounded-full bg-tint-yel px-2 py-0.5 text-tiny font-bold text-on-tint-yel">
                             Đang tạo {p.job?.percent}%
                           </span>
                         )}

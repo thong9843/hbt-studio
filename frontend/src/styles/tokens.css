@@ -2,14 +2,23 @@
    Sáng/tối theo hệ thống hoặc `data-theme="light|dark"` trên <html>.
    Khối tối được khai hai lần (media query và data-theme) để tokens.test.ts kiểm tra đồng bộ. */
 :root {
-  /* Bề mặt Daylight Studio */
-  --bg: #f6f8fc;
+  /* Bề mặt 3 tầng HBT Studio Pro Craft (Light Studio: #F4F6FA -> #FFFFFF -> #F8FAFC) */
+  --bg: #f4f6fa;
   --card: #ffffff;
+  --surface-card: #ffffff;
+  --bg-elevated: #f8fafc;
   --nav: #ffffff;
-  --soft: #f1f5f9;
+  --soft: #eef2f7;
   --soft-2: #e2e8f0;
-  --line: #e2e8f0;
+  --line: rgba(15, 23, 42, 0.09);
+  --border-subtle: rgba(15, 23, 42, 0.09);
   --line-input: #cbd5e1;
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+
+  /* Badge Watermark thích ứng 2 chế độ */
+  --wm-badge-bg: rgba(217, 35, 46, 0.12);
+  --wm-badge-border: rgba(217, 35, 46, 0.28);
+  --wm-badge-text: #b91c1c;
 
   /* Chữ tương phản cao (Slate) */
   --text: #0f172a;
@@ -103,25 +112,32 @@
   --nav-w: 248px;
   --nav-w-mini: 72px;
 
-  /* Chuyển động xúc giác */
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-press: 90ms;
-  --dur: 180ms;
-  --dur-pop: 200ms;
-  --dur-slow: 200ms;
+  /* Chuyển động xúc giác (0% CPU khi rảnh, 120–220ms) */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-press: 120ms;
+  --dur: 160ms;
+  --dur-pop: 140ms;
+  --dur-slow: 220ms;
 
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0b0f19;
-    --card: #131a2a;
-    --nav: #0f1523;
-    --soft: #1e293b;
-    --soft-2: #283548;
+    --bg: #0a0d14;
+    --card: #111622;
+    --surface-card: #111622;
+    --bg-elevated: #182032;
+    --nav: #0e131e;
+    --soft: #182032;
+    --soft-2: #202a40;
     --line: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.08);
     --line-input: rgba(255, 255, 255, 0.16);
+    --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --wm-badge-bg: rgba(245, 158, 11, 0.16);
+    --wm-badge-border: rgba(245, 158, 11, 0.34);
+    --wm-badge-text: #fcd34d;
     --text: #f8fafc;
     --text-2: #cbd5e1;
     --muted: #94a3b8;
@@ -159,13 +175,20 @@
 }
 
 :root[data-theme='dark'] {
-  --bg: #0b0f19;
-  --card: #131a2a;
-  --nav: #0f1523;
-  --soft: #1e293b;
-  --soft-2: #283548;
+  --bg: #0a0d14;
+  --card: #111622;
+  --surface-card: #111622;
+  --bg-elevated: #182032;
+  --nav: #0e131e;
+  --soft: #182032;
+  --soft-2: #202a40;
   --line: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.08);
   --line-input: rgba(255, 255, 255, 0.16);
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --wm-badge-bg: rgba(245, 158, 11, 0.16);
+  --wm-badge-border: rgba(245, 158, 11, 0.34);
+  --wm-badge-text: #fcd34d;
   --text: #f8fafc;
   --text-2: #cbd5e1;
   --muted: #94a3b8;

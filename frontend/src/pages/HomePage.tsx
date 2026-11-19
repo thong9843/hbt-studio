@@ -331,7 +331,7 @@ export function HomePage() {
   return (
     <main className="w-full max-w-full space-y-8 px-6 py-7 lg:px-8">
       {/* Header Chào mừng Sáng tạo — Thoáng đãng, không dùng hộp đen */}
-      <header className="flex flex-col gap-5 rounded-card border border-line bg-card/80 p-6 shadow-card backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
+      <header className="flex flex-col gap-5 rounded-card border border-border-subtle bg-surface-card p-6 shadow-card lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 rounded-pill border border-line bg-soft px-3 py-1 text-tiny font-bold text-text-2">
             <img src="/brand/hay-biet-tuot_avatar.png" alt="" className="h-4 w-4 rounded-full" />

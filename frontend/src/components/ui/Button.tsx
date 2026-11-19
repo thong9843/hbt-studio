@@ -49,6 +49,14 @@ export function Button({
 }: Props) {
   const resolvedTone = tone ?? variant ?? 'ink';
   const off = Boolean(disabled || busy);
+  const hasSheen =
+    resolvedTone === 'brand' ||
+    resolvedTone === 'primary' ||
+    resolvedTone === 'export' ||
+    resolvedTone === 'magic' ||
+    resolvedTone === 'core' ||
+    resolvedTone === 'postv' ||
+    resolvedTone === 'chatting';
   return (
     <button
       {...rest}
@@ -59,6 +67,7 @@ export function Button({
       className={cx(
         'ui-btn',
         `ui-btn-${resolvedTone === 'primary' ? 'brand' : resolvedTone}`,
+        hasSheen && 'ui-btn-sheen',
         size === 'lg' && 'ui-btn-lg',
         size === 'sm' && 'ui-btn-sm',
         className,

@@ -120,17 +120,21 @@ describe('StickvPage', () => {
     expect(await screen.findByText(/Xưởng Video Người Que/i)).toBeInTheDocument();
     expect(await screen.findByDisplayValue('Đây là beat mở đầu.')).toBeInTheDocument();
 
-    const modelSelect = screen.getByLabelText('Chọn model Gemini') as HTMLSelectElement;
-    expect(modelSelect.value).toBe('gemini-3.1-flash-lite');
+    const modelSelect = screen.getByRole('combobox', { name: 'Chọn model Gemini' });
+    expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.1-flash-lite');
+    fireEvent.click(modelSelect);
     expect(
       screen.getByRole('option', { name: 'Gemini 3.1 Flash Lite (Mặc định / 500 RPD)' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Dáng: Flow Hero' })).toBeInTheDocument();
+    fireEvent.keyDown(modelSelect, { key: 'Escape' });
 
-    const voiceSelect = (await screen.findByLabelText(
-      'Chọn giọng đọc VieNeu',
-    )) as HTMLSelectElement;
-    expect(voiceSelect.value).toBe('Thanh Bình');
+    const poseSelect = screen.getByRole('combobox', { name: 'Dáng người que' });
+    fireEvent.click(poseSelect);
+    expect(screen.getByRole('option', { name: 'Dáng: Flow Hero' })).toBeInTheDocument();
+    fireEvent.keyDown(poseSelect, { key: 'Escape' });
+
+    const voiceSelect = await screen.findByRole('combobox', { name: 'Chọn giọng đọc VieNeu' });
+    expect(voiceSelect).toHaveAttribute('data-value', 'Thanh Bình');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Dán JSON (0 Token)' }));
     expect(screen.getByRole('button', { name: /Copy Prompt Đạo diễn/i })).toBeInTheDocument();
@@ -141,10 +145,10 @@ describe('StickvPage', () => {
     fireEvent.click(toggle169);
     expect(screen.getByRole('button', { name: /1920×1080/i })).toBeInTheDocument();
 
-    expect(screen.getByLabelText('Bối cảnh sân khấu')).toBeInTheDocument();
-    expect(screen.getByLabelText('Chế độ diễn hoạt')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tâm trạng nhạc')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tương tác sân khấu')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Bối cảnh sân khấu' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Chế độ diễn hoạt' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tâm trạng nhạc' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tương tác sân khấu' })).toBeInTheDocument();
   });
 
   it('persists live StickV SSE progress across route unmount/remount and shows GlobalJobDock link', async () => {

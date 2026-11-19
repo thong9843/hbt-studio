@@ -30,6 +30,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Input, Textarea } from '../ui/Field';
+import { StudioSelect } from '../ui/StudioSelect';
 import { cx } from '../ui/cx';
 
 const T = vi.hbtCore;
@@ -558,35 +559,35 @@ export function HbtCoreWorkspace({
           {/* Thanh công cụ tích hợp ngay trong ô input */}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
             <div className="flex flex-wrap items-center gap-2">
-              <select
+              <StudioSelect
                 aria-label={T.v2.modelLabel}
+                variant="compact"
+                autoWidth
                 value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
-              >
-                {geminiModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setSelectedModel(val)}
+                options={geminiModels.map((m) => ({ value: m.id, label: m.name }))}
+                className="min-w-[180px]"
+              />
 
-              <select
+              <StudioSelect
                 aria-label={T.topics.label}
+                variant="compact"
+                autoWidth
                 value={v2Topic}
-                onChange={(e) => {
-                  const next = e.target.value as HbtCoreTopic;
+                onChange={(val) => {
+                  const next = val as HbtCoreTopic;
                   setV2Topic(next);
                   setTopic(next);
                   syncEditorToJsonText(title, next, segments);
                 }}
-                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
-              >
-                <option value="history">{T.topics.history}</option>
-                <option value="fun">{T.topics.fun}</option>
-                <option value="science">{T.topics.science}</option>
-                <option value="mystery">{T.topics.mystery}</option>
-              </select>
+                options={[
+                  { value: 'history', label: T.topics.history },
+                  { value: 'fun', label: T.topics.fun },
+                  { value: 'science', label: T.topics.science },
+                  { value: 'mystery', label: T.topics.mystery },
+                ]}
+                className="min-w-[130px]"
+              />
 
               <button
                 type="button"
@@ -766,21 +767,16 @@ export function HbtCoreWorkspace({
                       }
                     />
                     <div className="ui-field">
-                      <label htmlFor={`hbt-core-sticker-${idx}`} className="ui-label">
-                        {T.v1.segmentStickerLabel(idx + 1)}
-                      </label>
-                      <select
+                      <StudioSelect
                         id={`hbt-core-sticker-${idx}`}
-                        className="ui-input"
+                        label={T.v1.segmentStickerLabel(idx + 1)}
                         value={seg.sticker || 'question'}
-                        onChange={(e) => updateSegment(idx, { sticker: e.target.value })}
-                      >
-                        {STICKER_PRESETS.map((st) => (
-                          <option key={st} value={st}>
-                            {STICKER_EMOJI[st]} {st}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => updateSegment(idx, { sticker: val })}
+                        options={STICKER_PRESETS.map((st) => ({
+                          value: st,
+                          label: `${STICKER_EMOJI[st]} ${st}`,
+                        }))}
+                      />
                     </div>
                   </div>
 
@@ -838,26 +834,19 @@ export function HbtCoreWorkspace({
                     </div>
 
                     <div className="ui-field">
-                      <label htmlFor={`hbt-core-sfx-${idx}`} className="ui-label">
-                        {T.v1.segmentSfxLabel(idx + 1)}
-                      </label>
-                      <select
+                      <StudioSelect
                         id={`hbt-core-sfx-${idx}`}
-                        className="ui-input"
+                        label={T.v1.segmentSfxLabel(idx + 1)}
                         value={seg.sfx}
-                        onChange={(e) => updateSegment(idx, { sfx: e.target.value })}
-                      >
-                        {sfxOptions.map((sfxName) => (
-                          <option key={sfxName} value={sfxName}>
-                            {sfxName}
-                          </option>
-                        ))}
-                        {assets?.sfx.map((item) => (
-                          <option key={item.id} value={item.name}>
-                            {item.name} ({item.category})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => updateSegment(idx, { sfx: val })}
+                        options={[
+                          ...sfxOptions.map((sfxName) => ({ value: sfxName, label: sfxName })),
+                          ...(assets?.sfx ?? []).map((item) => ({
+                            value: item.name,
+                            label: `${item.name} (${item.category})`,
+                          })),
+                        ]}
+                      />
                     </div>
                   </div>
                 </li>

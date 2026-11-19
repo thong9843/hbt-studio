@@ -1386,4 +1386,16 @@ export const vi = {
     renderFailed: 'Dựng video StickV thất bại',
     renderCancelled: 'Đã hủy dựng video StickV',
   },
+  watermark: {
+    title: 'Watermark bản quyền',
+    disabled: 'Đã tắt',
+    customize: 'Tùy chỉnh',
+    collapse: 'Thu gọn',
+    modeLabel: 'Kiểu hiển thị',
+    modeAria: 'Kiểu Watermark',
+    positionLabel: 'Vị trí Safe-Zone',
+    positionAria: 'Vị trí Watermark',
+    opacityLabel: (pct: number) => `Độ mờ (${pct}%)`,
+    opacityAria: 'Độ mờ Watermark',
+  },
 } as const;

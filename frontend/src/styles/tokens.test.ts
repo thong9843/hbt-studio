@@ -84,20 +84,29 @@ describe('tokens.css v2', () => {
     }
   });
 
-  it('uses the exact light and dark values of v5.0 Creator Workstation', () => {
+  it('uses the exact 3-tier light and dark surface hierarchy of HBT Studio Pro Craft', () => {
     const l = resolver('light');
     const d = resolver('dark');
-    expect([l('--bg'), l('--card'), l('--soft'), l('--line'), l('--text')]).toEqual([
-      '#f6f8fc',
-      '#ffffff',
-      '#f1f5f9',
-      '#e2e8f0',
-      '#0f172a',
-    ]);
-    expect([d('--bg'), d('--card'), d('--soft'), d('--line'), d('--text')]).toEqual([
-      '#0b0f19',
-      '#131a2a',
-      '#1e293b',
+    expect([
+      l('--bg'),
+      l('--card'),
+      l('--surface-card'),
+      l('--bg-elevated'),
+      l('--line'),
+      l('--text'),
+    ]).toEqual(['#f4f6fa', '#ffffff', '#ffffff', '#f8fafc', 'rgba(15, 23, 42, 0.09)', '#0f172a']);
+    expect([
+      d('--bg'),
+      d('--card'),
+      d('--surface-card'),
+      d('--bg-elevated'),
+      d('--line'),
+      d('--text'),
+    ]).toEqual([
+      '#0a0d14',
+      '#111622',
+      '#111622',
+      '#182032',
       'rgba(255, 255, 255, 0.08)',
       '#f8fafc',
     ]);
@@ -139,18 +148,26 @@ describe('tokens.css v2', () => {
 const PAIRS: [string, string][] = [
   ['--text', '--bg'],
   ['--text', '--card'],
+  ['--text', '--surface-card'],
+  ['--text', '--bg-elevated'],
   ['--text', '--nav'],
   ['--text', '--soft'],
   ['--text', '--soft-2'],
   ['--text-2', '--bg'],
   ['--text-2', '--card'],
+  ['--text-2', '--surface-card'],
+  ['--text-2', '--bg-elevated'],
   ['--text-2', '--nav'],
   ['--text-2', '--soft'],
   ['--muted', '--bg'],
   ['--muted', '--card'],
+  ['--muted', '--surface-card'],
+  ['--muted', '--bg-elevated'],
   ['--muted', '--nav'],
   ['--muted', '--soft'],
   ['--muted', '--soft-2'],
+  ['--wm-badge-text', '--card'],
+  ['--wm-badge-text', '--bg-elevated'],
   ['--on-primary', '--primary'],
   ['--on-hero', '--hero'],
   ['--text-on-dark', '--surface-dark'],

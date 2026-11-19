@@ -32,6 +32,9 @@ import { PhonePreviewStage } from '../components/studio/PhonePreviewStage';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Progress } from '../components/ui/Progress';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { StudioSelect } from '../components/ui/StudioSelect';
+import { Switch } from '../components/ui/Switch';
 import { useRenderJob } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useRemainingText } from '../hooks/useRemaining';
@@ -580,18 +583,17 @@ export function StickvPage() {
 
         {projects.length > 0 && (
           <div className="flex items-center gap-2">
-            <select
+            <StudioSelect
               aria-label="Chọn dự án StickV"
+              autoWidth
               value={selectedSlug}
-              onChange={(e) => setSelectedSlug(e.target.value)}
-              className="rounded-input border border-line-input bg-card px-3 py-2 text-small font-semibold text-text"
-            >
-              {projects.map((p) => (
-                <option key={p.slug} value={p.slug}>
-                  {p.title} ({p.aspect})
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setSelectedSlug(val)}
+              options={projects.map((p) => ({
+                value: p.slug,
+                label: `${p.title} (${p.aspect})`,
+              }))}
+              className="min-w-[210px]"
+            />
             {draft && (
               <Button
                 tone="soft"
@@ -667,34 +669,17 @@ export function StickvPage() {
           <Card className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-title font-bold text-text">1. Kịch bản StickV (3 Chế độ)</h2>
-              <div
-                role="tablist"
+              <SegmentedControl
+                roleMode="tab"
                 aria-label="Chế độ đầu vào StickV"
-                className="inline-flex rounded-pill border border-line bg-soft p-0.5 text-tiny font-bold"
-              >
-                {(
-                  [
-                    { id: 'ai', label: 'Tạo tự động (API)' },
-                    { id: 'json', label: 'Dán JSON (0 Token)' },
-                    { id: 'script', label: 'Dán Lời thoại' },
-                  ] as const
-                ).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={inputMode === t.id}
-                    onClick={() => setInputMode(t.id)}
-                    className={`rounded-pill px-3 py-1 transition-colors ${
-                      inputMode === t.id
-                        ? 'bg-card text-text shadow-sm'
-                        : 'text-muted hover:text-text'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+                value={inputMode}
+                onChange={(next) => setInputMode(next)}
+                options={[
+                  { value: 'ai', label: 'Tạo tự động (API)' },
+                  { value: 'json', label: 'Dán JSON (0 Token)' },
+                  { value: 'script', label: 'Dán Lời thoại' },
+                ]}
+              />
             </div>
 
             {inputMode === 'ai' && (
@@ -760,135 +745,110 @@ export function StickvPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Khung hình</span>
-                <select
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <span className="block text-tiny font-bold text-muted">Khung hình</span>
+                <SegmentedControl
+                  aria-label="Khung hình"
                   value={aspect}
-                  onChange={(e) => setAspect(e.target.value as StickvAspect)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="9:16">9:16 Shorts</option>
-                  <option value="16:9">16:9 YouTube</option>
-                </select>
-              </label>
+                  onChange={(next) => setAspect(next)}
+                  options={[
+                    { value: '9:16', label: '9:16' },
+                    { value: '16:9', label: '16:9' },
+                  ]}
+                />
+              </div>
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Chủ đề màu</span>
-                <select
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value as StickvTheme)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="cream">Giấy kem (#FAF7F0)</option>
-                  <option value="dark">Bảng tối (#111827)</option>
-                </select>
-              </label>
+              <div className="space-y-1">
+                <span className="block text-tiny font-bold text-muted">Thời lượng</span>
+                <SegmentedControl
+                  aria-label="Thời lượng"
+                  value={String(targetMinutes)}
+                  onChange={(next) => setTargetMinutes(Number(next))}
+                  options={[
+                    { value: '1', label: '1p' },
+                    { value: '3', label: '3p' },
+                    { value: '5', label: '5p' },
+                    { value: '8', label: '8p' },
+                    { value: '10', label: '10p' },
+                  ]}
+                />
+              </div>
+            </div>
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Thời lượng</span>
-                <select
-                  value={targetMinutes}
-                  onChange={(e) => setTargetMinutes(Number(e.target.value))}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value={1}>~1 phút (Shorts)</option>
-                  <option value={3}>~3 phút</option>
-                  <option value={5}>~5 phút (Long)</option>
-                  <option value={8}>~8 phút (Long)</option>
-                  <option value={10}>~10 phút (Long)</option>
-                </select>
-              </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <StudioSelect
+                label="Chủ đề màu"
+                aria-label="Chủ đề màu"
+                value={theme}
+                onChange={(val) => setTheme(val as StickvTheme)}
+                options={[
+                  { value: 'cream', label: 'Giấy kem (#FAF7F0)' },
+                  { value: 'dark', label: 'Bảng tối (#111827)' },
+                ]}
+              />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Bối cảnh sân khấu</span>
-                <select
-                  aria-label="Bối cảnh sân khấu"
-                  value={draft?.domain ?? domain}
-                  onChange={(e) => {
-                    const nextDom = e.target.value as StickvDomain;
-                    const syncedTheme: StickvTheme =
-                      nextDom === 'paper_classic' || nextDom === 'history_geo' ? 'cream' : 'dark';
-                    setDomain(nextDom);
-                    setTheme(syncedTheme);
-                    if (draft) setDraft({ ...draft, domain: nextDom, theme: syncedTheme });
-                  }}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  {DOMAINS.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <StudioSelect
+                label="Bối cảnh sân khấu"
+                aria-label="Bối cảnh sân khấu"
+                value={draft?.domain ?? domain}
+                onChange={(val) => {
+                  const nextDom = val as StickvDomain;
+                  const syncedTheme: StickvTheme =
+                    nextDom === 'paper_classic' || nextDom === 'history_geo' ? 'cream' : 'dark';
+                  setDomain(nextDom);
+                  setTheme(syncedTheme);
+                  if (draft) setDraft({ ...draft, domain: nextDom, theme: syncedTheme });
+                }}
+                options={DOMAINS.map((d) => ({ value: d.id, label: d.label }))}
+              />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Tâm trạng nhạc</span>
-                <select
-                  aria-label="Tâm trạng nhạc"
-                  value={draft?.music_mood ?? musicMood}
-                  onChange={(e) => {
-                    const nextMood = e.target.value;
-                    setMusicMood(nextMood);
-                    if (draft) setDraft({ ...draft, music_mood: nextMood });
-                  }}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  {MUSIC_MOODS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <StudioSelect
+                label="Tâm trạng nhạc"
+                aria-label="Tâm trạng nhạc"
+                value={draft?.music_mood ?? musicMood}
+                onChange={(val) => {
+                  setMusicMood(val);
+                  if (draft) setDraft({ ...draft, music_mood: val });
+                }}
+                options={MUSIC_MOODS.map((m) => ({ value: m.id, label: m.label }))}
+              />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Chế độ diễn hoạt</span>
-                <select
-                  aria-label="Chế độ diễn hoạt"
-                  value={draft?.animation_mode ?? animationMode}
-                  onChange={(e) => {
-                    const nextMode = e.target.value as StickvAnimationMode;
-                    setAnimationMode(nextMode);
-                    if (draft) setDraft({ ...draft, animation_mode: nextMode });
-                  }}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="auto">Tự động (Puppet 2D → WebM → PNG)</option>
-                  <option value="static">Chỉ dùng Ảnh Pose tĩnh</option>
-                </select>
-              </label>
+              <StudioSelect
+                label="Chế độ diễn hoạt"
+                aria-label="Chế độ diễn hoạt"
+                value={draft?.animation_mode ?? animationMode}
+                onChange={(val) => {
+                  const nextMode = val as StickvAnimationMode;
+                  setAnimationMode(nextMode);
+                  if (draft) setDraft({ ...draft, animation_mode: nextMode });
+                }}
+                options={[
+                  { value: 'auto', label: 'Tự động (Puppet 2D → WebM → PNG)' },
+                  { value: 'static', label: 'Chỉ dùng Ảnh Pose tĩnh' },
+                ]}
+              />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Nhóm nhạc</span>
-                <select
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="science">Khoa học / Chill</option>
-                  <option value="fun">Vui nhộn</option>
-                  <option value="history">Kịch tính</option>
-                  <option value="mystery">Bí ẩn</option>
-                </select>
-              </label>
+              <StudioSelect
+                label="Nhóm nhạc"
+                aria-label="Nhóm nhạc"
+                value={topic}
+                onChange={(val) => setTopic(val)}
+                options={[
+                  { value: 'science', label: 'Khoa học / Chill' },
+                  { value: 'fun', label: 'Vui nhộn' },
+                  { value: 'history', label: 'Kịch tính' },
+                  { value: 'mystery', label: 'Bí ẩn' },
+                ]}
+              />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Model Gemini</span>
-                <select
-                  aria-label="Chọn model Gemini"
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <StudioSelect
+                label="Model Gemini"
+                aria-label="Chọn model Gemini"
+                value={geminiModel}
+                onChange={(val) => setGeminiModel(val)}
+                options={models.map((m) => ({ value: m.id, label: m.name }))}
+              />
             </div>
 
             <div className="flex justify-end">
@@ -940,22 +900,22 @@ export function StickvPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
+                  <StudioSelect
                     aria-label="Chọn giọng đọc VieNeu"
+                    variant="compact"
+                    autoWidth
                     value={
                       voiceOptions.some((v) => v.id === draft.voice_id)
                         ? draft.voice_id
                         : defaultVoiceId
                     }
-                    onChange={(e) => setDraft({ ...draft, voice_id: e.target.value })}
-                    className="rounded-input border border-line-input bg-card px-2.5 py-1.5 text-tiny font-semibold text-text"
-                  >
-                    {voiceOptions.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        Giọng: {v.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setDraft({ ...draft, voice_id: val })}
+                    options={voiceOptions.map((v) => ({
+                      value: v.id,
+                      label: `Giọng: ${v.label}`,
+                    }))}
+                    className="min-w-[160px]"
+                  />
                   <Button
                     tone="soft"
                     size="sm"
@@ -1038,133 +998,102 @@ export function StickvPage() {
                         className="w-full rounded-input border border-line-input bg-card p-2 text-small text-text"
                       />
 
-                      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                        <select
+                      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <StudioSelect
                           aria-label="Dáng người que"
+                          variant="compact"
                           value={beat.pose}
-                          onChange={(e) => {
-                            const chosen = poseOptions.find((p) => p.id === e.target.value);
+                          onChange={(val) => {
+                            const chosen = poseOptions.find((p) => p.id === val);
                             updateBeat(beat.id, {
-                              pose: e.target.value,
+                              pose: val,
                               clip_path: chosen?.isVideo ? chosen.url : '',
                             });
                           }}
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {poseOptions.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              Dáng: {p.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={poseOptions.map((p) => ({
+                            value: p.id,
+                            label: `Dáng: ${p.label}`,
+                          }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Hướng nhìn"
+                          variant="compact"
                           value={beat.facing}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { facing: e.target.value as 'left' | 'right' })
+                          onChange={(val) =>
+                            updateBeat(beat.id, { facing: val as 'left' | 'right' })
                           }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          <option value="right">Quay phải →</option>
-                          <option value="left">← Quay trái</option>
-                        </select>
+                          options={[
+                            { value: 'right', label: 'Quay phải →' },
+                            { value: 'left', label: '← Quay trái' },
+                          ]}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Chuyển động"
+                          variant="compact"
                           value={beat.motion}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { motion: e.target.value as StickvMotion })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {MOTIONS.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => updateBeat(beat.id, { motion: val as StickvMotion })}
+                          options={MOTIONS.map((m) => ({ value: m.id, label: m.label }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Âm thanh SFX"
+                          variant="compact"
                           value={beat.sfx_tag}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { sfx_tag: e.target.value as StickvSfxTag })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {SFX_TAGS.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              SFX: {s.label}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => updateBeat(beat.id, { sfx_tag: val as StickvSfxTag })}
+                          options={SFX_TAGS.map((s) => ({ value: s.id, label: `SFX: ${s.label}` }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Loại bảng minh họa"
+                          variant="compact"
                           value={beat.board_type}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { board_type: e.target.value as StickvBoardType })
+                          onChange={(val) =>
+                            updateBeat(beat.id, { board_type: val as StickvBoardType })
                           }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {BOARD_TYPES.map((bt) => (
-                            <option key={bt.id} value={bt.id}>
-                              Bảng: {bt.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={BOARD_TYPES.map((bt) => ({
+                            value: bt.id,
+                            label: `Bảng: ${bt.label}`,
+                          }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Tương tác sân khấu"
+                          variant="compact"
                           value={beat.interaction ?? 'none'}
-                          onChange={(e) =>
-                            updateBeat(beat.id, {
-                              interaction: e.target.value as StickvInteraction,
-                            })
+                          onChange={(val) =>
+                            updateBeat(beat.id, { interaction: val as StickvInteraction })
                           }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {INTERACTIONS.map((it) => (
-                            <option key={it.id} value={it.id}>
-                              Tương tác: {it.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={INTERACTIONS.map((it) => ({
+                            value: it.id,
+                            label: `Tương tác: ${it.label}`,
+                          }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Góc máy ảo"
+                          variant="compact"
                           value={beat.camera_shot ?? 'wide_stage'}
-                          onChange={(e) =>
-                            updateBeat(beat.id, {
-                              camera_shot: e.target.value as StickvCameraShot,
-                            })
+                          onChange={(val) =>
+                            updateBeat(beat.id, { camera_shot: val as StickvCameraShot })
                           }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {CAMERA_SHOTS.map((cam) => (
-                            <option key={cam.id} value={cam.id}>
-                              Cam: {cam.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={CAMERA_SHOTS.map((cam) => ({
+                            value: cam.id,
+                            label: `Cam: ${cam.label}`,
+                          }))}
+                        />
 
-                        <select
+                        <StudioSelect
                           aria-label="Biểu cảm khuôn mặt"
+                          variant="compact"
                           value={beat.emotion ?? 'auto'}
-                          onChange={(e) =>
-                            updateBeat(beat.id, {
-                              emotion: e.target.value as StickvEmotion,
-                            })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {EMOTIONS.map((em) => (
-                            <option key={em.id} value={em.id}>
-                              Cảm xúc: {em.label}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => updateBeat(beat.id, { emotion: val as StickvEmotion })}
+                          options={EMOTIONS.map((em) => ({
+                            value: em.id,
+                            label: `Cảm xúc: ${em.label}`,
+                          }))}
+                        />
                       </div>
 
                       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1268,15 +1197,14 @@ export function StickvPage() {
             exportLabel={`Xuất bản đẹp (${(draft?.aspect ?? aspect) === '16:9' ? '1920×1080' : '1080×1920'})`}
             footer={
               draft && (
-                <label className="flex cursor-pointer items-center justify-between gap-2 rounded-inner border border-line bg-soft-2 px-3 py-2 text-tiny font-bold text-text">
+                <div className="flex items-center justify-between gap-2 rounded-inner border border-border-subtle bg-elevated px-3 py-2 text-tiny font-bold text-text">
                   <span>Thêm Outro 4s (@HayBietTuot)</span>
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={draft.outro ?? true}
-                    onChange={(e) => setDraft({ ...draft, outro: e.target.checked })}
-                    className="h-4 w-4 accent-amber-500"
+                    onChange={(checked) => setDraft({ ...draft, outro: checked })}
+                    label="Thêm Outro 4s (@HayBietTuot)"
                   />
-                </label>
+                </div>
               )
             }
           >

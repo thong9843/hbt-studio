@@ -8,7 +8,7 @@ import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
-import { Select } from '../../components/ui/Select';
+import { StudioSelect } from '../../components/ui/StudioSelect';
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from '../../components/icons';
 
 const DURATION_OPTIONS = [
@@ -444,24 +444,19 @@ export function ChattingEditor() {
                   <p className="truncate text-tiny font-bold text-text">
                     {char.name} ({char.side === 'right' ? 'Phải/Tôi' : 'Trái'})
                   </p>
-                  <Select
+                  <StudioSelect
                     aria-label={`Giọng của ${char.name}`}
                     variant="compact"
                     value={char.voice_id || 'Adam bựa'}
-                    onChange={(e) => {
+                    onChange={(val) => {
                       const newChars = doc.characters.map((c: ChatCharacter) =>
-                        c.id === char.id ? { ...c, voice_id: e.target.value } : c,
+                        c.id === char.id ? { ...c, voice_id: val } : c,
                       );
                       saveDoc({ ...doc, characters: newChars });
                     }}
+                    options={VOICE_OPTIONS.map((v) => ({ value: v, label: v }))}
                     className="mt-1"
-                  >
-                    {VOICE_OPTIONS.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </Select>
+                  />
                 </div>
               </div>
             </div>
@@ -524,22 +519,18 @@ export function ChattingEditor() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {isSaving && <span className="text-tiny text-muted">{vi.chatting.saving}</span>}
-            <Select
+            <StudioSelect
               aria-label="Trần thời lượng video"
               variant="pill"
               autoWidth
               value={doc.target_duration_s ? String(doc.target_duration_s) : ''}
-              onChange={(e) => {
-                const v = e.target.value ? Number(e.target.value) : null;
+              onChange={(val) => {
+                const v = val ? Number(val) : null;
                 saveDoc({ ...doc, target_duration_s: v });
               }}
-            >
-              {DURATION_OPTIONS.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </Select>
+              options={DURATION_OPTIONS.map((d) => ({ value: d.id, label: d.label }))}
+              className="min-w-[160px]"
+            />
             <Button tone="soft" size="sm" onClick={handleRegenAI}>
               {vi.chatting.regenBtn}
             </Button>

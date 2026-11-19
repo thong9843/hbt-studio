@@ -272,7 +272,7 @@ export function Sidebar({ mini, render }: SidebarProps) {
   return (
     <aside
       className={cx(
-        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-line bg-nav/95 backdrop-blur-md transition-[width] duration-200',
+        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-subtle bg-nav transition-[width] duration-200',
         mini ? 'w-[72px] px-2' : 'w-[248px] px-3.5',
       )}
     >

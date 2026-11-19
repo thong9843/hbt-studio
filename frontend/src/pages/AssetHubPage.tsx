@@ -27,6 +27,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Dialog } from '../components/ui/Dialog';
 import { Skeleton } from '../components/ui/Skeleton';
+import { StudioSelect } from '../components/ui/StudioSelect';
 import { cx } from '../components/ui/cx';
 import { releaseVideoElementLocks } from '../utils/media';
 import { useToast } from '../hooks/toast';
@@ -309,7 +310,7 @@ export function AssetHubPage() {
       <audio ref={audioRef} onEnded={() => setPlayingAudioUrl(null)} className="hidden" />
 
       {/* Header Visual Asset Hub — Light/Dark Adaptive */}
-      <header className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-line bg-card/90 p-6 shadow-card backdrop-blur-sm">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-border-subtle bg-surface-card p-6 shadow-card">
         <div className="space-y-1.5">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-inner bg-gradient-to-br from-[#F59E0B] to-[#EA580C] text-white shadow-sm">
@@ -328,18 +329,18 @@ export function AssetHubPage() {
         {!isRendersTab && (
           <div className="flex flex-wrap items-center gap-2.5">
             {activeTab === 'stickman' && (
-              <select
+              <StudioSelect
                 aria-label="Loại tài nguyên Stickman khi tải lên"
+                autoWidth
                 value={stickmanAnimGroup}
-                onChange={(e) =>
-                  setStickmanAnimGroup(e.target.value as 'pose' | 'oneshot' | 'loop')
-                }
-                className="rounded-inner border border-line bg-card px-3 py-2 text-small font-semibold text-text"
-              >
-                <option value="pose">Ảnh Pose tĩnh</option>
-                <option value="oneshot">Animation Phản ứng (One-shot)</option>
-                <option value="loop">Animation Lặp (Loop)</option>
-              </select>
+                onChange={(val) => setStickmanAnimGroup(val as 'pose' | 'oneshot' | 'loop')}
+                options={[
+                  { value: 'pose', label: 'Ảnh Pose tĩnh' },
+                  { value: 'oneshot', label: 'Animation Phản ứng (One-shot)' },
+                  { value: 'loop', label: 'Animation Lặp (Loop)' },
+                ]}
+                className="min-w-[210px]"
+              />
             )}
             {supportsOnline && (
               <Button tone="postv" onClick={() => setOnlineOpen(true)}>

@@ -140,12 +140,16 @@ describe('PostvQuickPage', () => {
     const submitBtn = screen.getByRole('button', { name: 'Tạo video' });
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Nhạc nền')).toHaveValue('lo-fi-chill');
+      expect(screen.getByRole('combobox', { name: 'Nhạc nền' })).toHaveAttribute(
+        'data-value',
+        'lo-fi-chill',
+      );
     });
 
     // Đổi thời lượng sang 3m (180s)
-    const durationSelect = screen.getByLabelText('Thời lượng');
-    await user.selectOptions(durationSelect, '180');
+    const durationSelect = screen.getByRole('combobox', { name: 'Thời lượng' });
+    await user.click(durationSelect);
+    await user.click(screen.getByRole('option', { name: '3m' }));
 
     // Gõ link vào
     await user.type(textarea, 'https://www.threads.net/@user/post/xyz');
@@ -455,14 +459,15 @@ describe('PostvQuickPage', () => {
     page();
 
     await waitFor(() => {
-      const voiceSelect = screen.getByLabelText('Giọng');
-      expect(voiceSelect).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
+      expect(voiceSelect).toHaveAttribute('data-value', 'adam-bua');
     });
-    const voiceSelect = screen.getByLabelText('Giọng');
+    const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
 
     // Đổi giọng sang Mai Anh
-    await user.selectOptions(voiceSelect, 'mai-anh');
-    expect(voiceSelect).toHaveValue('mai-anh');
+    await user.click(voiceSelect);
+    await user.click(screen.getByRole('option', { name: 'Mai Anh' }));
+    expect(voiceSelect).toHaveAttribute('data-value', 'mai-anh');
 
     await waitFor(() => {
       expect(settingsSent.body).not.toBeNull();
