@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { vi } from '../../i18n/vi';
-import { EyeIcon, GridIcon, PlayIcon } from '../icons';
+import { EyeIcon, GripIcon, PlayIcon } from '../icons';
 import { Button } from '../ui/Button';
 import { cx } from '../ui/cx';
 
@@ -91,7 +91,7 @@ export function StageCanvas({
           <Button
             tone="soft"
             size="sm"
-            icon={<GridIcon size={13} />}
+            icon={<GripIcon size={13} />}
             busy={contactSheetBusy}
             onClick={onOpenContactSheet}
             className="!min-h-[30px] !px-2.5 !text-tiny"

@@ -21,7 +21,6 @@ import {
   FolderIcon,
   GripIcon,
   PlayIcon,
-  PlusIcon,
   StopIcon,
   UploadIcon,
 } from '../components/icons';

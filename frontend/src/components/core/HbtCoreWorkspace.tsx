@@ -23,7 +23,6 @@ import {
   CheckIcon,
   CopyIcon,
   PlayIcon,
-  PlusIcon,
   SettingsIcon,
   SparklesIcon,
   TrashIcon,

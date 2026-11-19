@@ -106,7 +106,7 @@ export function ExportPopover({
           </div>
         )}
 
-        {showWatermarkControl && <WatermarkControl compact />}
+        {showWatermarkControl && <WatermarkControl />}
 
         {extraSettings}
 
