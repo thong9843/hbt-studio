@@ -2,6 +2,7 @@
 
 ## Đầu mỗi phiên
 - Nếu chủ dự án chưa chạy `/kickoff`, tự làm theo `.claude/commands/kickoff.md` trước khi làm việc.
+- **Ponytail harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (chế độ mặc định `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, không cắt bỏ quy tắc bắt buộc của `CLAUDE.md`.
 
 ## Bối cảnh
 - App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, hai máy (máy cũ: i5-10400, không GPU rời, 16 GB; máy mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB). Không giả định có GPU: IMPLEMENT §0.
@@ -21,6 +22,11 @@
 - Phải hỏi chủ dự án trước khi cài, gỡ hoặc nâng cấp bất kỳ phần mềm, driver hay gói nào ở cấp hệ thống (winget, choco, CUDA…). Gói Python trong `backend/.venv` và gói npm của dự án thì được tự cài.
 - Push nhánh khi kế hoạch đã duyệt có ghi. Không push và không merge khi lần chạy cuối của giai đoạn đỏ.
 - Không commit kết thúc giai đoạn khi lần chạy cuối đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
+
+## Quy ước 5 Nhánh & 4 Tag Cố Định
+- Repo chỉ duy trì đúng **5 nhánh chính thức**: `main`, `GD1-HBT`, `GD2-PostV`, `GD3-Chatting`, `GD4-StickV` (cấm để tồn đọng nhánh `feat/*` rác sau khi merge).
+- Tag chính thức theo mốc giai đoạn: `v1` (`GD1-HBT`), `v2` (`GD2-PostV`), `v3` (`GD3-Chatting`), `v4` (`GD4-StickV`); các mốc sau tiếp tục `v5`, `v6`... (hoặc `v4.1` cho bản sửa nhỏ).
+- **Luật khóa đầu phiên (Pre-flight Branch Check):** Trước khi sửa bất kỳ file nào, Agent bắt buộc in ra `git branch --show-current` và `git log -1 --oneline`, đồng thời xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
 
 ## Quy trình mốc
 - Mỗi mốc một nhánh riêng `feat/…`, `fix/…` hoặc `docs/…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`). Commit lẻ không bắt buộc xanh; chỉ đầu nhánh phải xanh.
