@@ -3,22 +3,33 @@
 from __future__ import annotations
 
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
 from hbt.shared.llm import AVAILABLE_GEMINI_MODELS, GEMINI_MODEL, GeminiClientError
+from hbt.shared.online_sources.iconify_props import search_iconify_icons
+from hbt.stickv.animator import list_available_animations
 from hbt.stickv.llm import (
     build_director_prompt,
     generate_stickv_script,
     parse_stickv_json_payload,
     split_raw_narration_to_beats,
 )
-from hbt.stickv.models import StickvAspect, StickvBeat, StickvProject, StickvTheme
+from hbt.stickv.models import (
+    StickvAnimationMode,
+    StickvAspect,
+    StickvBeat,
+    StickvDomain,
+    StickvProject,
+    StickvTheme,
+)
+from hbt.stickv.puppet import PuppetRig, is_puppet_ready
 from hbt.stickv.stage import list_available_poses, resolve_pose_png
 from hbt.stickv.storage import (
     create_stickv_project,
@@ -39,6 +50,9 @@ _SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 class StickvCreateBody(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
@@ -49,6 +63,9 @@ class StickvCreateBody(BaseModel):
 class StickvGenerateBody(BaseModel):
     idea: str = Field(min_length=1, max_length=2000)
     topic: str = "science"
+    domain: StickvDomain | None = None
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
     target_minutes: float = Field(default=1.0, ge=0.25, le=20.0)
@@ -63,6 +80,9 @@ class StickvRenderBody(BaseModel):
 class StickvImportJsonBody(BaseModel):
     raw_json: str = Field(min_length=1)
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
 
@@ -71,6 +91,9 @@ class StickvImportScriptBody(BaseModel):
     raw_text: str = Field(min_length=1)
     title: str = ""
     topic: str = "science"
+    domain: StickvDomain = "paper_classic"
+    animation_mode: StickvAnimationMode = "auto"
+    music_mood: str = ""
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
 
@@ -89,13 +112,59 @@ def list_stickv(state: State) -> dict[str, Any]:
         "default_model": GEMINI_MODEL,
         "director_prompt": build_director_prompt(available_poses=poses),
         "poses": poses,
+        "puppet_ready": is_puppet_ready(state.settings.library_dir, state.settings.assets_dir),
     }
 
 
 @router.get("/stickv/poses")
 def list_stickv_poses(state: State) -> dict[str, Any]:
-    """Liệt kê động toàn bộ tên dáng nhân vật có trong kho."""
-    return {"poses": _poses_for_state(state)}
+    """Liệt kê động toàn bộ tên dáng nhân vật và animation `.webm` có trong kho."""
+    return {
+        "poses": _poses_for_state(state),
+        "animations": list_available_animations(
+            state.settings.library_dir, state.settings.assets_dir
+        ),
+        "puppet_ready": is_puppet_ready(state.settings.library_dir, state.settings.assets_dir),
+    }
+
+
+@router.get("/stickv/puppet/preview")
+def preview_stickv_puppet(
+    state: State,
+    pose: str = Query(default="present_board"),
+    emotion: str = Query(default="auto"),
+    interaction: str = Query(default="none"),
+    facing: str = Query(default="right"),
+) -> Response:
+    """Dựng 1 ảnh PNG xem trước nhân vật Puppet 2D đã lắp ráp đầy đủ mắt + miệng + biểu cảm."""
+    lib_dir = state.settings.library_dir
+    assets_dir = state.settings.assets_dir
+    if not is_puppet_ready(lib_dir, assets_dir):
+        raise NotFound("Bộ linh kiện Puppet 2D chưa sẵn sàng")
+    rig = PuppetRig(
+        library_dir=lib_dir,
+        assets_dir=assets_dir,
+        target_height=480,
+        pose=pose,
+        emotion=emotion,
+        interaction=interaction,
+        facing="left" if facing == "left" else "right",
+        rms_env=[0.35],
+    )
+    try:
+        frame = rig.render_frame(0, 0.0)
+        buf = BytesIO()
+        frame.save(buf, format="PNG")
+        frame.close()
+        return Response(content=buf.getvalue(), media_type="image/png")
+    finally:
+        rig.close()
+
+
+@router.get("/stickv/iconify/search")
+def search_stickv_iconify(q: str = Query(default="")) -> dict[str, Any]:
+    """Tìm nhanh icon PNG trên Iconify API để xem trước trên StickvPage."""
+    return {"items": search_iconify_icons(q, limit=6)}
 
 
 @router.post("/stickv", status_code=201)
@@ -104,6 +173,9 @@ def create_stickv(body: StickvCreateBody, state: State) -> dict[str, Any]:
         state.settings.workspace_dir,
         title=body.title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         target_minutes=body.target_minutes,
@@ -130,16 +202,23 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
 
+    chosen_domain = body.domain or meta.get("domain") or "paper_classic"
+    chosen_mood = body.music_mood or str(meta.get("music_mood") or "curious_science")
+    chap_list = meta.get("chapter_list") if isinstance(meta.get("chapter_list"), list) else []
     if body.slug:
         proj = load_stickv_project(state.settings.workspace_dir, body.slug)
         proj = proj.model_copy(
             update={
                 "title": title,
                 "topic": body.topic,
+                "domain": chosen_domain,
+                "animation_mode": body.animation_mode,
+                "music_mood": chosen_mood,
                 "aspect": body.aspect,
                 "theme": body.theme,
                 "target_minutes": body.target_minutes,
                 "gemini_model": body.model or GEMINI_MODEL,
+                "chapters": chap_list,
                 "beats": beats,
             }
         )
@@ -149,12 +228,20 @@ def generate_stickv(body: StickvGenerateBody, state: State) -> dict[str, Any]:
             state.settings.workspace_dir,
             title=title,
             topic=body.topic,
+            domain=chosen_domain,
+            animation_mode=body.animation_mode,
+            music_mood=chosen_mood,
             aspect=body.aspect,
             theme=body.theme,
             target_minutes=body.target_minutes,
             gemini_model=body.model or GEMINI_MODEL,
             beats=beats,
         )
+        if chap_list:
+            proj = save_stickv_project(
+                state.settings.workspace_dir,
+                proj.model_copy(update={"chapters": chap_list}),
+            )
     return {"project": proj.model_dump(mode="json"), "meta": meta}
 
 
@@ -169,6 +256,9 @@ def import_stickv_json(body: StickvImportJsonBody, state: State) -> dict[str, An
         state.settings.workspace_dir,
         title=title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         beats=beats,
@@ -186,6 +276,9 @@ def import_stickv_script(body: StickvImportScriptBody, state: State) -> dict[str
         state.settings.workspace_dir,
         title=title,
         topic=body.topic,
+        domain=body.domain,
+        animation_mode=body.animation_mode,
+        music_mood=body.music_mood,
         aspect=body.aspect,
         theme=body.theme,
         beats=beats,

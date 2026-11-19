@@ -27,6 +27,7 @@ import { useNewProject } from '../hooks/newProject';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
+import { releaseVideoElementLocks } from '../utils/media';
 import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus } from '../utils/projectStatus';
 import { readiness } from '../utils/readiness';
@@ -272,8 +273,15 @@ export function HomePage() {
   });
 
   const deleteRenderMut = useMutation({
-    mutationFn: (item: UnifiedRenderItem) => api.deleteUnifiedRender(item.id),
+    mutationFn: (item: UnifiedRenderItem) => {
+      if (activeRender?.id === item.id) setActiveRender(null);
+      releaseVideoElementLocks(item.video_url);
+      return api.deleteUnifiedRender(item.id);
+    },
     onSuccess: (_res, item) => {
+      queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
+        old ? { items: old.items.filter((x) => x.id !== item.id) } : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
       toast.info(`Đã xóa video "${item.title}"`);
       if (activeRender?.id === item.id) setActiveRender(null);
@@ -322,52 +330,37 @@ export function HomePage() {
 
   return (
     <main className="w-full max-w-full space-y-8 px-6 py-7 lg:px-8">
-      {/* Header Chào mừng Sáng tạo — Thoáng đãng, không dùng hộp đen */}
-      <header className="flex flex-col gap-5 rounded-card border border-line bg-card/80 p-6 shadow-card backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-pill border border-line bg-soft px-3 py-1 text-tiny font-bold text-text-2">
+      {/* Header VEED Bright Minimalist — Gọn, sáng, 0 KPI rườm rà */}
+      <header className="flex flex-col gap-4 rounded-card border border-line bg-card p-5 shadow-card lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-2 rounded-pill border border-line bg-soft px-2.5 py-0.5 text-tiny font-bold text-text-2">
             <img src="/brand/hay-biet-tuot_avatar.png" alt="" className="h-4 w-4 rounded-full" />
             <span>HBT Studio v5.0 · Next-Gen Creator Workstation</span>
           </div>
-          <h1 className="text-h1 font-extrabold text-text">
-            {getTimeGreeting()}, hôm nay làm video gì?
+          <h1 className="text-h1 font-bold tracking-tight text-text">
+            {getTimeGreeting()}, {vi.veedHome.heroTitle.toLowerCase()}
           </h1>
-          <p className="text-small text-muted">
-            Chọn nhanh động cơ bên dưới hoặc tiếp tục dự án đang biên tập của kênh Hay Biết Tuốt.
-          </p>
+          <p className="text-small text-muted">{vi.veedHome.heroSubtitle}</p>
         </div>
 
-        {/* Thanh tìm kiếm & 3 Chỉ số tổng quan từ API/DB */}
-        <div className="flex flex-col gap-3 sm:items-end">
-          <div className="relative w-full sm:w-[320px]">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative w-full sm:w-[300px]">
             <SearchIcon
-              size={16}
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
             />
             <input
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm dự án hoặc video đã xuất..."
+              placeholder={vi.veedHome.searchPlaceholder}
               aria-label="Tìm dự án hoặc video đã xuất"
-              className="ui-input !min-h-[42px] !pl-10 text-small"
+              className="ui-input !min-h-[38px] !pl-9 text-small"
             />
           </div>
-
-          <div className="grid grid-cols-3 gap-2.5">
-            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
-              <div className="num text-title font-extrabold text-text">{allRenders.length}</div>
-              <div className="text-[11px] font-semibold text-muted">Video đã xuất</div>
-            </div>
-            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
-              <div className="num text-title font-extrabold text-text">{data?.length ?? 0}</div>
-              <div className="text-[11px] font-semibold text-muted">Dự án đang dở</div>
-            </div>
-            <div className="rounded-inner border border-line bg-soft/70 px-3.5 py-2 text-center">
-              <div className="num text-title font-extrabold text-text">{totalAssets}</div>
-              <div className="text-[11px] font-semibold text-muted">Tài nguyên sẵn có</div>
-            </div>
-          </div>
+          <span className="rounded-pill border border-line bg-soft px-3 py-1.5 text-tiny font-semibold text-muted tabular-nums">
+            {allRenders.length} video · {data?.length ?? 0} dự án · {totalAssets} tài nguyên
+          </span>
         </div>
       </header>
 
@@ -479,7 +472,7 @@ export function HomePage() {
                     </span>
                   </span>
                   {item.duration_sec > 0 && (
-                    <span className="num absolute bottom-2.5 right-2.5 rounded-md bg-black/75 px-2 py-0.5 text-tiny font-bold text-white backdrop-blur-sm">
+                    <span className="num absolute bottom-2.5 right-2.5 rounded-md bg-black/80 px-2 py-0.5 text-tiny font-bold text-white">
                       {formatDuration(item.duration_sec)}
                     </span>
                   )}

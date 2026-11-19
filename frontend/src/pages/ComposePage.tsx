@@ -15,7 +15,7 @@ import { Button } from '../components/ui/Button';
 import { Menu } from '../components/ui/Menu';
 import { Input } from '../components/ui/Field';
 import { ProjectEditorContext, type ProjectEditor } from '../hooks/projectEditor';
-import { useRenderJob } from '../hooks/renderJob';
+import { useRenderJobStatus } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useAutosave } from '../hooks/useAutosave';
 import { vi } from '../i18n/vi';
@@ -160,7 +160,7 @@ function EditorProvider({ initial }: { initial: Project }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const job = useRenderJob();
+  const job = useRenderJobStatus();
   const rendering = job.running && job.slug === slug;
   const removeProject = useMutation({
     mutationFn: async () => {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
+import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
 import type {
   PostvPickComment,
@@ -19,7 +20,6 @@ import {
   FolderIcon,
   GripIcon,
   PlayIcon,
-  PlusIcon,
   StopIcon,
   UploadIcon,
 } from '../components/icons';
@@ -28,7 +28,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Chip } from '../components/ui/Chip';
 import { Progress } from '../components/ui/Progress';
-import { Select } from '../components/ui/Select';
+import { StudioSelect } from '../components/ui/StudioSelect';
 import { cx } from '../components/ui/cx';
 import { vi } from '../i18n/vi';
 
@@ -679,22 +679,36 @@ export function PostvQuickPage() {
   const remainingEta = Math.max(5, Math.round(((100 - progressPct) / 100) * duration * 0.8));
 
   return (
-    <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
+    <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg">
+      <StudioTopBar
+        engineBadge="PostV"
+        exportProps={{
+          aspect: '9:16',
+          outroEnabled: outro,
+          onOutroChange: setOutro,
+          showWatermarkControl: true,
+          onExportFinal: () => handleStartAuto(false),
+          finalLabel: isSubmitting ? T.creatingBtn : T.createBtn,
+          disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
+          isSubmitting,
+          isRendering: Boolean(jobId && !isFinished),
+          progressPct,
+          progressStage: stageMessage || currentStage,
+          onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
+        }}
+      />
       {/* Khu vực giữa chính */}
       <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
         <div className="w-full max-w-4xl">
           {/* TRƯỜNG HỢP 1: TRẠNG THÁI TRỐNG HOẶC ĐANG NHẬP */}
           {!jobId && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="space-y-5">
               <div className="text-center">
-                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-postv-soft text-engine-postv shadow-sm">
-                  <PlusIcon size={28} />
-                </div>
                 <div className="mb-2 flex justify-center">
                   <Badge tone="postv">PostV · 60fps</Badge>
                 </div>
-                <h1 className="text-h1 font-extrabold text-text">{T.greeting}</h1>
-                <p className="mx-auto mt-2 max-w-md text-small text-muted">{T.greetingSub}</p>
+                <h1 className="text-h1 font-bold tracking-tight text-text">{T.greeting}</h1>
+                <p className="mx-auto mt-1.5 max-w-md text-small text-muted">{T.greetingSub}</p>
               </div>
 
               {/* Thông báo trùng link đã tạo */}
@@ -784,26 +798,24 @@ export function PostvQuickPage() {
                   </Chip>
 
                   {/* Dropdown Giọng (VieNeu) & Nút ▶ nghe thử */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
                     <span className="shrink-0">🎙️ {T.voice.label}:</span>
-                    <Select
+                    <StudioSelect
                       aria-label={T.voice.label}
                       variant="compact"
                       autoWidth
                       value={selectedVoice || ''}
-                      onChange={(e) => handleVoiceChange(e.target.value)}
-                      className="border-0 bg-transparent min-h-[28px] max-w-[140px] truncate"
-                    >
-                      {voiceList?.voices && voiceList.voices.length > 0 ? (
-                        voiceList.voices.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.label || v.id}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">{T.voice.defaultOption}</option>
-                      )}
-                    </Select>
+                      onChange={(val) => handleVoiceChange(val)}
+                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[155px]"
+                      options={
+                        voiceList?.voices && voiceList.voices.length > 0
+                          ? voiceList.voices.map((v) => ({
+                              value: v.id,
+                              label: v.label || v.id,
+                            }))
+                          : [{ value: '', label: T.voice.defaultOption }]
+                      }
+                    />
                     {selectedVoice && (
                       <button
                         type="button"
@@ -811,7 +823,7 @@ export function PostvQuickPage() {
                         onClick={handleToggleSample}
                         className={cx(
                           'ml-0.5 rounded-full p-1 text-muted hover:text-brand transition-colors',
-                          isPlayingSample && 'text-brand animate-pulse',
+                          isPlayingSample && 'text-brand',
                         )}
                       >
                         {isPlayingSample ? <StopIcon size={12} /> : <PlayIcon size={12} />}
@@ -820,34 +832,31 @@ export function PostvQuickPage() {
                   </div>
 
                   {/* Dropdown Thời lượng (1m - 3m) */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
                     <span className="shrink-0">⏱️ {T.options.duration}:</span>
-                    <Select
+                    <StudioSelect
                       aria-label={T.options.duration}
                       variant="compact"
                       autoWidth
                       value={String(duration)}
-                      onChange={(e) => setDuration(Number(e.target.value))}
-                      className="border-0 bg-transparent min-h-[28px]"
-                    >
-                      {DURATION_CHOICES.map((opt) => (
-                        <option key={opt.value} value={String(opt.value)}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </Select>
+                      onChange={(val) => setDuration(Number(val))}
+                      triggerClassName="border-0 bg-transparent min-h-[28px]"
+                      options={DURATION_CHOICES.map((opt) => ({
+                        value: String(opt.value),
+                        label: opt.label,
+                      }))}
+                    />
                   </div>
 
                   {/* Nhạc nền BGM (mặc định tự chọn 1 bài từ library/music/ + Playlist acrossfade) */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
                     <span className="shrink-0">🎵 {T.options.musicLabel}:</span>
-                    <Select
+                    <StudioSelect
                       aria-label={T.options.musicLabel}
                       variant="compact"
                       autoWidth
                       value={music === 'none' ? 'none' : selectedMusicId || 'auto'}
-                      onChange={(e) => {
-                        const val = e.target.value;
+                      onChange={(val) => {
                         if (val === 'none') {
                           setMusic('none');
                         } else {
@@ -855,19 +864,14 @@ export function PostvQuickPage() {
                           setSelectedMusicId(val);
                         }
                       }}
-                      className="border-0 bg-transparent min-h-[28px] max-w-[150px] truncate"
-                    >
-                      {musicList && musicList.length > 0 ? (
-                        musicList.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.title}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="auto">{T.options.musicAuto}</option>
-                      )}
-                      <option value="none">{T.options.musicNone}</option>
-                    </Select>
+                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[165px]"
+                      options={[
+                        ...(musicList && musicList.length > 0
+                          ? musicList.map((m) => ({ value: m.id, label: m.title }))
+                          : [{ value: 'auto', label: T.options.musicAuto }]),
+                        { value: 'none', label: T.options.musicNone },
+                      ]}
+                    />
                   </div>
 
                   {/* 60 fps */}

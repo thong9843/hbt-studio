@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { UnifiedRenderItem } from '../../api/types';
 import { formatDuration } from '../../utils/format';
+import { releaseVideoElementLocks } from '../../utils/media';
 import { CopyIcon, DownloadIcon, TrashIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -77,7 +78,7 @@ export function RenderPlayerModal({
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  href={item.video_url}
+                  href={`${item.video_url}${item.video_url.includes('?') ? '&' : '?'}download=1`}
                   download={`${item.slug || 'video'}.mp4`}
                   className="ui-btn ui-btn-export ui-btn-sm"
                 >
@@ -104,7 +105,10 @@ export function RenderPlayerModal({
                 size="sm"
                 tone="danger"
                 icon={<TrashIcon size={14} />}
-                onClick={() => onRequestDelete(item)}
+                onClick={() => {
+                  releaseVideoElementLocks(item.video_url);
+                  onRequestDelete(item);
+                }}
               >
                 Xóa video
               </Button>

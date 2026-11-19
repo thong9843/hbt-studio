@@ -4,7 +4,10 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
 import { useSafeZone } from '../SafeZoneOverlay';
+import { CinemaInspectorPanel } from '../cinema/CinemaInspectorPanel';
+import { ExportPopover } from '../studio/ExportPopover';
 import { PhonePreviewStage } from '../studio/PhonePreviewStage';
+import { SceneTimelineStrip } from '../studio/SceneTimelineStrip';
 import type {
   HbtCoreGeminiModel,
   HbtCoreScript,
@@ -20,7 +23,6 @@ import {
   CheckIcon,
   CopyIcon,
   PlayIcon,
-  PlusIcon,
   SettingsIcon,
   SparklesIcon,
   TrashIcon,
@@ -29,6 +31,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Input, Textarea } from '../ui/Field';
+import { StudioSelect } from '../ui/StudioSelect';
 import { cx } from '../ui/cx';
 
 const T = vi.hbtCore;
@@ -557,35 +560,35 @@ export function HbtCoreWorkspace({
           {/* Thanh công cụ tích hợp ngay trong ô input */}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
             <div className="flex flex-wrap items-center gap-2">
-              <select
+              <StudioSelect
                 aria-label={T.v2.modelLabel}
+                variant="compact"
+                autoWidth
                 value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
-              >
-                {geminiModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setSelectedModel(val)}
+                options={geminiModels.map((m) => ({ value: m.id, label: m.name }))}
+                className="min-w-[180px]"
+              />
 
-              <select
+              <StudioSelect
                 aria-label={T.topics.label}
+                variant="compact"
+                autoWidth
                 value={v2Topic}
-                onChange={(e) => {
-                  const next = e.target.value as HbtCoreTopic;
+                onChange={(val) => {
+                  const next = val as HbtCoreTopic;
                   setV2Topic(next);
                   setTopic(next);
                   syncEditorToJsonText(title, next, segments);
                 }}
-                className="rounded-inner border border-line bg-soft px-3 py-1.5 text-tiny font-bold text-ink focus:border-indigo-500 focus:outline-none"
-              >
-                <option value="history">{T.topics.history}</option>
-                <option value="fun">{T.topics.fun}</option>
-                <option value="science">{T.topics.science}</option>
-                <option value="mystery">{T.topics.mystery}</option>
-              </select>
+                options={[
+                  { value: 'history', label: T.topics.history },
+                  { value: 'fun', label: T.topics.fun },
+                  { value: 'science', label: T.topics.science },
+                  { value: 'mystery', label: T.topics.mystery },
+                ]}
+                className="min-w-[130px]"
+              />
 
               <button
                 type="button"
@@ -611,23 +614,25 @@ export function HbtCoreWorkspace({
                   {vi.common.close}
                 </Button>
               )}
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={rendering || v2Loading}
-                onClick={() => void handleStartV1Render()}
-              >
-                {rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-              </Button>
               <button
                 type="button"
                 disabled={v2Loading || rendering || !prompt.trim()}
                 onClick={() => void handleRunV2Prompt()}
-                className="ui-btn ui-btn-magic ui-btn-sm"
+                className="ui-btn ui-btn-ink ui-btn-sm"
               >
                 <SparklesIcon size={16} />
                 <span>{v2Loading ? T.studio.generatingBtn : T.studio.generateBtn}</span>
               </button>
+              <ExportPopover
+                aspect="9:16"
+                showWatermarkControl
+                onExportFinal={() => void handleStartV1Render()}
+                finalLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
+                disabled={rendering || v2Loading}
+                isRendering={rendering}
+                progressPct={progressPct}
+                progressStage={progressStep}
+              />
             </div>
           </div>
         </section>
@@ -700,39 +705,37 @@ export function HbtCoreWorkspace({
           </div>
         </Dialog>
 
-        {/* Danh sách các phân cảnh (Segments Cards) */}
+        {/* Dải phân cảnh ngang chuẩn VEED + Trình sửa DUY NHẤT phân cảnh đang chọn (giảm 80% DOM) */}
         <section aria-label={T.v1.segmentsTitle} className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h2 className="text-body font-extrabold">{title}</h2>
-              <Badge tone="neutral">{segments.length} cảnh</Badge>
-            </div>
-            <Button tone="soft" size="sm" onClick={addSegment}>
-              <PlusIcon size={16} />
-              {T.v1.addSegment}
-            </Button>
+          <div className="overflow-hidden rounded-card border border-line bg-card">
+            <SceneTimelineStrip
+              items={segments.map((seg, idx) => ({
+                id: String(idx),
+                index: idx + 1,
+                title: seg.title,
+                summary: seg.text,
+                badge: `${STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'} ${seg.sticker || 'question'}`,
+              }))}
+              selectedId={String(safeIndex)}
+              onSelect={(id) => setSelectedSegIndex(Number(id))}
+              onAdd={addSegment}
+              addLabel={T.v1.addSegment}
+              onDelete={(id) => removeSegment(Number(id))}
+            />
           </div>
 
-          <ul className="space-y-3">
-            {segments.map((seg, idx) => {
-              const selected = idx === safeIndex;
+          {activeSegment &&
+            (() => {
+              const seg = activeSegment;
+              const idx = safeIndex;
               return (
-                <li
-                  key={idx}
-                  onClick={() => setSelectedSegIndex(idx)}
-                  className={cx(
-                    'cursor-pointer space-y-3 rounded-card border p-4 transition duration-150',
-                    selected
-                      ? 'border-indigo-500/80 bg-card shadow-sm'
-                      : 'border-line bg-card/70 hover:border-line-input hover:bg-card',
-                  )}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-3 rounded-card border border-line bg-card p-4 shadow-card">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-tiny font-extrabold text-indigo-300">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand text-tiny font-extrabold text-white tabular-nums">
                         {idx + 1}
                       </span>
-                      <span className="text-small font-extrabold">
+                      <span className="text-small font-bold text-text">
                         {seg.title || T.v1.segmentOrder(idx + 1)}
                       </span>
                       <Badge tone="neutral">
@@ -744,11 +747,8 @@ export function HbtCoreWorkspace({
                       <button
                         type="button"
                         aria-label={T.v1.removeSegment(idx + 1)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeSegment(idx);
-                        }}
-                        className="rounded-inner p-1.5 text-muted transition hover:bg-danger/15 hover:text-danger"
+                        onClick={() => removeSegment(idx)}
+                        className="rounded-inner p-1.5 text-muted transition hover:bg-danger-soft hover:text-danger"
                       >
                         <TrashIcon size={15} />
                       </button>
@@ -765,21 +765,16 @@ export function HbtCoreWorkspace({
                       }
                     />
                     <div className="ui-field">
-                      <label htmlFor={`hbt-core-sticker-${idx}`} className="ui-label">
-                        {T.v1.segmentStickerLabel(idx + 1)}
-                      </label>
-                      <select
+                      <StudioSelect
                         id={`hbt-core-sticker-${idx}`}
-                        className="ui-input"
+                        label={T.v1.segmentStickerLabel(idx + 1)}
                         value={seg.sticker || 'question'}
-                        onChange={(e) => updateSegment(idx, { sticker: e.target.value })}
-                      >
-                        {STICKER_PRESETS.map((st) => (
-                          <option key={st} value={st}>
-                            {STICKER_EMOJI[st]} {st}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => updateSegment(idx, { sticker: val })}
+                        options={STICKER_PRESETS.map((st) => ({
+                          value: st,
+                          label: `${STICKER_EMOJI[st]} ${st}`,
+                        }))}
+                      />
                     </div>
                   </div>
 
@@ -790,7 +785,6 @@ export function HbtCoreWorkspace({
                     onChange={(e) => updateSegment(idx, { text: e.target.value })}
                   />
 
-                  {/* Câu lệnh ComfyUI kèm nút Copy 1-click */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <label htmlFor={`hbt-core-img-prompt-${idx}`} className="ui-label !mb-0">
@@ -798,11 +792,8 @@ export function HbtCoreWorkspace({
                       </label>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleCopyImagePrompt(idx, seg.image_prompt ?? '');
-                        }}
-                        className="inline-flex items-center gap-1 rounded-inner bg-soft px-2.5 py-1 text-tiny font-bold text-ink transition hover:bg-indigo-600 hover:text-white"
+                        onClick={() => void handleCopyImagePrompt(idx, seg.image_prompt ?? '')}
+                        className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2"
                       >
                         {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
                         <span>{T.studio.copyPrompt}</span>
@@ -837,32 +828,24 @@ export function HbtCoreWorkspace({
                     </div>
 
                     <div className="ui-field">
-                      <label htmlFor={`hbt-core-sfx-${idx}`} className="ui-label">
-                        {T.v1.segmentSfxLabel(idx + 1)}
-                      </label>
-                      <select
+                      <StudioSelect
                         id={`hbt-core-sfx-${idx}`}
-                        className="ui-input"
+                        label={T.v1.segmentSfxLabel(idx + 1)}
                         value={seg.sfx}
-                        onChange={(e) => updateSegment(idx, { sfx: e.target.value })}
-                      >
-                        {sfxOptions.map((sfxName) => (
-                          <option key={sfxName} value={sfxName}>
-                            {sfxName}
-                          </option>
-                        ))}
-                        {assets?.sfx.map((item) => (
-                          <option key={item.id} value={item.name}>
-                            {item.name} ({item.category})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => updateSegment(idx, { sfx: val })}
+                        options={[
+                          ...sfxOptions.map((sfxName) => ({ value: sfxName, label: sfxName })),
+                          ...(assets?.sfx ?? []).map((item) => ({
+                            value: item.name,
+                            label: `${item.name} (${item.category})`,
+                          })),
+                        ]}
+                      />
                     </div>
                   </div>
-                </li>
+                </div>
               );
-            })}
-          </ul>
+            })()}
         </section>
       </div>
 
@@ -934,6 +917,17 @@ export function HbtCoreWorkspace({
             </p>
           </div>
         </PhonePreviewStage>
+
+        <CinemaInspectorPanel
+          coreScript={{
+            title,
+            topic,
+            total_segments: segments.length,
+            segments,
+          }}
+          beatIndex={safeIndex}
+          disabled={rendering || v2Loading}
+        />
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
         {(v2Loading || rendering || resultVideoUrl || renderError) &&

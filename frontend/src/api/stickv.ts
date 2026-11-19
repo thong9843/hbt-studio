@@ -1,5 +1,11 @@
 import { apiRequest } from './client';
-import type { StickvAspect, StickvProject, StickvTheme } from './types';
+import type {
+  StickvAnimationMode,
+  StickvAspect,
+  StickvDomain,
+  StickvProject,
+  StickvTheme,
+} from './types';
 
 export interface GeminiModelOption {
   id: string;
@@ -12,6 +18,7 @@ export interface StickvListResponse {
   default_model: string;
   director_prompt?: string;
   poses?: string[];
+  puppet_ready?: boolean;
 }
 
 export const stickvApi = {
@@ -23,6 +30,9 @@ export const stickvApi = {
   create: (body: {
     title: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
     target_minutes?: number;
@@ -32,6 +42,9 @@ export const stickvApi = {
   generate: (body: {
     idea: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
     target_minutes?: number;
@@ -72,6 +85,9 @@ export const stickvApi = {
   importJson: (body: {
     raw_json: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
   }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-json', { json: body }),
@@ -80,7 +96,16 @@ export const stickvApi = {
     raw_text: string;
     title?: string;
     topic?: string;
+    domain?: StickvDomain;
+    animation_mode?: StickvAnimationMode;
+    music_mood?: string;
     aspect?: StickvAspect;
     theme?: StickvTheme;
   }) => apiRequest<{ project: StickvProject }>('POST', '/stickv/import-script', { json: body }),
+
+  searchIconify: (q: string) =>
+    apiRequest<{ items: Array<{ id: string; prefix: string; name: string; png_url: string }> }>(
+      'GET',
+      `/stickv/iconify/search?q=${encodeURIComponent(q)}`,
+    ),
 };

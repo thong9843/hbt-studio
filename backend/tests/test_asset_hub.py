@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hbt.config import Settings
@@ -328,3 +329,85 @@ def test_asset_hub_scans_library_with_index_json_and_brand_watermark(tmp_path: P
     res_wm = client.get("/api/asset-hub/watermarks")
     assert res_wm.status_code == 200
     assert any(it["name"] == "hbt-logo-mark.png" for it in res_wm.json()["items"])
+
+
+def test_unified_render_download_and_delete_with_slash_id(tmp_path: Path) -> None:
+    from urllib.parse import quote
+
+    from hbt.shared.db.media_index import upsert_render
+
+    client = _make_client(tmp_path)
+    video_file = tmp_path / "assets" / "renders" / "stickv" / "test-vid" / "final.mp4"
+    video_file.parent.mkdir(parents=True, exist_ok=True)
+    video_file.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    rid = "stickv/test-vid/final.mp4"
+    upsert_render(
+        render_id=rid,
+        slug="test-vid",
+        title="Video Test Download",
+        engine="stickv",
+        file_path=video_file,
+        db_path=tmp_path / "workspace" / "studio.db",
+        base_dir=tmp_path,
+    )
+
+    enc = quote(rid, safe="")
+    r_dl = client.get(f"/api/renders/media/{enc}?kind=video&download=1")
+    assert r_dl.status_code == 200
+    assert "attachment" in r_dl.headers.get("content-disposition", "").lower()
+    assert "test-vid.mp4" in r_dl.headers.get("content-disposition", "")
+
+    r_del = client.delete(f"/api/renders/{enc}")
+    assert r_del.status_code == 200
+    assert r_del.json()["ok"] is True
+    assert not video_file.exists()
+
+    # Sau khi xóa không còn xuất hiện trong /api/renders
+    listed = client.get("/api/renders").json()["items"]
+    assert all(it["id"] != rid for it in listed)
+
+
+def test_unified_render_delete_survives_winerror32_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from urllib.parse import quote
+
+    from hbt.shared.db.media_index import upsert_render
+
+    client = _make_client(tmp_path)
+    video_file = tmp_path / "assets" / "renders" / "stickv" / "locked-vid" / "final.mp4"
+    video_file.parent.mkdir(parents=True, exist_ok=True)
+    video_file.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    rid = "stickv/locked-vid/final.mp4"
+    upsert_render(
+        render_id=rid,
+        slug="locked-vid",
+        title="Locked Video",
+        engine="stickv",
+        file_path=video_file,
+        db_path=tmp_path / "workspace" / "studio.db",
+        base_dir=tmp_path,
+    )
+
+    real_unlink = Path.unlink
+
+    def _mock_unlink(self: Path, missing_ok: bool = False) -> None:
+        if self.name == "final.mp4" and self.parent.name == "locked-vid":
+            raise PermissionError("WinError 32: file locked")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _mock_unlink)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    enc = quote(rid, safe="")
+    r_del = client.delete(f"/api/renders/{enc}")
+    assert r_del.status_code == 200
+    body = r_del.json()
+    assert body["ok"] is True
+    assert body["deferred_unlink"] is True
+
+    # Bản ghi DB đã bị xóa và sync_renders_from_disk không quét lại file bị khóa
+    listed = client.get("/api/renders").json()["items"]
+    assert all(it["id"] != rid for it in listed)

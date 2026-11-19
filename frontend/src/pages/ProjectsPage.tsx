@@ -11,7 +11,7 @@ import { BackgroundLibraryCard } from '../components/postv/BackgroundLibrary';
 import { ProjectCard, ProjectCardSkeleton } from '../components/ProjectCard';
 import { Button } from '../components/ui/Button';
 import { useNewProject } from '../hooks/newProject';
-import { useRenderJob } from '../hooks/renderJob';
+import { useRenderJobStatus } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { projectHref } from '../utils/projectHref';
@@ -24,7 +24,7 @@ export function ProjectsPage({ kind }: { kind?: ProjectKind } = {}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
-  const render = useRenderJob();
+  const render = useRenderJobStatus();
   const { open: openNew } = useNewProject();
   const all = useQuery({
     queryKey: ['projects'],

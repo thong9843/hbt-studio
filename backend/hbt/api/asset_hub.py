@@ -18,9 +18,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -35,11 +35,13 @@ from hbt.shared.db.media_index import (
 )
 from hbt.shared.online_sources import (
     batch_auto_tag_memes,
+    import_freesound_audio,
     import_giphy_sticker,
     import_greenmeme,
     import_pixabay_audio,
     import_sigstick_pack,
     import_tuna_sfx,
+    search_freesound_audio,
     search_giphy_stickers,
     search_greenmeme,
     search_pixabay_audio,
@@ -50,6 +52,12 @@ from hbt.stickv.poses_init import (
     convert_stickman_dir_to_transparent,
     ensure_default_poses,
     remove_white_background,
+)
+from hbt.stickv.puppet import (
+    PUPPET_SLOTS,
+    auto_segment_puppet,
+    clean_puppet_sprite,
+    get_puppet_status,
 )
 from hbt.storage import BadRequest, NotFound, Unprocessable
 
@@ -237,6 +245,7 @@ def _serialize_item(
         "width": int(m.get("width") or 0),
         "height": int(m.get("height") or 0),
         "thumb_url": thumb_url,
+        "anim_group": str(m.get("anim_group") or ""),
     }
 
 
@@ -257,7 +266,11 @@ def _collect_dir_items(
     for p in iterator:
         if not p.is_file() or p.name.startswith("."):
             continue
-        if p.name == "index.json" or "thumbs" in p.relative_to(folder).parts:
+        if (
+            p.name == "index.json"
+            or "thumbs" in p.relative_to(folder).parts
+            or any(part.startswith(".") for part in p.relative_to(folder).parts)
+        ):
             continue
         ext = p.suffix.lower()
         if allowed_exts is not None and ext not in allowed_exts:
@@ -278,14 +291,28 @@ def _collect_dir_items(
                     f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
                     f"/thumbs/{quote(thumb_file.name)}"
                 )
-        elif category == "stickman" and _file_kind(p) == "video":
-            dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
-            meta = {**(meta or {}), "duration_sec": dur, "width": vw, "height": vh}
-            if thumb_file is not None:
-                thumb_url = (
-                    f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
-                    f"/thumbs/{quote(thumb_file.name)}"
-                )
+        elif category == "stickman":
+            anim_group = "pose"
+            if rel.startswith("animations/oneshot/"):
+                anim_group = "oneshot"
+            elif rel.startswith("animations/loop/"):
+                anim_group = "loop"
+            if _file_kind(p) == "video":
+                dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(p, folder / "thumbs")
+                meta = {
+                    **(meta or {}),
+                    "duration_sec": dur,
+                    "width": vw,
+                    "height": vh,
+                    "anim_group": anim_group,
+                }
+                if thumb_file is not None:
+                    thumb_url = (
+                        f"/api/asset-hub/file/{quote(source)}/{quote(category)}"
+                        f"/thumbs/{quote(thumb_file.name)}"
+                    )
+            else:
+                meta = {**(meta or {}), "anim_group": anim_group}
         out.append(
             _serialize_item(
                 category,
@@ -332,10 +359,24 @@ class TunaImportBody(BaseModel):
     tags: list[str] = []
 
 
+class FreesoundImportBody(BaseModel):
+    item_id: str
+    title: str
+    artist: str = "Freesound Creator"
+    download_url: str
+    kind: Literal["music", "sfx"] = "music"
+    tags: list[str] = []
+    license_url: str = ""
+
+
 class MemePatchBody(BaseModel):
     tags: list[str] | None = None
     topic: str | None = None
     title: str | None = None
+
+
+def clear_online_search_cache() -> None:
+    _ONLINE_SEARCH_CACHE.clear()
 
 
 @router.get("/asset-hub/online/search")
@@ -351,7 +392,7 @@ async def online_search_unified(
         chosen_src = (
             "tuna"
             if category == "sfx"
-            else "pixabay"
+            else "freesound"
             if category == "music"
             else "greenmeme"
             if category == "memes"
@@ -366,12 +407,29 @@ async def online_search_unified(
 
     try:
         if category == "sfx" and chosen_src == "tuna":
-            items = await search_tuna_sfx(q or "meme")
+            tuna_key = resolve_online_api_key("VOICEMOD_TUNA_API_KEY", state.settings.workspace_dir)
+            items = await search_tuna_sfx(q or "meme", api_key=tuna_key)
             res: dict[str, Any] = {
                 "items": items,
                 "missing_key": False,
                 "source": "tuna",
                 "category": "sfx",
+            }
+        elif category in ("music", "sfx") and chosen_src == "freesound":
+            fkey = resolve_online_api_key("FREESOUND_API_KEY", state.settings.workspace_dir)
+            if not fkey:
+                return {
+                    "items": [],
+                    "missing_key": True,
+                    "source": "freesound",
+                    "category": category,
+                }
+            items = await search_freesound_audio(q, kind=category, api_key=fkey)
+            res = {
+                "items": items,
+                "missing_key": False,
+                "source": "freesound",
+                "category": category,
             }
         elif category in ("music", "sfx"):
             api_key = resolve_online_api_key("PIXABAY_API_KEY", state.settings.workspace_dir)
@@ -413,6 +471,14 @@ async def online_search_unified(
                 "source": "giphy",
                 "category": "stickers",
             }
+    except ValueError as exc:
+        return {
+            "items": [],
+            "missing_key": False,
+            "source": chosen_src,
+            "category": category,
+            "error": str(exc),
+        }
     except Exception as exc:
         return {
             "items": [],
@@ -459,6 +525,20 @@ async def online_import_tuna(body: TunaImportBody, state: State) -> dict[str, An
         title=body.title,
         preview_url=body.preview_url,
         tags=body.tags,
+        library_dir=state.settings.library_dir,
+    )
+
+
+@router.post("/asset-hub/online/freesound/import")
+async def online_import_freesound(body: FreesoundImportBody, state: State) -> dict[str, Any]:
+    return await import_freesound_audio(
+        item_id=body.item_id,
+        title=body.title,
+        artist=body.artist,
+        download_url=body.download_url,
+        kind=body.kind,
+        tags=body.tags,
+        license_url=body.license_url,
         library_dir=state.settings.library_dir,
     )
 
@@ -539,6 +619,53 @@ def patch_meme_endpoint(meme_id: str, body: MemePatchBody, state: State) -> dict
     if updated is None:
         raise NotFound(f"Không tìm thấy meme '{meme_id}'")
     return {"ok": True, "item": updated}
+
+
+@router.get("/asset-hub/stickman/puppet")
+def get_stickman_puppet_status(state: State) -> dict[str, Any]:
+    """Trạng thái bộ linh kiện 7 mảnh Puppet 2D trong thư viện."""
+    return get_puppet_status(state.settings.library_dir, state.settings.assets_dir)
+
+
+@router.post("/asset-hub/stickman/puppet/{slot}", status_code=201)
+async def upload_stickman_puppet_slot(
+    slot: str,
+    state: State,
+    file: Annotated[UploadFile, File(...)],
+) -> dict[str, Any]:
+    """Tải lên 1 mảnh linh kiện Puppet 2D vào `library/stickman/puppet/<slot>.png`."""
+    if slot not in PUPPET_SLOTS:
+        raise Unprocessable(f"Slot Puppet không hợp lệ: '{slot}'")
+
+    puppet_dir = state.settings.library_dir / "stickman" / "puppet"
+    puppet_dir.mkdir(parents=True, exist_ok=True)
+    raw_bytes = await file.read()
+    tmp_raw = puppet_dir / f".raw_{slot}_{_safe_filename(file.filename or 'part.png')}"
+    tmp_raw.write_bytes(raw_bytes)
+    target = puppet_dir / f"{slot}.png"
+    try:
+        from PIL import Image
+
+        with Image.open(tmp_raw) as raw_img:
+            cleaned = clean_puppet_sprite(raw_img, padding=4)
+        try:
+            cleaned.save(target, format="PNG")
+        finally:
+            cleaned.close()
+    finally:
+        tmp_raw.unlink(missing_ok=True)
+
+    segmented = False
+    if slot == "base_character":
+        auto_segment_puppet(target, puppet_dir / ".segments")
+        segmented = True
+
+    return {
+        "ok": True,
+        "slot": slot,
+        "segmented": segmented,
+        "status": get_puppet_status(state.settings.library_dir, state.settings.assets_dir),
+    }
 
 
 @router.get("/asset-hub/{category}")
@@ -693,8 +820,20 @@ async def upload_asset_hub_item(
     category: str,
     state: State,
     file: Annotated[UploadFile, File(...)],
+    anim_group: Annotated[str, Form()] = "pose",
 ) -> dict[str, Any]:
-    folder = _category_dir(state, category)
+    clean_group = anim_group if anim_group in {"pose", "oneshot", "loop"} else "pose"
+    is_anim_slot = category == "stickman" and clean_group in {"oneshot", "loop"}
+    if is_anim_slot:
+        base_lib = state.settings.library_dir / "stickman"
+        folder = base_lib / "animations" / clean_group
+        folder.mkdir(parents=True, exist_ok=True)
+        dest_source = "library"
+    else:
+        base_lib = _category_dir(state, category)
+        folder = base_lib
+        dest_source = "assets"
+
     safe_name = _safe_filename(file.filename or "asset.bin")
     target = folder / safe_name
 
@@ -710,24 +849,38 @@ async def upload_asset_hub_item(
     content = await file.read()
     target.write_bytes(content)
 
-    meta_override: dict[str, Any] | None = None
+    meta_override: dict[str, Any] | None = (
+        {"anim_group": clean_group} if category == "stickman" else None
+    )
     thumb_url: str | None = None
-    if category == "stickman" and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+    if (
+        category == "stickman"
+        and not is_anim_slot
+        and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    ):
         png_target = target.with_suffix(".png")
         final_path, _ = remove_white_background(target, png_target)
         if final_path != target and target.is_file() and final_path.is_file():
             target.unlink(missing_ok=True)
             target = final_path
     elif category == "stickman" and target.suffix.lower() in VIDEO_EXTS:
-        dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, folder / "thumbs")
-        meta_override = {"duration_sec": dur, "width": vw, "height": vh}
+        dur, vw, vh, thumb_file = _probe_and_thumb_video_pose(target, base_lib / "thumbs")
+        meta_override = {"duration_sec": dur, "width": vw, "height": vh, "anim_group": clean_group}
         if thumb_file is not None:
-            thumb_url = f"/api/asset-hub/file/assets/stickman/thumbs/{quote(thumb_file.name)}"
+            thumb_url = (
+                f"/api/asset-hub/file/{quote(dest_source)}/stickman/thumbs/{quote(thumb_file.name)}"
+            )
 
+    relpath = f"animations/{clean_group}/{target.name}" if is_anim_slot else None
     return {
         "ok": True,
         "item": _serialize_item(
-            category, target, source="assets", meta=meta_override, thumb_url=thumb_url
+            category,
+            target,
+            source=dest_source,
+            relpath=relpath,
+            meta=meta_override,
+            thumb_url=thumb_url,
         ),
     }
 
@@ -797,8 +950,24 @@ def delete_asset_hub_item(
     candidates: list[Path] = []
     if source in (None, "assets"):
         candidates.append(folder)
+        if category == "stickman":
+            candidates.extend(
+                [
+                    folder / "animations" / "oneshot",
+                    folder / "animations" / "loop",
+                ]
+            )
     if source in (None, "library"):
-        candidates.append(state.settings.library_dir / category)
+        lib_cat = state.settings.library_dir / category
+        candidates.append(lib_cat)
+        if category == "stickman":
+            candidates.extend(
+                [
+                    lib_cat / "poses",
+                    lib_cat / "animations" / "oneshot",
+                    lib_cat / "animations" / "loop",
+                ]
+            )
 
     for base in candidates:
         base_res = base.resolve()
@@ -898,14 +1067,37 @@ def list_unified_renders(state: State, engine: str | None = None) -> dict[str, A
     return {"items": items}
 
 
+def _find_render_row(conn: Any, render_id: str, base_dir: Path) -> Any:
+    from hbt.shared.db.media_index import normalize_media_path
+
+    decoded = unquote(render_id)
+    candidates = list(dict.fromkeys([render_id, decoded]))
+    for cand in candidates:
+        row = conn.execute("SELECT * FROM renders WHERE id = ?", (cand,)).fetchone()
+        if row is not None:
+            return row
+    for cand in candidates:
+        norm = normalize_media_path(cand, base_dir=base_dir)
+        row = conn.execute("SELECT * FROM renders WHERE file_path = ?", (norm,)).fetchone()
+        if row is not None:
+            return row
+    return None
+
+
 @router.get("/renders/media/{render_id:path}")
-def serve_unified_render_media(render_id: str, state: State, kind: str = "video") -> FileResponse:
+def serve_unified_render_media(
+    render_id: str,
+    state: State,
+    kind: str = "video",
+    download: bool = False,
+) -> FileResponse:
     from hbt.shared.db.media_index import resolve_media_path
 
     db = _db_path(state)
+    base_dir = state.settings.workspace_dir.parent
     conn = init_db(db)
     try:
-        row = conn.execute("SELECT * FROM renders WHERE id = ?", (render_id,)).fetchone()
+        row = _find_render_row(conn, render_id, base_dir)
     finally:
         conn.close()
     if row is None:
@@ -913,26 +1105,62 @@ def serve_unified_render_media(render_id: str, state: State, kind: str = "video"
     target_str = str(row["cover_path"] if kind == "cover" else row["file_path"])
     if not target_str:
         raise NotFound("Không có tệp media tương ứng")
-    target = resolve_media_path(target_str, base_dir=state.settings.workspace_dir.parent)
+    target = resolve_media_path(target_str, base_dir=base_dir)
     if not target.is_file():
         raise NotFound("Tệp media không còn tồn tại trên ổ đĩa")
-    return FileResponse(target)
+    if download:
+        slug = str(row["slug"] or target.stem).strip() or target.stem
+        dl_name = f"{slug}{target.suffix or '.mp4'}"
+        return FileResponse(
+            target,
+            filename=dl_name,
+            media_type="video/mp4" if kind != "cover" else None,
+            content_disposition_type="attachment",
+        )
+    return FileResponse(target, media_type="video/mp4" if kind != "cover" else None)
 
 
 @router.delete("/renders/{render_id:path}")
 def delete_unified_render(render_id: str, state: State) -> dict[str, Any]:
-    from hbt.shared.db.media_index import resolve_media_path
+    from hbt.shared.db.media_index import (
+        normalize_media_path,
+        record_deleted_render_path,
+        resolve_media_path,
+    )
 
     db = _db_path(state)
+    base_dir = state.settings.workspace_dir.parent
     conn = init_db(db)
     try:
-        row = conn.execute("SELECT * FROM renders WHERE id = ?", (render_id,)).fetchone()
+        row = _find_render_row(conn, render_id, base_dir)
+        if row is None:
+            raise NotFound(f"Không tìm thấy bản xuất '{render_id}'")
+        row_id = str(row["id"])
+        row_fp = str(row["file_path"] or "")
+        norm_fp = normalize_media_path(row_fp, base_dir=base_dir) if row_fp else ""
+        fp = resolve_media_path(row_fp, base_dir=base_dir) if row_fp else Path("")
+        # Luôn xóa bản ghi DB trước để thao tác xóa của người dùng luôn trả HTTP 200
+        conn.execute("DELETE FROM renders WHERE id = ? OR file_path = ?", (row_id, norm_fp))
+        conn.commit()
     finally:
         conn.close()
-    if row is None:
-        raise NotFound(f"Không tìm thấy bản xuất '{render_id}'")
-    fp = resolve_media_path(str(row["file_path"]), base_dir=state.settings.workspace_dir.parent)
+    delete_render(row_id, db_path=db)
+
+    deferred_unlink = False
     if fp.is_file():
-        fp.unlink(missing_ok=True)
-    delete_render(render_id, db_path=db)
-    return {"ok": True, "deleted": render_id}
+        for attempt in range(3):
+            try:
+                fp.unlink(missing_ok=True)
+                deferred_unlink = False
+                break
+            except PermissionError:
+                deferred_unlink = True
+                if attempt < 2:
+                    time.sleep(0.1)
+            except OSError:
+                deferred_unlink = True
+                break
+        if deferred_unlink and norm_fp:
+            record_deleted_render_path(norm_fp, db_path=db)
+
+    return {"ok": True, "deleted": row_id, "deferred_unlink": deferred_unlink}

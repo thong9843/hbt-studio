@@ -16,6 +16,7 @@ from hbt.api import (
     assets,
     backgrounds,
     chatting,
+    cinema,
     core,
     files,
     health,
@@ -156,6 +157,7 @@ def create_app(
         chatting,
         core,
         stickv,
+        cinema,
     ):
         app.include_router(module.router, prefix="/api")
     return app

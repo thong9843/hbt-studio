@@ -110,15 +110,30 @@ async def search_tuna_sfx(
     query: str = "meme",
     *,
     per_page: int = 20,
+    api_key: str = "",
     client: httpx.AsyncClient | None = None,
 ) -> list[dict[str, Any]]:
-    """Tìm kiếm Meme SFX trên Voicemod Tuna; fallback sang trang tag hoặc [] khi lỗi mạng."""
+    """Tìm kiếm Meme SFX trên Voicemod Tuna; gắn auth header nếu có Key."""
     q = (query or "").strip() or "meme"
     limit = max(1, min(40, per_page))
+    clean_key = (api_key or "").strip()
+    req_headers: dict[str, str] = {}
+    if clean_key:
+        req_headers["x-api-key"] = clean_key
+        req_headers["Authorization"] = f"Bearer {clean_key}"
 
     async def _do(c: httpx.AsyncClient) -> list[dict[str, Any]]:
         try:
-            resp = await c.get(TUNA_SEARCH_API, params={"search": q, "size": limit})
+            resp = await c.get(
+                TUNA_SEARCH_API,
+                params={"search": q, "size": limit},
+                headers=req_headers or None,
+            )
+            if clean_key and resp.status_code in (401, 403):
+                raise ValueError(
+                    "VOICEMOD_TUNA_API_KEY không hợp lệ hoặc bị từ chối (HTTP 401/403). "
+                    "Vui lòng kiểm tra lại khóa trong trang Cài đặt."
+                )
             if resp.status_code == 200:
                 payload = resp.json()
                 raw_items = (
@@ -131,10 +146,14 @@ async def search_tuna_sfx(
                 out = [norm for it in raw_items if (norm := _normalize_sound_item(it)) is not None]
                 if out:
                     return out[:limit]
+        except ValueError:
+            raise
         except Exception:
             pass
 
-        # Fallback sang bóc tách HTML trang tag
+        # Chỉ dùng đường fallback HTML __NEXT_DATA__ công khai khi người dùng chưa cấu hình API key
+        if clean_key:
+            return []
         try:
             tag_slug = quote(_safe_slug(q))
             page = await c.get(TUNA_TAG_PAGE.format(tag=tag_slug))

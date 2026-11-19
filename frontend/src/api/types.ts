@@ -212,9 +212,17 @@ export interface JobOutput {
 export interface Job {
   id: string;
   project: string;
+  slug?: string;
+  kind?: string;
+  mode?: 'preview' | 'final';
   status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
   log_tail: string[];
   output: JobOutput | null;
   error: string | null;
@@ -225,14 +233,22 @@ export interface Job {
   preview_seconds: number | null;
 }
 
-/** Một dòng của `GET /jobs`: job đang chạy hoặc đang chờ. */
+/** Một dòng của `GET /jobs`: job đang chạy/chờ (hoặc vừa hoàn tất khi `include_recent=true`). */
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto';
-  status: 'queued' | 'running' | 'waiting_pick';
+  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto' | 'stickv';
+  mode?: 'preview' | 'final';
+  status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  output?: Record<string, unknown> | null;
+  error?: string | null;
 }
 
 export type AspectMode = 'fill' | 'fit';
@@ -265,6 +281,8 @@ export interface AppSettings {
   watermark?: WatermarkSettings;
   pixabay_api_key?: string;
   giphy_api_key?: string;
+  freesound_api_key?: string;
+  voicemod_tuna_api_key?: string;
 }
 
 export interface SensitiveCategory {
@@ -881,6 +899,7 @@ export interface AssetHubItem {
   width?: number;
   height?: number;
   thumb_url?: string | null;
+  anim_group?: 'pose' | 'oneshot' | 'loop' | '';
 }
 
 export interface OnlinePixabayItem {
@@ -934,21 +953,84 @@ export interface UnifiedRenderItem {
 
 export type StickvAspect = '9:16' | '16:9';
 export type StickvTheme = 'cream' | 'dark';
-export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'shake' | 'float' | 'static';
-export type StickvBoardType = 'none' | 'bullets' | 'big_number' | 'comparison' | 'flow_steps';
+export type StickvDomain =
+  'paper_classic' | 'physics_science' | 'history_geo' | 'psychology_story' | 'cosmos_mystery';
+export type StickvInteraction = 'none' | 'hold_prop' | 'point_chart' | 'versus_split';
+export type StickvAnimationMode = 'auto' | 'static';
+export type PuppetSlotKey =
+  | 'base_character'
+  | 'eyes_neutral'
+  | 'eyes_happy'
+  | 'eyes_shock'
+  | 'eyes_angry'
+  | 'mouth_closed'
+  | 'mouth_open';
+
+export interface PuppetSlotStatus {
+  found: boolean;
+  name: string;
+  source: string;
+  url: string | null;
+}
+
+export interface PuppetStatusResponse {
+  ready: boolean;
+  present_count: number;
+  total: number;
+  slots: Record<PuppetSlotKey, PuppetSlotStatus>;
+}
+export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'float' | 'static';
+export type StickvCameraShot = 'wide_stage' | 'focus_board' | 'closeup_react';
+export type StickvEmotion =
+  | 'auto'
+  | 'neutral'
+  | 'confident'
+  | 'curious'
+  | 'idea'
+  | 'shock'
+  | 'skeptical'
+  | 'serious'
+  | 'sad'
+  | 'happy'
+  | 'excited';
+export type StickvBoardType =
+  | 'none'
+  | 'bullets'
+  | 'big_number'
+  | 'comparison'
+  | 'flow_steps'
+  | 'card'
+  | 'list'
+  | 'quote'
+  | 'bar_compare'
+  | 'counter_grow'
+  | 'timeline_era'
+  | 'location_map'
+  | 'myth_vs_fact'
+  | 'recap_card';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
   id: string;
   chapter: number;
+  chapter_title?: string;
   narration: string;
   pose: string;
+  emotion?: StickvEmotion;
+  anim_oneshot?: string | null;
+  anim_loop?: string;
+  interaction?: StickvInteraction;
+  camera_shot?: StickvCameraShot;
+  prop_query?: string | null;
   facing: 'left' | 'right';
   motion: StickvMotion;
   sfx_tag: StickvSfxTag;
   board_type: StickvBoardType;
   board_title: string;
+  board_items?: string[];
+  takeaway?: string;
   board_data: Record<string, unknown>;
+  visual_data?: Record<string, unknown>;
   media_path: string;
   clip_path?: string;
   duration_sec: number;
@@ -958,6 +1040,8 @@ export interface StickvProject {
   slug: string;
   title: string;
   topic: string;
+  domain?: StickvDomain;
+  animation_mode?: StickvAnimationMode;
   aspect: StickvAspect;
   theme: StickvTheme;
   fps: number;
@@ -966,6 +1050,7 @@ export interface StickvProject {
   outro?: boolean;
   gemini_model: string;
   target_minutes: number;
+  chapters?: Array<Record<string, unknown>>;
   beats: StickvBeat[];
   created_at: string;
   updated_at: string;
@@ -976,4 +1061,77 @@ export interface StickvProject {
     aspect: StickvAspect;
     preview: boolean;
   } | null;
+}
+
+export type CinemaShotType =
+  'desk_wide' | 'card_hero' | 'split_compare' | 'data_spotlight' | 'puppet_closeup' | 'recap_grid';
+
+export interface CinemaHardwareProfile {
+  mode: 'cpu' | 'gpu' | string;
+  video_encoder: string;
+  gpu_name: string | null;
+  nvenc_probed: boolean;
+  nvenc_probe_error: string | null;
+  layer_cache_mb: number;
+  ffmpeg_threads: number;
+}
+
+export interface CinemaPreflightIssue {
+  beat_id: string | null;
+  beat_index: number | null;
+  code: string;
+  severity: 'error' | 'warn';
+  message: string;
+  auto_fixed: boolean;
+}
+
+export interface CinemaPreflightReport {
+  ok: boolean;
+  errors: CinemaPreflightIssue[];
+  warnings: CinemaPreflightIssue[];
+  fixed_count: number;
+  repaired_spec: {
+    slug: string;
+    title: string;
+    aspect: StickvAspect;
+    fps: number;
+    preflight_passed: boolean;
+    beats: Array<{
+      id: string;
+      shot_type: CinemaShotType;
+      transition_in: string;
+    }>;
+  };
+  stats: {
+    initial_errors?: number;
+    remaining_errors?: number;
+    bbox_reflows?: number;
+    anti_parrot_rewrites?: number;
+    pacing_diversifications?: number;
+    recap_conversions?: number;
+  };
+}
+
+export interface CinemaContactSheetResponse {
+  ok: boolean;
+  filename: string;
+  url: string;
+  preflight_ok: boolean;
+  preflight_fixed: number;
+  width: number;
+  height: number;
+  beats_rendered: number;
+  elapsed_ms: number;
+}
+
+export interface CinemaRenderBeatResponse {
+  ok: boolean;
+  beat_id: string;
+  cache_hit: boolean;
+  cache_key: string;
+  filename: string;
+  url: string;
+  elapsed_ms: number;
+  width: number;
+  height: number;
 }

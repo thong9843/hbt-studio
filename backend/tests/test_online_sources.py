@@ -225,3 +225,49 @@ def test_meme_auto_tag_and_context_matching(tmp_path: Path) -> None:
     out_msgs = select_memes_for_chat(msgs, batch["items"])
     chosen_ids = [m["meme_id"] for m in out_msgs if m.get("meme_id")]
     assert len(chosen_ids) == len(set(chosen_ids))  # Không bao giờ chọn trùng meme_id
+
+
+@pytest.mark.anyio
+async def test_voicemod_tuna_api_key_dynamic_override_and_auth_headers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from hbt.shared.online_sources.tuna_sfx import search_tuna_sfx
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    monkeypatch.setenv("VOICEMOD_TUNA_API_KEY", "")
+    AppSettingsStore(ws).save(AppSettings(voicemod_tuna_api_key="tuna-live-secret"))
+    assert resolve_online_api_key("VOICEMOD_TUNA_API_KEY", ws) == "tuna-live-secret"
+    assert resolve_online_api_key("tuna", ws) == "tuna-live-secret"
+
+    captured_headers: dict[str, str] = {}
+
+    def ok_auth_handler(request: httpx.Request) -> httpx.Response:
+        captured_headers["x-api-key"] = request.headers.get("x-api-key", "")
+        captured_headers["authorization"] = request.headers.get("authorization", "")
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "tn1",
+                        "name": "Boom Impact",
+                        "duration": 900,
+                        "mp3Path": "https://cdn.voicemod.net/tn1.mp3",
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(ok_auth_handler)) as c:
+        items = await search_tuna_sfx("boom", api_key="tuna-live-secret", client=c)
+        assert len(items) == 1
+        assert captured_headers["x-api-key"] == "tuna-live-secret"
+        assert captured_headers["authorization"] == "Bearer tuna-live-secret"
+
+    def err_401_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(err_401_handler)) as c:
+        with pytest.raises(ValueError, match="VOICEMOD_TUNA_API_KEY"):
+            await search_tuna_sfx("boom", api_key="bad-key", client=c)

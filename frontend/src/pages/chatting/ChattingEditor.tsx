@@ -4,11 +4,13 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { useSafeZone } from '../../components/SafeZoneOverlay';
 import { PhonePreviewStage } from '../../components/studio/PhonePreviewStage';
+import { SceneTimelineStrip } from '../../components/studio/SceneTimelineStrip';
+import { StudioTopBar } from '../../components/studio/StudioTopBar';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
-import { Select } from '../../components/ui/Select';
+import { StudioSelect } from '../../components/ui/StudioSelect';
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from '../../components/icons';
 
 const DURATION_OPTIONS = [
@@ -404,350 +406,376 @@ export function ChattingEditor() {
     : data?.preview_url;
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden">
-      {/* CỘT TRÁI (280px): Nhân vật + Danh sách tin nhắn */}
-      <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-card p-4 overflow-y-auto">
-        <Link
-          to="/chatting"
-          className="mb-4 inline-flex items-center gap-1.5 text-tiny font-bold text-muted hover:text-text"
-        >
-          <ArrowLeftIcon size={16} /> Quay lại danh sách
-        </Link>
-
-        <h2 className="text-small font-extrabold text-text">{vi.chatting.characters}</h2>
-        <div className="mt-3 space-y-3">
-          {doc.characters.map((char: ChatCharacter) => (
-            <div key={char.id} className="rounded-xl border border-line bg-soft-2 p-2.5">
-              <div className="flex items-center gap-2.5">
-                <label className="relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-line bg-soft">
-                  {char.avatar ? (
-                    <img
-                      src={`/api/chatting/${slug}/${char.avatar}?t=${Date.now()}`}
-                      alt={char.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="font-bold text-text">{char.name ? char.name[0] : 'U'}</span>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files?.[0]) {
-                        handleAvatarUpload(char.id, e.target.files[0]);
-                      }
-                    }}
-                  />
-                </label>
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-tiny font-bold text-text">
-                    {char.name} ({char.side === 'right' ? 'Phải/Tôi' : 'Trái'})
-                  </p>
-                  <Select
-                    aria-label={`Giọng của ${char.name}`}
-                    variant="compact"
-                    value={char.voice_id || 'Adam bựa'}
-                    onChange={(e) => {
-                      const newChars = doc.characters.map((c: ChatCharacter) =>
-                        c.id === char.id ? { ...c, voice_id: e.target.value } : c,
-                      );
-                      saveDoc({ ...doc, characters: newChars });
-                    }}
-                    className="mt-1"
-                  >
-                    {VOICE_OPTIONS.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6 flex items-center justify-between border-t border-line pt-4">
-          <h2 className="text-small font-extrabold text-text">
-            {vi.chatting.messages} ({doc.messages.length})
-          </h2>
-          <button
-            type="button"
-            onClick={handleAddMessage}
-            className="rounded p-1 text-muted hover:bg-soft hover:text-text"
-            title={vi.chatting.addMsg}
+    <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-bg text-text">
+      <StudioTopBar
+        engineBadge="Chatting"
+        savedText={isSaving ? vi.chatting.saving : vi.studioShell.savedBadge}
+        exportProps={{
+          aspect: '9:16',
+          showWatermarkControl: true,
+          onExportPreview: () => void handleRender(true),
+          onExportFinal: () => void handleRender(false),
+          previewLabel: vi.chatting.exportFast,
+          finalLabel: vi.chatting.exportFinal,
+          disabled: isRendering,
+          isRendering,
+          progressPct: renderProgress ?? 0,
+          progressStage: isRendering ? 'Đang dựng video Chatting 60fps…' : '',
+        }}
+      />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* CỘT TRÁI (280px): Nhân vật + Danh sách tin nhắn */}
+        <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-card p-4 overflow-y-auto">
+          <Link
+            to="/chatting"
+            className="mb-4 inline-flex items-center gap-1.5 text-tiny font-bold text-muted hover:text-text"
           >
-            <PlusIcon size={16} />
-          </button>
-        </div>
+            <ArrowLeftIcon size={16} /> Quay lại danh sách
+          </Link>
 
-        <div className="mt-2 flex-1 space-y-1.5 overflow-y-auto">
-          {doc.messages.map((m: ChatMessage, idx: number) => {
-            const isSelected = idx === selectedMsgIndex;
-            const sender = doc.characters.find((c: ChatCharacter) => c.id === m.from);
-            return (
-              <div
-                key={idx}
-                onClick={() => setSelectedMsgIndex(idx)}
-                className={`flex cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-tiny transition-colors ${
-                  isSelected
-                    ? 'bg-primary text-on-primary font-bold'
-                    : 'bg-soft/40 hover:bg-soft text-text'
-                }`}
-              >
-                <div className="flex-1 truncate mr-2">
-                  <span className="opacity-70">{idx + 1}. </span>
-                  <span className="font-semibold">{sender?.name}: </span>
-                  <span>{m.text}</span>
+          <h2 className="text-small font-extrabold text-text">{vi.chatting.characters}</h2>
+          <div className="mt-3 space-y-3">
+            {doc.characters.map((char: ChatCharacter) => (
+              <div key={char.id} className="rounded-xl border border-line bg-soft-2 p-2.5">
+                <div className="flex items-center gap-2.5">
+                  <label className="relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-line bg-soft">
+                    {char.avatar ? (
+                      <img
+                        src={`/api/chatting/${slug}/${char.avatar}?t=${Date.now()}`}
+                        alt={char.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="font-bold text-text">{char.name ? char.name[0] : 'U'}</span>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          handleAvatarUpload(char.id, e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </label>
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-tiny font-bold text-text">
+                      {char.name} ({char.side === 'right' ? 'Phải/Tôi' : 'Trái'})
+                    </p>
+                    <StudioSelect
+                      aria-label={`Giọng của ${char.name}`}
+                      variant="compact"
+                      value={char.voice_id || 'Adam bựa'}
+                      onChange={(val) => {
+                        const newChars = doc.characters.map((c: ChatCharacter) =>
+                          c.id === char.id ? { ...c, voice_id: val } : c,
+                        );
+                        saveDoc({ ...doc, characters: newChars });
+                      }}
+                      options={VOICE_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      className="mt-1"
+                    />
+                  </div>
                 </div>
-                {m.sticker && (
-                  <span className="rounded bg-black/10 px-1.5 py-0.5 text-[10px] uppercase">
-                    {m.sticker}
-                  </span>
-                )}
               </div>
-            );
-          })}
-        </div>
-      </aside>
-
-      {/* CỘT GIỮA: Sửa tin đang chọn */}
-      <main className="flex flex-1 flex-col p-6 overflow-y-auto">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
-          <div>
-            <h1 className="text-xl font-bold">{doc.title}</h1>
-            <p className="text-tiny text-muted">
-              {vi.chatting.platform}: {doc.platform} · {doc.messages.length} tin nhắn ·{' '}
-              {doc.characters.length > 2 ? `Nhóm ${doc.characters.length} người` : '2 người'}
-            </p>
+            ))}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {isSaving && <span className="text-tiny text-muted">{vi.chatting.saving}</span>}
-            <Select
-              aria-label="Trần thời lượng video"
-              variant="pill"
-              autoWidth
-              value={doc.target_duration_s ? String(doc.target_duration_s) : ''}
-              onChange={(e) => {
-                const v = e.target.value ? Number(e.target.value) : null;
-                saveDoc({ ...doc, target_duration_s: v });
-              }}
+
+          <div className="mt-6 flex items-center justify-between border-t border-line pt-4">
+            <h2 className="text-small font-extrabold text-text">
+              {vi.chatting.messages} ({doc.messages.length})
+            </h2>
+            <button
+              type="button"
+              onClick={handleAddMessage}
+              className="rounded p-1 text-muted hover:bg-soft hover:text-text"
+              title={vi.chatting.addMsg}
             >
-              {DURATION_OPTIONS.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </Select>
-            <Button tone="soft" size="sm" onClick={handleRegenAI}>
-              {vi.chatting.regenBtn}
-            </Button>
+              <PlusIcon size={16} />
+            </button>
           </div>
-        </div>
 
-        {notice && (
-          <div className="mt-4 rounded-xl bg-tint-yel/60 p-3 text-tiny font-bold text-text">
-            {notice}
+          <div className="mt-2 flex-1 space-y-1.5 overflow-y-auto">
+            {doc.messages.map((m: ChatMessage, idx: number) => {
+              const isSelected = idx === selectedMsgIndex;
+              const sender = doc.characters.find((c: ChatCharacter) => c.id === m.from);
+              return (
+                <div
+                  key={idx}
+                  onClick={() => setSelectedMsgIndex(idx)}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-tiny transition-colors ${
+                    isSelected
+                      ? 'bg-primary text-on-primary font-bold'
+                      : 'bg-soft/40 hover:bg-soft text-text'
+                  }`}
+                >
+                  <div className="flex-1 truncate mr-2">
+                    <span className="opacity-70">{idx + 1}. </span>
+                    <span className="font-semibold">{sender?.name}: </span>
+                    <span>{m.text}</span>
+                  </div>
+                  {m.sticker && (
+                    <span className="rounded bg-black/10 px-1.5 py-0.5 text-[10px] uppercase">
+                      {m.sticker}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
+        </aside>
 
-        {doc.warnings && doc.warnings.length > 0 && (
-          <div className="mt-4 rounded-xl border border-tint-yel/60 bg-tint-yel/20 p-3.5 text-tiny text-text">
-            <div className="flex items-center gap-1.5 font-bold text-accent">
-              <span>⚠️ Lưu ý kịch bản:</span>
+        {/* CỘT GIỮA: Sửa tin đang chọn */}
+        <main className="flex flex-1 flex-col p-6 overflow-y-auto">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+            <div>
+              <h1 className="text-xl font-bold">{doc.title}</h1>
+              <p className="text-tiny text-muted">
+                {vi.chatting.platform}: {doc.platform} · {doc.messages.length} tin nhắn ·{' '}
+                {doc.characters.length > 2 ? `Nhóm ${doc.characters.length} người` : '2 người'}
+              </p>
             </div>
-            <ul className="mt-1 list-disc list-inside space-y-0.5 text-muted">
-              {doc.warnings.map((w: string, i: number) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
+            <div className="flex flex-wrap items-center gap-3">
+              {isSaving && <span className="text-tiny text-muted">{vi.chatting.saving}</span>}
+              <StudioSelect
+                aria-label="Trần thời lượng video"
+                variant="pill"
+                autoWidth
+                value={doc.target_duration_s ? String(doc.target_duration_s) : ''}
+                onChange={(val) => {
+                  const v = val ? Number(val) : null;
+                  saveDoc({ ...doc, target_duration_s: v });
+                }}
+                options={DURATION_OPTIONS.map((d) => ({ value: d.id, label: d.label }))}
+                className="min-w-[160px]"
+              />
+              <Button tone="soft" size="sm" onClick={handleRegenAI}>
+                {vi.chatting.regenBtn}
+              </Button>
+            </div>
           </div>
-        )}
 
-        <div className="mt-6 rounded-2xl border border-line bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-body font-extrabold">Sửa tin nhắn số {selectedMsgIndex + 1}</h2>
-            <Button
-              tone="soft"
-              size="sm"
-              onClick={() => handleDeleteMessage(selectedMsgIndex)}
-              className="text-danger hover:bg-danger/10"
-            >
-              <TrashIcon size={14} /> {vi.chatting.delMsg}
-            </Button>
-          </div>
+          {notice && (
+            <div className="mt-4 rounded-xl bg-tint-yel/60 p-3 text-tiny font-bold text-text">
+              {notice}
+            </div>
+          )}
 
-          {/* Chọn người gửi */}
-          <div className="mt-4">
-            <label className="text-tiny font-semibold text-muted">{vi.chatting.sender}:</label>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {doc.characters.map((c: ChatCharacter) => (
+          {doc.warnings && doc.warnings.length > 0 && (
+            <div className="mt-4 rounded-xl border border-tint-yel/60 bg-tint-yel/20 p-3.5 text-tiny text-text">
+              <div className="flex items-center gap-1.5 font-bold text-accent">
+                <span>⚠️ Lưu ý kịch bản:</span>
+              </div>
+              <ul className="mt-1 list-disc list-inside space-y-0.5 text-muted">
+                {doc.warnings.map((w: string, i: number) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="mt-6 rounded-2xl border border-line bg-card p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-body font-extrabold">Sửa tin nhắn số {selectedMsgIndex + 1}</h2>
+              <Button
+                tone="soft"
+                size="sm"
+                onClick={() => handleDeleteMessage(selectedMsgIndex)}
+                className="text-danger hover:bg-danger/10"
+              >
+                <TrashIcon size={14} /> {vi.chatting.delMsg}
+              </Button>
+            </div>
+
+            {/* Chọn người gửi */}
+            <div className="mt-4">
+              <label className="text-tiny font-semibold text-muted">{vi.chatting.sender}:</label>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {doc.characters.map((c: ChatCharacter) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => handleSenderChange(c.id)}
+                    className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
+                      activeMsg.from === c.id
+                        ? 'bg-primary text-on-primary'
+                        : 'bg-soft text-text hover:bg-soft/80'
+                    }`}
+                  >
+                    {c.name} ({c.side === 'right' ? 'Tôi' : 'Bạn'})
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Nội dung tin nhắn */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <label className="text-tiny font-semibold text-muted">Lời nhắn:</label>
+                <span
+                  className={`text-tiny font-bold tabular-nums ${
+                    activeMsg.text.length > 300 ? 'text-danger' : 'text-muted'
+                  }`}
+                >
+                  {activeMsg.text.length}/300
+                </span>
+              </div>
+              <textarea
+                value={activeMsg.text}
+                onChange={(e) => handleTextChange(e.target.value)}
+                rows={3}
+                maxLength={300}
+                className="mt-1.5 w-full resize-none rounded-xl border border-line bg-soft-2 p-3 text-body font-medium outline-none focus:border-text focus:ring-2 focus:ring-accent"
+              />
+            </div>
+
+            {/* Ảnh / Video minh họa trong luồng chat */}
+            <div className="mt-4 rounded-xl border border-line bg-soft-2 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-tiny font-semibold text-muted">Ảnh / Video minh họa:</span>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80">
+                    Đính kèm Ảnh / Video
+                    <input
+                      type="file"
+                      accept="image/*,video/mp4,video/quicktime,.gif"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleMediaUpload(f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {activeMsg.media_path && (
+                    <button
+                      type="button"
+                      onClick={handleMediaClear}
+                      className="rounded-full bg-danger/15 px-3 py-1 text-tiny font-bold text-danger"
+                    >
+                      Xóa media
+                    </button>
+                  )}
+                </div>
+              </div>
+              {activeMsg.media_hint && (
+                <p className="mt-1.5 text-tiny text-muted">
+                  💡 Gợi ý AI: <span className="text-text">{activeMsg.media_hint}</span>
+                </p>
+              )}
+              {activeMsg.media_path && (
+                <p className="mt-1 text-tiny font-mono text-emerald-400">
+                  Đã đính kèm ({activeMsg.media_type}): {activeMsg.media_path}
+                </p>
+              )}
+            </div>
+
+            {/* Chọn Sticker */}
+            <div className="mt-4">
+              <label className="text-tiny font-semibold text-muted">{vi.chatting.sticker}:</label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <button
-                  key={c.id}
                   type="button"
-                  onClick={() => handleSenderChange(c.id)}
-                  className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
-                    activeMsg.from === c.id
+                  onClick={() => handleStickerChange(null)}
+                  className={`rounded-full px-3 py-1 text-tiny font-bold transition-colors ${
+                    !activeMsg.sticker
                       ? 'bg-primary text-on-primary'
                       : 'bg-soft text-text hover:bg-soft/80'
                   }`}
                 >
-                  {c.name} ({c.side === 'right' ? 'Tôi' : 'Bạn'})
+                  {vi.chatting.noSticker}
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Nội dung tin nhắn */}
-          <div className="mt-4">
-            <div className="flex items-center justify-between">
-              <label className="text-tiny font-semibold text-muted">Lời nhắn:</label>
-              <span
-                className={`text-tiny font-bold tabular-nums ${
-                  activeMsg.text.length > 300 ? 'text-danger' : 'text-muted'
-                }`}
-              >
-                {activeMsg.text.length}/300
-              </span>
-            </div>
-            <textarea
-              value={activeMsg.text}
-              onChange={(e) => handleTextChange(e.target.value)}
-              rows={3}
-              maxLength={300}
-              className="mt-1.5 w-full resize-none rounded-xl border border-line bg-soft-2 p-3 text-body font-medium outline-none focus:border-text focus:ring-2 focus:ring-accent"
-            />
-          </div>
-
-          {/* Ảnh / Video minh họa trong luồng chat */}
-          <div className="mt-4 rounded-xl border border-line bg-soft-2 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-tiny font-semibold text-muted">Ảnh / Video minh họa:</span>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80">
-                  Đính kèm Ảnh / Video
-                  <input
-                    type="file"
-                    accept="image/*,video/mp4,video/quicktime,.gif"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void handleMediaUpload(f);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-                {activeMsg.media_path && (
+                {STICKER_TAGS.map((tag) => (
                   <button
+                    key={tag}
                     type="button"
-                    onClick={handleMediaClear}
-                    className="rounded-full bg-danger/15 px-3 py-1 text-tiny font-bold text-danger"
+                    onClick={() => handleStickerChange(tag)}
+                    className={`rounded-full px-3 py-1 text-tiny font-bold uppercase transition-colors ${
+                      activeMsg.sticker === tag
+                        ? 'bg-accent text-primary'
+                        : 'bg-soft text-text hover:bg-soft/80'
+                    }`}
                   >
-                    Xóa media
+                    {tag}
                   </button>
-                )}
+                ))}
               </div>
             </div>
-            {activeMsg.media_hint && (
-              <p className="mt-1.5 text-tiny text-muted">
-                💡 Gợi ý AI: <span className="text-text">{activeMsg.media_hint}</span>
-              </p>
-            )}
-            {activeMsg.media_path && (
-              <p className="mt-1 text-tiny font-mono text-emerald-400">
-                Đã đính kèm ({activeMsg.media_type}): {activeMsg.media_path}
-              </p>
-            )}
           </div>
+        </main>
 
-          {/* Chọn Sticker */}
-          <div className="mt-4">
-            <label className="text-tiny font-semibold text-muted">{vi.chatting.sticker}:</label>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => handleStickerChange(null)}
-                className={`rounded-full px-3 py-1 text-tiny font-bold transition-colors ${
-                  !activeMsg.sticker
-                    ? 'bg-primary text-on-primary'
-                    : 'bg-soft text-text hover:bg-soft/80'
-                }`}
-              >
-                {vi.chatting.noSticker}
-              </button>
-              {STICKER_TAGS.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => handleStickerChange(tag)}
-                  className={`rounded-full px-3 py-1 text-tiny font-bold uppercase transition-colors ${
-                    activeMsg.sticker === tag
-                      ? 'bg-accent text-primary'
-                      : 'bg-soft text-text hover:bg-soft/80'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* CỘT PHẢI (376px): Xem trước 9:16 + Nút Xuất */}
-      <aside className="w-[376px] shrink-0 overflow-y-auto border-l border-line bg-bg/50 p-4">
-        <PhonePreviewStage
-          title="Xem trước"
-          badgeText={
-            doc.platform === 'instagram'
-              ? '9:16 · Instagram iOS · 60fps'
-              : '9:16 · Messenger iOS · 60fps'
-          }
-          safeZone={safeZone}
-          onSafeZoneChange={setSafeZone}
-          previewBusy={isRendering}
-          exportBusy={isRendering}
-          previewDisabled={isRendering}
-          exportDisabled={isRendering}
-          previewLabel={vi.chatting.exportFast}
-          exportLabel={vi.chatting.exportFinal}
-          onPreview={() => handleRender(true)}
-          onExport={() => handleRender(false)}
-          footer={
-            <div className="space-y-2 text-center">
-              {isRendering && (
-                <p className="num text-tiny font-bold text-engine-chatting">
-                  Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}
-                </p>
-              )}
-              {videoUrl && (
-                <a
-                  href={videoUrl}
-                  download
-                  className="inline-block text-tiny font-bold text-engine-postv hover:underline"
-                >
-                  {vi.chatting.download}
-                </a>
-              )}
-            </div>
-          }
-        >
-          {videoUrl ? (
-            <video
-              key={videoUrl}
-              src={videoUrl}
-              controls
-              autoPlay={false}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center p-4 text-center text-tiny text-muted-on-dark">
-              Chưa có video xem nhanh. Bấm &quot;Xem nhanh&quot; để dựng.
-            </div>
-          )}
-        </PhonePreviewStage>
-      </aside>
+        {/* CỘT PHẢI (376px): Xem trước 9:16 + Nút Xuất */}
+        <aside className="w-[376px] shrink-0 overflow-y-auto border-l border-line bg-bg/50 p-4">
+          <PhonePreviewStage
+            title="Xem trước"
+            badgeText={
+              doc.platform === 'instagram'
+                ? '9:16 · Instagram iOS · 60fps'
+                : '9:16 · Messenger iOS · 60fps'
+            }
+            safeZone={safeZone}
+            onSafeZoneChange={setSafeZone}
+            previewBusy={isRendering}
+            exportBusy={isRendering}
+            previewDisabled={isRendering}
+            exportDisabled={isRendering}
+            previewLabel={vi.chatting.exportFast}
+            exportLabel={vi.chatting.exportFinal}
+            onPreview={() => handleRender(true)}
+            onExport={() => handleRender(false)}
+            footer={
+              <div className="space-y-2 text-center">
+                {isRendering && (
+                  <p className="num text-tiny font-bold text-engine-chatting">
+                    Đang dựng video... {renderProgress ? `${renderProgress}%` : ''}
+                  </p>
+                )}
+                {videoUrl && (
+                  <a
+                    href={videoUrl}
+                    download
+                    className="inline-block text-tiny font-bold text-engine-postv hover:underline"
+                  >
+                    {vi.chatting.download}
+                  </a>
+                )}
+              </div>
+            }
+          >
+            {videoUrl ? (
+              <video
+                key={videoUrl}
+                src={videoUrl}
+                controls
+                autoPlay={false}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center p-4 text-center text-tiny text-muted-on-dark">
+                Chưa có video xem nhanh. Bấm &quot;Xem nhanh&quot; để dựng.
+              </div>
+            )}
+          </PhonePreviewStage>
+        </aside>
+      </div>
+      <SceneTimelineStrip
+        items={doc.messages.map((m: ChatMessage, idx: number) => {
+          const sender = doc.characters.find((c: ChatCharacter) => c.id === m.from);
+          return {
+            id: String(idx),
+            index: idx + 1,
+            title: sender?.name,
+            summary: `${sender?.name ? `${sender.name}: ` : ''}${m.text}`,
+            badge: m.sticker ? `[${m.sticker}]` : sender?.name,
+          };
+        })}
+        selectedId={String(selectedMsgIndex)}
+        onSelect={(id) => setSelectedMsgIndex(Number(id))}
+        onAdd={handleAddMessage}
+        addLabel="+ Thêm tin nhắn"
+        onDelete={(id) => handleDeleteMessage(Number(id))}
+      />
     </div>
   );
 }

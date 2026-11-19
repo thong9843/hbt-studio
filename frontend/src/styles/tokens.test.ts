@@ -84,31 +84,55 @@ describe('tokens.css v2', () => {
     }
   });
 
-  it('uses the exact light and dark values of v5.0 Creator Workstation', () => {
+  it('uses the exact VEED-inspired Bright Minimalist and Quiet Dark surface hierarchy (90-8-2 rule)', () => {
     const l = resolver('light');
     const d = resolver('dark');
-    expect([l('--bg'), l('--card'), l('--soft'), l('--line'), l('--text')]).toEqual([
-      '#f6f8fc',
+    expect([
+      l('--bg'),
+      l('--card'),
+      l('--surface-card'),
+      l('--bg-elevated'),
+      l('--bg-canvas'),
+      l('--line'),
+      l('--text'),
+      l('--muted'),
+    ]).toEqual([
+      '#f7f8fa',
       '#ffffff',
-      '#f1f5f9',
-      '#e2e8f0',
-      '#0f172a',
+      '#ffffff',
+      '#f1f3f6',
+      '#eceff4',
+      '#e6e8ee',
+      '#111318',
+      '#5e6675',
     ]);
-    expect([d('--bg'), d('--card'), d('--soft'), d('--line'), d('--text')]).toEqual([
-      '#0b0f19',
-      '#131a2a',
-      '#1e293b',
+    expect([
+      d('--bg'),
+      d('--card'),
+      d('--surface-card'),
+      d('--bg-elevated'),
+      d('--bg-canvas'),
+      d('--line'),
+      d('--text'),
+      d('--muted'),
+    ]).toEqual([
+      '#0e1015',
+      '#151821',
+      '#151821',
+      '#1c202b',
+      '#090b0f',
       'rgba(255, 255, 255, 0.08)',
-      '#f8fafc',
+      '#f4f6fa',
+      '#96a0b2',
     ]);
     expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#b91c1c']);
     expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#facc15', '#d9232e', '#f87171']);
   });
 
-  it('has radii and shadows for v5.0 cards', () => {
-    expect(light['--radius-card']).toBe('20px');
-    expect(light['--radius-dialog']).toBe('24px');
-    expect(light['--radius-input']).toBe('12px');
+  it('has VEED minimalist radii and shadows', () => {
+    expect(light['--radius-card']).toBe('14px');
+    expect(light['--radius-dialog']).toBe('16px');
+    expect(light['--radius-input']).toBe('10px');
     expect(light['--radius-pill']).toBe('999px');
     expect(darkAttr['--card-border']).toBe('rgba(255, 255, 255, 0.08)');
   });
@@ -139,18 +163,26 @@ describe('tokens.css v2', () => {
 const PAIRS: [string, string][] = [
   ['--text', '--bg'],
   ['--text', '--card'],
+  ['--text', '--surface-card'],
+  ['--text', '--bg-elevated'],
   ['--text', '--nav'],
   ['--text', '--soft'],
   ['--text', '--soft-2'],
   ['--text-2', '--bg'],
   ['--text-2', '--card'],
+  ['--text-2', '--surface-card'],
+  ['--text-2', '--bg-elevated'],
   ['--text-2', '--nav'],
   ['--text-2', '--soft'],
   ['--muted', '--bg'],
   ['--muted', '--card'],
+  ['--muted', '--surface-card'],
+  ['--muted', '--bg-elevated'],
   ['--muted', '--nav'],
   ['--muted', '--soft'],
   ['--muted', '--soft-2'],
+  ['--wm-badge-text', '--card'],
+  ['--wm-badge-text', '--bg-elevated'],
   ['--on-primary', '--primary'],
   ['--on-hero', '--hero'],
   ['--text-on-dark', '--surface-dark'],

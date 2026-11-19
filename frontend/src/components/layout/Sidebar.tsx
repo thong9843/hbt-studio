@@ -18,6 +18,8 @@ import {
   MessagesSquareIcon,
   MoonIcon,
   MusicIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   PlusIcon,
   SettingsIcon,
   SmartphoneIcon,
@@ -31,6 +33,8 @@ import { Progress } from '../ui/Progress';
 import { cx } from '../ui/cx';
 import { QuickCreateDrawer } from './QuickCreateDrawer';
 import '../ui/ui.css';
+
+export const SIDEBAR_COLLAPSED_KEY = 'hbt_sidebar_collapsed';
 
 const ENV_ITEMS = [
   'ffmpeg',
@@ -50,8 +54,10 @@ export interface RenderProgress {
 }
 
 export interface SidebarProps {
-  /** Thu còn biểu tượng (rộng 72) ở dưới 1280 px. */
+  /** Thu còn biểu tượng (rộng 64px) hoặc phóng rộng (224px). */
   mini: boolean;
+  /** Bấm nút mở rộng / thu gọn Sidebar. */
+  onToggleMini?: () => void;
   /** Có job đang chạy thì hiện thẻ tiến độ; `null` thì ẩn. */
   render?: RenderProgress | null;
 }
@@ -184,7 +190,7 @@ function OpenPostvProject({ slug, mini }: { slug: string; mini: boolean }) {
   );
 }
 
-/** Nút Sáng ↔ Tối: chữ và biểu tượng là chế độ hiện tại; thu 72 px chỉ còn biểu tượng. */
+/** Nút Sáng ↔ Tối: chữ và biểu tượng Mặt trăng / Mặt trời sắc nét, tách biệt hẳn icon Bánh răng Cài đặt. */
 function ThemeToggle({ mini }: { mini: boolean }) {
   const { theme, toggle } = useTheme();
   const dark = theme === 'dark';
@@ -200,7 +206,9 @@ function ThemeToggle({ mini }: { mini: boolean }) {
       title={mini ? action : undefined}
       onClick={toggle}
     >
-      <span className="shrink-0">{dark ? <MoonIcon /> : <SunIcon />}</span>
+      <span className="shrink-0" data-testid={dark ? 'theme-icon-moon' : 'theme-icon-sun'}>
+        {dark ? <MoonIcon /> : <SunIcon />}
+      </span>
       {!mini && <span className="truncate">{label}</span>}
     </button>
   );
@@ -240,14 +248,10 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
 
 /**
  * Sidebar thống nhất (Navigation Shell):
- * 1. Trang chủ (Dashboard / Hub)
- * 2. HBT Core (Auto V1 JSON & V2 1-Click Prompt)
- * 3. PostV (Bài đăng mạng xã hội trên nền gameplay)
- * 4. Chatting (Tin nhắn hội thoại 60fps)
- * 5. Cài đặt (Settings)
- * + Dự án (Quản lý danh sách dự án)
+ * - Có nút Mở rộng (224px) / Thu gọn (64px) rõ ràng ngay ở đầu thanh, lưu vào localStorage, hoạt động trên mọi trang.
+ * - Chân Sidebar phân biệt sắc nét icon Bánh răng (Cài đặt) và Mặt trăng / Mặt trời (Sáng/Tối).
  */
-export function Sidebar({ mini, render }: SidebarProps) {
+export function Sidebar({ mini, onToggleMini, render }: SidebarProps) {
   const { open: openNew } = useNewProject();
   const [quickOpen, setQuickOpen] = useState(false);
   const openVideo = useMatch('/p/:slug/*');
@@ -268,36 +272,62 @@ export function Sidebar({ mini, render }: SidebarProps) {
   });
   const latestPostvSlug = allProjects?.find((p) => p.kind === 'postv')?.slug;
   const showPostvProjectSlug = postvSlug || (isAdvanced ? latestPostvSlug : undefined);
+  const toggleLabel = mini ? vi.nav.expandSidebar : vi.nav.collapseSidebar;
 
   return (
     <aside
       className={cx(
-        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-line bg-nav/95 backdrop-blur-md transition-[width] duration-200',
-        mini ? 'w-[72px] px-2' : 'w-[248px] px-3.5',
+        'sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-subtle bg-nav transition-[width] duration-[180ms] motion-reduce:transition-none',
+        mini ? 'w-[64px] px-1.5' : 'w-[224px] px-3',
       )}
     >
-      <Link
-        to="/"
-        aria-label={vi.appName}
-        className={cx('ui-nav-item mt-4 min-h-[52px]', mini && 'justify-center px-0')}
-      >
-        <img src="/brand/hbt-logo-mark.png" alt="" className="h-9 w-auto shrink-0 rounded-lg" />
-        {!mini && (
-          <div className="min-w-0">
-            <span className="block truncate text-body font-extrabold tracking-tight">
-              {vi.appName}
-            </span>
-            <span className="block text-[11px] font-semibold text-muted">Creator Workstation</span>
-          </div>
+      <div
+        className={cx(
+          'mt-3 flex items-center gap-1',
+          mini ? 'flex-col justify-center' : 'justify-between',
         )}
-      </Link>
+      >
+        <Link
+          to="/"
+          aria-label={vi.appName}
+          className={cx(
+            'ui-nav-item min-h-[48px] min-w-0 flex-1',
+            mini && 'w-full justify-center px-0',
+          )}
+        >
+          <img src="/brand/hbt-logo-mark.png" alt="" className="h-8 w-auto shrink-0 rounded-lg" />
+          {!mini && (
+            <div className="min-w-0">
+              <span className="block truncate text-body font-extrabold tracking-tight">
+                {vi.appName}
+              </span>
+              <span className="block truncate text-[11px] font-semibold text-muted">
+                Creator Workstation
+              </span>
+            </div>
+          )}
+        </Link>
 
-      <div className={cx('mt-3 flex gap-2', mini ? 'flex-col items-center' : 'items-center')}>
+        {onToggleMini && (
+          <button
+            type="button"
+            onClick={onToggleMini}
+            aria-label={toggleLabel}
+            aria-expanded={!mini}
+            title={toggleLabel}
+            className="ui-icon-btn ui-icon-btn-sm shrink-0 text-muted hover:text-text"
+          >
+            {mini ? <PanelLeftOpenIcon size={18} /> : <PanelLeftCloseIcon size={18} />}
+          </button>
+        )}
+      </div>
+
+      <div className={cx('mt-2.5 flex gap-2', mini ? 'flex-col items-center' : 'items-center')}>
         <button
           type="button"
           className={cx(
             'ui-btn ui-btn-brand flex-1',
-            mini && 'mx-auto !h-11 !w-11 !min-h-0 !flex-none !p-0',
+            mini && 'mx-auto !h-10 !w-10 !min-h-0 !flex-none !p-0',
           )}
           aria-label={vi.nav.newVideo}
           title={mini ? vi.nav.newVideo : 'Tạo dự án HBT / PostV thủ công'}
@@ -309,7 +339,7 @@ export function Sidebar({ mini, render }: SidebarProps) {
         {!mini && (
           <button
             type="button"
-            className="ui-btn ui-btn-magic !min-h-[48px] !px-3.5"
+            className="ui-btn ui-btn-magic !min-h-[40px] !px-3"
             aria-label="Tạo nhanh"
             title="Mở bảng chọn nhanh 3 động cơ AI"
             onClick={() => setQuickOpen(true)}
@@ -319,33 +349,18 @@ export function Sidebar({ mini, render }: SidebarProps) {
         )}
       </div>
 
-      <nav aria-label={vi.nav.main} className="mt-4 flex-1 overflow-y-auto">
+      <nav aria-label={vi.nav.main} className="mt-3 flex-1 overflow-y-auto">
         <div className="space-y-1">
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
-          <NavItem
-            to="/core"
-            icon={<ZapIcon className="text-engine-core" />}
-            label={vi.nav.hbtCore}
-            mini={mini}
-          />
-          <NavItem
-            to="/postv"
-            icon={<SmartphoneIcon className="text-engine-postv" />}
-            label={vi.nav.postv}
-            mini={mini}
-          />
+          <NavItem to="/core" icon={<ZapIcon />} label={vi.nav.hbtCore} mini={mini} />
+          <NavItem to="/postv" icon={<SmartphoneIcon />} label={vi.nav.postv} mini={mini} />
           <NavItem
             to="/chatting"
-            icon={<MessagesSquareIcon className="text-engine-chatting" />}
+            icon={<MessagesSquareIcon />}
             label={vi.nav.chatting}
             mini={mini}
           />
-          <NavItem
-            to="/stickv"
-            icon={<SparklesIcon className="text-engine-stickv" />}
-            label={vi.nav.stickv}
-            mini={mini}
-          />
+          <NavItem to="/stickv" icon={<SparklesIcon />} label={vi.nav.stickv} mini={mini} />
           <NavItem to="/library" icon={<FolderIcon />} label={vi.nav.library} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}

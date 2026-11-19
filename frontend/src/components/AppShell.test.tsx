@@ -9,7 +9,11 @@ import { renderWithProviders } from '../test/render';
 import { AppShell } from './AppShell';
 import { RenderCard } from './SideNav';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  localStorage.removeItem('hbt_sidebar_collapsed');
+  localStorage.removeItem('hbt_advanced_mode');
+  vi.unstubAllGlobals();
+});
 
 const health = {
   ok: true,
@@ -91,11 +95,25 @@ describe('AppShell, wide (>= 1280 px)', () => {
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
-  it('is 248 px wide and fixed in place', () => {
+  it('is 224 px wide when expanded and can be toggled to 64 px and back on any page with localStorage persistence', async () => {
     stubFetch(routes());
-    shell();
+    shell('/core');
     const side = screen.getByRole('complementary');
-    expect(side).toHaveClass('w-[248px]', 'sticky', 'h-screen');
+    expect(side).toHaveClass('w-[224px]', 'sticky', 'h-screen');
+
+    const collapseBtn = screen.getByRole('button', { name: 'Thu gọn thanh bên' });
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(collapseBtn);
+
+    expect(side).toHaveClass('w-[64px]');
+    expect(localStorage.getItem('hbt_sidebar_collapsed')).toBe('true');
+
+    const expandBtn = screen.getByRole('button', { name: 'Mở rộng thanh bên' });
+    expect(expandBtn).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(expandBtn);
+
+    expect(side).toHaveClass('w-[224px]');
+    expect(localStorage.getItem('hbt_sidebar_collapsed')).toBe('false');
   });
 
   it('hides the open-project block outside a project', () => {
@@ -236,6 +254,7 @@ describe('AppShell, wide (>= 1280 px)', () => {
     shell();
     const order = [
       'HBT Studio',
+      'Thu gọn thanh bên',
       'Tạo video',
       'Tạo nhanh',
       'Trang chủ',
@@ -254,12 +273,13 @@ describe('AppShell, wide (>= 1280 px)', () => {
 });
 
 describe('AppShell, narrow (< 1280 px)', () => {
-  it('collapses to 72 px with icons only, still named for screen readers', () => {
+  it('collapses to 64 px with icons only, still named for screen readers, and can be manually expanded', async () => {
     const restore = narrowScreen();
     try {
       stubFetch(routes());
       shell('/p/muoi');
-      expect(screen.getByRole('complementary')).toHaveClass('w-[72px]');
+      const side = screen.getByRole('complementary');
+      expect(side).toHaveClass('w-[64px]');
       expect(screen.queryByText('HBT Studio')).toBeNull();
       // Chữ còn trong DOM dưới dạng sr-only, và có tooltip.
       const home = screen.getByRole('link', { name: 'Thư viện' });
@@ -272,6 +292,10 @@ describe('AppShell, narrow (< 1280 px)', () => {
       );
       // Tên dự án không hiện ở chế độ thu.
       expect(screen.queryByText('muoi')).toBeNull();
+
+      // Người dùng bấm Mở rộng thanh bên ngay cả trên màn hẹp
+      await userEvent.click(screen.getByRole('button', { name: 'Mở rộng thanh bên' }));
+      expect(side).toHaveClass('w-[224px]');
     } finally {
       restore();
     }

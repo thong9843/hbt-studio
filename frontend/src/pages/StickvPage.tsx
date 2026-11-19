@@ -1,37 +1,81 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
 import type {
+  StickvAnimationMode,
   StickvAspect,
   StickvBeat,
   StickvBoardType,
+  StickvCameraShot,
+  StickvDomain,
+  StickvEmotion,
+  StickvInteraction,
   StickvMotion,
   StickvProject,
   StickvSfxTag,
   StickvTheme,
 } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { CopyIcon, PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from '../components/icons';
-import type { SafeZonePlatform } from '../components/SafeZoneOverlay';
-import { PhonePreviewStage } from '../components/studio/PhonePreviewStage';
+import { CinemaInspectorPanel } from '../components/cinema/CinemaInspectorPanel';
+import {
+  ChevronDownIcon,
+  CopyIcon,
+  EyeIcon,
+  FilmIcon,
+  MusicIcon,
+  PlusIcon,
+  SparklesIcon,
+  UploadIcon,
+} from '../components/icons';
+import { SafeZoneOverlay, type SafeZonePlatform } from '../components/SafeZoneOverlay';
+import { StudioShell } from '../components/studio/StudioShell';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { useRenderJob } from '../hooks/renderJob';
+import { Dialog } from '../components/ui/Dialog';
+import { Input } from '../components/ui/Field';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { StudioSelect } from '../components/ui/StudioSelect';
+import { Switch } from '../components/ui/Switch';
+import { cx } from '../components/ui/cx';
+import { useRenderJobStatus } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
+import { vi } from '../i18n/vi';
+
+/** Ghi nhớ các job StickV đã hoàn tất đã thông báo trong phiên để tránh toast trùng khi re-render. */
+const seenCompletedStickvJobs = new Set<string>();
 
 const DEFAULT_POSE_OPTIONS = [
-  { id: 'explain', label: 'Giải thích' },
-  { id: 'think', label: 'Suy nghĩ' },
-  { id: 'shock', label: 'Bất ngờ / Sốc' },
-  { id: 'happy', label: 'Vui vẻ' },
-  { id: 'run', label: 'Chạy nhanh' },
-  { id: 'rich', label: 'Giàu có' },
-  { id: 'sad', label: 'Buồn bã' },
-  { id: 'angry', label: 'Tức giận' },
+  { id: 'point_up', label: 'Chỉ tay lên bảng' },
+  { id: 'point_board_high', label: 'Chỉ cao lên bảng' },
+  { id: 'think_chin', label: 'Vắt tay lên cằm' },
+  { id: 'arms_crossed', label: 'Khoanh tay phân tích' },
+  { id: 'hands_on_hips', label: 'Chống nạnh khẳng định' },
+  { id: 'shrug_ask', label: 'Nhún vai đặt câu hỏi' },
+  { id: 'present_board', label: 'Xòe tay giới thiệu' },
+  { id: 'emphatic_chop', label: 'Đánh nhịp nhấn ý' },
+  { id: 'shock_hands_up', label: 'Giơ tay sửng sốt' },
+  { id: 'lean_secret', label: 'Thì thầm bật mí' },
+  { id: 'count_points', label: 'Đếm ý trên tay' },
+  { id: 'walk_explore', label: 'Sải bước khám phá' },
+  { id: 'idle_breathe', label: 'Đứng thở tự nhiên' },
+  { id: 'wave_hello', label: 'Vẫy tay chào mở đầu' },
+  { id: 'scratch_head', label: 'Gãi đầu băn khoăn' },
+  { id: 'facepalm_light', label: 'Vỗ trán ngán ngẩm' },
+  { id: 'nod_yes', label: 'Gật đầu đồng tình' },
+  { id: 'shake_no', label: 'Lắc đầu bác bỏ' },
 ];
 
 const EXTRA_POSE_LABELS: Record<string, string> = {
+  explain: 'Giải thích (Cũ)',
+  think: 'Suy nghĩ (Cũ)',
+  shock: 'Bất ngờ / Sốc (Cũ)',
+  happy: 'Vui vẻ (Cũ)',
+  run: 'Chạy nhanh',
+  rich: 'Giàu có',
+  sad: 'Buồn bã',
+  angry: 'Tức giận',
   idea: 'Ý tưởng / Sáng kiến',
   confused: 'Bối rối / Khó hiểu',
   detective: 'Thám tử / Điều tra',
@@ -58,7 +102,6 @@ const MOTIONS: { id: StickvMotion; label: string }[] = [
   { id: 'bounce', label: 'Nhún nhịp' },
   { id: 'slide_left', label: 'Trượt từ phải' },
   { id: 'slide_right', label: 'Trượt từ trái' },
-  { id: 'shake', label: 'Rung mạnh' },
   { id: 'float', label: 'Lơ lửng' },
   { id: 'static', label: 'Đứng yên' },
 ];
@@ -73,10 +116,62 @@ const SFX_TAGS: { id: StickvSfxTag; label: string }[] = [
 
 const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'bullets', label: 'Gạch đầu dòng' },
-  { id: 'big_number', label: 'Con số lớn' },
-  { id: 'comparison', label: 'So sánh 2 cột' },
+  { id: 'timeline_era', label: 'Trục niên đại (Lịch sử)' },
+  { id: 'location_map', label: 'Bản đồ địa danh' },
+  { id: 'myth_vs_fact', label: 'Lầm tưởng vs Sự thật' },
+  { id: 'bar_compare', label: 'Biểu đồ cột động' },
+  { id: 'counter_grow', label: 'Bộ đếm số tăng' },
   { id: 'flow_steps', label: 'Sơ đồ bước' },
-  { id: 'none', label: 'Ẩn bảng' },
+  { id: 'comparison', label: 'So sánh 2 cột' },
+  { id: 'big_number', label: 'Con số lớn' },
+  { id: 'card', label: 'Thẻ thông tin' },
+  { id: 'quote', label: 'Trích dẫn' },
+  { id: 'list', label: 'Danh sách' },
+  { id: 'recap_card', label: 'Tóm tắt 3 ý (CTA)' },
+  { id: 'none', label: 'Thẻ tự động (Icon)' },
+];
+
+const DOMAINS: { id: StickvDomain; label: string; bgClass: string }[] = [
+  { id: 'paper_classic', label: 'Giấy kem HBT', bgClass: 'bg-[#FAF7F0] text-slate-900' },
+  { id: 'physics_science', label: 'Khoa học & Vật lý', bgClass: 'bg-[#0F172A] text-slate-50' },
+  { id: 'history_geo', label: 'Cổ đại / Lịch sử', bgClass: 'bg-[#DFC69B] text-stone-900' },
+  { id: 'psychology_story', label: 'Tâm lý & Kể chuyện', bgClass: 'bg-[#14121D] text-slate-50' },
+  { id: 'cosmos_mystery', label: 'Vũ trụ & Bí ẩn', bgClass: 'bg-[#090D16] text-slate-50' },
+];
+
+const MUSIC_MOODS: { id: string; label: string }[] = [
+  { id: 'curious_science', label: 'Tò mò / Khoa học' },
+  { id: 'history_epic', label: 'Sử thi / Kịch tính' },
+  { id: 'funny_quirky', label: 'Vui nhộn / Hài hước' },
+  { id: 'mysterious_tense', label: 'Bí ẩn / Căng thẳng' },
+  { id: 'calm_lofi', label: 'Nhẹ nhàng / Lofi' },
+];
+
+const CAMERA_SHOTS: { id: StickvCameraShot; label: string }[] = [
+  { id: 'wide_stage', label: 'Toàn cảnh' },
+  { id: 'focus_board', label: 'Zoom Bảng' },
+  { id: 'closeup_react', label: 'Cận cảnh biểu cảm' },
+];
+
+const INTERACTIONS: { id: StickvInteraction; label: string }[] = [
+  { id: 'none', label: 'Toàn cảnh' },
+  { id: 'hold_prop', label: 'Cầm Icon' },
+  { id: 'point_chart', label: 'Chỉ Biểu đồ' },
+  { id: 'versus_split', label: 'So sánh 2 vế' },
+];
+
+const EMOTIONS: { id: StickvEmotion; label: string }[] = [
+  { id: 'auto', label: 'Tự động theo thoại' },
+  { id: 'neutral', label: 'Bình tĩnh / Trung tính' },
+  { id: 'confident', label: 'Tự tin / Thuyết phục' },
+  { id: 'curious', label: 'Tò mò / Dấu hỏi' },
+  { id: 'idea', label: 'Bừng sáng ý tưởng' },
+  { id: 'shock', label: 'Sửng sốt / Bất ngờ' },
+  { id: 'skeptical', label: 'Hoài nghi / Nhướn mày' },
+  { id: 'serious', label: 'Nghiêm túc / Nhấn mạnh' },
+  { id: 'sad', label: 'Đồng cảm / Buồn nhẹ' },
+  { id: 'happy', label: 'Vui vẻ / Cởi mở' },
+  { id: 'excited', label: 'Hào hứng / Đỉnh điểm' },
 ];
 
 function makeEmptyBeat(index: number): StickvBeat {
@@ -84,7 +179,9 @@ function makeEmptyBeat(index: number): StickvBeat {
     id: `b${String(index).padStart(3, '0')}`,
     chapter: 1,
     narration: '',
-    pose: 'explain',
+    pose: 'present_board',
+    emotion: 'auto',
+    camera_shot: 'wide_stage',
     facing: 'right',
     motion: 'bounce',
     sfx_tag: 'whoosh',
@@ -99,15 +196,22 @@ function makeEmptyBeat(index: number): StickvBeat {
 export function StickvPage() {
   const qc = useQueryClient();
   const toast = useToast();
-  const job = useRenderJob();
+  // Chỉ đăng ký trạng thái vòng đời job (KHÔNG lắng nghe % progress để trang re-render 0 lần khi đang dựng)
+  const job = useRenderJobStatus();
+  const [searchParams] = useSearchParams();
+  const urlSlug = (searchParams.get('slug') ?? '').trim();
 
-  const [selectedSlug, setSelectedSlug] = useState<string>('');
+  const [selectedSlug, setSelectedSlug] = useState<string>(urlSlug);
   const [draft, setDraft] = useState<StickvProject | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'script' | 'visual' | 'audio' | 'inspect'>('script');
   const [safeZone, setSafeZone] = useState<SafeZonePlatform>('none');
-  const [rendering, setRendering] = useState(false);
-  const [renderProgress, setRenderProgress] = useState<{ pct: number; step: string } | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const [propPreviewMap, setPropPreviewMap] = useState<Record<string, string>>({});
+
+  // Trạng thái đóng/mở Accordion tạo kịch bản AI: tự động thu gọn khi dự án đã có >= 1 beat
+  const [creatorManualOpen, setCreatorManualOpen] = useState<boolean | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTitle, setRenameTitle] = useState('');
 
   // 3 Chế độ kịch bản StickV
   const [inputMode, setInputMode] = useState<'ai' | 'json' | 'script'>('ai');
@@ -116,6 +220,9 @@ export function StickvPage() {
   const [rawScript, setRawScript] = useState('');
   const [rawTitle, setRawTitle] = useState('');
   const [topic, setTopic] = useState('science');
+  const [domain, setDomain] = useState<StickvDomain>('paper_classic');
+  const [musicMood, setMusicMood] = useState('curious_science');
+  const [animationMode, setAnimationMode] = useState<StickvAnimationMode>('auto');
   const [aspect, setAspect] = useState<StickvAspect>('9:16');
   const [theme, setTheme] = useState<StickvTheme>('cream');
   const [targetMinutes, setTargetMinutes] = useState<number>(1);
@@ -171,25 +278,98 @@ export function StickvPage() {
   }, [geminiModel, listQuery.data?.default_model]);
 
   useEffect(() => {
+    if (urlSlug && urlSlug !== selectedSlug) {
+      setSelectedSlug(urlSlug);
+    }
+  }, [urlSlug, selectedSlug]);
+
+  useEffect(() => {
     if (!selectedSlug && projects.length > 0) {
       setSelectedSlug(projects[0].slug);
     }
   }, [selectedSlug, projects]);
 
+  const { attachJob } = job;
+
+  // Đồng bộ job StickV bền vững khi mount / quay lại trang hoặc đổi dự án
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs({ includeRecent: true })
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const stickvJobs = rows.filter((r) => r.kind === 'stickv');
+        const activeTarget =
+          stickvJobs.find(
+            (r) =>
+              (r.status === 'running' || r.status === 'queued') &&
+              (!selectedSlug || r.slug === selectedSlug),
+          ) ??
+          stickvJobs.find((r) => r.status === 'running' || r.status === 'queued') ??
+          null;
+
+        if (activeTarget) {
+          if (!selectedSlug && activeTarget.slug) {
+            setSelectedSlug(activeTarget.slug);
+          }
+          attachJob({
+            jobId: activeTarget.id,
+            slug: activeTarget.slug,
+            kind: 'stickv',
+            preview: activeTarget.mode === 'preview',
+            progress: activeTarget.progress,
+            step: activeTarget.step,
+            stage: activeTarget.stage || activeTarget.step,
+            currentBeat: activeTarget.current_beat ?? null,
+            totalBeats: activeTarget.total_beats ?? null,
+            startedAt: activeTarget.started_at ?? null,
+          });
+          return;
+        }
+
+        const recentDone = stickvJobs.find(
+          (r) =>
+            r.status === 'done' &&
+            !seenCompletedStickvJobs.has(r.id) &&
+            (!selectedSlug || r.slug === selectedSlug),
+        );
+        if (recentDone) {
+          seenCompletedStickvJobs.add(recentDone.id);
+          void qc.invalidateQueries({ queryKey: ['stickv-list'] });
+          void qc.invalidateQueries({ queryKey: ['unified-renders'] });
+          toast.info(vi.stickvJob.renderDoneAway);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSlug, attachJob, qc, toast]);
+
   useEffect(() => {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;
     if (found) {
       setDraft(found);
+      if (found.domain) setDomain(found.domain);
+      if (found.music_mood) setMusicMood(found.music_mood);
+      if (found.animation_mode) setAnimationMode(found.animation_mode);
+      setTheme(found.theme);
       if (found.beats.length > 0 && !found.beats.some((b) => b.id === selectedBeatId)) {
         setSelectedBeatId(found.beats[0].id);
       }
     }
   }, [selectedSlug, projects, selectedBeatId]);
 
-  const activeBeat = useMemo(
-    () => draft?.beats.find((b) => b.id === selectedBeatId) ?? draft?.beats[0] ?? null,
-    [draft, selectedBeatId],
-  );
+  const hasBeats = Boolean(draft && draft.beats.length > 0);
+  const isCreatorOpen = creatorManualOpen ?? !hasBeats;
+
+  const activeBeatIndex = useMemo(() => {
+    if (!draft || draft.beats.length === 0) return 0;
+    const idx = draft.beats.findIndex((b) => b.id === selectedBeatId);
+    return idx >= 0 ? idx : 0;
+  }, [draft, selectedBeatId]);
+
+  const activeBeat = useMemo(() => draft?.beats[activeBeatIndex] ?? null, [draft, activeBeatIndex]);
 
   const poseOptions = useMemo(() => {
     const labelMap = new Map(DEFAULT_POSE_OPTIONS.map((d) => [d.id, d.label]));
@@ -245,6 +425,9 @@ export function StickvPage() {
       stickvApi.generate({
         idea: idea.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
         target_minutes: targetMinutes,
@@ -254,7 +437,10 @@ export function StickvPage() {
       void qc.invalidateQueries({ queryKey: ['stickv-list'] });
       setSelectedSlug(project.slug);
       setDraft(project);
+      if (project.domain) setDomain(project.domain);
+      if (project.music_mood) setMusicMood(project.music_mood);
       setSelectedBeatId(project.beats[0]?.id ?? '');
+      setCreatorManualOpen(false);
       toast.info(`Đã sinh ${project.beats.length} beat kịch bản StickV`);
     },
     onError: (e: Error) => toast.error(e),
@@ -265,6 +451,9 @@ export function StickvPage() {
       stickvApi.importJson({
         raw_json: rawJson.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
       }),
@@ -274,6 +463,7 @@ export function StickvPage() {
       setDraft(project);
       setSelectedBeatId(project.beats[0]?.id ?? '');
       setRawJson('');
+      setCreatorManualOpen(false);
       toast.info(`Đã nạp ${project.beats.length} beat từ JSON (0 Token API)`);
     },
     onError: (e: Error) => toast.error(e),
@@ -285,6 +475,9 @@ export function StickvPage() {
         raw_text: rawScript.trim(),
         title: rawTitle.trim(),
         topic,
+        domain,
+        animation_mode: animationMode,
+        music_mood: musicMood,
         aspect,
         theme,
       }),
@@ -294,6 +487,7 @@ export function StickvPage() {
       setDraft(project);
       setSelectedBeatId(project.beats[0]?.id ?? '');
       setRawScript('');
+      setCreatorManualOpen(false);
       toast.info(`Đã tách ${project.beats.length} beat từ lời thoại có sẵn`);
     },
     onError: (e: Error) => toast.error(e),
@@ -323,60 +517,42 @@ export function StickvPage() {
     mutationFn: async (preview: boolean) => {
       if (!draft) throw new Error('Chưa có dự án để dựng');
       await stickvApi.save(draft.slug, draft);
-      return stickvApi.render(draft.slug, preview);
+      const res = await stickvApi.render(draft.slug, preview);
+      return {
+        job_id: res.job_id,
+        slug: draft.slug,
+        preview,
+        totalBeats: preview ? Math.min(3, draft.beats.length) : draft.beats.length,
+      };
     },
-    onSuccess: ({ job_id }) => {
-      setRendering(true);
-      setRenderProgress({ pct: 2, step: 'Đang khởi động...' });
+    onSuccess: ({ job_id, slug, preview, totalBeats }) => {
+      seenCompletedStickvJobs.delete(job_id);
+      job.attachJob({
+        jobId: job_id,
+        slug,
+        kind: 'stickv',
+        preview,
+        progress: 2,
+        step: 'Sinh giọng VieNeu-TTS',
+        stage: 'Sinh giọng VieNeu-TTS',
+        message: vi.stickvJob.queued,
+        currentBeat: 0,
+        totalBeats,
+        startedAt: Date.now() / 1000,
+        estimateSeconds: Math.max(15, totalBeats * (preview ? 8 : 18)),
+      });
       toast.info('Đã đưa StickV vào hàng đợi dựng');
-      if (typeof EventSource !== 'undefined') {
-        esRef.current?.close();
-        const es = new EventSource(`/api/jobs/${encodeURIComponent(job_id)}/events`);
-        esRef.current = es;
-        es.addEventListener('progress', (ev) => {
-          try {
-            const d = JSON.parse((ev as MessageEvent).data) as {
-              progress?: number;
-              step?: string;
-              text?: string;
-            };
-            setRenderProgress({
-              pct: Math.round(d.progress ?? 0),
-              step: d.text || d.step || 'Đang dựng...',
-            });
-          } catch {
-            // ignore
-          }
-        });
-        es.addEventListener('end', (ev) => {
-          es.close();
-          esRef.current = null;
-          setRendering(false);
-          setRenderProgress(null);
-          try {
-            const d = JSON.parse((ev as MessageEvent).data) as { status?: string; error?: string };
-            if (d.status === 'done') {
-              void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-              void qc.invalidateQueries({ queryKey: ['unified-renders'] });
-              toast.info('Đã dựng xong video StickV!');
-            } else if (d.status === 'failed') {
-              toast.error(d.error || 'Dựng video StickV thất bại');
-            }
-          } catch {
-            void qc.invalidateQueries({ queryKey: ['stickv-list'] });
-          }
-        });
-        es.onerror = () => {
-          es.close();
-          esRef.current = null;
-          setRendering(false);
-        };
-      }
     },
     onError: (e: Error) => toast.error(e),
   });
 
-  useEffect(() => () => esRef.current?.close(), []);
+  useEffect(() => {
+    if (job.finished && (job.kind === 'stickv' || job.finished.kind === 'stickv')) {
+      seenCompletedStickvJobs.add(job.finished.id);
+    }
+  }, [job.finished, job.kind]);
+
+  const isStickvJobRunning = job.running && job.kind === 'stickv';
 
   const updateBeat = (beatId: string, patch: Partial<StickvBeat>) => {
     if (!draft) return;
@@ -408,509 +584,661 @@ export function StickvPage() {
     matchedStickman?.modified_at ? `?t=${encodeURIComponent(matchedStickman.modified_at)}` : ''
   }`;
 
-  return (
-    <div className="mx-auto max-w-[1440px] space-y-6 pb-10">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <span className="inline-flex items-center gap-1.5 rounded-pill bg-engine-stickv-soft px-3 py-1 text-tiny font-extrabold text-on-engine-stickv-soft">
-            <SparklesIcon size={14} />
-            StickV · Động cơ Người que 2D/2.5D
-          </span>
-          <h1 className="mt-2 text-h1 font-extrabold tracking-tight text-text">
-            Xưởng Video Người Que (Shorts 9:16 & Longform 16:9)
-          </h1>
+  const currentAspect = draft?.aspect ?? aspect;
+  const totalDurationSec = useMemo(
+    () => (draft?.beats ?? []).reduce((acc, b) => acc + (b.duration_sec || 3.0), 0),
+    [draft?.beats],
+  );
+
+  // Tab 1 (Kịch bản): CHỈ chứa lời đọc (narration), tiêu đề bảng, câu chốt + nút Thêm Beat & Lưu (0 dropdown hình ảnh!)
+  const renderScriptBeatEditor = () => {
+    if (!draft || !activeBeat) return null;
+    return (
+      <Card className="space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 rounded-md bg-brand px-2 py-0.5 text-tiny font-extrabold text-white tabular-nums">
+              #{activeBeatIndex + 1} · Chương {activeBeat.chapter}
+            </span>
+            <span className="truncate text-tiny font-bold text-text">
+              {activeBeat.chapter_title || activeBeat.id}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <Button
+              tone="soft"
+              size="sm"
+              icon={<PlusIcon size={13} />}
+              onClick={() => {
+                const next = makeEmptyBeat(draft.beats.length + 1);
+                setDraft({ ...draft, beats: [...draft.beats, next] });
+                setSelectedBeatId(next.id);
+              }}
+            >
+              Thêm Beat
+            </Button>
+            <Button
+              tone="ink"
+              size="sm"
+              busy={saveMutation.isPending}
+              onClick={() => saveMutation.mutate(draft)}
+            >
+              Lưu
+            </Button>
+          </div>
         </div>
 
-        {projects.length > 0 && (
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="Chọn dự án StickV"
-              value={selectedSlug}
-              onChange={(e) => setSelectedSlug(e.target.value)}
-              className="rounded-input border border-line-input bg-card px-3 py-2 text-small font-semibold text-text"
-            >
-              {projects.map((p) => (
-                <option key={p.slug} value={p.slug}>
-                  {p.title} ({p.aspect})
-                </option>
-              ))}
-            </select>
-            {draft && (
-              <Button
-                tone="soft"
-                size="sm"
-                icon={<TrashIcon size={14} />}
-                onClick={() => deleteMutation.mutate(draft.slug)}
-                aria-label="Xóa dự án StickV"
-              >
-                Xóa
-              </Button>
-            )}
-          </div>
-        )}
-      </header>
+        <input
+          type="text"
+          aria-label="Tiêu đề bảng minh họa"
+          value={activeBeat.board_title ?? ''}
+          onChange={(e) => updateBeat(activeBeat.id, { board_title: e.target.value })}
+          placeholder="Tiêu đề trên bảng minh họa..."
+          className="ui-input !min-h-[36px] text-small font-semibold"
+        />
 
-      {listQuery.isError && <ErrorNote error={listQuery.error} />}
+        <textarea
+          aria-label="Lời đọc beat"
+          value={activeBeat.narration}
+          onChange={(e) => updateBeat(activeBeat.id, { narration: e.target.value })}
+          rows={3}
+          placeholder="Lời đọc tiếng Việt cho beat đang chọn..."
+          className="ui-input !min-h-[82px] text-small"
+        />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.35fr_380px]">
-        {/* Cột trái: Sinh kịch bản AI + Danh sách Beat */}
-        <div className="space-y-5">
-          <Card className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-title font-bold text-text">1. Kịch bản StickV (3 Chế độ)</h2>
-              <div
-                role="tablist"
-                aria-label="Chế độ đầu vào StickV"
-                className="inline-flex rounded-pill border border-line bg-soft p-0.5 text-tiny font-bold"
-              >
-                {(
-                  [
-                    { id: 'ai', label: 'Tạo tự động (API)' },
-                    { id: 'json', label: 'Dán JSON (0 Token)' },
-                    { id: 'script', label: 'Dán Lời thoại' },
-                  ] as const
-                ).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={inputMode === t.id}
-                    onClick={() => setInputMode(t.id)}
-                    className={`rounded-pill px-3 py-1 transition-colors ${
-                      inputMode === t.id
-                        ? 'bg-card text-text shadow-sm'
-                        : 'text-muted hover:text-text'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <input
+          type="text"
+          aria-label="Câu chốt ý (takeaway)"
+          value={
+            activeBeat.takeaway ??
+            (typeof activeBeat.board_data?.takeaway === 'string'
+              ? activeBeat.board_data.takeaway
+              : '')
+          }
+          onChange={(e) => {
+            const val = e.target.value;
+            updateBeat(activeBeat.id, {
+              takeaway: val,
+              board_data: { ...(activeBeat.board_data ?? {}), takeaway: val },
+            });
+          }}
+          placeholder="Chốt lại 1 dòng ngắn trên bảng (tuỳ chọn)..."
+          className="ui-input !min-h-[36px] text-tiny"
+        />
+      </Card>
+    );
+  };
 
-            {inputMode === 'ai' && (
-              <textarea
-                value={idea}
-                onChange={(e) => setIdea(e.target.value)}
-                rows={2}
-                placeholder="Nhập ý tưởng video (vd: Tại sao 90% người mới đầu tư hay mất tiền?)"
-                className="w-full rounded-input border border-line-input bg-soft-2 p-3 text-small text-text focus:border-engine-stickv focus:outline-none"
+  // Tab 2 (Hình ảnh): Chứa cài đặt trực quan của beat đang chọn (Dáng, Biểu cảm, Góc máy, Loại bảng, Tương tác, Chèn clip/ảnh)
+  const renderVisualBeatEditor = () => {
+    if (!draft || !activeBeat) return null;
+    return (
+      <Card className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2">
+          <span className="text-small font-bold text-text">
+            Hình ảnh & Diễn hoạt Beat #{activeBeatIndex + 1}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-line bg-soft px-2.5 py-1 text-tiny font-semibold text-text hover:bg-soft-2">
+              <UploadIcon size={12} />
+              <span>{activeBeat.media_path ? 'Đổi clip/ảnh' : 'Chèn clip/ảnh'}</span>
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleUploadBeatMedia(activeBeat.id, f);
+                }}
               />
-            )}
+            </label>
+            <Button
+              tone="ink"
+              size="sm"
+              busy={saveMutation.isPending}
+              onClick={() => saveMutation.mutate(draft)}
+            >
+              Lưu
+            </Button>
+          </div>
+        </div>
 
-            {inputMode === 'json' && (
-              <div className="space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-engine-stickv/30 bg-engine-stickv-soft/40 p-3">
-                  <span className="text-tiny font-semibold text-text-2">
-                    Copy Prompt Đạo diễn 5 chặng sang Web Gemini Pro rồi dán JSON vào đây (0 Token
-                    API):
-                  </span>
-                  <Button
-                    tone="soft"
-                    size="sm"
-                    icon={<CopyIcon size={14} />}
-                    onClick={() => {
-                      const prompt =
-                        listQuery.data?.director_prompt ||
-                        'Biên kịch StickV 5 chặng -> trả về JSON {title, beats}';
-                      void navigator.clipboard
-                        .writeText(prompt)
-                        .then(() => toast.info('Đã copy Prompt Đạo diễn!'))
-                        .catch((err) => toast.error(err));
-                    }}
-                  >
-                    Copy Prompt Đạo diễn
-                  </Button>
-                </div>
-                <textarea
-                  value={rawJson}
-                  onChange={(e) => setRawJson(e.target.value)}
-                  rows={4}
-                  placeholder='Dán JSON từ Web Gemini Pro (vd: {"title":"...","beats":[...]})'
-                  className="w-full rounded-input border border-line-input bg-soft-2 p-3 font-mono text-tiny text-text focus:border-engine-stickv focus:outline-none"
-                />
-              </div>
-            )}
+        <div className="grid grid-cols-2 gap-2">
+          <StudioSelect
+            aria-label="Dáng người que"
+            variant="compact"
+            value={activeBeat.pose}
+            onChange={(val) => {
+              const chosen = poseOptions.find((p) => p.id === val);
+              updateBeat(activeBeat.id, {
+                pose: val,
+                clip_path: chosen?.isVideo ? chosen.url : '',
+              });
+            }}
+            options={poseOptions.map((p) => ({
+              value: p.id,
+              label: `Dáng: ${p.label}`,
+            }))}
+          />
 
-            {inputMode === 'script' && (
-              <div className="space-y-2.5">
-                <input
-                  type="text"
-                  value={rawTitle}
-                  onChange={(e) => setRawTitle(e.target.value)}
-                  placeholder="Tiêu đề video (không bắt buộc)..."
-                  className="w-full rounded-input border border-line-input bg-soft-2 px-3 py-2 text-small text-text focus:border-engine-stickv focus:outline-none"
-                />
-                <textarea
-                  value={rawScript}
-                  onChange={(e) => setRawScript(e.target.value)}
-                  rows={4}
-                  placeholder="Dán lời thoại có sẵn (mỗi câu hoặc mỗi dòng sẽ tự tách thành 1 beat + gắn dáng người que & bảng)..."
-                  className="w-full rounded-input border border-line-input bg-soft-2 p-3 text-small text-text focus:border-engine-stickv focus:outline-none"
-                />
-              </div>
-            )}
+          <StudioSelect
+            aria-label="Biểu cảm khuôn mặt"
+            variant="compact"
+            value={activeBeat.emotion ?? 'auto'}
+            onChange={(val) => updateBeat(activeBeat.id, { emotion: val as StickvEmotion })}
+            options={EMOTIONS.map((em) => ({
+              value: em.id,
+              label: `Cảm xúc: ${em.label}`,
+            }))}
+          />
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Khung hình</span>
-                <select
-                  value={aspect}
-                  onChange={(e) => setAspect(e.target.value as StickvAspect)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="9:16">9:16 Shorts</option>
-                  <option value="16:9">16:9 YouTube</option>
-                </select>
-              </label>
+          <StudioSelect
+            aria-label="Góc máy ảo"
+            variant="compact"
+            value={activeBeat.camera_shot ?? 'wide_stage'}
+            onChange={(val) => updateBeat(activeBeat.id, { camera_shot: val as StickvCameraShot })}
+            options={CAMERA_SHOTS.map((cam) => ({
+              value: cam.id,
+              label: `Cam: ${cam.label}`,
+            }))}
+          />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Chủ đề màu</span>
-                <select
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value as StickvTheme)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="cream">Giấy kem (#FAF7F0)</option>
-                  <option value="dark">Bảng tối (#111827)</option>
-                </select>
-              </label>
+          <StudioSelect
+            aria-label="Loại bảng minh họa"
+            variant="compact"
+            value={activeBeat.board_type}
+            onChange={(val) => updateBeat(activeBeat.id, { board_type: val as StickvBoardType })}
+            options={BOARD_TYPES.map((bt) => ({
+              value: bt.id,
+              label: `Bảng: ${bt.label}`,
+            }))}
+          />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Thời lượng</span>
-                <select
-                  value={targetMinutes}
-                  onChange={(e) => setTargetMinutes(Number(e.target.value))}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value={1}>~1 phút (Shorts)</option>
-                  <option value={3}>~3 phút</option>
-                  <option value={5}>~5 phút (Long)</option>
-                  <option value={10}>~10 phút (Long)</option>
-                  <option value={15}>~15 phút (Long)</option>
-                </select>
-              </label>
+          <StudioSelect
+            aria-label="Tương tác sân khấu"
+            variant="compact"
+            value={activeBeat.interaction ?? 'none'}
+            onChange={(val) => updateBeat(activeBeat.id, { interaction: val as StickvInteraction })}
+            options={INTERACTIONS.map((it) => ({
+              value: it.id,
+              label: `Tương tác: ${it.label}`,
+            }))}
+          />
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Nhóm nhạc</span>
-                <select
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  <option value="science">Khoa học / Chill</option>
-                  <option value="fun">Vui nhộn</option>
-                  <option value="history">Kịch tính</option>
-                  <option value="mystery">Bí ẩn</option>
-                </select>
-              </label>
+          <StudioSelect
+            aria-label="Chuyển động"
+            variant="compact"
+            value={activeBeat.motion}
+            onChange={(val) => updateBeat(activeBeat.id, { motion: val as StickvMotion })}
+            options={MOTIONS.map((m) => ({ value: m.id, label: m.label }))}
+          />
+        </div>
 
-              <label className="space-y-1 text-tiny font-bold text-muted">
-                <span>Model Gemini</span>
-                <select
-                  aria-label="Chọn model Gemini"
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  className="w-full rounded-input border border-line-input bg-card px-2.5 py-2 text-small text-text"
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="flex justify-end">
-              {inputMode === 'ai' && (
-                <Button
-                  tone="export"
-                  busy={genMutation.isPending}
-                  disabled={!idea.trim()}
-                  icon={<SparklesIcon size={16} />}
-                  onClick={() => genMutation.mutate()}
-                >
-                  Sinh kịch bản StickV
-                </Button>
-              )}
-              {inputMode === 'json' && (
-                <Button
-                  tone="export"
-                  busy={importJsonMutation.isPending}
-                  disabled={!rawJson.trim()}
-                  icon={<SparklesIcon size={16} />}
-                  onClick={() => importJsonMutation.mutate()}
-                >
-                  Nạp JSON (0 Token)
-                </Button>
-              )}
-              {inputMode === 'script' && (
-                <Button
-                  tone="export"
-                  busy={importScriptMutation.isPending}
-                  disabled={!rawScript.trim()}
-                  icon={<SparklesIcon size={16} />}
-                  onClick={() => importScriptMutation.mutate()}
-                >
-                  Tách lời thoại thành Beat
-                </Button>
-              )}
-            </div>
-          </Card>
-
-          {draft && (
-            <Card className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-title font-bold text-text">
-                    2. Kịch bản từng Beat ({draft.beats.length} beat)
-                  </h2>
-                  <p className="text-tiny text-muted">
-                    Mỗi beat tự neo thời gian theo giọng VieNeu-TTS + SFX + Bảng minh họa
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    aria-label="Chọn giọng đọc VieNeu"
-                    value={
-                      voiceOptions.some((v) => v.id === draft.voice_id)
-                        ? draft.voice_id
-                        : defaultVoiceId
-                    }
-                    onChange={(e) => setDraft({ ...draft, voice_id: e.target.value })}
-                    className="rounded-input border border-line-input bg-card px-2.5 py-1.5 text-tiny font-semibold text-text"
-                  >
-                    {voiceOptions.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        Giọng: {v.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    tone="soft"
-                    size="sm"
-                    icon={<PlusIcon size={14} />}
-                    onClick={() => {
-                      const next = makeEmptyBeat(draft.beats.length + 1);
-                      setDraft({ ...draft, beats: [...draft.beats, next] });
-                      setSelectedBeatId(next.id);
-                    }}
-                  >
-                    Thêm Beat
-                  </Button>
-                  <Button
-                    tone="primary"
-                    size="sm"
-                    busy={saveMutation.isPending}
-                    onClick={() => saveMutation.mutate(draft)}
-                  >
-                    Lưu thay đổi
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {draft.beats.map((beat, idx) => {
-                  const isSel = activeBeat?.id === beat.id;
-                  return (
-                    <div
-                      key={beat.id}
-                      onClick={() => setSelectedBeatId(beat.id)}
-                      className={`cursor-pointer rounded-inner border p-3.5 transition-colors ${
-                        isSel
-                          ? 'border-engine-stickv bg-engine-stickv-soft/40'
-                          : 'border-line bg-soft-2/50 hover:border-line-input'
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="rounded-pill bg-card px-2.5 py-0.5 text-tiny font-extrabold text-text shadow-sm">
-                          #{idx + 1} · Chương {beat.chapter} ({beat.id})
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <label className="inline-flex cursor-pointer items-center gap-1 rounded-pill bg-card px-2.5 py-1 text-tiny font-semibold text-text-2 hover:bg-soft">
-                            <UploadIcon size={12} />
-                            <span>{beat.media_path ? 'Đổi clip/ảnh' : 'Chèn clip .mp4/ảnh'}</span>
-                            <input
-                              type="file"
-                              accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) void handleUploadBeatMedia(beat.id, f);
-                              }}
-                            />
-                          </label>
-                          {draft.beats.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDraft({
-                                  ...draft,
-                                  beats: draft.beats.filter((x) => x.id !== beat.id),
-                                });
-                              }}
-                              className="rounded-pill p-1 text-muted hover:text-danger"
-                              aria-label={`Xóa beat ${beat.id}`}
-                            >
-                              <TrashIcon size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <textarea
-                        value={beat.narration}
-                        onChange={(e) => updateBeat(beat.id, { narration: e.target.value })}
-                        rows={2}
-                        placeholder="Lời đọc tiếng Việt cho beat này..."
-                        className="w-full rounded-input border border-line-input bg-card p-2 text-small text-text"
-                      />
-
-                      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                        <select
-                          aria-label="Dáng người que"
-                          value={beat.pose}
-                          onChange={(e) => {
-                            const chosen = poseOptions.find((p) => p.id === e.target.value);
-                            updateBeat(beat.id, {
-                              pose: e.target.value,
-                              clip_path: chosen?.isVideo ? chosen.url : '',
-                            });
-                          }}
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {poseOptions.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              Dáng: {p.label}
-                            </option>
-                          ))}
-                        </select>
-
-                        <select
-                          aria-label="Hướng nhìn"
-                          value={beat.facing}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { facing: e.target.value as 'left' | 'right' })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          <option value="right">Quay phải →</option>
-                          <option value="left">← Quay trái</option>
-                        </select>
-
-                        <select
-                          aria-label="Chuyển động"
-                          value={beat.motion}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { motion: e.target.value as StickvMotion })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {MOTIONS.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-
-                        <select
-                          aria-label="Âm thanh SFX"
-                          value={beat.sfx_tag}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { sfx_tag: e.target.value as StickvSfxTag })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {SFX_TAGS.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              SFX: {s.label}
-                            </option>
-                          ))}
-                        </select>
-
-                        <select
-                          aria-label="Loại bảng minh họa"
-                          value={beat.board_type}
-                          onChange={(e) =>
-                            updateBeat(beat.id, { board_type: e.target.value as StickvBoardType })
-                          }
-                          className="rounded-input border border-line-input bg-card px-2 py-1.5 text-tiny font-semibold text-text"
-                        >
-                          {BOARD_TYPES.map((bt) => (
-                            <option key={bt.id} value={bt.id}>
-                              Bảng: {bt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+          <StudioSelect
+            aria-label="Hướng nhìn"
+            variant="compact"
+            autoWidth
+            value={activeBeat.facing}
+            onChange={(val) => updateBeat(activeBeat.id, { facing: val as 'left' | 'right' })}
+            options={[
+              { value: 'right', label: 'Quay phải →' },
+              { value: 'left', label: '← Quay trái' },
+            ]}
+          />
+          <input
+            type="text"
+            aria-label="Từ khóa Icon (prop_query)"
+            placeholder="Từ khóa Icon (vd: brain, earth)..."
+            value={activeBeat.prop_query ?? ''}
+            onChange={(e) => updateBeat(activeBeat.id, { prop_query: e.target.value })}
+            className="ui-input !min-h-[32px] min-w-[120px] flex-1 text-tiny"
+          />
+          <Button
+            size="sm"
+            tone="soft"
+            onClick={async () => {
+              const q = (activeBeat.prop_query ?? '').trim();
+              if (!q) return;
+              try {
+                const res = await stickvApi.searchIconify(q);
+                if (res.items[0]?.png_url) {
+                  setPropPreviewMap((prev) => ({
+                    ...prev,
+                    [activeBeat.id]: res.items[0].png_url,
+                  }));
+                  toast.info(`Đã tìm thấy icon "${res.items[0].id}"`);
+                } else {
+                  toast.info('Không thấy icon khớp, sẽ dùng huy hiệu dự phòng');
+                }
+              } catch (err) {
+                toast.error(err);
+              }
+            }}
+          >
+            Tìm Icon
+          </Button>
+          {propPreviewMap[activeBeat.id] && (
+            <img
+              src={propPreviewMap[activeBeat.id]}
+              alt={activeBeat.prop_query ?? 'icon'}
+              className="h-7 w-7 rounded border border-line bg-white object-contain p-0.5"
+            />
           )}
         </div>
+      </Card>
+    );
+  };
 
-        {/* Cột phải: PhonePreviewStage 9:16 / 16:9 */}
-        <div className="space-y-4">
-          <PhonePreviewStage
-            title="Sân khấu StickV"
-            badgeText={draft ? `${draft.theme === 'cream' ? 'Kem ấm' : 'Bảng tối'}` : 'Sẵn sàng'}
-            safeZone={safeZone}
-            onSafeZoneChange={setSafeZone}
-            aspect={draft?.aspect ?? aspect}
-            onAspectChange={(nextAspect) => {
-              setAspect(nextAspect);
-              if (draft) setDraft({ ...draft, aspect: nextAspect });
-            }}
-            estimateText={
-              renderProgress
-                ? `${renderProgress.pct}% · ${renderProgress.step}`
-                : draft
-                  ? `${draft.beats.length} beat · ${draft.aspect} · ${draft.fps}fps`
-                  : 'Chưa chọn dự án'
-            }
-            previewBusy={renderMutation.isPending || rendering || job.running}
-            exportBusy={renderMutation.isPending || rendering || job.running}
-            previewDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
-            exportDisabled={!draft || draft.beats.length === 0 || rendering || job.running}
-            onPreview={() => renderMutation.mutate(true)}
-            onExport={() => renderMutation.mutate(false)}
-            exportLabel={`Xuất bản đẹp (${(draft?.aspect ?? aspect) === '16:9' ? '1920×1080' : '1080×1920'})`}
-            footer={
-              draft && (
-                <label className="flex cursor-pointer items-center justify-between gap-2 rounded-inner border border-line bg-soft-2 px-3 py-2 text-tiny font-bold text-text">
-                  <span>Thêm Outro 4s (@HayBietTuot)</span>
-                  <input
-                    type="checkbox"
-                    checked={draft.outro ?? true}
-                    onChange={(e) => setDraft({ ...draft, outro: e.target.checked })}
-                    className="h-4 w-4 accent-amber-500"
+  return (
+    <StudioShell
+      topBar={{
+        engineBadge: 'StickV',
+        savedText: saveMutation.isPending ? 'Đang lưu…' : vi.studioShell.savedBadge,
+        projectSelector:
+          projects.length > 0 ? (
+            <StudioSelect
+              aria-label="Chọn dự án StickV"
+              variant="compact"
+              autoWidth
+              value={selectedSlug}
+              onChange={(val) => setSelectedSlug(val)}
+              options={projects.map((p) => ({
+                value: p.slug,
+                label: `${p.title} (${p.aspect})`,
+              }))}
+              className="min-w-[200px]"
+            />
+          ) : undefined,
+        projectMenuItems: draft
+          ? [
+              {
+                key: 'rename',
+                label: vi.studioShell.renameProject,
+                onSelect: () => {
+                  setRenameTitle(draft.title);
+                  setRenameOpen(true);
+                },
+              },
+              {
+                key: 'delete',
+                label: vi.studioShell.deleteProject,
+                danger: true,
+                disabled: isStickvJobRunning,
+                reason: vi.projects.renderingReason,
+                onSelect: () => deleteMutation.mutate(draft.slug),
+              },
+            ]
+          : undefined,
+        aspect: currentAspect,
+        onAspectChange: (nextAspect) => {
+          setAspect(nextAspect);
+          if (draft) setDraft({ ...draft, aspect: nextAspect });
+        },
+        exportProps: {
+          aspect: currentAspect,
+          outroEnabled: draft?.outro ?? true,
+          onOutroChange: draft ? (checked) => setDraft({ ...draft, outro: checked }) : undefined,
+          showWatermarkControl: true,
+          onExportPreview: () => renderMutation.mutate(true),
+          onExportFinal: () => renderMutation.mutate(false),
+          disabled: !draft || draft.beats.length === 0,
+          isSubmitting: renderMutation.isPending,
+          isRendering: isStickvJobRunning,
+          subscribeGlobalProgress: true,
+          onCancelRender: () => void job.cancel(),
+        },
+      }}
+      liveBanner={listQuery.isError ? <ErrorNote error={listQuery.error} /> : undefined}
+      activeTab={activeTab}
+      onTabChange={(id) => setActiveTab(id as 'script' | 'visual' | 'audio' | 'inspect')}
+      tabs={[
+        {
+          id: 'script',
+          label: vi.studioShell.tabs.script,
+          icon: <SparklesIcon size={13} />,
+          badge: draft?.beats.length,
+          content: (
+            <div className="space-y-3.5">
+              {/* Khung Khởi tạo Kịch bản AI: tự động gấp gọn khi dự án đã có >= 1 beat */}
+              <div className="rounded-card border border-line bg-card shadow-card">
+                <button
+                  type="button"
+                  aria-expanded={isCreatorOpen}
+                  onClick={() => setCreatorManualOpen(!isCreatorOpen)}
+                  className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-tiny font-bold text-text transition-colors hover:bg-soft rounded-card"
+                >
+                  <span>{vi.studioShell.aiCreatorAccordionBtn}</span>
+                  <ChevronDownIcon
+                    size={15}
+                    className={cx(
+                      'shrink-0 text-muted transition-transform duration-150',
+                      isCreatorOpen && 'rotate-180',
+                    )}
                   />
-                </label>
-              )
-            }
-          >
+                </button>
+
+                <div
+                  className="ui-accordion-grid"
+                  data-open={isCreatorOpen ? 'true' : 'false'}
+                  aria-hidden={!isCreatorOpen}
+                >
+                  <div className="ui-accordion-inner">
+                    <div className="space-y-3 border-t border-line px-3.5 pb-3.5 pt-3">
+                      <SegmentedControl
+                        roleMode="tab"
+                        aria-label="Chế độ đầu vào StickV"
+                        value={inputMode}
+                        onChange={(next) => setInputMode(next)}
+                        options={[
+                          { value: 'ai', label: 'Tạo tự động (API)' },
+                          { value: 'json', label: 'Dán JSON (0 Token)' },
+                          { value: 'script', label: 'Dán Lời thoại' },
+                        ]}
+                      />
+
+                      {inputMode === 'ai' && (
+                        <div className="space-y-2">
+                          <textarea
+                            value={idea}
+                            onChange={(e) => setIdea(e.target.value)}
+                            rows={2}
+                            placeholder="Nhập ý tưởng video (vd: Tại sao 90% người mới đầu tư hay mất tiền?)"
+                            className="ui-input !min-h-[60px] text-small"
+                          />
+                          <StudioSelect
+                            aria-label="Chọn model Gemini"
+                            variant="compact"
+                            value={geminiModel}
+                            onChange={(val) => setGeminiModel(val)}
+                            options={models.map((m) => ({ value: m.id, label: m.name }))}
+                          />
+                        </div>
+                      )}
+
+                      {inputMode === 'json' && (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line bg-soft p-2">
+                            <span className="text-tiny font-semibold text-text-2">
+                              Copy Prompt Đạo diễn 5 chặng sang Gemini Web rồi dán JSON:
+                            </span>
+                            <Button
+                              tone="soft"
+                              size="sm"
+                              icon={<CopyIcon size={13} />}
+                              onClick={() => {
+                                const prompt =
+                                  listQuery.data?.director_prompt ||
+                                  'Biên kịch StickV 5 chặng -> trả về JSON {title, beats}';
+                                void navigator.clipboard
+                                  .writeText(prompt)
+                                  .then(() => toast.info('Đã copy Prompt Đạo diễn!'))
+                                  .catch((err) => toast.error(err));
+                              }}
+                            >
+                              Copy Prompt Đạo diễn
+                            </Button>
+                          </div>
+                          <textarea
+                            value={rawJson}
+                            onChange={(e) => setRawJson(e.target.value)}
+                            rows={3}
+                            placeholder='Dán JSON từ Web Gemini Pro (vd: {"title":"...","beats":[...]})'
+                            className="ui-input font-mono text-tiny"
+                          />
+                        </div>
+                      )}
+
+                      {inputMode === 'script' && (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={rawTitle}
+                            onChange={(e) => setRawTitle(e.target.value)}
+                            placeholder="Tiêu đề video (không bắt buộc)..."
+                            className="ui-input !min-h-[36px] text-small"
+                          />
+                          <textarea
+                            value={rawScript}
+                            onChange={(e) => setRawScript(e.target.value)}
+                            rows={3}
+                            placeholder="Dán lời thoại có sẵn (mỗi câu/dòng tự tách thành 1 beat)..."
+                            className="ui-input text-small"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <SegmentedControl
+                          aria-label="Thời lượng"
+                          value={String(targetMinutes)}
+                          onChange={(next) => setTargetMinutes(Number(next))}
+                          options={[
+                            { value: '1', label: '1p' },
+                            { value: '3', label: '3p' },
+                            { value: '5', label: '5p' },
+                            { value: '8', label: '8p' },
+                            { value: '10', label: '10p' },
+                          ]}
+                        />
+
+                        {inputMode === 'ai' && (
+                          <Button
+                            tone="ink"
+                            size="sm"
+                            busy={genMutation.isPending}
+                            disabled={!idea.trim()}
+                            icon={<SparklesIcon size={14} />}
+                            onClick={() => genMutation.mutate()}
+                          >
+                            Sinh kịch bản StickV
+                          </Button>
+                        )}
+                        {inputMode === 'json' && (
+                          <Button
+                            tone="ink"
+                            size="sm"
+                            busy={importJsonMutation.isPending}
+                            disabled={!rawJson.trim()}
+                            icon={<SparklesIcon size={14} />}
+                            onClick={() => importJsonMutation.mutate()}
+                          >
+                            Nạp JSON (0 Token)
+                          </Button>
+                        )}
+                        {inputMode === 'script' && (
+                          <Button
+                            tone="ink"
+                            size="sm"
+                            busy={importScriptMutation.isPending}
+                            disabled={!rawScript.trim()}
+                            icon={<SparklesIcon size={14} />}
+                            onClick={() => importScriptMutation.mutate()}
+                          >
+                            Tách lời thoại thành Beat
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {renderScriptBeatEditor()}
+            </div>
+          ),
+        },
+        {
+          id: 'visual',
+          label: vi.studioShell.tabs.visual,
+          icon: <FilmIcon size={13} />,
+          content: (
+            <div className="space-y-3.5">
+              {renderVisualBeatEditor()}
+
+              <Card className="space-y-2.5">
+                <h3 className="text-small font-bold text-text">Bối cảnh & Phong cách dự án</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <StudioSelect
+                    aria-label="Bối cảnh sân khấu"
+                    variant="compact"
+                    value={draft?.domain ?? domain}
+                    onChange={(val) => {
+                      const nextDom = val as StickvDomain;
+                      const syncedTheme: StickvTheme =
+                        nextDom === 'paper_classic' || nextDom === 'history_geo' ? 'cream' : 'dark';
+                      setDomain(nextDom);
+                      setTheme(syncedTheme);
+                      if (draft) setDraft({ ...draft, domain: nextDom, theme: syncedTheme });
+                    }}
+                    options={DOMAINS.map((d) => ({ value: d.id, label: d.label }))}
+                  />
+                  <StudioSelect
+                    aria-label="Chủ đề màu"
+                    variant="compact"
+                    value={draft?.theme ?? theme}
+                    onChange={(val) => {
+                      const nextT = val as StickvTheme;
+                      setTheme(nextT);
+                      if (draft) setDraft({ ...draft, theme: nextT });
+                    }}
+                    options={[
+                      { value: 'cream', label: 'Giấy kem (#FAF7F0)' },
+                      { value: 'dark', label: 'Bảng tối (#111827)' },
+                    ]}
+                  />
+                </div>
+                <StudioSelect
+                  aria-label="Chế độ diễn hoạt"
+                  variant="compact"
+                  value={draft?.animation_mode ?? animationMode}
+                  onChange={(val) => {
+                    const nextMode = val as StickvAnimationMode;
+                    setAnimationMode(nextMode);
+                    if (draft) setDraft({ ...draft, animation_mode: nextMode });
+                  }}
+                  options={[
+                    { value: 'auto', label: 'Tự động (Puppet 2D → WebM → PNG)' },
+                    { value: 'static', label: 'Chỉ dùng Ảnh Pose tĩnh' },
+                  ]}
+                />
+              </Card>
+            </div>
+          ),
+        },
+        {
+          id: 'audio',
+          label: vi.studioShell.tabs.audio,
+          icon: <MusicIcon size={13} />,
+          content: (
+            <div className="space-y-3.5">
+              <Card className="space-y-3">
+                <h3 className="text-small font-bold text-text">Giọng đọc VieNeu, Nhạc nền & SFX</h3>
+                <StudioSelect
+                  label="Giọng đọc chính"
+                  aria-label="Chọn giọng đọc VieNeu"
+                  value={
+                    draft && voiceOptions.some((v) => v.id === draft.voice_id)
+                      ? draft.voice_id
+                      : defaultVoiceId
+                  }
+                  onChange={(val) => {
+                    if (draft) setDraft({ ...draft, voice_id: val });
+                  }}
+                  options={voiceOptions.map((v) => ({
+                    value: v.id,
+                    label: `Giọng: ${v.label}`,
+                  }))}
+                />
+                <StudioSelect
+                  label="Tâm trạng nhạc nền"
+                  aria-label="Tâm trạng nhạc"
+                  value={draft?.music_mood ?? musicMood}
+                  onChange={(val) => {
+                    setMusicMood(val);
+                    if (draft) setDraft({ ...draft, music_mood: val });
+                  }}
+                  options={MUSIC_MOODS.map((m) => ({ value: m.id, label: m.label }))}
+                />
+                <StudioSelect
+                  label="Nhóm chủ đề âm thanh"
+                  aria-label="Nhóm nhạc"
+                  value={topic}
+                  onChange={(val) => setTopic(val)}
+                  options={[
+                    { value: 'science', label: 'Khoa học / Chill' },
+                    { value: 'fun', label: 'Vui nhộn' },
+                    { value: 'history', label: 'Kịch tính' },
+                    { value: 'mystery', label: 'Bí ẩn' },
+                  ]}
+                />
+                {activeBeat && (
+                  <StudioSelect
+                    label={`SFX cho Beat #${activeBeatIndex + 1}`}
+                    aria-label="Âm thanh SFX"
+                    value={activeBeat.sfx_tag}
+                    onChange={(val) => updateBeat(activeBeat.id, { sfx_tag: val as StickvSfxTag })}
+                    options={SFX_TAGS.map((s) => ({ value: s.id, label: `SFX: ${s.label}` }))}
+                  />
+                )}
+                {draft && (
+                  <div className="flex items-center justify-between gap-2 rounded-inner border border-line bg-soft px-3 py-2 text-tiny font-bold text-text">
+                    <span>Thêm Outro 4s (@HayBietTuot)</span>
+                    <Switch
+                      checked={draft.outro ?? true}
+                      onChange={(checked) => setDraft({ ...draft, outro: checked })}
+                      label="Thêm Outro 4s (@HayBietTuot)"
+                    />
+                  </div>
+                )}
+              </Card>
+            </div>
+          ),
+        },
+        {
+          id: 'inspect',
+          label: vi.studioShell.tabs.inspect,
+          icon: <EyeIcon size={13} />,
+          content: draft ? (
+            <CinemaInspectorPanel
+              stickvProject={draft}
+              beatId={activeBeat?.id}
+              disabled={job.running}
+            />
+          ) : (
+            <Card className="p-4 text-small text-muted">Chưa có dự án StickV để kiểm định.</Card>
+          ),
+        },
+      ]}
+      canvas={{
+        aspect: currentAspect,
+        safeZoneActive: safeZone !== 'none',
+        onToggleSafeZone: () => setSafeZone((prev) => (prev === 'none' ? 'tiktok' : 'none')),
+        onOpenContactSheet: () => setActiveTab('inspect'),
+        onPlayPreview: () => renderMutation.mutate(true),
+        playPreviewLabel: vi.studioShell.canvasPlayBtn,
+        children: (
+          <div className="relative h-full w-full">
             {draft?.last_render?.video_url ? (
               <video
                 key={draft.last_render.video_url}
                 src={draft.last_render.video_url}
                 controls
-                className="h-full w-full object-contain bg-black"
+                className="h-full w-full bg-black object-contain"
               />
             ) : (
               <div
                 className={`flex h-full w-full flex-col justify-between p-4 ${
-                  (draft?.theme ?? theme) === 'cream'
+                  DOMAINS.find((d) => d.id === (draft?.domain ?? domain))?.bgClass ??
+                  ((draft?.theme ?? theme) === 'cream'
                     ? 'bg-[#FAF7F0] text-slate-900'
-                    : 'bg-[#111827] text-slate-50'
+                    : 'bg-[#111827] text-slate-50')
                 }`}
               >
                 {activeBeat?.board_type !== 'none' && (
-                  <div className="rounded-xl border border-black/10 bg-white/80 p-3 text-slate-900 shadow-sm">
-                    <p className="text-[11px] font-extrabold text-amber-600 uppercase">
+                  <div className="rounded-xl border border-black/10 bg-white/90 p-3 text-slate-900 shadow-sm">
+                    <p className="text-[11px] font-extrabold uppercase text-[#D9232E]">
                       {activeBeat?.board_type ?? 'bullets'}
                     </p>
                     <p className="mt-1 text-xs font-bold">
@@ -942,25 +1270,105 @@ export function StickvPage() {
                     />
                   ) : (
                     <img
-                      src={currentPoseUrl}
+                      src={
+                        listQuery.data?.puppet_ready && (draft?.animation_mode ?? 'auto') === 'auto'
+                          ? `/api/stickv/puppet/preview?pose=${encodeURIComponent(
+                              activeBeat?.pose ?? 'explain',
+                            )}&interaction=${encodeURIComponent(
+                              activeBeat?.interaction ?? 'none',
+                            )}&facing=${encodeURIComponent(
+                              activeBeat?.facing ?? 'right',
+                            )}&emotion=${encodeURIComponent(activeBeat?.emotion ?? 'auto')}`
+                          : currentPoseUrl
+                      }
                       alt={activeBeat?.pose ?? 'explain'}
                       onError={(e) => {
                         if (!e.currentTarget.dataset.fb) {
                           e.currentTarget.dataset.fb = '1';
-                          e.currentTarget.src = '/api/stickv/poses/explain';
+                          e.currentTarget.src = currentPoseUrl || '/api/stickv/poses/explain';
                         }
                       }}
-                      className={`h-32 w-auto object-contain ${
-                        activeBeat?.facing === 'left' ? '-scale-x-100' : ''
+                      className={`h-36 w-auto object-contain ${
+                        !(
+                          listQuery.data?.puppet_ready &&
+                          (draft?.animation_mode ?? 'auto') === 'auto'
+                        ) && activeBeat?.facing === 'left'
+                          ? '-scale-x-100'
+                          : ''
                       }`}
                     />
                   )}
                 </div>
               </div>
             )}
-          </PhonePreviewStage>
-        </div>
-      </div>
-    </div>
+            <SafeZoneOverlay platform={safeZone} />
+          </div>
+        ),
+      }}
+      timeline={
+        draft
+          ? {
+              items: draft.beats.map((b, idx) => ({
+                id: b.id,
+                index: idx + 1,
+                title: b.board_title,
+                summary: b.narration,
+                badge: b.pose,
+                durationSec: b.duration_sec || 3.0,
+              })),
+              selectedId: activeBeat?.id ?? '',
+              onSelect: (id) => setSelectedBeatId(id),
+              onAdd: () => {
+                const next = makeEmptyBeat(draft.beats.length + 1);
+                setDraft({ ...draft, beats: [...draft.beats, next] });
+                setSelectedBeatId(next.id);
+              },
+              addLabel: '+ Thêm Beat',
+              onDelete: (id) => {
+                if (draft.beats.length <= 1) return;
+                setDraft({
+                  ...draft,
+                  beats: draft.beats.filter((x) => x.id !== id),
+                });
+              },
+              totalDurationSec,
+            }
+          : undefined
+      }
+      modals={
+        <Dialog
+          open={renameOpen}
+          onClose={() => setRenameOpen(false)}
+          title={vi.studioShell.renameDialogTitle}
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button tone="soft" size="sm" onClick={() => setRenameOpen(false)}>
+                {vi.common.cancel}
+              </Button>
+              <Button
+                tone="brand"
+                size="sm"
+                disabled={!renameTitle.trim() || !draft}
+                onClick={() => {
+                  if (!draft || !renameTitle.trim()) return;
+                  const updated = { ...draft, title: renameTitle.trim() };
+                  setDraft(updated);
+                  saveMutation.mutate(updated);
+                  setRenameOpen(false);
+                }}
+              >
+                {vi.common.save}
+              </Button>
+            </div>
+          }
+        >
+          <Input
+            label={vi.studioShell.renameInputLabel}
+            value={renameTitle}
+            onChange={(e) => setRenameTitle(e.target.value)}
+          />
+        </Dialog>
+      }
+    />
   );
 }

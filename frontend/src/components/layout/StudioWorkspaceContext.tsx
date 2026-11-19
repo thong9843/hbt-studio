@@ -18,6 +18,7 @@ export function StudioWorkspaceProvider({ children }: { children: ReactNode }) {
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const [resultSlug, setResultSlug] = useState<string | null>(null);
+  const [studioMode, setStudioMode] = useState(false);
 
   return (
     <StudioWorkspaceContext.Provider
@@ -44,6 +45,8 @@ export function StudioWorkspaceProvider({ children }: { children: ReactNode }) {
         setResultVideoUrl,
         resultSlug,
         setResultSlug,
+        studioMode,
+        setStudioMode,
       }}
     >
       {children}

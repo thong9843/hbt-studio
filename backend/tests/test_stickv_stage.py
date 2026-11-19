@@ -108,15 +108,15 @@ def test_synth_and_render_cleans_up_chunks_dir(tmp_path: Path) -> None:
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         Path(cmd[-1]).write_bytes(b"fake-media-bytes")
 
-    def fake_stream(*, out_mp4: Path, **kwargs):
+    def fake_stream_chunk(*, out_mp4: Path, global_frame_offset: int, acc_audio_t: float, **kwargs):
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
         out_mp4.write_bytes(b"fake-media-bytes")
-        return out_mp4
+        return global_frame_offset + 60, acc_audio_t + 2.4, None
 
     with (
         patch("hbt.stickv.audio.run_ffmpeg", side_effect=fake_ffmpeg),
         patch("hbt.stickv.render.run_ffmpeg", side_effect=fake_ffmpeg),
-        patch("hbt.stickv.render._stream_beat_frames_to_ffmpeg", side_effect=fake_stream),
+        patch("hbt.stickv.render._stream_chunk_frames_to_ffmpeg", side_effect=fake_stream_chunk),
         patch("hbt.stickv.render.measure_audio_duration", return_value=3.2),
     ):
         res = render_stickv(
@@ -354,14 +354,25 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     import pytest
 
     from hbt.stickv.audio import (
+        GLOBAL_LEAD_SILENCE_S,
+        PAUSE_END_SENTENCE_S,
+        PAUSE_MID_CLAUSE_S,
+        SENTENCE_GAP_S,
         align_beat_karaoke,
         compute_pause_after,
         split_beat_sentences,
     )
 
-    assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một.", "Câu hai?"]
-    assert compute_pause_after("Kết thúc câu.") == pytest.approx(0.45)
-    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(0.25)
+    # Câu vụn < 5 từ được gộp để giữ ngữ điệu tự nhiên; câu >= 5 từ tách nhịp rõ ràng
+    assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một. Câu hai?"]
+    assert split_beat_sentences(
+        "Ánh sáng truyền đi rất nhanh trong chân không. Bạn có nhận ra điều kỳ diệu này không?"
+    ) == [
+        "Ánh sáng truyền đi rất nhanh trong chân không.",
+        "Bạn có nhận ra điều kỳ diệu này không?",
+    ]
+    assert compute_pause_after("Kết thúc câu.") == pytest.approx(PAUSE_END_SENTENCE_S)
+    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(PAUSE_MID_CLAUSE_S)
 
     def _write_tone_wav(out_path: Path, dur_s: float = 0.80, sr: int = 24000) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,9 +396,11 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
             for it in items:
                 _write_tone_wav(it.out, dur_s=0.80)
 
+    s1 = "Ánh sáng truyền đi rất nhanh trong chân không."
+    s2 = "Bạn có nhận ra điều kỳ diệu này không?"
     beats = [
-        StickvBeat(id="b1", narration="Câu một. Câu hai?"),
-        StickvBeat(id="b2", narration="Ý tiếp theo,"),
+        StickvBeat(id="b1", narration=f"{s1} {s2}"),
+        StickvBeat(id="b2", narration="Ý tiếp theo mang góc nhìn mới,"),
     ]
     audio_dir = tmp_path / "audio"
     out_beats = synth_stickv_beats_audio(
@@ -398,24 +411,482 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
         pause_scale=1.0,
     )
 
-    # b1: 0.10 lead + 0.80 s1 + 0.30 gap + 0.80 s2 + 0.45 pause_after = 2.45s
-    assert beats[0].duration_sec == pytest.approx(2.45, abs=0.05)
-    assert out_beats[0][1] == pytest.approx(2.45, abs=0.05)
-    # b2: 0.10 lead + 0.80 s1 + 0.25 pause_after = 1.15s (clamped >= 1.2s)
-    assert beats[1].duration_sec >= 1.15
+    # b1: 0.18 global_lead + (0.80+0.11 clean s1) + 0.20 gap + (0.80+0.11 clean s2) + 0.24 tail
+    assert beats[0].duration_sec == pytest.approx(2.44, abs=0.06)
+    assert out_beats[0][1] == pytest.approx(2.44, abs=0.06)
+    assert beats[1].duration_sec >= 1.2
 
     b1_wav = audio_dir / "b1.wav"
     env = extract_wav_rms_envelope(b1_wav, fps=20, duration_sec=beats[0].duration_sec)
-    # Last 0.40s (8 frames at 20fps) are inside the 0.45s trailing pause -> silent
-    assert max(env[-8:]) == 0.0
+    # 0.15s cuối nằm trong 0.24s trailing pause -> im lặng
+    assert max(env[-3:]) == 0.0
 
     timings = align_beat_karaoke(
-        "Câu một. Câu hai?",
+        f"{s1} {s2}",
         b1_wav,
         beats[0].duration_sec,
-        lead_in_s=0.10,
-        pause_after_s=0.45,
+        lead_in_s=GLOBAL_LEAD_SILENCE_S,
+        pause_after_s=PAUSE_END_SENTENCE_S,
     )
-    assert len(timings) == 4
-    assert timings[0][1] >= 0.08
-    assert timings[-1][2] <= beats[0].duration_sec - 0.45 + 0.02
+    assert len(timings) == len(f"{s1} {s2}".split())
+    assert timings[0][1] >= GLOBAL_LEAD_SILENCE_S - 0.01
+    assert timings[-1][2] <= beats[0].duration_sec - PAUSE_END_SENTENCE_S + 0.02
+
+    # Kiểm tra spoken_segments sidecar + khóa Karaoke qua khoảng nghỉ
+    from hbt.stickv.audio import load_beat_spoken_segments
+    from hbt.stickv.backdrops import BackdropRenderer
+    from hbt.stickv.stage import draw_karaoke_strip
+
+    segs = load_beat_spoken_segments(b1_wav)
+    assert len(segs) == 2
+    assert segs[0][2] == s1
+    assert segs[1][2] == s2
+    # Khoảng giữa câu 1 và câu 2 có gap ~0.20s (nhịp thở chuẩn GĐ9)
+    assert segs[1][0] - segs[0][1] == pytest.approx(SENTENCE_GAP_S, abs=0.03)
+
+    # Kiểm tra domain="physics_science" sinh phông xanh kỹ thuật khác #FAF7F0
+    bd_phys = BackdropRenderer("physics_science", 360, 640)
+    try:
+        bg_phys = bd_phys.render_frame(0.5)
+        assert bg_phys.getpixel((10, 10)) != (250, 247, 240)
+        bg_phys.close()
+    finally:
+        bd_phys.close()
+
+    # Khoảng lặng cuối câu ẩn phụ đề; ngắt <= 0.22s giữ ổn định nền mờ; đang nói vẽ đầy đủ
+    canvas_sil = Image.new("RGBA", (540, 1200), (0, 0, 0, 0))
+    draw_karaoke_strip(
+        canvas_sil, timings, beats[0].duration_sec - 0.04, aspect="9:16", spoken_segments=segs
+    )
+    assert canvas_sil.getbbox() is None
+    gap_t = (segs[0][1] + segs[1][0]) / 2.0
+    draw_karaoke_strip(canvas_sil, timings, gap_t, aspect="9:16", spoken_segments=segs)
+    assert canvas_sil.getbbox() is not None  # Giữ ổn định nền mờ trong khoảng ngắt <= 0.22s
+    draw_karaoke_strip(canvas_sil, timings, segs[0][0] + 0.1, aspect="9:16", spoken_segments=segs)
+    assert canvas_sil.getbbox() is not None
+    canvas_sil.close()
+
+
+def test_v8_stage_100pct_coverage_3_history_cards_virtual_cam_and_16x9() -> None:
+    from hbt.stickv.stage import (
+        BeatStageState,
+        compute_beat_character_target,
+        compute_camera_state,
+        infer_auto_prop_query,
+    )
+
+    assert infer_auto_prop_query("Kim tự tháp Giza năm 2560 TCN") == "pyramid"
+
+    # 1. board_type="none" vẫn dựng Thẻ Minh Họa Tự Động (nửa trên không bao giờ trống trơn)
+    bg_916 = Image.new("RGB", (540, 960), (229, 207, 168))
+    char_916 = Image.new("RGBA", (140, 280), (11, 14, 20, 255))
+    try:
+        b_none = StickvBeat(
+            id="b_auto",
+            chapter=2,
+            narration="Kim tự tháp Giza xây năm 2560 TCN.",
+            board_type="none",
+        )
+        out_none = render_animated_beat_frame(
+            bg_img=bg_916,
+            char_img=char_916,
+            beat=b_none,
+            aspect="9:16",
+            t_sec=0.5,
+            mouth_open=0.4,
+            word_timings=[],
+            draw_board=True,
+            domain="history_geo",
+            duration_sec=2.0,
+        )
+        # Vùng thẻ nửa trên khác màu nền phẳng nhờ thẻ minh họa tự động
+        crop_top = out_none.crop((80, 120, 460, 420))
+        assert crop_top.getcolors(maxcolors=2048) is None or len(crop_top.getcolors(2048) or []) > 5
+        crop_top.close()
+        out_none.close()
+
+        # 2. 3 mẫu thẻ lịch sử & cross-fade khi trùng board_title
+        prev_st = BeatStageState(x=200.0, y=520.0, last_board_title="Ai Cập Cổ Đại")
+        for bt, bdata in (
+            (
+                "timeline_era",
+                {"events": [{"year": "2560 TCN", "title": "Xây Kim Tự Tháp"}]},
+            ),
+            (
+                "location_map",
+                {"location": "Cao nguyên Giza", "coordinates": "29.9792° N, 31.1342° E"},
+            ),
+            (
+                "myth_vs_fact",
+                {"myth": "Nô lệ xây dựng", "fact": "Thợ lành nghề được trả lương"},
+            ),
+        ):
+            b_hist = StickvBeat(
+                id=f"b_{bt}",
+                narration="Khám phá sự thật",
+                board_type=bt,  # type: ignore[arg-type]
+                board_title="Ai Cập Cổ Đại",
+                board_data=bdata,
+                camera_shot="focus_board",
+            )
+            f_h = render_animated_beat_frame(
+                bg_img=bg_916,
+                char_img=char_916,
+                beat=b_hist,
+                aspect="9:16",
+                t_sec=0.20,
+                mouth_open=0.2,
+                word_timings=[],
+                draw_board=True,
+                prev_stage_state=prev_st,
+                show_chapter_banner=True,
+            )
+            assert f_h.size == (540, 960)
+            f_h.close()
+    finally:
+        bg_916.close()
+        char_916.close()
+
+    # 3. Nội suy 3 camera_shot mượt 0.55s & layout 16:9 Stickman đứng bên trái
+    z0, _, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.0,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    z_mid, _, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.275,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    z1, px1, _ = compute_camera_state(
+        "closeup_react",
+        aspect="16:9",
+        t_sec=0.55,
+        prev_stage_state=BeatStageState(x=0.0, y=0.0, camera_zoom=1.0),
+    )
+    assert z0 == pytest.approx(1.0)
+    assert 1.05 < z_mid < 1.18
+    assert z1 == pytest.approx(1.22)
+    assert px1 < 0.30
+
+    tx_169, _, _ = compute_beat_character_target(
+        1920, 1080, 300, 690, interaction="none", aspect="16:9"
+    )
+    assert tx_169 < 420.0  # Stickman đứng bên trái màn hình 16:9
+
+
+def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
+    from hbt.stickv.stage import (
+        BeatStageState,
+        compute_layered_camera_layout,
+    )
+
+    # 1. Kiểm tra kẹp biên tách lớp trên 1080x1920
+    lay_focus = compute_layered_camera_layout(
+        "focus_board", aspect="9:16", w=1080, h=1920, t_sec=0.6
+    )
+    assert lay_focus.board_scale == pytest.approx(1.07)
+    assert lay_focus.clamp_bounds is not None
+    assert lay_focus.clamp_bounds[1] >= 115
+    assert lay_focus.clamp_bounds[3] <= 865
+    assert lay_focus.char_scale == pytest.approx(0.82)
+
+    lay_close_fade = compute_layered_camera_layout(
+        "closeup_react",
+        aspect="9:16",
+        w=1080,
+        h=1920,
+        t_sec=0.35,
+        prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
+    )
+    assert lay_close_fade.board_alpha == pytest.approx(0.0, abs=0.01)
+
+    lay_close_done = compute_layered_camera_layout(
+        "closeup_react",
+        aspect="9:16",
+        w=1080,
+        h=1920,
+        t_sec=0.60,
+        prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
+    )
+    assert lay_close_done.board_alpha == pytest.approx(0.0, abs=0.01)
+    assert lay_close_done.char_scale == pytest.approx(1.22)
+
+    # 2. Kiểm tra focus_board không đẩy chữ lên sát mép y < 110 và closeup_react ẩn bảng lớn
+    bg = Image.new("RGB", (540, 960), (250, 247, 240))
+    char = Image.new("RGBA", (140, 280), (11, 14, 20, 255))
+    try:
+        b_recap = StickvBeat(
+            id="b_recap",
+            chapter=3,
+            chapter_title="Tổng kết",
+            narration="Hãy bình luận bên dưới!",
+            pose="wave_hello",
+            emotion="happy",
+            camera_shot="focus_board",
+            board_type="recap_card",
+            board_title="TÓM TẮT **3 Ý CỐT LÕI**",
+            board_data={
+                "items": [
+                    "**Amygdala** phản ứng 12ms",
+                    "**Thói quen** cần 21 ngày",
+                    "**Ngủ đủ 8h** tăng trí nhớ",
+                ],
+                "takeaway": "Hiểu cơ chế để làm chủ hành vi",
+            },
+        )
+        f_focus = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_recap,
+            aspect="9:16",
+            t_sec=0.6,
+            mouth_open=0.3,
+            word_timings=[("Hãy", 0.0, 0.4), ("bình", 0.4, 0.8)],
+            draw_board=True,
+        )
+        # Vùng mép trên y < 55 vẫn giữ nguyên màu nền (không cắt bảng)
+        assert f_focus.getpixel((270, 30)) == (250, 247, 240)
+        f_focus.close()
+
+        b_close = b_recap.model_copy(update={"camera_shot": "closeup_react"})
+        f_close = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_close,
+            aspect="9:16",
+            t_sec=0.4,
+            mouth_open=0.3,
+            word_timings=[],
+            draw_board=True,
+            prev_stage_state=BeatStageState(x=200.0, y=500.0, board_alpha=1.0),
+        )
+        # Vùng giữa bảng cũ y = 260 ở closeup_react trở về màu nền vì bảng lớn đã ẩn mượt
+        assert f_close.getpixel((270, 260)) == (250, 247, 240)
+        f_close.close()
+    finally:
+        bg.close()
+        char.close()
+
+
+def test_mp4_compat_flags_and_legacy_shake_motion_normalized() -> None:
+    from hbt.stickv.llm import VALID_MOTIONS, sanitize_beats
+    from hbt.stickv.render import STICKV_MP4_COMPAT_FLAGS
+
+    flags_str = " ".join(STICKV_MP4_COMPAT_FLAGS)
+    assert "-pix_fmt yuv420p" in flags_str
+    assert "-profile:v high" in flags_str
+    assert "-movflags +faststart" in flags_str
+    assert "-ar 48000" in flags_str
+
+    assert "shake" not in VALID_MOTIONS
+    legacy = StickvBeat(id="b_old", narration="Kiểm tra", motion="shake")
+    assert legacy.motion == "float"
+
+    sanitized = sanitize_beats([{"narration": "Một câu", "motion": "shake"}])
+    assert sanitized[0].motion == "float"
+
+
+def test_phase9_zero_raw_markdown_across_all_board_templates_and_shots() -> None:
+    """Mọi mẫu bảng StickV & 6 góc máy Cinema Core tuyệt đối không in ký tự `**` thô."""
+    from PIL import ImageDraw
+
+    from hbt.cinema.schema import BeatSpec, BoardSpec
+    from hbt.cinema.shots import bake_static_shot_layer, compute_shot_layout
+    from hbt.stickv.stage import (
+        _draw_smart_board_content,
+        parse_rich_spans,
+        resolve_stage_palette,
+    )
+
+    # Kiểm thử trực tiếp parse_rich_spans cả trường hợp thiếu dấu đóng **
+    spans = parse_rich_spans("1. **Vi chấn thương** sợi cơ và **mảnh cắt dở")
+    assert all("**" not in seg for seg, _ in spans)
+    assert any(seg == "Vi chấn thương" and hl for seg, hl in spans)
+
+    drawn_texts: list[str] = []
+    orig_text = ImageDraw.ImageDraw.text
+
+    def spy_text(self, xy, text, *args, **kwargs):
+        drawn_texts.append(str(text))
+        return orig_text(self, xy, text, *args, **kwargs)
+
+    board_cases: list[tuple[str, dict]] = [
+        (
+            "bullets",
+            {
+                "items": ["**Vi chấn thương** tạo tín hiệu tái tạo sợi cơ"],
+                "takeaway": "**Ngủ đủ** mới tăng cơ",
+            },
+        ),
+        (
+            "flow_steps",
+            {
+                "steps": [
+                    "**Bước 1:** Vi chấn thương cơ học",
+                    "**Bước 2:** Tổng hợp protein khi ngủ",
+                ]
+            },
+        ),
+        (
+            "comparison",
+            {
+                "left_title": "**Cách cũ**",
+                "left_items": ["**Ép đau** không nghỉ"],
+                "right_title": "**Khoa học**",
+                "right_items": ["**Tải tăng tiến** + ngủ sâu"],
+            },
+        ),
+        (
+            "myth_vs_fact",
+            {
+                "myth": "**Đau mới hiệu quả:** Ngộ nhận phổ biến khiến người tập dễ chấn thương",
+                "fact": "**Áp lực cơ học:** Mới là tín hiệu kích thích tổng hợp sợi cơ bền vững",
+            },
+        ),
+        (
+            "big_number",
+            {
+                "value": "**48h**",
+                "label": "Chu kỳ **phục hồi** sợi cơ",
+                "sub": "**Tổng hợp** protein tối ưu",
+            },
+        ),
+        ("counter_grow", {"target": "**72**", "unit": "**giờ**", "label": "Ngưỡng **tái tạo** mô"}),
+        (
+            "bar_compare",
+            {
+                "values": [
+                    {"label": "**Ngủ 8h**", "value": 95},
+                    {"label": "**Ngủ 5h**", "value": 45},
+                ]
+            },
+        ),
+        (
+            "timeline_era",
+            {"events": [{"year": "**2560 TCN**", "title": "**Xây dựng** Kim Tự Tháp Giza"}]},
+        ),
+        ("location_map", {"location": "**Cao nguyên Giza**", "coordinates": "**29.97° N**"}),
+        ("quote", {"quote": "Cơ bắp chỉ **lớn lên** trong giấc ngủ sâu."}),
+        (
+            "recap_card",
+            {"items": ["**Ý 1:** Cơ chế gốc", "**Ý 2:** Ngủ đủ 8h", "**Ý 3:** Dinh dưỡng"]},
+        ),
+        ("none", {"items": ["**Auto Card** xử lý markdown sạch"]}),
+    ]
+
+    pal = resolve_stage_palette("physics_science", "dark")
+    with patch.object(ImageDraw.ImageDraw, "text", spy_text):
+        for bt, bdata in board_cases:
+            canvas = Image.new("RGBA", (1080, 1920), pal["bg"])
+            try:
+                beat = StickvBeat(
+                    id=f"b_{bt}",
+                    narration="Cơ chế **vi chấn thương** và phục hồi.",
+                    board_type=bt,  # type: ignore[arg-type]
+                    board_title="**Tiêu đề** bảng kiểm định",
+                    takeaway="Ghi nhớ **nguyên lý** cốt lõi",
+                    board_data=bdata,
+                )
+                _draw_smart_board_content(canvas, beat, (56, 125, 1024, 830), pal)
+            finally:
+                canvas.close()
+
+        for shot_t in (
+            "desk_wide",
+            "card_hero",
+            "split_compare",
+            "data_spotlight",
+            "puppet_closeup",
+            "recap_grid",
+        ):
+            bs = BeatSpec(
+                id=f"c_{shot_t}",
+                narration="Kiểm thử Cinema Core.",
+                shot_type=shot_t,  # type: ignore[arg-type]
+                board=BoardSpec(
+                    board_type="myth_vs_fact" if shot_t == "split_compare" else "bullets",
+                    title="**Tiêu đề** Tactile Desk",
+                    bullets=["**Điểm 1:** Không lộ dấu sao", "**Điểm 2:** Đậm rõ từ khóa"],
+                    takeaway="**Chốt lại** không lộ sao",
+                ),
+            )
+            lay = compute_shot_layout(shot_t, "9:16", beat=bs, width=540, height=960)  # type: ignore[arg-type]
+            baked = bake_static_shot_layer(bs, lay, width=540, height=960)
+            baked.close()
+
+    assert len(drawn_texts) > 30
+    leaked = [t for t in drawn_texts if "**" in t]
+    assert leaked == [], f"Phát hiện ký tự '**' thô bị vẽ ra màn hình: {leaked}"
+
+
+def test_phase9_karaoke_highlight_box_clearance_and_closeup_quote_banner() -> None:
+    """Hộp highlight Karaoke cách từ kế cận >= 10px (không dính chữ) & closeup có Quote."""
+    from hbt.stickv.stage import compute_karaoke_word_boxes, draw_karaoke_strip
+
+    words = ["Khoa", "học", "lại", "chứng", "minh"]
+    for aspect, frame_w in (("9:16", 1080), ("16:9", 1920)):
+        for active_idx in range(len(words)):
+            _font, _strip, items = compute_karaoke_word_boxes(
+                words,
+                active_idx,
+                frame_w=frame_w,
+                base_y=900,
+                aspect=aspect,  # type: ignore[arg-type]
+            )
+            hl_box = items[active_idx]["highlight_box"]
+            assert hl_box is not None
+            # Kiểm tra khoảng hở tối thiểu >= 10px với từ bên trái và bên phải
+            if active_idx > 0:
+                left_box = items[active_idx - 1]["text_box"]
+                assert hl_box[0] - left_box[2] >= 10, f"Dính từ trái ở idx={active_idx}"
+            if active_idx + 1 < len(items):
+                right_box = items[active_idx + 1]["text_box"]
+                assert right_box[0] - hl_box[2] >= 10, f"Dính từ phải ở idx={active_idx}"
+
+    # Vẽ thực tế draw_karaoke_strip lên RGBA 1080x1920 không lỗi
+    canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    try:
+        timings = [(w, i * 0.3, (i + 1) * 0.3) for i, w in enumerate(words)]
+        draw_karaoke_strip(canvas, timings, 0.45, aspect="9:16")
+        assert canvas.getbbox() is not None
+    finally:
+        canvas.close()
+
+    # Kiểm tra closeup_react hiển thị dải Quote/Keyword ở vùng trên (không để trống hoác)
+    bg = Image.new("RGB", (1080, 1920), (20, 26, 38))
+    char = Image.new("RGBA", (280, 560), (255, 255, 255, 255))
+    try:
+        b_close = StickvBeat(
+            id="b_quote",
+            chapter=1,
+            chapter_title="Sự thật bất ngờ",
+            narration="Cơ bắp chỉ to lên khi bạn ngủ đủ giấc mỗi đêm.",
+            camera_shot="closeup_react",
+            board_type="bullets",
+            board_title="**Ngủ sâu** xây cơ bắp",
+            takeaway="Giấc ngủ sâu mới tạo mô cơ",
+        )
+        out_f = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=b_close,
+            aspect="9:16",
+            t_sec=0.5,
+            mouth_open=0.3,
+            word_timings=[],
+            draw_board=True,
+            domain="physics_science",
+            theme="dark",
+        )
+        # Vùng banner Quote y=180..360 trên 1080x1920 phải có nhiều màu (không trống nền phẳng)
+        quote_crop = out_f.crop((100, 180, 980, 360))
+        colors = quote_crop.getcolors(maxcolors=2048)
+        assert colors is None or len(colors) > 8
+        quote_crop.close()
+        out_f.close()
+    finally:
+        bg.close()
+        char.close()

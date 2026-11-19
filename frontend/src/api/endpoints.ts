@@ -55,6 +55,8 @@ import type {
   OnlineGreenMemeItem,
   OnlinePixabayItem,
   OnlineTunaItem,
+  PuppetSlotKey,
+  PuppetStatusResponse,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -328,6 +330,8 @@ export const api = {
       json: { voice_id: voiceId },
     }),
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
+  listJobs: (opts?: { includeRecent?: boolean }) =>
+    apiGet<ActiveJob[]>(opts?.includeRecent ? '/jobs?include_recent=true' : '/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
   startPostvQuick: (body: {
@@ -399,9 +403,16 @@ export const api = {
 
   listAssetHub: (category: AssetHubCategory) =>
     apiGet<{ category: AssetHubCategory; items: AssetHubItem[] }>(`/asset-hub/${enc(category)}`),
-  uploadAssetHub: (category: AssetHubCategory, file: File) => {
+  uploadAssetHub: (
+    category: AssetHubCategory,
+    file: File,
+    animGroup?: 'pose' | 'oneshot' | 'loop',
+  ) => {
     const form = new FormData();
     form.set('file', file);
+    if (animGroup && category === 'stickman') {
+      form.set('anim_group', animGroup);
+    }
     return apiRequest<{ ok: boolean; item: AssetHubItem }>('POST', `/asset-hub/${enc(category)}`, {
       form,
     });
@@ -454,6 +465,15 @@ export const api = {
     kind: 'music' | 'sfx';
     tags: string[];
   }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/pixabay/import', { json: body }),
+  importFreesoundOnline: (body: {
+    item_id: string;
+    title: string;
+    artist: string;
+    download_url: string;
+    kind: 'music' | 'sfx';
+    tags: string[];
+    license_url?: string;
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/freesound/import', { json: body }),
 
   searchGreenMemeOnline: (q: string) =>
     apiGet<{ items: OnlineGreenMemeItem[] }>(`/asset-hub/online/greenmeme?q=${enc(q)}`),
@@ -497,4 +517,16 @@ export const api = {
       'POST',
       `/asset-hub/stickman/${enc(filename)}/set-default`,
     ),
+
+  getStickmanPuppetStatus: () => apiGet<PuppetStatusResponse>('/asset-hub/stickman/puppet'),
+  uploadStickmanPuppetSlot: (slot: PuppetSlotKey, file: File) => {
+    const form = new FormData();
+    form.set('file', file);
+    return apiRequest<{
+      ok: boolean;
+      slot: PuppetSlotKey;
+      segmented: boolean;
+      status: PuppetStatusResponse;
+    }>('POST', `/asset-hub/stickman/puppet/${enc(slot)}`, { form });
+  },
 };

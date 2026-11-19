@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from hbt.config import DEFAULT_FPS
+from hbt.config import DEFAULT_FPS, REPO_ROOT, _read_env_file
 from hbt.models import HEX_COLOR
 from hbt.shared.pipeline.watermark import WatermarkSettings
 
@@ -42,23 +42,46 @@ class AppSettings(BaseModel):
     watermark: WatermarkSettings = Field(default_factory=WatermarkSettings)
     pixabay_api_key: str = ""
     giphy_api_key: str = ""
+    freesound_api_key: str = ""
+    voicemod_tuna_api_key: str = ""
+
+
+_ONLINE_KEY_ALIASES: dict[str, str] = {
+    "tuna": "VOICEMOD_TUNA_API_KEY",
+    "voicemod_tuna_api_key": "VOICEMOD_TUNA_API_KEY",
+    "freesound": "FREESOUND_API_KEY",
+    "pixabay": "PIXABAY_API_KEY",
+    "giphy": "GIPHY_API_KEY",
+}
 
 
 def resolve_online_api_key(
-    env_name: Literal["PIXABAY_API_KEY", "GIPHY_API_KEY"],
+    env_name: Literal[
+        "PIXABAY_API_KEY",
+        "GIPHY_API_KEY",
+        "FREESOUND_API_KEY",
+        "VOICEMOD_TUNA_API_KEY",
+        "tuna",
+    ],
     workspace_dir: Path | None = None,
 ) -> str:
-    """Đọc API key từ .env trước, sau đó fallback sang workspace/settings/app.json."""
-    val = os.environ.get(env_name, "").strip()
+    """Đọc API key từ os.environ -> workspace/settings/app.json -> .env (không cần restart)."""
+    canonical = _ONLINE_KEY_ALIASES.get(env_name.strip().lower(), env_name)
+    val = os.environ.get(canonical, "").strip()
     if val:
         return val
     if workspace_dir is not None:
         s = AppSettingsStore(workspace_dir).load()
-        if env_name == "PIXABAY_API_KEY" and s.pixabay_api_key.strip():
+        if canonical == "PIXABAY_API_KEY" and s.pixabay_api_key.strip():
             return s.pixabay_api_key.strip()
-        if env_name == "GIPHY_API_KEY" and s.giphy_api_key.strip():
+        if canonical == "GIPHY_API_KEY" and s.giphy_api_key.strip():
             return s.giphy_api_key.strip()
-    return ""
+        if canonical == "FREESOUND_API_KEY" and s.freesound_api_key.strip():
+            return s.freesound_api_key.strip()
+        if canonical == "VOICEMOD_TUNA_API_KEY" and s.voicemod_tuna_api_key.strip():
+            return s.voicemod_tuna_api_key.strip()
+    env_map = _read_env_file(REPO_ROOT / ".env")
+    return env_map.get(canonical, "").strip()
 
 
 class AppSettingsStore:

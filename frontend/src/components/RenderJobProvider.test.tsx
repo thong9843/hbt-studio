@@ -3,14 +3,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRenderJob } from '../hooks/renderJob';
+import { getActiveStreamCount, resetActiveStreams } from '../hooks/useJob';
 import { FakeEventSource, stubFetch } from '../test/fakes';
 import { RenderJobProvider } from './RenderJobProvider';
 
 beforeEach(() => {
+  resetActiveStreams();
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  resetActiveStreams();
+  vi.unstubAllGlobals();
+});
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
@@ -122,6 +127,79 @@ describe('RenderJobProvider', () => {
       release([active('old', 'running')]);
       await new Promise((r) => setTimeout(r, 40));
       expect(result.current.jobId).toBe('mine');
+    });
+
+    it('enforces single EventSource per jobId, throttles rapid progress bursts, and invalidates queries only on terminal end', async () => {
+      stubFetch({
+        'GET /api/jobs': [],
+        'GET /api/jobs/sv-burst-1': {
+          id: 'sv-burst-1',
+          project: 'stickv-demo',
+          slug: 'stickv-demo',
+          kind: 'stickv',
+          status: 'done',
+          progress: 100,
+          step: 'Ghép Outro & Hoàn tất',
+        },
+      });
+      const qc = new QueryClient();
+      const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
+      const customWrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={qc}>
+          <RenderJobProvider>{children}</RenderJobProvider>
+        </QueryClientProvider>
+      );
+
+      const { result } = renderHook(() => useRenderJob(), { wrapper: customWrapper });
+
+      act(() => {
+        result.current.attachJob({
+          jobId: 'sv-burst-1',
+          slug: 'stickv-demo',
+          kind: 'stickv',
+          preview: false,
+          progress: 2,
+          step: 'Sinh giọng VieNeu-TTS',
+          stage: 'Sinh giọng VieNeu-TTS',
+        });
+        // Gọi lặp attachJob cùng jobId nhiều lần (mô phỏng remount / click đúp)
+        result.current.attachJob({
+          jobId: 'sv-burst-1',
+          slug: 'stickv-demo',
+          kind: 'stickv',
+          preview: false,
+          progress: 5,
+          step: 'Sinh giọng VieNeu-TTS',
+        });
+      });
+
+      expect(FakeEventSource.instances).toHaveLength(1);
+      expect(getActiveStreamCount()).toBe(1);
+      expect(result.current.running).toBe(true);
+
+      const es = FakeEventSource.instances[0];
+      // Bắn dồn dập 20 sự kiện progress trong cùng 1 bước
+      act(() => {
+        for (let i = 10; i <= 80; i += 3.5) {
+          es.emit('progress', {
+            progress: Math.round(i),
+            step: 'Dựng khung hình',
+            stage: 'Dựng khung hình',
+            message: `Frame ${i}`,
+          });
+        }
+      });
+
+      // Tuyệt đối không gọi invalidateQueries trong suốt quá trình nhận sự kiện progress
+      expect(invalidateSpy).not.toHaveBeenCalled();
+
+      // Khi kết thúc job -> chỉ invalidateQueries đúng 1 đợt duy nhất
+      act(() => {
+        es.emit('end', { status: 'done' });
+      });
+      await waitFor(() => expect(result.current.finished?.status).toBe('done'));
+      expect(getActiveStreamCount()).toBe(0);
+      expect(invalidateSpy).toHaveBeenCalled();
     });
   });
 });

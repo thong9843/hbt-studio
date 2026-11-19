@@ -47,6 +47,15 @@ async def search_pixabay_audio(
 
     async def _do(c: httpx.AsyncClient) -> list[dict[str, Any]]:
         resp = await c.get(PIXABAY_AUDIO_API, params=params)
+        if resp.status_code in (401, 403):
+            raise ValueError(
+                "PIXABAY_API_KEY không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại trong Cài đặt."
+            )
+        if resp.status_code == 400:
+            raise ValueError(
+                "Pixabay Public REST API không hỗ trợ tìm nhạc/SFX trực tiếp (HTTP 400). "
+                "Vui lòng chuyển sang nguồn Freesound hoặc Voicemod Tuna."
+            )
         resp.raise_for_status()
         data = resp.json()
         hits = data.get("hits") if isinstance(data, dict) else []

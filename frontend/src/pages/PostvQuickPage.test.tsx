@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,18 +87,20 @@ describe('PostvQuickPage', () => {
 
     // Hàng chip tuỳ chọn
     await waitFor(() => {
-      const voiceSelect = screen.getByLabelText('Giọng');
-      expect(voiceSelect).toHaveValue('adam-bua');
-      const bgmSelect = screen.getByLabelText('Nhạc nền');
-      expect(bgmSelect).toHaveValue('lo-fi-chill');
+      const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
+      expect(voiceSelect).toHaveAttribute('data-value', 'adam-bua');
+      const bgmSelect = screen.getByRole('combobox', { name: 'Nhạc nền' });
+      expect(bgmSelect).toHaveAttribute('data-value', 'lo-fi-chill');
     });
-    const durationSelect = screen.getByLabelText('Thời lượng');
-    expect(durationSelect).toHaveValue('90');
+    const durationSelect = screen.getByRole('combobox', { name: 'Thời lượng' });
+    expect(durationSelect).toHaveAttribute('data-value', '90');
+    fireEvent.click(durationSelect);
     expect(screen.getByRole('option', { name: '1m' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '1m30s' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '2m' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '2m30s' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '3m' })).toBeInTheDocument();
+    fireEvent.keyDown(durationSelect, { key: 'Escape' });
 
     expect(screen.getByText(/Bình luận: Tự động/)).toBeInTheDocument();
     expect(screen.getByText('60 fps')).toBeInTheDocument();
@@ -140,12 +142,16 @@ describe('PostvQuickPage', () => {
     const submitBtn = screen.getByRole('button', { name: 'Tạo video' });
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Nhạc nền')).toHaveValue('lo-fi-chill');
+      expect(screen.getByRole('combobox', { name: 'Nhạc nền' })).toHaveAttribute(
+        'data-value',
+        'lo-fi-chill',
+      );
     });
 
     // Đổi thời lượng sang 3m (180s)
-    const durationSelect = screen.getByLabelText('Thời lượng');
-    await user.selectOptions(durationSelect, '180');
+    const durationSelect = screen.getByRole('combobox', { name: 'Thời lượng' });
+    await user.click(durationSelect);
+    await user.click(screen.getByRole('option', { name: '3m' }));
 
     // Gõ link vào
     await user.type(textarea, 'https://www.threads.net/@user/post/xyz');
@@ -455,14 +461,15 @@ describe('PostvQuickPage', () => {
     page();
 
     await waitFor(() => {
-      const voiceSelect = screen.getByLabelText('Giọng');
-      expect(voiceSelect).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
+      expect(voiceSelect).toHaveAttribute('data-value', 'adam-bua');
     });
-    const voiceSelect = screen.getByLabelText('Giọng');
+    const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
 
     // Đổi giọng sang Mai Anh
-    await user.selectOptions(voiceSelect, 'mai-anh');
-    expect(voiceSelect).toHaveValue('mai-anh');
+    await user.click(voiceSelect);
+    await user.click(screen.getByRole('option', { name: 'Mai Anh' }));
+    expect(voiceSelect).toHaveAttribute('data-value', 'mai-anh');
 
     await waitFor(() => {
       expect(settingsSent.body).not.toBeNull();
