@@ -75,17 +75,23 @@ export function useJob(
     source.addEventListener('progress', (ev) => {
       try {
         const data = JSON.parse((ev as MessageEvent<string>).data) as Partial<JobProgress>;
-        setProgress((prev) => ({
-          progress: data.progress ?? data.percent ?? prev.progress,
-          step: data.step ?? data.stage ?? prev.step,
-          stage: data.stage ?? data.step ?? prev.stage,
-          message: data.message ?? data.text ?? '',
-          current: data.current,
-          total: data.total,
-          current_beat: data.current_beat !== undefined ? data.current_beat : prev.current_beat,
-          total_beats: data.total_beats !== undefined ? data.total_beats : prev.total_beats,
-          percent: data.percent,
-        }));
+        setProgress((prev) => {
+          const next: JobProgress = {
+            progress: data.progress ?? data.percent ?? prev.progress,
+            step: data.step ?? data.stage ?? prev.step,
+            message: data.message ?? data.text ?? '',
+          };
+          if (data.stage !== undefined) next.stage = data.stage;
+          else if (prev.stage !== undefined) next.stage = prev.stage;
+          if (data.current !== undefined) next.current = data.current;
+          if (data.total !== undefined) next.total = data.total;
+          if (data.current_beat !== undefined) next.current_beat = data.current_beat;
+          else if (prev.current_beat !== undefined) next.current_beat = prev.current_beat;
+          if (data.total_beats !== undefined) next.total_beats = data.total_beats;
+          else if (prev.total_beats !== undefined) next.total_beats = prev.total_beats;
+          if (data.percent !== undefined) next.percent = data.percent;
+          return next;
+        });
       } catch {
         // Bỏ qua sự kiện hỏng.
       }

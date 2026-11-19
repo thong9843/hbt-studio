@@ -280,6 +280,8 @@ export function StickvPage() {
     }
   }, [selectedSlug, projects]);
 
+  const { attachJob } = job;
+
   // Đồng bộ job StickV bền vững khi mount / quay lại trang hoặc đổi dự án
   useEffect(() => {
     let cancelled = false;
@@ -301,7 +303,7 @@ export function StickvPage() {
           if (!selectedSlug && activeTarget.slug) {
             setSelectedSlug(activeTarget.slug);
           }
-          job.attachJob({
+          attachJob({
             jobId: activeTarget.id,
             slug: activeTarget.slug,
             kind: 'stickv',
@@ -334,7 +336,7 @@ export function StickvPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSlug, job.attachJob, qc, toast]);
+  }, [selectedSlug, attachJob, qc, toast]);
 
   useEffect(() => {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;

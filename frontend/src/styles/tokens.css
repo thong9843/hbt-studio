@@ -112,12 +112,12 @@
   --nav-w: 248px;
   --nav-w-mini: 72px;
 
-  /* Chuyển động xúc giác (0% CPU khi rảnh, 120–220ms) */
+  /* Chuyển động xúc giác (0% CPU khi rảnh, 120–200ms) */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-press: 120ms;
   --dur: 160ms;
   --dur-pop: 140ms;
-  --dur-slow: 220ms;
+  --dur-slow: 200ms;
 
   color-scheme: light;
 }

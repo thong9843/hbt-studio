@@ -160,7 +160,6 @@
   );
   transform: translateX(-140%) skewX(-18deg);
   pointer-events: none;
-  transition: transform 0ms linear;
 }
 @media (hover: hover) {
   .ui-btn:not(:disabled):not([aria-disabled='true']):hover {
@@ -171,7 +170,7 @@
   }
   .ui-btn-sheen:not(:disabled):not([aria-disabled='true']):hover::after {
     transform: translateX(240%) skewX(-18deg);
-    transition: transform 420ms var(--ease);
+    transition: transform var(--dur-slow) var(--ease);
   }
   .ui-btn-soft:not(:disabled):hover {
     background: var(--soft-2);
@@ -1180,9 +1179,9 @@ textarea.ui-input[data-counter] {
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 140ms var(--ease),
-    background-color 140ms var(--ease),
-    color 140ms var(--ease);
+    border-color var(--dur-pop) var(--ease),
+    background-color var(--dur-pop) var(--ease),
+    color var(--dur-pop) var(--ease);
 }
 .ui-studio-select-pill .ui-studio-select-trigger {
   min-height: 34px;
@@ -1228,8 +1227,8 @@ textarea.ui-input[data-counter] {
   flex-shrink: 0;
   color: var(--muted);
   transition:
-    transform 140ms var(--ease),
-    color 140ms var(--ease);
+    transform var(--dur-pop) var(--ease),
+    color var(--dur-pop) var(--ease);
 }
 .ui-studio-select-trigger[aria-expanded='true'] .ui-studio-select-caret {
   color: var(--text);
@@ -1252,7 +1251,7 @@ textarea.ui-input[data-counter] {
   background: var(--surface-card);
   box-shadow: var(--card-top-highlight), var(--shadow-pop);
   transform-origin: top center;
-  animation: ui-select-pop 140ms var(--ease) both;
+  animation: ui-select-pop var(--dur-pop) var(--ease) both;
 }
 @keyframes ui-select-pop {
   from {
@@ -1277,8 +1276,8 @@ textarea.ui-input[data-counter] {
   line-height: 1.3;
   cursor: pointer;
   transition:
-    background-color 120ms var(--ease),
-    color 120ms var(--ease);
+    background-color var(--dur-press) var(--ease),
+    color var(--dur-press) var(--ease);
 }
 .ui-studio-select-opt[data-highlighted='true'],
 .ui-studio-select-opt:hover {
@@ -1327,7 +1326,7 @@ textarea.ui-input[data-counter] {
   border: 1px solid var(--border-subtle);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
   pointer-events: none;
-  transition: transform 160ms var(--ease);
+  transition: transform var(--dur) var(--ease);
 }
 .ui-segmented-btn {
   position: relative;
@@ -1347,7 +1346,7 @@ textarea.ui-input[data-counter] {
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 140ms var(--ease);
+  transition: color var(--dur-pop) var(--ease);
 }
 .ui-segmented-btn:hover:not(:disabled) {
   color: var(--text);

@@ -180,7 +180,10 @@ describe('StickvPage', () => {
       </QueryClientProvider>,
     );
 
-    const exportBtn = await screen.findByRole('button', { name: /Xuất bản đẹp/i });
+    // Đợi dự án StickV nạp xong để nút Xuất bản đẹp mở khóa
+    expect(await screen.findByDisplayValue('Đây là beat mở đầu.')).toBeInTheDocument();
+    const exportBtn = screen.getByRole('button', { name: /Xuất bản đẹp/i });
+    await waitFor(() => expect(exportBtn).toBeEnabled());
     fireEvent.click(exportBtn);
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));

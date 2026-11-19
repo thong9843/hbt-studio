@@ -14,7 +14,6 @@ from typing import Any
 import numpy as np
 
 from hbt.app_settings import resolve_online_api_key
-from hbt.cinema.hardware import resolve_filter_complex_script_flag
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.align import align_silence
 from hbt.pipeline.ffutil import run_ffmpeg
@@ -864,6 +863,8 @@ def mix_stickv_audio(
     fc_text = ";\n".join(filter_parts) + "\n"
     script_path = out_wav.with_name(f"{out_wav.stem}_filtergraph.txt")
     _atomic_write_text(script_path, fc_text)
+
+    from hbt.cinema.hardware import resolve_filter_complex_script_flag
 
     tmp_wav = out_wav.with_name(f"{out_wav.stem}.tmp.wav")
     script_flag = resolve_filter_complex_script_flag()
