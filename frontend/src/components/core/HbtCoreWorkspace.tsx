@@ -614,14 +614,6 @@ export function HbtCoreWorkspace({
                   {vi.common.close}
                 </Button>
               )}
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={rendering || v2Loading}
-                onClick={() => void handleStartV1Render()}
-              >
-                {rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-              </Button>
               <button
                 type="button"
                 disabled={v2Loading || rendering || !prompt.trim()}

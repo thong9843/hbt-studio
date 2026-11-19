@@ -15,7 +15,11 @@ function isOnActiveJobPage(
   if (kind === 'stickv' && pathname.startsWith('/stickv')) {
     return true;
   }
-  if ((kind === 'preview' || kind === 'final') && slug && pathname.startsWith(`/p/${slug}/export`)) {
+  if (
+    (kind === 'preview' || kind === 'final') &&
+    slug &&
+    pathname.startsWith(`/p/${slug}/export`)
+  ) {
     return true;
   }
   return false;

@@ -32,13 +32,7 @@ function readStoredSidebarCollapsed(): boolean | null {
  * Thanh trái nhận tiến độ từ job toàn cục và cho phép người dùng chủ động mở rộng / thu gọn
  * trên mọi trang (không còn ép khóa cứng ở các trang Studio).
  */
-function Nav({
-  defaultMini,
-  render,
-}: {
-  defaultMini: boolean;
-  render?: RenderProgress | null;
-}) {
+function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderProgress | null }) {
   const status = useRenderJobStatus();
   const progress = useRenderJobProgress();
   const remaining = useRemainingText();

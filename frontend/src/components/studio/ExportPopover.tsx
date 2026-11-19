@@ -100,9 +100,7 @@ export const ExportPopover = memo(function ExportPopover({
             className="relative overflow-hidden"
           >
             <span>
-              {isRendering
-                ? vi.studioShell.exportingVideoBtn(pct)
-                : vi.studioShell.exportVideoBtn}
+              {isRendering ? vi.studioShell.exportingVideoBtn(pct) : vi.studioShell.exportVideoBtn}
             </span>
             {isRendering && (
               <span

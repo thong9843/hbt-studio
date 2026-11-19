@@ -1,27 +1,16 @@
-import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { HbtCoreWorkspace } from '../components/core/HbtCoreWorkspace';
 import { ArrowLeftIcon, FolderIcon, ZapIcon } from '../components/icons';
-import { useStudioWorkspace } from '../hooks/studioWorkspace';
 import { vi } from '../i18n/vi';
 
 export function HbtCorePage() {
   const [searchParams] = useSearchParams();
   const slugParam = searchParams.get('slug') ?? undefined;
-  const ws = useStudioWorkspace();
-  const setStudioMode = ws?.setStudioMode;
-
-  useEffect(() => {
-    setStudioMode?.(true);
-    return () => {
-      setStudioMode?.(false);
-    };
-  }, [setStudioMode]);
 
   return (
     <main className="flex min-h-screen w-full flex-col bg-bg text-text">
-      <header className="flex min-h-[56px] flex-wrap items-center justify-between gap-3 border-b border-line bg-card px-4 py-2">
-        <div className="flex items-center gap-2.5">
+      <header className="flex h-[56px] shrink-0 items-center justify-between gap-3 border-b border-line bg-card px-3.5">
+        <div className="flex min-w-0 items-center gap-2">
           <Link
             to="/"
             aria-label={vi.studioShell.backToHome}
@@ -30,15 +19,16 @@ export function HbtCorePage() {
           >
             <ArrowLeftIcon size={15} />
           </Link>
-          <span className="inline-flex items-center gap-1 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
             <ZapIcon size={13} />
             {vi.nav.hbtCore}
           </span>
-          <h1 className="truncate text-body font-bold tracking-tight text-text">
-            {vi.hbtCore.title}
-          </h1>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-pill bg-soft px-2 py-0.5 text-[11px] font-semibold text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true" />
+            {vi.studioShell.savedBadge}
+          </span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Link to="/library" className="ui-btn ui-btn-soft ui-btn-sm">
             <FolderIcon size={15} />
             {vi.nav.library}

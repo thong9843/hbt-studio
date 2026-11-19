@@ -5,7 +5,6 @@ import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
-import { useStudioWorkspace } from '../hooks/studioWorkspace';
 import type {
   PostvPickComment,
   PostvPickData,
@@ -72,15 +71,6 @@ interface CompletedOutput {
 export function PostvQuickPage() {
   const navigate = useNavigate();
   const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
-  const ws = useStudioWorkspace();
-  const setStudioMode = ws?.setStudioMode;
-
-  useEffect(() => {
-    setStudioMode?.(true);
-    return () => {
-      setStudioMode?.(false);
-    };
-  }, [setStudioMode]);
 
   // Danh sách các dự án để hiện ở cột trái
   const { data: projectsData, refetch: refetchProjects } = useQuery({
@@ -691,8 +681,7 @@ export function PostvQuickPage() {
   return (
     <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg">
       <StudioTopBar
-        engineBadge="PostV · 60fps"
-        title="PostV Studio · Threads & Reddit 60fps"
+        engineBadge="PostV"
         exportProps={{
           aspect: '9:16',
           outroEnabled: outro,

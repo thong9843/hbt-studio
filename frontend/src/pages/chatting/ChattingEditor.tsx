@@ -7,7 +7,6 @@ import { PhonePreviewStage } from '../../components/studio/PhonePreviewStage';
 import { SceneTimelineStrip } from '../../components/studio/SceneTimelineStrip';
 import { StudioTopBar } from '../../components/studio/StudioTopBar';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
-import { useStudioWorkspace } from '../../hooks/studioWorkspace';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
@@ -42,16 +41,7 @@ const VOICE_OPTIONS = ['Adam bựa', 'Trúc Ly', 'Thiện Minh', 'Mai Anh', 'H�
 
 export function ChattingEditor() {
   const { slug } = useParams<{ slug: string }>();
-  const ws = useStudioWorkspace();
-  const setStudioMode = ws?.setStudioMode;
   const [selectedMsgIndex, setSelectedMsgIndex] = useState(0);
-
-  useEffect(() => {
-    setStudioMode?.(true);
-    return () => {
-      setStudioMode?.(false);
-    };
-  }, [setStudioMode]);
   const [isSaving, setIsSaving] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
@@ -416,10 +406,9 @@ export function ChattingEditor() {
     : data?.preview_url;
 
   return (
-    <div className="flex min-h-screen flex-col bg-bg text-text">
+    <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-bg text-text">
       <StudioTopBar
-        engineBadge="Chatting · 60fps"
-        title={`Chatting Studio · ${doc.platform === 'instagram' ? 'Instagram iOS' : 'Messenger iOS'}`}
+        engineBadge="Chatting"
         savedText={isSaving ? vi.chatting.saving : vi.studioShell.savedBadge}
         exportProps={{
           aspect: '9:16',
@@ -434,7 +423,7 @@ export function ChattingEditor() {
           progressStage: isRendering ? 'Đang dựng video Chatting 60fps…' : '',
         }}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* CỘT TRÁI (280px): Nhân vật + Danh sách tin nhắn */}
         <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-card p-4 overflow-y-auto">
           <Link
