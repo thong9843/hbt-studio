@@ -486,12 +486,17 @@ def _stream_chunk_frames_to_ffmpeg(
     acc_audio_t: float,
     prev_stage_state: BeatStageState | None,
     backdrop_renderer: BackdropRenderer,
+    on_progress: Callable[[float, str], None] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     tmp_mp4 = out_mp4.with_name(f"{out_mp4.stem}.tmp.mp4")
     cmd = [
         ffmpeg_exe(),
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "error",
         "-y",
         *FFMPEG_RESOURCE_CLAMP,
         "-f",
@@ -521,23 +526,38 @@ def _stream_chunk_frames_to_ffmpeg(
 
     norm_domain = normalize_domain(domain)
     total_chapters = max((b.chapter for b in all_beats), default=1)
+    total_beats_count = max(1, len(all_beats))
     accent = DOMAIN_PALETTES[norm_domain]["accent"]
 
     cur_frame_offset = global_frame_offset
     cur_audio_t = acc_audio_t
     cur_state = prev_stage_state
 
+    err_log_path = out_mp4.with_name(f"{out_mp4.stem}.ffmpeg.err.log")
+    err_file = open(err_log_path, "wb")  # noqa: SIM115
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=err_file,
     )
+    if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
+        with cancel._lock:
+            cancel._procs.add(proc)
     try:
         assert proc.stdin is not None
         for g_idx, beat, wav_p, dur_b in chunk_items:
             if cancel is not None:
                 cancel.check()
+            if on_progress is not None:
+                beat_pct = 35.0 + (g_idx / total_beats_count) * 48.0
+                on_progress(
+                    round(beat_pct, 1),
+                    (
+                        f"Đang dựng khung hình beat {g_idx + 1}/{total_beats_count} "
+                        f"(Chương {beat.chapter})..."
+                    ),
+                )
             target_total_frames = max(cur_frame_offset + 1, int(round((cur_audio_t + dur_b) * fps)))
             n_frames_beat = target_total_frames - cur_frame_offset
 
@@ -747,26 +767,36 @@ def _stream_chunk_frames_to_ffmpeg(
             proc.stdin.flush()
             proc.stdin.close()
             proc.stdin = None
-        _, stderr_b = proc.communicate(timeout=300.0)
+        proc.wait(timeout=300.0)
+        err_file.close()
         if proc.returncode != 0:
-            raise FFmpegError(
-                f"FFmpeg stream chunk lỗi ({proc.returncode}): "
-                f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
+            err_tail = (
+                err_log_path.read_text(encoding="utf-8", errors="replace")[-400:]
+                if err_log_path.is_file()
+                else ""
             )
+            raise FFmpegError(f"FFmpeg stream chunk lỗi ({proc.returncode}): {err_tail}")
         os.replace(tmp_mp4, out_mp4)
     finally:
-        for pipe in (proc.stdin, proc.stderr):
-            if pipe is not None:
-                try:
-                    pipe.close()
-                except OSError:
-                    pass
+        if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
+            with cancel._lock:
+                cancel._procs.discard(proc)
+        try:
+            err_file.close()
+        except Exception:
+            pass
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
         try:
             if proc.poll() is None:
                 proc.kill()
             proc.wait(timeout=2.0)
         except Exception:
             pass
+        err_log_path.unlink(missing_ok=True)
         if tmp_mp4.exists():
             tmp_mp4.unlink(missing_ok=True)
 
@@ -888,6 +918,8 @@ def render_stickv(
             voice_provider=voice_provider,
             voice_id=project.voice_id,
             pause_scale=pause_scale,
+            on_progress=on_progress,
+            cancel=cancel,
         )
 
         emit(28.0, "Đang trộn SFX & nhạc nền (-14 LUFS)...")
@@ -1000,6 +1032,7 @@ def render_stickv(
                             acc_audio_t=acc_audio_t,
                             prev_stage_state=prev_stage_state,
                             backdrop_renderer=shared_backdrop,
+                            on_progress=on_progress,
                         )
                     )
                 chunk_clips.append(chunk_mp4)

@@ -423,13 +423,17 @@ class DirtyRectCompositor:
         ]
 
         trans_frames = max(1, min(6, int(round(fps * 0.20))))
+        err_log_path = out_path.with_name(f"{out_path.stem}.ffmpeg.err.log")
+        err_file = open(err_log_path, "wb")  # noqa: SIM115
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=err_file,
         )
-        stderr_b = b""
+        if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
+            with cancel._lock:
+                cancel._procs.add(proc)
         try:
             assert proc.stdin is not None
             for f_idx in range(n_frames):
@@ -473,11 +477,16 @@ class DirtyRectCompositor:
             proc.stdin.flush()
             proc.stdin.close()
             proc.stdin = None
-            _, stderr_b = proc.communicate(timeout=180.0)
+            proc.wait(timeout=180.0)
+            err_file.close()
             if proc.returncode != 0:
+                err_tail = (
+                    err_log_path.read_text(encoding="utf-8", errors="replace")[-400:]
+                    if err_log_path.is_file()
+                    else ""
+                )
                 raise FFmpegError(
-                    f"FFmpeg compositor lỗi beat {beat.id} (mã {proc.returncode}): "
-                    f"{stderr_b.decode('utf-8', errors='replace')[-400:]}"
+                    f"FFmpeg compositor lỗi beat {beat.id} (mã {proc.returncode}): {err_tail}"
                 )
             os.replace(tmp_mp4, out_path)
             return {
@@ -489,20 +498,27 @@ class DirtyRectCompositor:
                 "layer_cache": self.layer_cache.stats(),
             }
         finally:
+            if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
+                with cancel._lock:
+                    cancel._procs.discard(proc)
             if puppet_rig is not None:
                 puppet_rig.close()
-            for pipe in (proc.stdin, proc.stderr):
-                if pipe is not None and not pipe.closed:
-                    try:
-                        pipe.close()
-                    except OSError:
-                        pass
+            try:
+                err_file.close()
+            except Exception:
+                pass
+            if proc.stdin is not None and not proc.stdin.closed:
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    pass
             try:
                 if proc.poll() is None:
                     proc.kill()
                 proc.wait(timeout=2.0)
             except Exception:
                 pass
+            err_log_path.unlink(missing_ok=True)
             if tmp_mp4.exists():
                 tmp_mp4.unlink(missing_ok=True)
 

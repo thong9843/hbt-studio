@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import wave
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -631,6 +632,8 @@ def synth_stickv_beats_audio(
     default_voice: str = DEFAULT_VIENEU_VOICE,
     pause_scale: float = 1.0,
     global_lead_s: float = GLOBAL_LEAD_SILENCE_S,
+    on_progress: Callable[[float, str], None] | None = None,
+    cancel: Any | None = None,
 ) -> list[tuple[Path, float]]:
     """Sinh giọng sạch từng câu, bảo vệ âm đầu + 180ms AAC priming guard & đo duration."""
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -666,6 +669,8 @@ def synth_stickv_beats_audio(
                 synth_items.append(SynthItem(text=sent, voice_id=chosen_voice, out=sp))
             beat_sub_wavs.append((sub_paths, sents))
         if synth_items:
+            if cancel is not None and hasattr(cancel, "check"):
+                cancel.check()
             voice_provider.synthesize_many(synth_items)
     else:
         for beat in beats:
@@ -678,7 +683,10 @@ def synth_stickv_beats_audio(
             beat_sub_wavs.append((sub_paths, sents))
 
     results: list[tuple[Path, float]] = []
+    total_beats_count = max(1, len(beats))
     for beat_idx, (beat, (sub_paths, sents)) in enumerate(zip(beats, beat_sub_wavs, strict=True)):
+        if cancel is not None and hasattr(cancel, "check"):
+            cancel.check()
         if voice_provider is not None and sub_paths:
             for sp in sub_paths:
                 if not sp.is_file() or sp.stat().st_size <= 44:
@@ -709,6 +717,12 @@ def synth_stickv_beats_audio(
         anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
         beat.duration_sec = anchored_dur
         results.append((wav_p, anchored_dur))
+        if on_progress is not None:
+            pct = 8.0 + ((beat_idx + 1) / total_beats_count) * 18.0
+            on_progress(
+                round(pct, 1),
+                f"Đã xử lý giọng đọc beat {beat_idx + 1}/{total_beats_count}...",
+            )
     return results
 
 

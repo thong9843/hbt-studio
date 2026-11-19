@@ -27,6 +27,7 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
 
   const kindRef = useRef(kind);
   kindRef.current = kind;
+  const completedJobIdsRef = useRef<Set<string>>(new Set());
 
   const {
     progress,
@@ -35,7 +36,14 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
   } = useJob(
     jobId,
     (job) => {
+      if (job.status === 'running' || job.status === 'queued') {
+        return;
+      }
       setFinished(job);
+      if (completedJobIdsRef.current.has(job.id)) {
+        return;
+      }
+      completedJobIdsRef.current.add(job.id);
       void queryClient.invalidateQueries({ queryKey: ['renders', job.project] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       const isStickv = kindRef.current === 'stickv' || job.kind === 'stickv';
@@ -62,6 +70,7 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       // Đang mở sẵn đúng luồng SSE này -> giữ nguyên không reset tiến độ
       return;
     }
+    completedJobIdsRef.current.delete(input.jobId);
     setSlug(input.slug);
     setKind(input.kind);
     setOptions({ preview: Boolean(input.preview) });

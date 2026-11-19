@@ -599,7 +599,8 @@ class JobManager:
             except TailTrimNeedsConfirmation as e:
                 cut = self.storage.rel(e.cut_file) if e.cut_file else None
                 job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
-            except Exception as e:  # noqa: BLE001
+            except BaseException as e:  # noqa: BLE001
+                log.exception("Lỗi job dựng '%s': %s", job.slug, e)
                 job._finish(FAILED, error=str(e) or e.__class__.__name__)
             else:
                 rel = self.storage.rel
@@ -1265,6 +1266,16 @@ class JobManager:
             current_beat=0 if total_beats else None,
             total_beats=total_beats,
         )
+        job._progress(
+            2.0,
+            "Sinh giọng VieNeu-TTS",
+            "Đã đưa vào hàng đợi dựng StickV...",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
+            percent=2.0,
+            text="Đã đưa vào hàng đợi dựng StickV...",
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -1303,13 +1314,27 @@ class JobManager:
             pdir = stickv_project_dir(ws, job.slug)
             wm = self.app_settings.load().watermark if self.app_settings is not None else None
 
+            active_voice = self.voice
+            if active_voice is not None:
+                try:
+                    v_status = active_voice.status()
+                    if not getattr(v_status, "ok", False):
+                        log.warning(
+                            "VieNeu-TTS chưa sẵn sàng (%s) -> dùng âm thanh dự phòng cho '%s'",
+                            getattr(v_status, "note", ""),
+                            job.slug,
+                        )
+                        active_voice = None
+                except Exception:
+                    active_voice = None
+
             res = render_stickv(
                 proj,
                 pdir,
                 library_dir=self.library_dir,
                 assets_dir=assets_dir,
                 brand_dir=self.brand_dir,
-                voice_provider=self.voice,
+                voice_provider=active_voice,
                 watermark=wm,
                 preview=job.preview,
                 cancel=job.token,
@@ -1353,6 +1378,6 @@ class JobManager:
             )
         except RenderCancelled:
             job._finish(CANCELLED)
-        except Exception as e:  # noqa: BLE001
+        except BaseException as e:  # noqa: BLE001
             log.exception("Lỗi job stickv: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
