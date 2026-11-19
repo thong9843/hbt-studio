@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
+import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
+import { useStudioWorkspace } from '../hooks/studioWorkspace';
 import type {
   PostvPickComment,
   PostvPickData,
@@ -71,6 +73,15 @@ interface CompletedOutput {
 export function PostvQuickPage() {
   const navigate = useNavigate();
   const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
+  const ws = useStudioWorkspace();
+  const setStudioMode = ws?.setStudioMode;
+
+  useEffect(() => {
+    setStudioMode?.(true);
+    return () => {
+      setStudioMode?.(false);
+    };
+  }, [setStudioMode]);
 
   // Danh sách các dự án để hiện ở cột trái
   const { data: projectsData, refetch: refetchProjects } = useQuery({
@@ -679,22 +690,37 @@ export function PostvQuickPage() {
   const remainingEta = Math.max(5, Math.round(((100 - progressPct) / 100) * duration * 0.8));
 
   return (
-    <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
+    <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg">
+      <StudioTopBar
+        engineBadge="PostV · 60fps"
+        title="PostV Studio · Threads & Reddit 60fps"
+        exportProps={{
+          aspect: '9:16',
+          outroEnabled: outro,
+          onOutroChange: setOutro,
+          showWatermarkControl: true,
+          onExportFinal: () => handleStartAuto(false),
+          finalLabel: isSubmitting ? T.creatingBtn : T.createBtn,
+          disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
+          isSubmitting,
+          isRendering: Boolean(jobId && !isFinished),
+          progressPct,
+          progressStage: stageMessage || currentStage,
+          onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
+        }}
+      />
       {/* Khu vực giữa chính */}
       <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
         <div className="w-full max-w-4xl">
           {/* TRƯỜNG HỢP 1: TRẠNG THÁI TRỐNG HOẶC ĐANG NHẬP */}
           {!jobId && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="space-y-5">
               <div className="text-center">
-                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-engine-postv-soft text-engine-postv shadow-sm">
-                  <PlusIcon size={28} />
-                </div>
                 <div className="mb-2 flex justify-center">
                   <Badge tone="postv">PostV · 60fps</Badge>
                 </div>
-                <h1 className="text-h1 font-extrabold text-text">{T.greeting}</h1>
-                <p className="mx-auto mt-2 max-w-md text-small text-muted">{T.greetingSub}</p>
+                <h1 className="text-h1 font-bold tracking-tight text-text">{T.greeting}</h1>
+                <p className="mx-auto mt-1.5 max-w-md text-small text-muted">{T.greetingSub}</p>
               </div>
 
               {/* Thông báo trùng link đã tạo */}

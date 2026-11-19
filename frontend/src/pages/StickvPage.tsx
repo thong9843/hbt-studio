@@ -1247,7 +1247,7 @@ export function StickvPage() {
         onToggleSafeZone: () => setSafeZone((prev) => (prev === 'none' ? 'tiktok' : 'none')),
         onOpenContactSheet: () => setActiveTab('inspect'),
         onPlayPreview: () => renderMutation.mutate(true),
-        playPreviewLabel: 'Xem nhanh',
+        playPreviewLabel: vi.studioShell.canvasPlayBtn,
         children: (
           <div className="relative h-full w-full">
             {draft?.last_render?.video_url ? (
