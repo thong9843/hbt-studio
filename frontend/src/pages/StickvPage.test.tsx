@@ -201,7 +201,9 @@ describe('StickvPage', () => {
       });
     });
 
-    expect(await screen.findByLabelText('Tiến trình dựng video StickV')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('region', { name: 'Tiến trình dựng video StickV' }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText(/48%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Dựng khung hình/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Beat 2\/4/).length).toBeGreaterThanOrEqual(1);
@@ -210,7 +212,9 @@ describe('StickvPage', () => {
     // Chuyển sang trang khác (unmount StickvPage hoàn toàn)
     fireEvent.click(screen.getByRole('link', { name: 'Đi tới Thư viện' }));
     expect(await screen.findByText('Trang Thư viện')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Tiến trình dựng video StickV')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Tiến trình dựng video StickV' }),
+    ).not.toBeInTheDocument();
 
     // GlobalJobDock vẫn bám sống tiến độ + có nút nhảy về đúng dự án StickV
     const dockLink = screen.getByRole('link', { name: /Xem tiến trình StickV/i });
@@ -230,7 +234,9 @@ describe('StickvPage', () => {
     // Bấm nút trong GlobalJobDock để quay về /stickv (remount StickvPage)
     fireEvent.click(dockLink);
 
-    expect(await screen.findByLabelText('Tiến trình dựng video StickV')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('region', { name: 'Tiến trình dựng video StickV' }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText(/74%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Trộn âm thanh -14 LUFS/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /Xuất bản đẹp/i })).toBeDisabled();
