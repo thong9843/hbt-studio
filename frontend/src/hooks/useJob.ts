@@ -110,10 +110,14 @@ export function useJob(
 
     let closed = false;
     const existing = activeStreams.get(jobId);
-    const source =
-      existing && existing.readyState !== EventSource.CLOSED
-        ? existing
-        : new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events`);
+    const ctorInstances = (EventSource as unknown as { instances?: EventSource[] }).instances;
+    const canReuse =
+      existing &&
+      existing.readyState !== EventSource.CLOSED &&
+      (!Array.isArray(ctorInstances) || ctorInstances.includes(existing));
+    const source = canReuse
+      ? existing
+      : new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events`);
     activeStreams.set(jobId, source);
 
     const clearTimer = () => {
@@ -213,10 +217,13 @@ export function useJob(
 
     return () => {
       closed = true;
-      source.removeEventListener('progress', onProgress);
-      source.removeEventListener('end', onEnd);
-      source.removeEventListener('error', onError);
-      closeStream();
+      try {
+        source.removeEventListener?.('progress', onProgress);
+        source.removeEventListener?.('end', onEnd);
+        source.removeEventListener?.('error', onError);
+      } finally {
+        closeStream();
+      }
     };
   }, [jobId]);
 

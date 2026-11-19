@@ -14,8 +14,8 @@ export interface SegmentedControlProps<T extends string = string> {
   value: T;
   onChange: (value: T) => void;
   'aria-label': string;
-  /** 'radio' cho nhóm chọn giá trị (9:16/16:9, thời lượng), 'tab' cho thanh chuyển tab. */
-  roleMode?: 'radio' | 'tab';
+  /** 'radio' cho nhóm chọn giá trị, 'tab' cho thanh chuyển tab, 'button' cho nhóm nút bấm. */
+  roleMode?: 'radio' | 'tab' | 'button';
   fullWidth?: boolean;
   className?: string;
 }
@@ -40,7 +40,7 @@ export function SegmentedControl<T extends string = string>({
 
   return (
     <div
-      role={roleMode === 'tab' ? 'tablist' : 'radiogroup'}
+      role={roleMode === 'tab' ? 'tablist' : roleMode === 'button' ? 'group' : 'radiogroup'}
       aria-label={ariaLabel}
       className={cx('ui-segmented', fullWidth && 'ui-segmented-full', className)}
     >
@@ -58,9 +58,10 @@ export function SegmentedControl<T extends string = string>({
           <button
             key={opt.value}
             type="button"
-            role={roleMode === 'tab' ? 'tab' : 'radio'}
+            role={roleMode === 'tab' ? 'tab' : roleMode === 'button' ? undefined : 'radio'}
             aria-selected={roleMode === 'tab' ? active : undefined}
             aria-checked={roleMode === 'radio' ? active : undefined}
+            aria-pressed={roleMode === 'button' ? active : undefined}
             data-active={active ? 'true' : 'false'}
             disabled={opt.disabled}
             onClick={() => !opt.disabled && onChange(opt.value)}

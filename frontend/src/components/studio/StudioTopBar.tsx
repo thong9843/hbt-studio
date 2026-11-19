@@ -76,6 +76,7 @@ export function StudioTopBar({
       <div className="flex flex-wrap items-center gap-2">
         {aspect && onAspectChange && (
           <SegmentedControl
+            roleMode="button"
             aria-label={aspectAriaLabel}
             value={aspect}
             onChange={onAspectChange}
