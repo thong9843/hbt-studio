@@ -11,4 +11,7 @@
 - Không dừng giữa đợt để hỏi; chỗ chưa rõ chọn phương án an toàn nhất, ghi "Cần chốt" trong báo cáo cuối.
 - `gh` đã đăng nhập: tự kiểm CI bằng `gh run list` / `gh run watch`, ghi link run vào báo cáo.
 - Không `git push --force`, không rebase, không dời tag, không xoá `workspace/projects/*`.
-- **Quy ước 5 Nhánh & 4 Tag Cố Định (chống nhầm nhánh):** Repo chỉ duy trì đúng 5 nhánh chính thức (`main`, `GD1-HBT`, `GD2-PostV`, `GD3-Chatting`, `GD4-StickV`) và tag chuẩn `v1`–`v4` (tiếp tục `v5`, `v6`... hoặc `v4.1`). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge. **Pre-flight Branch Check:** Trước khi sửa bất kỳ file nào, bắt buộc in `git branch --show-current` và `git log -1 --oneline` để xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
+- **Quy trình Git mới (5 Nhánh & 4 Tag Cố Định):**
+  - Nhánh cố định theo giai đoạn: `main`, `GD1-HBT` (`v1`), `GD2-PostV` (`v2`), `GD3-Chatting` (`v3`), `GD4-StickV` (`v4`); tính năng lớn kế tiếp tạo `GD5-<TenTinhNang>` (`v5`). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge.
+  - Luồng commit trong ngày: code thuộc tính năng/động cơ nào → commit & push lên đúng nhánh `GDx-...`; code ngoài luồng (UI chung, hạ tầng `shared/`, fix toàn cục, tài liệu) → commit & push thẳng lên `main`.
+  - **Pre-flight Branch Check:** Bắt buộc in `git branch --show-current` và `git log -1 --oneline` trước khi sửa file đầu tiên trong phiên.

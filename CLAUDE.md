@@ -23,10 +23,12 @@
 - Push nhánh khi kế hoạch đã duyệt có ghi. Không push và không merge khi lần chạy cuối của giai đoạn đỏ.
 - Không commit kết thúc giai đoạn khi lần chạy cuối đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
 
-## Quy ước 5 Nhánh & 4 Tag Cố Định
-- Repo chỉ duy trì đúng **5 nhánh chính thức**: `main`, `GD1-HBT`, `GD2-PostV`, `GD3-Chatting`, `GD4-StickV` (cấm để tồn đọng nhánh `feat/*` rác sau khi merge).
-- Tag chính thức theo mốc giai đoạn: `v1` (`GD1-HBT`), `v2` (`GD2-PostV`), `v3` (`GD3-Chatting`), `v4` (`GD4-StickV`); các mốc sau tiếp tục `v5`, `v6`... (hoặc `v4.1` cho bản sửa nhỏ).
-- **Luật khóa đầu phiên (Pre-flight Branch Check):** Trước khi sửa bất kỳ file nào, Agent bắt buộc in ra `git branch --show-current` và `git log -1 --oneline`, đồng thời xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
+## Quy ước 5 Nhánh & 4 Tag Cố Định (Quy trình Git mới)
+- **Nhánh cố định theo giai đoạn:** `main`, `GD1-HBT` (`v1`), `GD2-PostV` (`v2`), `GD3-Chatting` (`v3`), `GD4-StickV` (`v4`). Tính năng lớn kế tiếp tạo nhánh `GD5-<TenTinhNang>` (`v5`, `v6`... hoặc `v4.1` cho bản sửa nhỏ). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge.
+- **Luồng commit trong ngày:**
+  - Code thuộc tính năng/động cơ nào → commit và push lên đúng nhánh `GDx-...` của tính năng đó.
+  - Code ngoài luồng (UI chung, hạ tầng `shared/`, fix toàn cục, tài liệu) → commit và push thẳng lên `main`.
+- **Luật khóa đầu phiên (Pre-flight Branch Check):** Bắt buộc in `git branch --show-current` và `git log -1 --oneline` trước khi sửa file đầu tiên trong phiên, xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
 
 ## Quy trình mốc
 - Mỗi mốc một nhánh riêng `feat/…`, `fix/…` hoặc `docs/…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`). Commit lẻ không bắt buộc xanh; chỉ đầu nhánh phải xanh.
