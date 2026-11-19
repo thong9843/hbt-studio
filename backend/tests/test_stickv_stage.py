@@ -354,14 +354,25 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
     import pytest
 
     from hbt.stickv.audio import (
+        GLOBAL_LEAD_SILENCE_S,
+        PAUSE_END_SENTENCE_S,
+        PAUSE_MID_CLAUSE_S,
+        SENTENCE_GAP_S,
         align_beat_karaoke,
         compute_pause_after,
         split_beat_sentences,
     )
 
-    assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một.", "Câu hai?"]
-    assert compute_pause_after("Kết thúc câu.") == pytest.approx(0.14)
-    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(0.14)
+    # Câu vụn < 5 từ được gộp để giữ ngữ điệu tự nhiên; câu >= 5 từ tách nhịp rõ ràng
+    assert split_beat_sentences("Câu một. Câu hai?") == ["Câu một. Câu hai?"]
+    assert split_beat_sentences(
+        "Ánh sáng truyền đi rất nhanh trong chân không. Bạn có nhận ra điều kỳ diệu này không?"
+    ) == [
+        "Ánh sáng truyền đi rất nhanh trong chân không.",
+        "Bạn có nhận ra điều kỳ diệu này không?",
+    ]
+    assert compute_pause_after("Kết thúc câu.") == pytest.approx(PAUSE_END_SENTENCE_S)
+    assert compute_pause_after("Ngắt giữa câu,") == pytest.approx(PAUSE_MID_CLAUSE_S)
 
     def _write_tone_wav(out_path: Path, dur_s: float = 0.80, sr: int = 24000) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,9 +396,11 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
             for it in items:
                 _write_tone_wav(it.out, dur_s=0.80)
 
+    s1 = "Ánh sáng truyền đi rất nhanh trong chân không."
+    s2 = "Bạn có nhận ra điều kỳ diệu này không?"
     beats = [
-        StickvBeat(id="b1", narration="Câu một. Câu hai?"),
-        StickvBeat(id="b2", narration="Ý tiếp theo,"),
+        StickvBeat(id="b1", narration=f"{s1} {s2}"),
+        StickvBeat(id="b2", narration="Ý tiếp theo mang góc nhìn mới,"),
     ]
     audio_dir = tmp_path / "audio"
     out_beats = synth_stickv_beats_audio(
@@ -398,27 +411,26 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
         pause_scale=1.0,
     )
 
-    # b1: 0.06 lead + 0.80 s1 + 0.16 gap + 0.80 s2 + 0.14 pause_after = 1.96s
-    assert beats[0].duration_sec == pytest.approx(1.96, abs=0.05)
-    assert out_beats[0][1] == pytest.approx(1.96, abs=0.05)
-    # b2: 0.06 lead + 0.80 s1 + 0.14 pause_after = 1.00s (clamped >= 1.2s)
-    assert beats[1].duration_sec >= 1.15
+    # b1: 0.18 global_lead + (0.80+0.11 clean s1) + 0.20 gap + (0.80+0.11 clean s2) + 0.24 tail
+    assert beats[0].duration_sec == pytest.approx(2.44, abs=0.06)
+    assert out_beats[0][1] == pytest.approx(2.44, abs=0.06)
+    assert beats[1].duration_sec >= 1.2
 
     b1_wav = audio_dir / "b1.wav"
     env = extract_wav_rms_envelope(b1_wav, fps=20, duration_sec=beats[0].duration_sec)
-    # 0.10s cuối nằm trong 0.14s trailing pause -> im lặng
-    assert max(env[-2:]) == 0.0
+    # 0.15s cuối nằm trong 0.24s trailing pause -> im lặng
+    assert max(env[-3:]) == 0.0
 
     timings = align_beat_karaoke(
-        "Câu một. Câu hai?",
+        f"{s1} {s2}",
         b1_wav,
         beats[0].duration_sec,
-        lead_in_s=0.06,
-        pause_after_s=0.14,
+        lead_in_s=GLOBAL_LEAD_SILENCE_S,
+        pause_after_s=PAUSE_END_SENTENCE_S,
     )
-    assert len(timings) == 4
-    assert timings[0][1] >= 0.04
-    assert timings[-1][2] <= beats[0].duration_sec - 0.14 + 0.02
+    assert len(timings) == len(f"{s1} {s2}".split())
+    assert timings[0][1] >= GLOBAL_LEAD_SILENCE_S - 0.01
+    assert timings[-1][2] <= beats[0].duration_sec - PAUSE_END_SENTENCE_S + 0.02
 
     # Kiểm tra spoken_segments sidecar + khóa Karaoke qua khoảng nghỉ
     from hbt.stickv.audio import load_beat_spoken_segments
@@ -427,10 +439,10 @@ def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:
 
     segs = load_beat_spoken_segments(b1_wav)
     assert len(segs) == 2
-    assert segs[0][2] == "Câu một."
-    assert segs[1][2] == "Câu hai?"
-    # Khoảng giữa câu 1 và câu 2 có gap ~0.16s (nhịp kể liên tục)
-    assert segs[1][0] - segs[0][1] == pytest.approx(0.16, abs=0.03)
+    assert segs[0][2] == s1
+    assert segs[1][2] == s2
+    # Khoảng giữa câu 1 và câu 2 có gap ~0.20s (nhịp thở chuẩn GĐ9)
+    assert segs[1][0] - segs[0][1] == pytest.approx(SENTENCE_GAP_S, abs=0.03)
 
     # Kiểm tra domain="physics_science" sinh phông xanh kỹ thuật khác #FAF7F0
     bd_phys = BackdropRenderer("physics_science", 360, 640)

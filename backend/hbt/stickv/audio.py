@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import wave
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from hbt.app_settings import resolve_online_api_key
+from hbt.cinema.hardware import resolve_filter_complex_script_flag
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.align import align_silence
 from hbt.pipeline.ffutil import run_ffmpeg
@@ -30,10 +33,19 @@ from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
 
-LEAD_IN_SILENCE_S = 0.06
-SENTENCE_GAP_S = 0.16
-PAUSE_END_SENTENCE_S = 0.14
-PAUSE_MID_CLAUSE_S = 0.14
+# Chuẩn nhịp thở & chống AAC priming nuốt chữ đầu video (GĐ9)
+GLOBAL_LEAD_SILENCE_S = 0.18
+LEAD_IN_SILENCE_S = 0.04
+SENTENCE_GAP_S = 0.20
+PAUSE_END_SENTENCE_S = 0.24
+PAUSE_MID_CLAUSE_S = 0.20
+
+DEFAULT_PRE_ROLL_MS = 35
+DEFAULT_POST_ROLL_MS = 75
+DEFAULT_GHOST_MAX_MS = 80
+DEFAULT_GHOST_GAP_MS = 220
+DEFAULT_FADE_IN_MS = 18
+DEFAULT_FADE_OUT_MS = 25
 
 SFX_TAG_KEYWORDS: dict[str, tuple[str, ...]] = {
     "whoosh": ("swoosh", "whoosh", "swipe"),
@@ -44,21 +56,322 @@ SFX_TAG_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
 
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_HEADING_RE = re.compile(r"(?m)^\s*#+\s*")
+_MD_BULLET_RE = re.compile(r"(?m)^\s*[-•*]\s+")
+_MD_SYNTAX_RE = re.compile(r"\*\*|__|~~|`|#")
+_MULTI_SPACE_RE = re.compile(r"\s+")
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?…])")
+_DUP_PUNCT_RE = re.compile(r"([.!?])\1+")
 
-def split_beat_sentences(text: str) -> list[str]:
-    """Tách các câu trong cùng 1 beat theo dấu ngắt câu (. ? ! …) để VieNeu đọc có nhịp nghỉ."""
-    clean = (text or "").strip()
+
+def _atomic_write_bytes(dest: Path, data: bytes) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f"{dest.name}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _atomic_write_text(dest: Path, text: str) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f"{dest.name}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _atomic_write_pcm_wav(dest: Path, pcm: np.ndarray, *, sr: int, ch: int = 1) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f"{dest.name}.tmp")
+    arr = np.asarray(pcm, dtype=np.int16)
+    try:
+        with wave.open(str(tmp), "wb") as wf:
+            wf.setnchannels(ch)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sr))
+            wf.writeframes(arr.tobytes())
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def sanitize_tts_text(text: str, *, ensure_terminal: bool = True) -> str:
+    """Làm sạch markdown & chuẩn hóa dấu câu tiếng Việt trước khi gửi vào VieNeu-TTS."""
+    raw = str(text or "")
+    if not raw.strip():
+        return ""
+    s = _MD_LINK_RE.sub(r"\1", raw)
+    s = _MD_HEADING_RE.sub("", s)
+    s = _MD_BULLET_RE.sub("", s)
+    s = _MD_SYNTAX_RE.sub("", s)
+    s = s.replace("*", "")
+    s = s.replace("...", "…")
+    s = _MULTI_SPACE_RE.sub(" ", s).strip()
+    s = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", s)
+    s = _DUP_PUNCT_RE.sub(r"\1", s)
+    s = s.strip(" \t\r\n\"'“”")
+    if not s:
+        return ""
+    if ensure_terminal and not s.endswith((".", "?", "!", "…")):
+        s = s.rstrip(",;:-–— ")
+        if s and not s.endswith((".", "?", "!", "…")):
+            s = f"{s}."
+    return s
+
+
+def split_beat_sentences(text: str, *, min_words: int = 5) -> list[str]:
+    """Tách câu theo dấu ngắt câu (. ? ! …) và gộp mảnh < 5 từ để giữ mạch ngữ điệu tự nhiên."""
+    clean = sanitize_tts_text(text, ensure_terminal=True)
     if not clean:
         return []
-    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", clean) if p.strip()]
-    return parts or [clean]
+    raw_parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+", clean) if p.strip()]
+    if len(raw_parts) <= 1:
+        return raw_parts or [clean]
+
+    threshold = max(1, int(min_words))
+    merged: list[str] = []
+    idx = 0
+    while idx < len(raw_parts):
+        part = raw_parts[idx]
+        words_n = len(part.split())
+        if words_n < threshold:
+            if merged:
+                merged[-1] = f"{merged[-1]} {part}"
+            elif idx + 1 < len(raw_parts):
+                raw_parts[idx + 1] = f"{part} {raw_parts[idx + 1]}"
+            else:
+                merged.append(part)
+        else:
+            merged.append(part)
+        idx += 1
+
+    return [sanitize_tts_text(p, ensure_terminal=True) for p in merged if p.strip()] or [clean]
 
 
 def compute_pause_after(text: str, *, pause_scale: float = 1.0) -> float:
-    """Tính khoảng nghỉ cuối beat: 0.45s cho kết câu (.?!…), 0.25s cho ngắt ý (,;:)."""
+    """Tính khoảng nghỉ cuối beat: 0.24s cho kết câu (.?!…), 0.20s cho ngắt ý (,;:)."""
     stripped = (text or "").rstrip()
     base = PAUSE_END_SENTENCE_S if stripped.endswith((".", "?", "!", "…")) else PAUSE_MID_CLAUSE_S
     return round(base * max(0.5, min(2.0, float(pause_scale))), 3)
+
+
+def clean_tts_wav(
+    wav_path: Path,
+    out_path: Path | None = None,
+    *,
+    pre_roll_ms: int = DEFAULT_PRE_ROLL_MS,
+    post_roll_ms: int = DEFAULT_POST_ROLL_MS,
+    ghost_max_ms: int = DEFAULT_GHOST_MAX_MS,
+    ghost_gap_ms: int = DEFAULT_GHOST_GAP_MS,
+    fade_in_ms: int = DEFAULT_FADE_IN_MS,
+    fade_out_ms: int = DEFAULT_FADE_OUT_MS,
+    rms_thresh: float = 0.014,
+) -> dict[str, Any]:
+    """Làm sạch clip WAV từ VieNeu-TTS bằng Envelope + ZCR Gate & cosine fade chống click.
+
+    - Bảo vệ âm đầu bằng `pre_roll >= 35ms` và âm đóng bằng `post_roll >= 75ms`.
+    - Cắt sạch xung nhiễu đuôi tách biệt `< 80ms` sau khoảng lặng `>= 220ms` (tiếng ma `"Nếu..."`).
+    - Áp cosine fade-in `18ms` và fade-out `25ms` chống bậc nhảy biên độ khi ghép câu.
+    """
+    src = Path(wav_path)
+    dest = Path(out_path) if out_path is not None else src
+    if not src.is_file() or src.stat().st_size <= 44:
+        return {
+            "file_path": str(dest),
+            "cleaned": False,
+            "ghosts_removed": 0,
+            "pre_roll_ms": 0.0,
+            "post_roll_ms": 0.0,
+            "original_ms": 0.0,
+            "cleaned_ms": 0.0,
+        }
+
+    try:
+        with wave.open(str(src), "rb") as wf:
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+    except (wave.Error, EOFError):
+        return {
+            "file_path": str(dest),
+            "cleaned": False,
+            "ghosts_removed": 0,
+            "pre_roll_ms": 0.0,
+            "post_roll_ms": 0.0,
+            "original_ms": 0.0,
+            "cleaned_ms": 0.0,
+        }
+
+    if sw != 2 or not raw or sr <= 0:
+        return {
+            "file_path": str(dest),
+            "cleaned": False,
+            "ghosts_removed": 0,
+            "pre_roll_ms": 0.0,
+            "post_roll_ms": 0.0,
+            "original_ms": 0.0,
+            "cleaned_ms": 0.0,
+        }
+
+    pcm = np.frombuffer(raw, dtype=np.int16)
+    if ch > 1:
+        pcm = pcm.reshape(-1, ch)
+        mono = pcm.astype(np.float32).mean(axis=1) / 32768.0
+    else:
+        mono = pcm.astype(np.float32) / 32768.0
+
+    n_samples = len(mono)
+    orig_ms = round((n_samples / sr) * 1000.0, 2)
+    frame_ms = 10
+    frame_samp = max(1, int(round(sr * frame_ms / 1000.0)))
+    n_frames = max(1, (n_samples + frame_samp - 1) // frame_samp)
+
+    rms_arr = np.zeros(n_frames, dtype=np.float32)
+    zcr_arr = np.zeros(n_frames, dtype=np.float32)
+    for fi in range(n_frames):
+        s0 = fi * frame_samp
+        s1 = min(n_samples, s0 + frame_samp)
+        seg = mono[s0:s1]
+        if len(seg) == 0:
+            continue
+        rms_arr[fi] = float(np.sqrt(np.mean(seg * seg)))
+        if len(seg) > 1:
+            zcr_arr[fi] = float(np.mean(np.abs(np.diff(np.signbit(seg).astype(np.int8)))))
+
+    peak_rms = float(np.max(rms_arr)) if len(rms_arr) else 0.0
+    if peak_rms < 1e-4:
+        # Clip im lặng (fallback test) -> giữ nguyên độ dài, ghi nguyên tử nếu khác đích
+        if dest != src:
+            _atomic_write_pcm_wav(dest, pcm, sr=sr, ch=ch)
+        return {
+            "file_path": str(dest),
+            "cleaned": True,
+            "ghosts_removed": 0,
+            "pre_roll_ms": 0.0,
+            "post_roll_ms": 0.0,
+            "original_ms": orig_ms,
+            "cleaned_ms": orig_ms,
+        }
+
+    eff_thresh = max(float(rms_thresh), peak_rms * 0.06)
+    zcr_rms_floor = max(0.005, eff_thresh * 0.45)
+    active = (rms_arr >= eff_thresh) | ((rms_arr >= zcr_rms_floor) & (zcr_arr >= 0.12))
+
+    # Gom thành các đảo tiếng nói (nối các khoảng đóng phụ âm tắc < 60ms)
+    raw_islands: list[tuple[int, int]] = []
+    fi = 0
+    while fi < n_frames:
+        if not active[fi]:
+            fi += 1
+            continue
+        start_f = fi
+        while fi < n_frames and active[fi]:
+            fi += 1
+        raw_islands.append((start_f, fi))
+
+    if not raw_islands:
+        if dest != src:
+            _atomic_write_pcm_wav(dest, pcm, sr=sr, ch=ch)
+        return {
+            "file_path": str(dest),
+            "cleaned": True,
+            "ghosts_removed": 0,
+            "pre_roll_ms": 0.0,
+            "post_roll_ms": 0.0,
+            "original_ms": orig_ms,
+            "cleaned_ms": orig_ms,
+        }
+
+    bridge_frames = max(1, int(round(60 / frame_ms)))
+    islands: list[tuple[int, int]] = [raw_islands[0]]
+    for st_f, en_f in raw_islands[1:]:
+        prev_st, prev_en = islands[-1]
+        if st_f - prev_en < bridge_frames:
+            islands[-1] = (prev_st, en_f)
+        else:
+            islands.append((st_f, en_f))
+
+    # Triệt tiêu xung nhiễu đuôi tách biệt (< ghost_max_ms sau khoảng nghỉ >= ghost_gap_ms)
+    ghosts_removed = 0
+    ghost_cut_samp = n_samples
+    while len(islands) >= 2:
+        last_st, last_en = islands[-1]
+        prev_st, prev_en = islands[-2]
+        last_dur_ms = (last_en - last_st) * frame_ms
+        gap_ms = (last_st - prev_en) * frame_ms
+        if last_dur_ms <= max(10, int(ghost_max_ms)) and gap_ms >= max(80, int(ghost_gap_ms)):
+            ghost_cut_samp = min(ghost_cut_samp, last_st * frame_samp)
+            islands.pop()
+            ghosts_removed += 1
+        else:
+            break
+
+    speech_start_samp = islands[0][0] * frame_samp
+    speech_end_samp = min(n_samples, islands[-1][1] * frame_samp)
+
+    safe_pre_ms = max(DEFAULT_PRE_ROLL_MS, int(pre_roll_ms))
+    safe_post_ms = max(DEFAULT_POST_ROLL_MS, int(post_roll_ms))
+    pre_samp = int(round(sr * safe_pre_ms / 1000.0))
+    post_samp = int(round(sr * safe_post_ms / 1000.0))
+
+    trim_start = max(0, speech_start_samp - pre_samp)
+    need_pre = max(0, pre_samp - speech_start_samp)
+
+    max_end = min(n_samples, ghost_cut_samp)
+    trim_end = min(max_end, speech_end_samp + post_samp)
+    actual_post_avail = max(0, trim_end - speech_end_samp)
+    need_post = max(0, post_samp - actual_post_avail)
+
+    sliced = pcm[trim_start:trim_end].astype(np.float32)
+
+    # Cosine De-Click Fade-In (18ms) & Fade-Out (25ms)
+    fi_samp = min(len(sliced) // 2, max(1, int(round(sr * max(1, int(fade_in_ms)) / 1000.0))))
+    fo_samp = min(len(sliced) // 2, max(1, int(round(sr * max(1, int(fade_out_ms)) / 1000.0))))
+    if fi_samp > 1:
+        ramp_in = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, fi_samp, dtype=np.float32)))
+        if ch > 1:
+            ramp_in = ramp_in[:, None]
+        sliced[:fi_samp] *= ramp_in
+    if fo_samp > 1:
+        ramp_out = 0.5 * (1.0 + np.cos(np.linspace(0.0, np.pi, fo_samp, dtype=np.float32)))
+        if ch > 1:
+            ramp_out = ramp_out[:, None]
+        sliced[-fo_samp:] *= ramp_out
+
+    parts: list[np.ndarray] = []
+    if need_pre > 0:
+        z_shape = (need_pre, ch) if ch > 1 else (need_pre,)
+        parts.append(np.zeros(z_shape, dtype=np.float32))
+    parts.append(sliced)
+    if need_post > 0:
+        z_shape = (need_post, ch) if ch > 1 else (need_post,)
+        parts.append(np.zeros(z_shape, dtype=np.float32))
+
+    final_f = np.concatenate(parts, axis=0) if len(parts) > 1 else sliced
+    out_pcm = np.clip(np.round(final_f), -32768, 32767).astype(np.int16)
+    _atomic_write_pcm_wav(dest, out_pcm, sr=sr, ch=ch)
+
+    actual_pre_ms = round(((speech_start_samp - trim_start) + need_pre) / sr * 1000.0, 2)
+    actual_post_ms = round((actual_post_avail + need_post) / sr * 1000.0, 2)
+    cleaned_ms = round((len(out_pcm) / sr) * 1000.0, 2)
+    return {
+        "file_path": str(dest),
+        "cleaned": True,
+        "ghosts_removed": ghosts_removed,
+        "pre_roll_ms": actual_pre_ms,
+        "post_roll_ms": actual_post_ms,
+        "original_ms": orig_ms,
+        "cleaned_ms": cleaned_ms,
+    }
 
 
 def _write_fallback_wav(dest: Path, text: str) -> None:
@@ -82,8 +395,9 @@ def _assemble_padded_beat_wav(
     gap_s: float,
     tail_s: float,
     sentences: list[str] | None = None,
+    clean_clips: bool = True,
 ) -> tuple[float, list[tuple[float, float, str]]]:
-    """Ghép các câu con kèm khoảng lặng đầu/giữa/cuối và trả về `(total_dur, spoken_segments)`."""
+    """Làm sạch từng clip TTS, ghép kèm khoảng lặng đầu/giữa/cuối & trả `(dur, spoken_segments)`."""
     chunks: list[bytes] = []
     sr = 24000
     ch = 1
@@ -93,6 +407,8 @@ def _assemble_padded_beat_wav(
     sent_list = sentences or []
     for idx, p in enumerate(sub_wavs):
         if p.is_file() and p.stat().st_size > 44:
+            if clean_clips:
+                clean_tts_wav(p)
             txt = sent_list[idx] if idx < len(sent_list) else ""
             valid_pairs.append((p, txt))
 
@@ -103,8 +419,7 @@ def _assemble_padded_beat_wav(
                 ch = wf0.getnchannels()
                 sw = wf0.getsampwidth()
         except (wave.Error, EOFError):
-            out_wav.parent.mkdir(parents=True, exist_ok=True)
-            out_wav.write_bytes(valid_pairs[0][0].read_bytes())
+            _atomic_write_bytes(out_wav, valid_pairs[0][0].read_bytes())
             dur = round(lead_s + tail_s + 0.5, 3)
             txt = valid_pairs[0][1]
             segs = [(round(lead_s, 4), round(lead_s + 0.5, 4), txt)] if txt else []
@@ -142,11 +457,17 @@ def _assemble_padded_beat_wav(
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     payload = b"".join(chunks)
-    with wave.open(str(out_wav), "wb") as out_wf:
-        out_wf.setnchannels(ch)
-        out_wf.setsampwidth(sw)
-        out_wf.setframerate(sr)
-        out_wf.writeframes(payload)
+    tmp_wav = out_wav.with_name(f"{out_wav.name}.tmp")
+    try:
+        with wave.open(str(tmp_wav), "wb") as out_wf:
+            out_wf.setnchannels(ch)
+            out_wf.setsampwidth(sw)
+            out_wf.setframerate(sr)
+            out_wf.writeframes(payload)
+        os.replace(tmp_wav, out_wav)
+    finally:
+        if tmp_wav.exists():
+            tmp_wav.unlink(missing_ok=True)
     return round(len(payload) / bytes_per_sec, 3), spoken_segments
 
 
@@ -310,11 +631,13 @@ def synth_stickv_beats_audio(
     voice_id: str,
     default_voice: str = DEFAULT_VIENEU_VOICE,
     pause_scale: float = 1.0,
+    global_lead_s: float = GLOBAL_LEAD_SILENCE_S,
 ) -> list[tuple[Path, float]]:
-    """Sinh giọng từng câu con trong beat, chèn khoảng nghỉ tự nhiên & đo duration."""
+    """Sinh giọng sạch từng câu, bảo vệ âm đầu + 180ms AAC priming guard & đo duration."""
     audio_dir.mkdir(parents=True, exist_ok=True)
     scale = max(0.5, min(2.0, float(pause_scale)))
     lead_s = round(LEAD_IN_SILENCE_S * scale, 3)
+    first_lead_s = round(max(float(global_lead_s), lead_s), 3)
     gap_s = round(SENTENCE_GAP_S * scale, 3)
 
     beat_sub_wavs: list[tuple[list[Path], list[str]]] = []
@@ -347,7 +670,7 @@ def synth_stickv_beats_audio(
             voice_provider.synthesize_many(synth_items)
     else:
         for beat in beats:
-            sents = split_beat_sentences(beat.narration) or ["stickv"]
+            sents = split_beat_sentences(beat.narration) or ["stickv."]
             sub_paths = []
             for s_idx, sent in enumerate(sents, start=1):
                 sp = audio_dir / f"{beat.id}_s{s_idx}.wav"
@@ -356,30 +679,32 @@ def synth_stickv_beats_audio(
             beat_sub_wavs.append((sub_paths, sents))
 
     results: list[tuple[Path, float]] = []
-    for beat, (sub_paths, sents) in zip(beats, beat_sub_wavs, strict=True):
+    for beat_idx, (beat, (sub_paths, sents)) in enumerate(zip(beats, beat_sub_wavs, strict=True)):
         if voice_provider is not None and sub_paths:
             for sp in sub_paths:
                 if not sp.is_file() or sp.stat().st_size <= 44:
                     raise RuntimeError(f"VieNeu-TTS không tạo được file giọng cho beat {beat.id}")
         wav_p = audio_dir / f"{beat.id}.wav"
         tail_s = compute_pause_after(beat.narration, pause_scale=scale)
+        cur_lead_s = first_lead_s if beat_idx == 0 else lead_s
         assembled_dur, spoken_segs = _assemble_padded_beat_wav(
             sub_paths,
             wav_p,
-            lead_s=lead_s,
+            lead_s=cur_lead_s,
             gap_s=gap_s,
             tail_s=tail_s,
             sentences=sents,
+            clean_clips=True,
         )
         for sp in sub_paths:
             sp.unlink(missing_ok=True)
-        _segments_sidecar_path(wav_p).write_text(
+        _atomic_write_text(
+            _segments_sidecar_path(wav_p),
             json.dumps(
                 [{"start_s": st, "end_s": et, "text": tx} for st, et, tx in spoken_segs],
                 ensure_ascii=False,
                 indent=2,
             ),
-            encoding="utf-8",
         )
         probed_dur = measure_audio_duration(wav_p)
         anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
@@ -443,7 +768,7 @@ def mix_stickv_audio(
     music_mood: str = "",
     workspace_dir: Path | None = None,
 ) -> Path:
-    """Ghép giọng đọc + SFX (-16 LUFS) + nhạc nền (-27 LUFS) + master -14 LUFS."""
+    """Ghép giọng đọc + SFX (-16 LUFS) + BGM liên tục (-27 LUFS, duck 25/220ms) + -14 LUFS."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     total_dur = round(sum(d for _, d in beat_wavs), 3)
     if total_dur <= 0:
@@ -461,9 +786,10 @@ def mix_stickv_audio(
         inputs.extend(["-i", str(wav_p)])
         delay_ms = int(round(cur_t * 1000))
         lbl = f"[v{i}]"
+        delay_part = f",adelay={delay_ms}|{delay_ms}" if delay_ms > 0 else ""
         filter_parts.append(
-            f"[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"adelay={delay_ms}|{delay_ms}{lbl}"
+            f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+            f"{delay_part}{lbl}"
         )
         voice_labels.append(lbl)
         sfx_path = resolve_sfx_file(beat.sfx_tag, library_dir, assets_dir)
@@ -471,10 +797,16 @@ def mix_stickv_audio(
             sfx_events.append((cur_t, sfx_path))
         cur_t += dur
 
-    filter_parts.append(
-        f"{''.join(voice_labels)}amix=inputs={len(voice_labels)}:normalize=0,"
-        f"apad=whole_dur={total_dur:.3f}[voice_bus]"
-    )
+    if len(voice_labels) == 1:
+        filter_parts.append(
+            f"{voice_labels[0]}apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice_bus]"
+        )
+    else:
+        filter_parts.append(
+            f"{''.join(voice_labels)}amix=inputs={len(voice_labels)}:duration=longest:"
+            f"dropout_transition=0:normalize=0,"
+            f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice_bus]"
+        )
 
     next_idx = len(beat_wavs)
     sfx_labels: list[str] = []
@@ -482,19 +814,27 @@ def mix_stickv_audio(
         inputs.extend(["-i", str(s_path)])
         delay_ms = int(round(s_t * 1000))
         lbl = f"[sfx{s_i}]"
+        delay_part = f",adelay={delay_ms}|{delay_ms}" if delay_ms > 0 else ""
         filter_parts.append(
-            f"[{next_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"volume=0.35,adelay={delay_ms}|{delay_ms}{lbl}"
+            f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"volume=0.35{delay_part}{lbl}"
         )
         sfx_labels.append(lbl)
         next_idx += 1
 
     if sfx_labels:
-        filter_parts.append(
-            f"{''.join(sfx_labels)}amix=inputs={len(sfx_labels)}:normalize=0,"
-            "loudnorm=I=-16:TP=-1.5:LRA=11[sfx_bus];"
-            "[voice_bus][sfx_bus]amix=inputs=2:normalize=0[fg_bus]"
-        )
+        if len(sfx_labels) == 1:
+            filter_parts.append(
+                f"{sfx_labels[0]}loudnorm=I=-16:TP=-1.5:LRA=11[sfx_bus];"
+                "[voice_bus][sfx_bus]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[fg_bus]"
+            )
+        else:
+            filter_parts.append(
+                f"{''.join(sfx_labels)}amix=inputs={len(sfx_labels)}:duration=longest:"
+                "dropout_transition=0:normalize=0,"
+                "loudnorm=I=-16:TP=-1.5:LRA=11[sfx_bus];"
+                "[voice_bus][sfx_bus]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[fg_bus]"
+            )
     else:
         filter_parts.append("[voice_bus]acopy[fg_bus]")
 
@@ -510,21 +850,28 @@ def mix_stickv_audio(
             bgm_fc = bgm_fc.replace(f"[{k}:a]", f"[{bgm_start_idx + k}:a]")
         filter_parts.append(bgm_fc)
         filter_parts.append(
-            f"{bgm_lbl}aresample=44100,loudnorm=I=-27:TP=-2.0:LRA=11,"
-            f"volume={bgm_volume:.2f}[bgm_low];"
+            f"{bgm_lbl}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS,"
+            f"loudnorm=I=-27:TP=-2.0:LRA=11,volume={bgm_volume:.2f}[bgm_low];"
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
-            "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=20:release=250[bgm_duck];"
-            "[fg_mix][bgm_duck]amix=inputs=2:normalize=0,"
-            "loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
+            "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck];"
+            "[fg_mix][bgm_duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11,atrim=0:{total_dur:.3f}[aout]"
         )
     else:
-        filter_parts.append("[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11[aout]")
+        filter_parts.append(f"[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,atrim=0:{total_dur:.3f}[aout]")
 
+    fc_text = ";\n".join(filter_parts) + "\n"
+    script_path = out_wav.with_name(f"{out_wav.stem}_filtergraph.txt")
+    _atomic_write_text(script_path, fc_text)
+
+    tmp_wav = out_wav.with_name(f"{out_wav.stem}.tmp.wav")
+    script_flag = resolve_filter_complex_script_flag()
     cmd = [
         *FFMPEG_RESOURCE_CLAMP,
         *inputs,
-        "-filter_complex",
-        ";".join(filter_parts),
+        script_flag,
+        str(script_path),
         "-map",
         "[aout]",
         "-t",
@@ -532,8 +879,16 @@ def mix_stickv_audio(
         "-c:a",
         "pcm_s16le",
         "-ar",
-        "44100",
-        str(out_wav),
+        "48000",
+        "-ac",
+        "2",
+        str(tmp_wav),
     ]
-    run_ffmpeg(cmd)
+    try:
+        run_ffmpeg(cmd)
+        os.replace(tmp_wav, out_wav)
+    finally:
+        if tmp_wav.exists():
+            tmp_wav.unlink(missing_ok=True)
+        script_path.unlink(missing_ok=True)
     return out_wav

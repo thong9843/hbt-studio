@@ -22,6 +22,7 @@ from hbt.cinema.schema import BeatSpec, TimelineSpec
 from hbt.core.audio import build_topic_bgm_playlist, render_smart_bgm_wav
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP, measure_audio_duration
+from hbt.stickv.audio import GLOBAL_LEAD_SILENCE_S, clean_tts_wav
 
 FOLEY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "whoosh": ("swoosh", "whoosh", "swipe", "transition"),
@@ -125,8 +126,8 @@ def tighten_breaths_wav(
             head = pcm[idx : idx + half_a].astype(np.float32)
             tail = pcm[nxt - half_b : nxt].astype(np.float32)
             if xfade > 2 and len(head) >= xfade and len(tail) >= xfade:
-                fade_out = np.linspace(1.0, 0.0, xfade, dtype=np.float32)
-                fade_in = np.linspace(0.0, 1.0, xfade, dtype=np.float32)
+                fade_out = 0.5 * (1.0 + np.cos(np.linspace(0.0, np.pi, xfade, dtype=np.float32)))
+                fade_in = 0.5 * (1.0 - np.cos(np.linspace(0.0, np.pi, xfade, dtype=np.float32)))
                 if ch > 1:
                     fade_out = fade_out[:, None]
                     fade_in = fade_in[:, None]
@@ -370,7 +371,7 @@ def build_mix_filtergraph_script(
         )
         lines.append("[speech]asplit=2[sp_mix][sp_sc]")
         lines.append(
-            "[bgm_raw][sp_sc]sidechaincompress=threshold=0.02:ratio=6:attack=15:release=220[bgm_duck]"
+            "[bgm_raw][sp_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck]"
         )
         mix_branches.extend(["[sp_mix]", "[bgm_duck]"])
     else:
@@ -409,26 +410,39 @@ def mix_cinema_audio(
     assets_dir: Path | None = None,
     work_dir: Path,
     tighten_breaths: bool = True,
+    clean_voice: bool = True,
+    global_lead_s: float = GLOBAL_LEAD_SILENCE_S,
     hw: HardwareProfile | None = None,
 ) -> dict[str, Any]:
-    """Trộn giọng (đã siết thở), Foley SFX, J/L-cut, Silence Drop & BGM chuẩn -14 LUFS."""
+    """Trộn giọng (làm sạch TTS + 180ms lead + siết thở), Foley SFX, J/L-cut & -14 LUFS."""
     profile = hw or detect_hardware()
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
+    clean_dir = work / "clean_voice"
     tight_dir = work / "tight_voice"
     sfx_fb_dir = work / "sfx_fallback"
 
+    lead_s = max(0.0, float(global_lead_s))
+    lead_ms = int(round(lead_s * 1000.0))
     jl_schedule = compute_jl_cut_schedule(spec.beats, jl_cut_ms=spec.audio.jl_cut_ms)
-    silence_drops = compute_silence_drops(spec.beats, silence_drop_ms=spec.audio.silence_drop_ms)
+    raw_drops = compute_silence_drops(spec.beats, silence_drop_ms=spec.audio.silence_drop_ms)
+    silence_drops = [(round(st + lead_s, 3), round(et + lead_s, 3)) for st, et in raw_drops]
 
     voice_entries: list[tuple[Path, int]] = []
     foley_entries: list[tuple[Path, int, float]] = []
     breath_saved_ms = 0.0
+    ghosts_removed = 0
 
     for idx, (beat, sched) in enumerate(zip(spec.beats, jl_schedule, strict=True)):
         raw_wav = beat_wavs.get(beat.id)
         if raw_wav is not None and Path(raw_wav).is_file():
             use_wav = Path(raw_wav)
+            if clean_voice:
+                cleaned_out = clean_dir / f"{beat.id}_clean.wav"
+                c_stats = clean_tts_wav(use_wav, cleaned_out)
+                ghosts_removed += int(c_stats.get("ghosts_removed", 0))
+                if cleaned_out.is_file():
+                    use_wav = cleaned_out
             if tighten_breaths and spec.audio.max_breath_ms > 0:
                 tight_out = tight_dir / f"{beat.id}_tight.wav"
                 t_stats = tighten_breaths_wav(
@@ -438,18 +452,26 @@ def mix_cinema_audio(
                 )
                 breath_saved_ms += float(t_stats.get("removed_ms", 0.0))
                 use_wav = tight_out
-            voice_entries.append((use_wav, int(sched["delay_ms"])))
+            voice_entries.append((use_wav, int(sched["delay_ms"]) + lead_ms))
 
         # Foley mặc định từ transition hoặc AudioCue
         cue_tags = [
-            (c.tag, int(round(sched["visual_start_s"] * 1000.0)) + int(c.offset_ms), c.gain_db)
+            (
+                c.tag,
+                int(round(sched["visual_start_s"] * 1000.0)) + lead_ms + int(c.offset_ms),
+                c.gain_db,
+            )
             for c in beat.audio_cues
             if c.kind in ("foley", "sfx") and c.tag and c.tag != "none"
         ]
         if not cue_tags and beat.sfx_tag and beat.sfx_tag != "none":
-            cue_tags.append((beat.sfx_tag, int(round(sched["visual_start_s"] * 1000.0)), 0.0))
+            cue_tags.append(
+                (beat.sfx_tag, int(round(sched["visual_start_s"] * 1000.0)) + lead_ms, 0.0)
+            )
         elif idx > 0 and not cue_tags and beat.transition_in == "paper_slide":
-            cue_tags.append(("paper_slide", int(round(sched["visual_start_s"] * 1000.0)), -2.0))
+            cue_tags.append(
+                ("paper_slide", int(round(sched["visual_start_s"] * 1000.0)) + lead_ms, -2.0)
+            )
 
         for tag, delay_ms, gain_db in cue_tags:
             sfx_p = resolve_foley_sfx(
@@ -458,7 +480,7 @@ def mix_cinema_audio(
             if sfx_p is not None and sfx_p.is_file():
                 foley_entries.append((sfx_p, max(0, delay_ms), gain_db))
 
-    total_dur = max(1.0, spec.total_duration_sec)
+    total_dur = max(1.0, spec.total_duration_sec + lead_s)
     bgm_wav: Path | None = None
     playlist = build_topic_bgm_playlist(
         Path(library_dir),
@@ -554,6 +576,8 @@ def mix_cinema_audio(
         "filtergraph_path": str(script_path),
         "script_flag": script_flag,
         "duration_sec": measure_audio_duration(out_path) or total_dur,
+        "global_lead_s": lead_s,
+        "ghosts_removed": ghosts_removed,
         "breath_saved_ms": round(breath_saved_ms, 2),
         "silence_drops": silence_drops,
         "jl_cuts": len([s for s in jl_schedule if s["j_cut_ms"] > 0 or s["l_cut_ms"] > 0]),

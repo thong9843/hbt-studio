@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import gc
+import os
 import shutil
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from hbt.shared.pipeline.watermark import (
 )
 from hbt.stickv.animator import StickmanAnimator
 from hbt.stickv.audio import (
+    GLOBAL_LEAD_SILENCE_S,
     LEAD_IN_SILENCE_S,
     align_beat_karaoke,
     compute_pause_after,
@@ -68,6 +70,23 @@ STICKV_MP4_COMPAT_FLAGS: tuple[str, ...] = (
 )
 
 
+def allocate_beat_frame_counts(
+    beat_durations: Sequence[float],
+    fps: int,
+) -> list[int]:
+    """Khóa đồng hồ tích lũy A/V: `end_frame_i = round(acc_audio * fps)` (lệch <= 1 frame)."""
+    eff_fps = max(1, int(fps))
+    counts: list[int] = []
+    acc_frames = 0
+    acc_audio_s = 0.0
+    for dur in beat_durations:
+        acc_audio_s += max(0.0, float(dur))
+        end_frame = max(acc_frames + 1, int(round(acc_audio_s * eff_fps)))
+        counts.append(end_frame - acc_frames)
+        acc_frames = end_frame
+    return counts
+
+
 def _stream_beat_frames_to_ffmpeg(
     *,
     beat: StickvBeat,
@@ -97,7 +116,9 @@ def _stream_beat_frames_to_ffmpeg(
     n_frames = n_frames_override if n_frames_override is not None else max(1, int(round(dur * fps)))
     rms_env = extract_wav_rms_envelope(wav_path, fps, dur)
     pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
-    lead_in = LEAD_IN_SILENCE_S * pause_scale
+    lead_in = (
+        GLOBAL_LEAD_SILENCE_S if global_frame_offset == 0 else (LEAD_IN_SILENCE_S * pause_scale)
+    )
     speech_end = max(lead_in + 0.3, dur - pause_after)
     spoken_segs = load_beat_spoken_segments(wav_path)
     word_timings = align_beat_karaoke(
@@ -109,6 +130,8 @@ def _stream_beat_frames_to_ffmpeg(
         spoken_segments=spoken_segs,
     )
 
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    tmp_mp4 = out_mp4.with_name(f"{out_mp4.stem}.tmp.mp4")
     cmd = [
         ffmpeg_exe(),
         "-y",
@@ -129,7 +152,9 @@ def _stream_beat_frames_to_ffmpeg(
         *FFMPEG_ENCODE_CLAMP,
         "-pix_fmt",
         "yuv420p",
-        str(out_mp4),
+        "-video_track_timescale",
+        "90000",
+        str(tmp_mp4),
     ]
 
     norm_domain = normalize_domain(domain)
@@ -225,13 +250,17 @@ def _stream_beat_frames_to_ffmpeg(
                 proc.stdin.write(frame.tobytes())
             finally:
                 frame.close()
-        proc.stdin.close()
-        _, stderr_b = proc.communicate()
+        if proc.stdin is not None:
+            proc.stdin.flush()
+            proc.stdin.close()
+            proc.stdin = None
+        _, stderr_b = proc.communicate(timeout=300.0)
         if proc.returncode != 0:
             raise FFmpegError(
                 f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
                 f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
             )
+        os.replace(tmp_mp4, out_mp4)
         if stage_state_out is not None:
             cw, ch_h = last_char_size or (
                 (char_img.width, char_img.height) if char_img is not None else (240, target_char_h)
@@ -248,8 +277,20 @@ def _stream_beat_frames_to_ffmpeg(
                 x=tx, y=ty, scale=tsc, pose_state=animator.last_pose_state
             )
     finally:
-        if proc.poll() is None:
-            proc.kill()
+        for pipe in (proc.stdin, proc.stderr):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+        try:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=2.0)
+        except Exception:
+            pass
+        if tmp_mp4.exists():
+            tmp_mp4.unlink(missing_ok=True)
         if owns_backdrop:
             backdrop.close()
         animator.close()
@@ -447,6 +488,8 @@ def _stream_chunk_frames_to_ffmpeg(
     backdrop_renderer: BackdropRenderer,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    tmp_mp4 = out_mp4.with_name(f"{out_mp4.stem}.tmp.mp4")
     cmd = [
         ffmpeg_exe(),
         "-y",
@@ -471,7 +514,9 @@ def _stream_chunk_frames_to_ffmpeg(
         "high",
         "-level",
         "4.1",
-        str(out_mp4),
+        "-video_track_timescale",
+        "90000",
+        str(tmp_mp4),
     ]
 
     norm_domain = normalize_domain(domain)
@@ -520,7 +565,7 @@ def _stream_chunk_frames_to_ffmpeg(
             interaction = getattr(beat, "interaction", "none") or "none"
             rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
             pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
-            lead_in = LEAD_IN_SILENCE_S * pause_scale
+            lead_in = GLOBAL_LEAD_SILENCE_S if g_idx == 0 else (LEAD_IN_SILENCE_S * pause_scale)
             speech_end = max(lead_in + 0.3, dur_b - pause_after)
             spoken_segs = load_beat_spoken_segments(wav_p)
             word_timings = align_beat_karaoke(
@@ -587,6 +632,7 @@ def _stream_chunk_frames_to_ffmpeg(
             next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
             has_next_diff_title = next_beat is None or (
                 (next_beat.board_title or "").strip() != (beat.board_title or "").strip()
+                or next_beat.board_type != beat.board_type
                 or not (beat.board_title or "").strip()
             )
             prev_ch = cur_state.last_chapter if cur_state is not None else None
@@ -697,16 +743,32 @@ def _stream_chunk_frames_to_ffmpeg(
             cur_audio_t += dur_b
             gc.collect()
 
-        proc.stdin.close()
-        _, stderr_b = proc.communicate()
+        if proc.stdin is not None:
+            proc.stdin.flush()
+            proc.stdin.close()
+            proc.stdin = None
+        _, stderr_b = proc.communicate(timeout=300.0)
         if proc.returncode != 0:
             raise FFmpegError(
                 f"FFmpeg stream chunk lỗi ({proc.returncode}): "
                 f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
             )
+        os.replace(tmp_mp4, out_mp4)
     finally:
-        if proc.poll() is None:
-            proc.kill()
+        for pipe in (proc.stdin, proc.stderr):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+        try:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=2.0)
+        except Exception:
+            pass
+        if tmp_mp4.exists():
+            tmp_mp4.unlink(missing_ok=True)
 
     return cur_frame_offset, cur_audio_t, cur_state
 
