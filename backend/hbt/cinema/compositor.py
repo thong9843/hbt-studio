@@ -470,7 +470,9 @@ class DirtyRectCompositor:
                 finally:
                     frame.close()
 
+            proc.stdin.flush()
             proc.stdin.close()
+            proc.stdin = None
             _, stderr_b = proc.communicate(timeout=180.0)
             if proc.returncode != 0:
                 raise FFmpegError(
