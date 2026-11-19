@@ -343,7 +343,7 @@ export function AssetHubPage() {
               />
             )}
             {supportsOnline && (
-              <Button tone="postv" onClick={() => setOnlineOpen(true)}>
+              <Button tone="soft" onClick={() => setOnlineOpen(true)}>
                 🌐 Tìm &amp; Tải Online
               </Button>
             )}
@@ -361,7 +361,7 @@ export function AssetHubPage() {
               }}
             />
             <Button
-              tone="export"
+              tone="ink"
               busy={upload.isPending}
               icon={<PlusIcon size={16} />}
               onClick={() => fileInputRef.current?.click()}
@@ -388,9 +388,9 @@ export function AssetHubPage() {
               aria-selected={selected}
               onClick={() => setActiveTab(cat.id)}
               className={cx(
-                'flex items-center justify-center gap-2 rounded-inner px-3 py-2.5 text-small font-bold transition-all duration-180',
+                'flex items-center justify-center gap-2 rounded-inner px-3 py-2 text-small font-bold transition-colors',
                 selected
-                  ? 'bg-primary text-on-primary shadow-sm'
+                  ? 'bg-[var(--accent-soft)] text-[var(--on-accent-soft)]'
                   : 'text-muted hover:bg-soft hover:text-text',
               )}
             >
@@ -399,7 +399,7 @@ export function AssetHubPage() {
               <span
                 className={cx(
                   'num rounded-pill px-1.5 py-0.5 text-[11px] font-extrabold',
-                  selected ? 'bg-white/20 text-on-primary' : 'bg-soft text-text-2',
+                  selected ? 'bg-brand text-white' : 'bg-soft text-text-2',
                 )}
               >
                 {tabCounts[cat.id]}
