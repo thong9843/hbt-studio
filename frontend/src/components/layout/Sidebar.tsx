@@ -322,30 +322,15 @@ export function Sidebar({ mini, render }: SidebarProps) {
       <nav aria-label={vi.nav.main} className="mt-4 flex-1 overflow-y-auto">
         <div className="space-y-1">
           <NavItem to="/" end icon={<HomeIcon />} label={vi.nav.home} mini={mini} />
-          <NavItem
-            to="/core"
-            icon={<ZapIcon className="text-engine-core" />}
-            label={vi.nav.hbtCore}
-            mini={mini}
-          />
-          <NavItem
-            to="/postv"
-            icon={<SmartphoneIcon className="text-engine-postv" />}
-            label={vi.nav.postv}
-            mini={mini}
-          />
+          <NavItem to="/core" icon={<ZapIcon />} label={vi.nav.hbtCore} mini={mini} />
+          <NavItem to="/postv" icon={<SmartphoneIcon />} label={vi.nav.postv} mini={mini} />
           <NavItem
             to="/chatting"
-            icon={<MessagesSquareIcon className="text-engine-chatting" />}
+            icon={<MessagesSquareIcon />}
             label={vi.nav.chatting}
             mini={mini}
           />
-          <NavItem
-            to="/stickv"
-            icon={<SparklesIcon className="text-engine-stickv" />}
-            label={vi.nav.stickv}
-            mini={mini}
-          />
+          <NavItem to="/stickv" icon={<SparklesIcon />} label={vi.nav.stickv} mini={mini} />
           <NavItem to="/library" icon={<FolderIcon />} label={vi.nav.library} mini={mini} />
         </div>
         {videoSlug && <OpenProject slug={videoSlug} mini={mini} />}

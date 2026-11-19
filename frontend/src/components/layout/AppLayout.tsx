@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { useRenderJob } from '../../hooks/renderJob';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useRemainingText } from '../../hooks/useRemaining';
+import { useStudioWorkspace } from '../../hooks/studioWorkspace';
 import { NewProjectProvider } from '../NewProjectDialog';
 import { RenderJobProvider } from '../RenderJobProvider';
 import { Sidebar, type RenderProgress } from './Sidebar';
@@ -16,10 +17,11 @@ export interface AppLayoutProps {
   render?: RenderProgress | null;
 }
 
-/** Thanh trái nhận tiến độ từ job toàn cục (`undefined` = lấy từ context). */
+/** Thanh trái nhận tiến độ từ job toàn cục và tự thu thành Icon Rail khi ở trong StudioShell. */
 function Nav({ mini, render }: { mini: boolean; render?: RenderProgress | null }) {
   const job = useRenderJob();
   const remaining = useRemainingText();
+  const ws = useStudioWorkspace();
   const fromJob: RenderProgress | null = job.running
     ? {
         percent: job.percent,
@@ -28,7 +30,12 @@ function Nav({ mini, render }: { mini: boolean; render?: RenderProgress | null }
         onCancel: () => void job.cancel(),
       }
     : null;
-  return <Sidebar mini={mini} render={render === undefined ? fromJob : render} />;
+  return (
+    <Sidebar
+      mini={mini || Boolean(ws?.studioMode)}
+      render={render === undefined ? fromJob : render}
+    />
+  );
 }
 
 /**

@@ -1,68 +1,74 @@
-/* Token giao diện v5.0 Next-Gen Creator Workstation (Daylight Studio & Midnight Aurora).
+/* Hệ thống Token v10.0 — HBT VEED-Inspired Bright Minimalist & Quiet Dark (Luật 90 · 8 · 2).
    Sáng/tối theo hệ thống hoặc `data-theme="light|dark"` trên <html>.
    Khối tối được khai hai lần (media query và data-theme) để tokens.test.ts kiểm tra đồng bộ. */
 :root {
-  /* Bề mặt 3 tầng HBT Studio Pro Craft (Light Studio: #F4F6FA -> #FFFFFF -> #F8FAFC) */
-  --bg: #f4f6fa;
+  /* Bề mặt Bright Studio (Mặc định — Sáng & Tinh khiết chuẩn VEED.IO) */
+  --bg: #f7f8fa;
+  --bg-app: #f7f8fa;
   --card: #ffffff;
   --surface-card: #ffffff;
-  --bg-elevated: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f3f6;
+  --bg-subtle: #f1f3f6;
+  --bg-canvas: #eceff4;
   --nav: #ffffff;
-  --soft: #eef2f7;
-  --soft-2: #e2e8f0;
-  --line: rgba(15, 23, 42, 0.09);
-  --border-subtle: rgba(15, 23, 42, 0.09);
-  --line-input: #cbd5e1;
-  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --soft: #f1f3f6;
+  --soft-2: #eceff4;
+  --line: #e6e8ee;
+  --border-subtle: #e6e8ee;
+  --line-input: #d5d9e2;
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
   /* Badge Watermark thích ứng 2 chế độ */
-  --wm-badge-bg: rgba(217, 35, 46, 0.12);
-  --wm-badge-border: rgba(217, 35, 46, 0.28);
+  --wm-badge-bg: #fdf2f2;
+  --wm-badge-border: rgba(217, 35, 46, 0.24);
   --wm-badge-text: #b91c1c;
 
-  /* Chữ tương phản cao (Slate) */
-  --text: #0f172a;
-  --text-2: #334155;
-  --muted: #475569;
+  /* Chữ tương phản cao (Luật 90·8·2: #111318 & #5E6675, WCAG >= 5.0:1) */
+  --text: #111318;
+  --text-primary: #111318;
+  --text-2: #3b404c;
+  --text-secondary: #5e6675;
+  --muted: #5e6675;
 
-  /* Điểm nhấn thương hiệu & Hành động */
-  --primary: #0f172a;
+  /* Điểm nhấn thương hiệu HBT (#D9232E) & Nút mực VEED (#111318) */
+  --primary: #111318;
   --on-primary: #ffffff;
+  --ink-action: #111318;
+  --on-ink-action: #ffffff;
   --accent: #facc15;
-  --on-accent: #0f172a;
+  --on-accent: #111318;
   --brand: #d9232e;
+  --brand-hover: #be1b25;
   --on-brand: #ffffff;
+  --accent-primary: #d9232e;
+  --accent-soft: #fdf2f2;
+  --on-accent-soft: #b91c1c;
 
-  /* Bảng màu Định danh Động cơ (Color-Coded Affordance) */
-  --engine-core: #f43f5e;
-  --engine-core-strong: #e11d48;
-  --engine-core-soft: #fff1f2;
-  --on-engine-core-soft: #be123c;
+  /* Đồng bộ 4 động cơ theo bảng màu trung tính tinh gọn (bỏ màu cầu vồng) */
+  --engine-core: #d9232e;
+  --engine-core-strong: #be1b25;
+  --engine-core-soft: #fdf2f2;
+  --on-engine-core-soft: #b91c1c;
 
-  --engine-postv: #3b82f6;
-  --engine-postv-strong: #4f46e5;
-  --engine-postv-soft: #eff6ff;
-  --on-engine-postv-soft: #1d4ed8;
+  --engine-postv: #111318;
+  --engine-postv-strong: #111318;
+  --engine-postv-soft: #f1f3f6;
+  --on-engine-postv-soft: #111318;
 
-  --engine-chatting: #10b981;
-  --engine-chatting-strong: #059669;
-  --engine-chatting-soft: #ecfdf5;
-  --on-engine-chatting-soft: #047857;
+  --engine-chatting: #111318;
+  --engine-chatting-strong: #111318;
+  --engine-chatting-soft: #f1f3f6;
+  --on-engine-chatting-soft: #111318;
 
-  --engine-stickv: #f59e0b;
-  --engine-stickv-strong: #d97706;
-  --engine-stickv-soft: #fffbeb;
-  --on-engine-stickv-soft: #b45309;
-
-  /* Gradient đặc biệt: Magic AI & Final Export */
-  --magic-from: #8b5cf6;
-  --magic-to: #ec4899;
-  --export-from: #f59e0b;
-  --export-to: #ea580c;
+  --engine-stickv: #d9232e;
+  --engine-stickv-strong: #be1b25;
+  --engine-stickv-soft: #fdf2f2;
+  --on-engine-stickv-soft: #b91c1c;
 
   /* Ngữ nghĩa trạng thái */
-  --tint-red: #fff1f2;
-  --on-tint-red: #be123c;
+  --tint-red: #fdf2f2;
+  --on-tint-red: #b91c1c;
   --tint-yel: #fef3c7;
   --on-tint-yel: #92400e;
   --ok: #16a34a;
@@ -71,22 +77,21 @@
   --danger: #b91c1c;
   --on-danger: #ffffff;
   --danger-soft: #fee2e2;
-  --focus: #3b82f6;
+  --focus: #d9232e;
 
   /* Bề mặt tối chuyên dụng cho khung xem trước video 9:16 */
-  --hero: #0b0f19;
+  --hero: #090b0f;
   --on-hero: #ffffff;
-  --surface-dark: #131a2a;
-  --text-on-dark: #f8fafc;
-  --muted-on-dark: #94a3b8;
+  --surface-dark: #151821;
+  --text-on-dark: #f4f6fa;
+  --muted-on-dark: #96a0b2;
 
-  /* Đổ bóng đa tầng mềm mại */
-  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
-  --shadow-card-hover:
-    0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
-  --shadow-pop: 0 24px 64px -12px rgba(15, 23, 42, 0.22);
-  --card-border: #e2e8f0;
-  --scrim: rgba(15, 23, 42, 0.45);
+  /* Đổ bóng tối giản chuẩn VEED */
+  --shadow-card: 0 1px 3px rgba(17, 19, 24, 0.04), 0 1px 2px rgba(17, 19, 24, 0.02);
+  --shadow-card-hover: 0 8px 24px -4px rgba(17, 19, 24, 0.08), 0 2px 6px rgba(17, 19, 24, 0.04);
+  --shadow-pop: 0 16px 40px -8px rgba(17, 19, 24, 0.16);
+  --card-border: #e6e8ee;
+  --scrim: rgba(17, 19, 24, 0.45);
 
   /* Khoảng cách: thang 4 px */
   --space-1: 4px;
@@ -100,22 +105,22 @@
   --space-16: 64px;
   --space-24: 96px;
 
-  /* Bo góc */
-  --radius-card: 20px;
-  --radius-dialog: 24px;
-  --radius-preview: 28px;
-  --radius-inner: 14px;
-  --radius-input: 12px;
+  /* Bo góc nhất quán (14px thẻ lớn, 10px nút/input, 8px nút nhỏ) */
+  --radius-card: 14px;
+  --radius-dialog: 16px;
+  --radius-preview: 16px;
+  --radius-inner: 10px;
+  --radius-input: 10px;
   --radius-pill: 999px;
 
   /* Bố cục */
-  --nav-w: 248px;
-  --nav-w-mini: 72px;
+  --nav-w: 220px;
+  --nav-w-mini: 60px;
 
-  /* Chuyển động xúc giác (0% CPU khi rảnh, 120–200ms) */
+  /* Chuyển động siêu nhẹ 0% Lag (120–200ms) */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-press: 120ms;
-  --dur: 160ms;
+  --dur: 150ms;
   --dur-pop: 140ms;
   --dur-slow: 200ms;
 
@@ -124,102 +129,126 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0a0d14;
-    --card: #111622;
-    --surface-card: #111622;
-    --bg-elevated: #182032;
-    --nav: #0e131e;
-    --soft: #182032;
-    --soft-2: #202a40;
+    --bg: #0e1015;
+    --bg-app: #0e1015;
+    --card: #151821;
+    --surface-card: #151821;
+    --bg-surface: #151821;
+    --bg-elevated: #1c202b;
+    --bg-subtle: #1c202b;
+    --bg-canvas: #090b0f;
+    --nav: #151821;
+    --soft: #1c202b;
+    --soft-2: #232836;
     --line: rgba(255, 255, 255, 0.08);
     --border-subtle: rgba(255, 255, 255, 0.08);
-    --line-input: rgba(255, 255, 255, 0.16);
-    --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    --wm-badge-bg: rgba(245, 158, 11, 0.16);
-    --wm-badge-border: rgba(245, 158, 11, 0.34);
-    --wm-badge-text: #fcd34d;
-    --text: #f8fafc;
-    --text-2: #cbd5e1;
-    --muted: #94a3b8;
-    --primary: #f8fafc;
-    --on-primary: #0f172a;
+    --line-input: rgba(255, 255, 255, 0.14);
+    --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --wm-badge-bg: rgba(229, 57, 69, 0.14);
+    --wm-badge-border: rgba(229, 57, 69, 0.28);
+    --wm-badge-text: #fca5a5;
+    --text: #f4f6fa;
+    --text-primary: #f4f6fa;
+    --text-2: #c4cad6;
+    --text-secondary: #96a0b2;
+    --muted: #96a0b2;
+    --primary: #f4f6fa;
+    --on-primary: #111318;
+    --ink-action: #f4f6fa;
+    --on-ink-action: #111318;
+    --brand-hover: #f04b56;
+    --accent-primary: #e53945;
+    --accent-soft: #2d1418;
+    --on-accent-soft: #fca5a5;
 
-    --engine-core-soft: #2d121d;
-    --on-engine-core-soft: #fda4af;
-    --engine-postv-soft: #13203c;
-    --on-engine-postv-soft: #93c5fd;
-    --engine-chatting-soft: #0c2922;
-    --on-engine-chatting-soft: #6ee7b7;
-    --engine-stickv-soft: #2c1e09;
-    --on-engine-stickv-soft: #fcd34d;
+    --engine-core-soft: #2d1418;
+    --on-engine-core-soft: #fca5a5;
+    --engine-postv-soft: #1c202b;
+    --on-engine-postv-soft: #f4f6fa;
+    --engine-chatting-soft: #1c202b;
+    --on-engine-chatting-soft: #f4f6fa;
+    --engine-stickv-soft: #2d1418;
+    --on-engine-stickv-soft: #fca5a5;
 
     --ok: #22c55e;
     --ok-soft: #102a1d;
     --on-ok-soft: #4ade80;
-    --tint-red: #2d121d;
-    --on-tint-red: #fda4af;
+    --tint-red: #2d1418;
+    --on-tint-red: #fca5a5;
     --tint-yel: #2b210e;
     --on-tint-yel: #fde047;
     --danger: #f87171;
-    --on-danger: #0f172a;
+    --on-danger: #111318;
     --danger-soft: #2e1518;
 
-    --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.45);
-    --shadow-card-hover: 0 12px 36px -6px rgba(0, 0, 0, 0.6);
-    --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.65);
+    --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
     --card-border: rgba(255, 255, 255, 0.08);
-    --scrim: rgba(4, 7, 15, 0.76);
+    --scrim: rgba(4, 7, 15, 0.72);
 
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #0a0d14;
-  --card: #111622;
-  --surface-card: #111622;
-  --bg-elevated: #182032;
-  --nav: #0e131e;
-  --soft: #182032;
-  --soft-2: #202a40;
+  --bg: #0e1015;
+  --bg-app: #0e1015;
+  --card: #151821;
+  --surface-card: #151821;
+  --bg-surface: #151821;
+  --bg-elevated: #1c202b;
+  --bg-subtle: #1c202b;
+  --bg-canvas: #090b0f;
+  --nav: #151821;
+  --soft: #1c202b;
+  --soft-2: #232836;
   --line: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.08);
-  --line-input: rgba(255, 255, 255, 0.16);
-  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --wm-badge-bg: rgba(245, 158, 11, 0.16);
-  --wm-badge-border: rgba(245, 158, 11, 0.34);
-  --wm-badge-text: #fcd34d;
-  --text: #f8fafc;
-  --text-2: #cbd5e1;
-  --muted: #94a3b8;
-  --primary: #f8fafc;
-  --on-primary: #0f172a;
+  --line-input: rgba(255, 255, 255, 0.14);
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --wm-badge-bg: rgba(229, 57, 69, 0.14);
+  --wm-badge-border: rgba(229, 57, 69, 0.28);
+  --wm-badge-text: #fca5a5;
+  --text: #f4f6fa;
+  --text-primary: #f4f6fa;
+  --text-2: #c4cad6;
+  --text-secondary: #96a0b2;
+  --muted: #96a0b2;
+  --primary: #f4f6fa;
+  --on-primary: #111318;
+  --ink-action: #f4f6fa;
+  --on-ink-action: #111318;
+  --brand-hover: #f04b56;
+  --accent-primary: #e53945;
+  --accent-soft: #2d1418;
+  --on-accent-soft: #fca5a5;
 
-  --engine-core-soft: #2d121d;
-  --on-engine-core-soft: #fda4af;
-  --engine-postv-soft: #13203c;
-  --on-engine-postv-soft: #93c5fd;
-  --engine-chatting-soft: #0c2922;
-  --on-engine-chatting-soft: #6ee7b7;
-  --engine-stickv-soft: #2c1e09;
-  --on-engine-stickv-soft: #fcd34d;
+  --engine-core-soft: #2d1418;
+  --on-engine-core-soft: #fca5a5;
+  --engine-postv-soft: #1c202b;
+  --on-engine-postv-soft: #f4f6fa;
+  --engine-chatting-soft: #1c202b;
+  --on-engine-chatting-soft: #f4f6fa;
+  --engine-stickv-soft: #2d1418;
+  --on-engine-stickv-soft: #fca5a5;
 
   --ok: #22c55e;
   --ok-soft: #102a1d;
   --on-ok-soft: #4ade80;
-  --tint-red: #2d121d;
-  --on-tint-red: #fda4af;
+  --tint-red: #2d1418;
+  --on-tint-red: #fca5a5;
   --tint-yel: #2b210e;
   --on-tint-yel: #fde047;
   --danger: #f87171;
-  --on-danger: #0f172a;
+  --on-danger: #111318;
   --danger-soft: #2e1518;
 
-  --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.45);
-  --shadow-card-hover: 0 12px 36px -6px rgba(0, 0, 0, 0.6);
-  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.65);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
   --card-border: rgba(255, 255, 255, 0.08);
-  --scrim: rgba(4, 7, 15, 0.76);
+  --scrim: rgba(4, 7, 15, 0.72);
 
   color-scheme: dark;
 }

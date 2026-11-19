@@ -65,6 +65,8 @@ export interface StudioWorkspaceDraft {
   setResultVideoUrl: (url: string | null) => void;
   resultSlug: string | null;
   setResultSlug: (slug: string | null) => void;
+  studioMode?: boolean;
+  setStudioMode?: (active: boolean) => void;
 }
 
 export const StudioWorkspaceContext = createContext<StudioWorkspaceDraft | null>(null);

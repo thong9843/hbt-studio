@@ -84,7 +84,7 @@ describe('tokens.css v2', () => {
     }
   });
 
-  it('uses the exact 3-tier light and dark surface hierarchy of HBT Studio Pro Craft', () => {
+  it('uses the exact VEED-inspired Bright Minimalist and Quiet Dark surface hierarchy (90-8-2 rule)', () => {
     const l = resolver('light');
     const d = resolver('dark');
     expect([
@@ -92,32 +92,47 @@ describe('tokens.css v2', () => {
       l('--card'),
       l('--surface-card'),
       l('--bg-elevated'),
+      l('--bg-canvas'),
       l('--line'),
       l('--text'),
-    ]).toEqual(['#f4f6fa', '#ffffff', '#ffffff', '#f8fafc', 'rgba(15, 23, 42, 0.09)', '#0f172a']);
+      l('--muted'),
+    ]).toEqual([
+      '#f7f8fa',
+      '#ffffff',
+      '#ffffff',
+      '#f1f3f6',
+      '#eceff4',
+      '#e6e8ee',
+      '#111318',
+      '#5e6675',
+    ]);
     expect([
       d('--bg'),
       d('--card'),
       d('--surface-card'),
       d('--bg-elevated'),
+      d('--bg-canvas'),
       d('--line'),
       d('--text'),
+      d('--muted'),
     ]).toEqual([
-      '#0a0d14',
-      '#111622',
-      '#111622',
-      '#182032',
+      '#0e1015',
+      '#151821',
+      '#151821',
+      '#1c202b',
+      '#090b0f',
       'rgba(255, 255, 255, 0.08)',
-      '#f8fafc',
+      '#f4f6fa',
+      '#96a0b2',
     ]);
     expect([l('--accent'), l('--brand'), l('--danger')]).toEqual(['#facc15', '#d9232e', '#b91c1c']);
     expect([d('--accent'), d('--brand'), d('--danger')]).toEqual(['#facc15', '#d9232e', '#f87171']);
   });
 
-  it('has radii and shadows for v5.0 cards', () => {
-    expect(light['--radius-card']).toBe('20px');
-    expect(light['--radius-dialog']).toBe('24px');
-    expect(light['--radius-input']).toBe('12px');
+  it('has VEED minimalist radii and shadows', () => {
+    expect(light['--radius-card']).toBe('14px');
+    expect(light['--radius-dialog']).toBe('16px');
+    expect(light['--radius-input']).toBe('10px');
     expect(light['--radius-pill']).toBe('999px');
     expect(darkAttr['--card-border']).toBe('rgba(255, 255, 255, 0.08)');
   });
