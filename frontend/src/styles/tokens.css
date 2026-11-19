@@ -114,13 +114,13 @@
   --radius-pill: 999px;
 
   /* Bố cục */
-  --nav-w: 220px;
-  --nav-w-mini: 60px;
+  --nav-w: 224px;
+  --nav-w-mini: 64px;
 
-  /* Chuyển động siêu nhẹ 0% Lag (120–200ms) */
+  /* Chuyển động siêu nhẹ 0% Lag (90–200ms) */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-press: 120ms;
-  --dur: 150ms;
+  --dur-press: 90ms;
+  --dur: 160ms;
   --dur-pop: 140ms;
   --dur-slow: 200ms;
 

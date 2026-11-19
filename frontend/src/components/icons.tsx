@@ -94,7 +94,7 @@ export const UploadIcon = make(<path d="M12 16V5m-5 4 5-5 5 5M5 20h14" />);
 export const SettingsIcon = make(
   <>
     <circle cx="12" cy="12" r="3" />
-    <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1M7.7 16.3l-2.1 2.1" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
   </>,
 );
 export const MoreIcon = make(
@@ -106,11 +106,35 @@ export const MoreIcon = make(
 );
 export const SunIcon = make(
   <>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5" />
+    <circle cx="12" cy="12" r="4.5" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
   </>,
 );
-export const MoonIcon = make(<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" />);
+export const MoonIcon = make(
+  <>
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+    <path d="M17.5 4.5v2M16.5 5.5h2" />
+  </>,
+);
+export const PanelLeftCloseIcon = make(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18M16 15l-3-3 3-3" />
+  </>,
+);
+export const PanelLeftOpenIcon = make(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18M13 9l3 3-3 3" />
+  </>,
+);
+export const ChevronDownIcon = make(<path d="m6 9 6 6 6-6" />);
+export const EditIcon = make(
+  <>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" />
+  </>,
+);
 export const MessagesSquareIcon = make(
   <>
     <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z" />

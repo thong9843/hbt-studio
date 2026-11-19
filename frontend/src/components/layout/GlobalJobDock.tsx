@@ -1,28 +1,45 @@
 import { Link, useLocation } from 'react-router-dom';
-import { useRenderJob } from '../../hooks/renderJob';
+import type { ActiveJob } from '../../api/types';
+import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { useRemainingText } from '../../hooks/useRemaining';
 import { vi } from '../../i18n/vi';
 import { StopIcon } from '../icons';
 import { Button } from '../ui/Button';
 import { Progress } from '../ui/Progress';
 
+function isOnActiveJobPage(
+  pathname: string,
+  kind: ActiveJob['kind'] | null,
+  slug: string | null,
+): boolean {
+  if (kind === 'stickv' && pathname.startsWith('/stickv')) {
+    return true;
+  }
+  if ((kind === 'preview' || kind === 'final') && slug && pathname.startsWith(`/p/${slug}/export`)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Thanh Tiến trình Dựng Toàn cục (Global SSE Job Dock):
- * Nổi gọn ở góc dưới bên phải, luôn theo sát người dùng khi chuyển giữa các trang.
- * Không dùng backdrop-blur hay animation lặp vô hạn (đạt 0% CPU khi rảnh).
+ * - Chỉ hiện khi người dùng rời sang trang khác (vd `/`, `/library`, `/core`...) trong lúc job đang chạy ngầm.
+ * - Tự động ẩn khi người dùng đang đứng ở đúng trang của job active (vd `/stickv`), triệt tiêu lỗi hiện 3 thanh tiến độ trùng lặp.
+ * - Đăng ký `useRenderJobProgress` độc lập qua `useSyncExternalStore`, không làm re-render các trang khác.
  */
 export function GlobalJobDock() {
-  const job = useRenderJob();
+  const status = useRenderJobStatus();
+  const progress = useRenderJobProgress();
   const remaining = useRemainingText();
   const location = useLocation();
 
-  if (!job.running) return null;
+  if (!status.running) return null;
+  if (isOnActiveJobPage(location.pathname, status.kind, status.slug)) return null;
 
-  const pct = Math.max(0, Math.min(100, Math.round(job.percent)));
-  const isStickv = job.kind === 'stickv';
-  const onStickvPage = location.pathname.startsWith('/stickv');
-  const stageLabel = job.stage || job.step || vi.stickvJob.working;
-  const stickvHref = job.slug ? `/stickv?slug=${encodeURIComponent(job.slug)}` : '/stickv';
+  const pct = Math.max(0, Math.min(100, Math.round(progress.percent)));
+  const isStickv = status.kind === 'stickv';
+  const stageLabel = progress.stage || progress.step || vi.stickvJob.working;
+  const stickvHref = status.slug ? `/stickv?slug=${encodeURIComponent(status.slug)}` : '/stickv';
 
   return (
     <aside
@@ -38,23 +55,26 @@ export function GlobalJobDock() {
             />
             <span className="truncate text-tiny font-bold uppercase tracking-wider text-muted">
               {isStickv ? vi.stickvJob.dockTitle : vi.nav.renderProgress}
-              {job.slug ? ` · ${job.slug}` : ''}
+              {status.slug ? ` · ${status.slug}` : ''}
             </span>
           </div>
           <p className="mt-1 truncate text-small font-bold text-text">
             <span className="num mr-1.5 text-brand">{pct}%</span>
             <span>{stageLabel}</span>
           </p>
-          {isStickv && job.totalBeats != null && job.totalBeats > 0 && job.currentBeat != null && (
-            <p className="mt-0.5 text-tiny font-semibold text-muted tabular-nums">
-              {vi.stickvJob.beatProgress(job.currentBeat, job.totalBeats)}
-            </p>
-          )}
+          {isStickv &&
+            progress.totalBeats != null &&
+            progress.totalBeats > 0 &&
+            progress.currentBeat != null && (
+              <p className="mt-0.5 text-tiny font-semibold text-muted tabular-nums">
+                {vi.stickvJob.beatProgress(progress.currentBeat, progress.totalBeats)}
+              </p>
+            )}
         </div>
         <Button
           tone="soft"
           size="sm"
-          onClick={() => void job.cancel()}
+          onClick={() => void status.cancel()}
           icon={<StopIcon size={14} />}
           aria-label="Hủy dựng toàn cục"
           title={vi.nav.cancelRender}
@@ -68,7 +88,7 @@ export function GlobalJobDock() {
       </div>
 
       <div className="mt-2.5 flex items-center justify-between gap-2">
-        {isStickv && !onStickvPage ? (
+        {isStickv ? (
           <Link
             to={stickvHref}
             className="inline-flex items-center rounded-lg border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition-colors hover:bg-soft-2"
@@ -76,7 +96,7 @@ export function GlobalJobDock() {
             {vi.stickvJob.dockOpenStickv} →
           </Link>
         ) : (
-          <span className="truncate text-tiny text-muted">{job.message || ''}</span>
+          <span className="truncate text-tiny text-muted">{progress.message || ''}</span>
         )}
         {remaining && (
           <p className="shrink-0 text-right text-tiny font-medium text-muted tabular-nums">

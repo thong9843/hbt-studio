@@ -1,58 +1,44 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { vi } from '../../i18n/vi';
-import { ArrowLeftIcon, DownloadIcon, PlayIcon } from '../icons';
-import { Button } from '../ui/Button';
+import { ArrowLeftIcon, MoreIcon } from '../icons';
+import { Menu, type MenuItem } from '../ui/Menu';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { ExportPopover, type ExportPopoverProps } from './ExportPopover';
 
 export interface StudioTopBarProps {
-  engineBadge: string;
-  title: string;
+  engineBadge?: string;
+  title?: string;
   savedText?: string;
   projectSelector?: ReactNode;
+  projectMenuItems?: MenuItem[];
   aspect?: '9:16' | '16:9';
   onAspectChange?: (next: '9:16' | '16:9') => void;
   aspectAriaLabel?: string;
-  onQuickPreview?: () => void;
-  quickPreviewLabel?: string;
-  quickPreviewDisabled?: boolean;
-  quickPreviewBusy?: boolean;
-  inlineFinalLabel?: string;
-  onInlineFinal?: () => void;
-  inlineFinalDisabled?: boolean;
-  inlineFinalBusy?: boolean;
   exportProps?: ExportPopoverProps;
   rightExtras?: ReactNode;
 }
 
 /**
- * Thanh Topbar 56px chuẩn VEED.IO:
- * Góc trái: Nút quay lại + Huy hiệu động cơ + Tên dự án / Bộ chọn dự án + Nhãn Đã lưu.
- * Góc phải: Chọn khổ 9:16 | 16:9 + Xem nhanh + Nút Xuất bản đẹp & Popover Cấu hình Xuất.
+ * Thanh Topbar 56px tối giản tuyệt đối chuẩn VEED.IO — CHỈ giữ đúng 4 cụm điều khiển:
+ * 1. Trái: Nút [←] · Dropdown chọn dự án (kèm tên dự án đang mở) · Menu ⋯ (Đổi tên, Xóa dự án) · Nhãn Đã lưu.
+ * 2. Phải: Bộ chọn tỷ lệ [9:16 | 16:9] · DUY NHẤT 1 nút đỏ Xuất video (Popover).
  */
 export function StudioTopBar({
   engineBadge,
   title,
   savedText = vi.studioShell.savedBadge,
   projectSelector,
+  projectMenuItems,
   aspect,
   onAspectChange,
   aspectAriaLabel = 'Tỉ lệ khung hình',
-  onQuickPreview,
-  quickPreviewLabel = vi.studioShell.previewQuickBtn,
-  quickPreviewDisabled = false,
-  quickPreviewBusy = false,
-  inlineFinalLabel,
-  onInlineFinal,
-  inlineFinalDisabled = false,
-  inlineFinalBusy = false,
   exportProps,
   rightExtras,
 }: StudioTopBarProps) {
   return (
-    <header className="flex min-h-[56px] flex-wrap items-center justify-between gap-3 border-b border-line bg-card px-4 py-2">
-      <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+    <header className="flex h-[56px] shrink-0 items-center justify-between gap-3 border-b border-line bg-card px-3.5">
+      <div className="flex min-w-0 items-center gap-2">
         <Link
           to="/"
           aria-label={vi.studioShell.backToHome}
@@ -61,19 +47,40 @@ export function StudioTopBar({
         >
           <ArrowLeftIcon size={15} />
         </Link>
-        <span className="rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
-          {engineBadge}
-        </span>
-        <h1 className="truncate text-body font-bold tracking-tight text-text">{title}</h1>
+
+        {projectSelector ? (
+          <div className="flex min-w-0 items-center gap-1.5">{projectSelector}</div>
+        ) : (
+          <div className="flex min-w-0 items-center gap-2">
+            {engineBadge && (
+              <span className="shrink-0 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
+                {engineBadge}
+              </span>
+            )}
+            {title && (
+              <h1 className="truncate text-small font-bold tracking-tight text-text">{title}</h1>
+            )}
+          </div>
+        )}
+
+        {projectMenuItems && projectMenuItems.length > 0 && (
+          <Menu
+            label={vi.studioShell.projectActionsMenu}
+            icon={<MoreIcon size={16} />}
+            items={projectMenuItems}
+            align="start"
+          />
+        )}
+
         {savedText && (
-          <span className="rounded-pill bg-soft px-2 py-0.5 text-[11px] font-semibold text-muted">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-pill bg-soft px-2 py-0.5 text-[11px] font-semibold text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true" />
             {savedText}
           </span>
         )}
-        {projectSelector && <div className="flex items-center gap-2">{projectSelector}</div>}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {aspect && onAspectChange && (
           <SegmentedControl
             roleMode="button"
@@ -81,36 +88,10 @@ export function StudioTopBar({
             value={aspect}
             onChange={onAspectChange}
             options={[
-              { value: '9:16', label: '9:16 Shorts' },
-              { value: '16:9', label: '16:9 Ngang' },
+              { value: '9:16', label: '9:16' },
+              { value: '16:9', label: '16:9' },
             ]}
           />
-        )}
-
-        {onQuickPreview && (
-          <Button
-            tone="soft"
-            size="sm"
-            icon={<PlayIcon size={14} />}
-            disabled={quickPreviewDisabled}
-            busy={quickPreviewBusy}
-            onClick={onQuickPreview}
-          >
-            {quickPreviewLabel}
-          </Button>
-        )}
-
-        {onInlineFinal && inlineFinalLabel && (
-          <Button
-            tone="brand"
-            size="sm"
-            icon={<DownloadIcon size={14} />}
-            disabled={inlineFinalDisabled}
-            busy={inlineFinalBusy}
-            onClick={onInlineFinal}
-          >
-            {inlineFinalLabel}
-          </Button>
         )}
 
         {rightExtras}

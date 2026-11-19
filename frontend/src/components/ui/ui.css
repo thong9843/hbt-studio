@@ -143,7 +143,7 @@
   }
 }
 .ui-btn:not(:disabled):not([aria-disabled='true']):active {
-  transform: scale(0.985);
+  transform: scale(0.97);
 }
 .ui-btn:disabled,
 .ui-btn[aria-disabled='true'] {
@@ -1127,6 +1127,37 @@ textarea.ui-input[data-counter] {
   color: var(--muted);
 }
 
+/* ---- Chuyển Tab Inspector & Accordion mượt mà (0% Lag, GPU transform/opacity) ---- */
+@keyframes panelFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ui-panel-fade {
+  animation: panelFadeIn var(--dur) var(--ease) both;
+}
+.ui-accordion-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-slow) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.ui-accordion-grid[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.ui-accordion-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* ---- Giảm chuyển động (prefers-reduced-motion) ---- */
 @media (prefers-reduced-motion: reduce) {
   .ui-step,
@@ -1141,7 +1172,8 @@ textarea.ui-input[data-counter] {
   .ui-scene-add,
   .ui-dot,
   .ui-studio-select-caret,
-  .ui-segmented-thumb {
+  .ui-segmented-thumb,
+  .ui-accordion-grid {
     transform: none !important;
     transition: none !important;
   }
@@ -1153,7 +1185,8 @@ textarea.ui-input[data-counter] {
   .ui-toast,
   .ui-menu,
   .ui-studio-select-menu,
-  .ui-scrim {
+  .ui-scrim,
+  .ui-panel-fade {
     animation: none !important;
   }
   .ui-progress-bar {

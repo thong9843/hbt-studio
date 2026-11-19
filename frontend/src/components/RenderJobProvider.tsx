@@ -2,15 +2,36 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api/endpoints';
 import type { ActiveJob, Job, RenderOptions } from '../api/types';
-import { RenderJobContext, type AttachJobInput, type RenderJobApi } from '../hooks/renderJob';
+import {
+  createRenderJobProgressStore,
+  EMPTY_PROGRESS_SNAPSHOT,
+  RenderJobContext,
+  type AttachJobInput,
+  type RenderJobStatusApi,
+} from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useJob, type JobProgress } from '../hooks/useJob';
 import { vi } from '../i18n/vi';
 
+function toSnapshot(p: Partial<JobProgress> | null | undefined) {
+  if (!p) return EMPTY_PROGRESS_SNAPSHOT;
+  const step = p.step ?? p.stage ?? '';
+  return {
+    percent: p.progress ?? p.percent ?? 0,
+    step,
+    stage: p.stage || step,
+    message: p.message ?? '',
+    currentBeat: p.current_beat ?? null,
+    totalBeats: p.total_beats ?? null,
+  };
+}
+
 /**
  * Giữ job dựng (HBT Core, PostV, StickV) và luồng SSE ở mức toàn app, để đổi màn không mất
- * tiến độ. `useJob` chỉ mở `EventSource` khi có `jobId` và đóng khi job kết thúc, nên lúc rảnh
- * không có kết nối hay request nào (13.B3.2 luật 6).
+ * tiến độ.
+ * - Tiến độ % (`percent`, `step`, `stage`, `message`, `currentBeat`, `totalBeats`) được ghi thẳng
+ *   vào `progressStore` (external store + `useSyncExternalStore`), giúp `RenderJobProvider` và các
+ *   trang lớn (`StickvPage`, `<video>`, Inspector Tabs) re-render ĐÚNG 0 LẦN khi job chạy 1% → 100%.
  */
 export function RenderJobProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -25,15 +46,16 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [seedProgress, setSeedProgress] = useState<Partial<JobProgress> | null>(null);
 
+  const progressStoreRef = useRef(createRenderJobProgressStore());
   const kindRef = useRef(kind);
   kindRef.current = kind;
   const completedJobIdsRef = useRef<Set<string>>(new Set());
 
-  const {
-    progress,
-    connectionError,
-    cancel: cancelJob,
-  } = useJob(
+  const handleProgress = useCallback((p: JobProgress) => {
+    progressStoreRef.current.setSnapshot(toSnapshot(p));
+  }, []);
+
+  const { connectionError, cancel: cancelJob } = useJob(
     jobId,
     (job) => {
       if (job.status === 'running' || job.status === 'queued') {
@@ -58,6 +80,10 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       }
     },
     seedProgress,
+    {
+      onProgress: handleProgress,
+      externalProgressOnly: true,
+    },
   );
 
   const jobIdRef = useRef(jobId);
@@ -67,24 +93,25 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
 
   const attachJob = useCallback((input: AttachJobInput) => {
     if (jobIdRef.current === input.jobId && finishedRef.current === null) {
-      // Đang mở sẵn đúng luồng SSE này -> giữ nguyên không reset tiến độ
       return;
     }
     completedJobIdsRef.current.delete(input.jobId);
-    setSlug(input.slug);
-    setKind(input.kind);
-    setOptions({ preview: Boolean(input.preview) });
-    setFinished(null);
-    setEstimate(input.estimateSeconds ?? null);
-    setStartedAt(input.startedAt ?? Date.now() / 1000);
-    setSeedProgress({
+    const seed: Partial<JobProgress> = {
       progress: input.progress ?? 0,
       step: input.step ?? input.stage ?? '',
       stage: input.stage ?? input.step ?? '',
       message: input.message ?? '',
       current_beat: input.currentBeat ?? null,
       total_beats: input.totalBeats ?? null,
-    });
+    };
+    progressStoreRef.current.setSnapshot(toSnapshot(seed));
+    setSlug(input.slug);
+    setKind(input.kind);
+    setOptions({ preview: Boolean(input.preview) });
+    setFinished(null);
+    setEstimate(input.estimateSeconds ?? null);
+    setStartedAt(input.startedAt ?? Date.now() / 1000);
+    setSeedProgress(seed);
     setJobId(input.jobId);
   }, []);
 
@@ -93,6 +120,7 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       setStarting(true);
       try {
         const res = await api.startRender(target, opts);
+        progressStoreRef.current.setSnapshot(EMPTY_PROGRESS_SNAPSHOT);
         setSlug(target);
         setKind(opts.preview ? 'preview' : 'final');
         setOptions(opts);
@@ -108,8 +136,6 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // Mở app (hoặc tải lại trang) khi backend vẫn đang dựng: hỏi `GET /jobs` đúng một lần rồi nối lại
-  // SSE của job đầu hàng. Không poll (13.B3.2 luật 6); lỗi mạng thì bỏ qua, 409 của máy chủ vẫn chặn.
   const resumed = useRef(false);
   useEffect(() => {
     if (resumed.current) return;
@@ -119,20 +145,22 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       .then((rows) => {
         const renders = Array.isArray(rows) ? rows.filter((r) => r.kind !== 'voice') : [];
         const head = renders.find((r) => r.status === 'running') ?? renders[0] ?? null;
-        if (!head || jobIdRef.current !== null) return; // người dùng đã tự bắt đầu một job
-        setSlug(head.slug);
-        setKind(head.kind);
-        setOptions({ preview: head.kind === 'preview' || head.mode === 'preview' });
-        setFinished(null);
-        setStartedAt(head.started_at ?? null);
-        setSeedProgress({
+        if (!head || jobIdRef.current !== null) return;
+        const seed: Partial<JobProgress> = {
           progress: head.progress ?? 0,
           step: head.step ?? head.stage ?? '',
           stage: head.stage ?? head.step ?? '',
           message: '',
           current_beat: head.current_beat ?? null,
           total_beats: head.total_beats ?? null,
-        });
+        };
+        progressStoreRef.current.setSnapshot(toSnapshot(seed));
+        setSlug(head.slug);
+        setKind(head.kind);
+        setOptions({ preview: head.kind === 'preview' || head.mode === 'preview' });
+        setFinished(null);
+        setStartedAt(head.started_at ?? null);
+        setSeedProgress(seed);
         setJobId(head.id);
       })
       .catch(() => undefined);
@@ -141,19 +169,13 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
   const cancel = useCallback(() => cancelJob(), [cancelJob]);
 
   const running = jobId !== null && finished === null && !connectionError;
-  const value: RenderJobApi = useMemo(
+  const value: RenderJobStatusApi = useMemo(
     () => ({
       slug,
       jobId,
       kind,
       running,
       starting,
-      percent: progress.progress,
-      step: progress.step,
-      stage: progress.stage || progress.step,
-      message: progress.message,
-      currentBeat: progress.current_beat ?? null,
-      totalBeats: progress.total_beats ?? null,
       startedAt,
       finished,
       connectionError,
@@ -162,6 +184,7 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       start,
       attachJob,
       cancel,
+      progressStore: progressStoreRef.current,
     }),
     [
       slug,
@@ -169,7 +192,6 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       kind,
       running,
       starting,
-      progress,
       startedAt,
       finished,
       connectionError,

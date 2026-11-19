@@ -15,6 +15,12 @@ export interface JobProgress {
   text?: string;
 }
 
+export interface UseJobOptions {
+  onProgress?: (progress: JobProgress) => void;
+  /** Khi bật, đẩy tiến độ sang external store qua `onProgress` mà không setState nội bộ mỗi nhịp. */
+  externalProgressOnly?: boolean;
+}
+
 const EMPTY: JobProgress = { progress: 0, step: '', message: '' };
 export const PROGRESS_THROTTLE_MS = 150;
 
@@ -67,11 +73,16 @@ export function useJob(
   jobId: string | null,
   onFinished?: (job: Job) => void,
   seedProgress?: Partial<JobProgress> | null,
+  options?: UseJobOptions,
 ) {
   const [progress, setProgress] = useState<JobProgress>(EMPTY);
   const [job, setJob] = useState<Job | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const finishedRef = useRef(onFinished);
+  const onProgressRef = useRef(options?.onProgress);
+  onProgressRef.current = options?.onProgress;
+  const externalOnlyRef = useRef(Boolean(options?.externalProgressOnly));
+  externalOnlyRef.current = Boolean(options?.externalProgressOnly);
   const seedRef = useRef(seedProgress);
   seedRef.current = seedProgress;
   const latestProgressRef = useRef<JobProgress>(EMPTY);
@@ -84,6 +95,13 @@ export function useJob(
   }, [onFinished]);
 
   useEffect(() => {
+    const emitProgress = (next: JobProgress) => {
+      onProgressRef.current?.(next);
+      if (!externalOnlyRef.current) {
+        setProgress(next);
+      }
+    };
+
     if (throttleTimerRef.current !== null) {
       clearTimeout(throttleTimerRef.current);
       throttleTimerRef.current = null;
@@ -103,7 +121,7 @@ export function useJob(
           }
         : EMPTY;
     latestProgressRef.current = initial;
-    setProgress(initial);
+    emitProgress(initial);
     setJob(null);
     setConnectionError(null);
     if (!jobId) return;
@@ -150,17 +168,18 @@ export function useJob(
             total_beats: final.total_beats,
           });
           latestProgressRef.current = synced;
-          setProgress(synced);
+          emitProgress(synced);
           return;
         }
         closed = true;
         closeStream();
         setJob(final);
-        setProgress((p) => {
-          const base =
-            latestProgressRef.current.progress > p.progress ? latestProgressRef.current : p;
-          return { ...base, progress: final.status === 'done' ? 100 : base.progress };
-        });
+        const terminalProgress: JobProgress = {
+          ...latestProgressRef.current,
+          progress: final.status === 'done' ? 100 : latestProgressRef.current.progress,
+        };
+        latestProgressRef.current = terminalProgress;
+        emitProgress(terminalProgress);
         if (notifiedJobIdRef.current !== jobId) {
           notifiedJobIdRef.current = jobId;
           finishedRef.current?.(final);
@@ -189,14 +208,14 @@ export function useJob(
         if (isFirstOrBoundary || elapsed >= PROGRESS_THROTTLE_MS) {
           clearTimer();
           lastFlushAtRef.current = now;
-          setProgress(next);
+          emitProgress(next);
         } else if (throttleTimerRef.current === null) {
           const remain = Math.max(16, PROGRESS_THROTTLE_MS - elapsed);
           throttleTimerRef.current = setTimeout(() => {
             throttleTimerRef.current = null;
             if (!closed) {
               lastFlushAtRef.current = Date.now();
-              setProgress(latestProgressRef.current);
+              emitProgress(latestProgressRef.current);
             }
           }, remain);
         }
