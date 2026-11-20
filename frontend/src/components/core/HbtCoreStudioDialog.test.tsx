@@ -210,4 +210,52 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     await waitFor(() => expect(capturedBodies).toHaveLength(1));
     expect(capturedBodies[0]?.selectedModel).toBe('gemini-3.5-flash-lite');
   });
+
+  it('shows clear Vietnamese error with Settings link when Cloudflare key is missing', async () => {
+    stubFetch({
+      'GET /api/hbt-core/assets': { ...assetsMock, cloudflare_configured: false },
+      'GET /api/hbt/core/models': geminiModelsMock,
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const autoImgBtn = await screen.findByRole('button', { name: 'Tự vẽ ảnh' });
+    await user.click(autoImgBtn);
+
+    expect(
+      await screen.findByText('Chưa cấu hình Cloudflare Account ID hoặc API Token.'),
+    ).toBeVisible();
+    const settingsLink = screen.getByRole('link', { name: 'Mở Cài đặt' });
+    expect(settingsLink).toHaveAttribute('href', '/settings');
+  });
+
+  it('triggers single-scene regenerate endpoint when clicking Vẽ lại', async () => {
+    let calledUrl = '';
+    stubFetch({
+      'GET /api/hbt-core/assets': { ...assetsMock, cloudflare_configured: true },
+      'GET /api/hbt/core/models': geminiModelsMock,
+      'POST /api/hbt-core/_new/scenes/0/generate-image': (url: string) => {
+        calledUrl = url;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            slug: 'dau-truong-la-ma',
+            scene_index: 0,
+            image: 'images/scene-01.png',
+            url: '/api/files/projects/dau-truong-la-ma/images/scene-01.png',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      },
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const regenBtn = await screen.findByRole('button', { name: 'Vẽ lại' });
+    await user.click(regenBtn);
+
+    await waitFor(() => expect(calledUrl).toContain('/api/hbt-core/_new/scenes/0/generate-image'));
+  });
 });

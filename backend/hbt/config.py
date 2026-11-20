@@ -39,6 +39,9 @@ class Settings:
     )  # kho tài nguyên Asset Hub (stickers, memes, backgrounds, renders)
     freesound_api_key: str = ""
     voicemod_tuna_api_key: str = ""
+    cloudflare_account_id: str = ""
+    cloudflare_api_token: str = ""
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-2-klein-4b"
 
 
 WHISPER_MODELS = ("auto", "small", "medium", "large-v3")
@@ -74,6 +77,11 @@ def load_settings(env_file: Path | None = None) -> Settings:
         assets_dir=path("ASSETS_DIR", "./assets"),
         freesound_api_key=env.get("FREESOUND_API_KEY", ""),
         voicemod_tuna_api_key=env.get("VOICEMOD_TUNA_API_KEY", ""),
+        cloudflare_account_id=env.get("CLOUDFLARE_ACCOUNT_ID", ""),
+        cloudflare_api_token=env.get("CLOUDFLARE_API_TOKEN", ""),
+        cloudflare_image_model=env.get(
+            "CLOUDFLARE_IMAGE_MODEL", "@cf/black-forest-labs/flux-2-klein-4b"
+        ),
     )
 
 
@@ -88,4 +96,7 @@ _KEYS = (
     "CHATTING_MODEL",
     "FREESOUND_API_KEY",
     "VOICEMOD_TUNA_API_KEY",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_IMAGE_MODEL",
 )

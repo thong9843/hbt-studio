@@ -69,12 +69,18 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['renders', job.project] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       const isStickv = kindRef.current === 'stickv' || job.kind === 'stickv';
+      const isCoreImages = kindRef.current === 'hbt_core_images' || job.kind === 'hbt_core_images';
       if (isStickv) {
         void queryClient.invalidateQueries({ queryKey: ['stickv-list'] });
         void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
         if (job.status === 'done') toast.info(vi.stickvJob.renderDone);
         else if (job.status === 'failed') toast.error(job.error || vi.stickvJob.renderFailed);
         else if (job.status === 'cancelled') toast.info(vi.stickvJob.renderCancelled);
+      } else if (isCoreImages) {
+        void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+        void queryClient.invalidateQueries({ queryKey: ['project', job.project] });
+        if (job.status === 'done') toast.info(vi.hbtCore.autoImage.doneToast);
+        else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
       } else if (job.status === 'done') {
         toast.info(vi.export.done);
       }

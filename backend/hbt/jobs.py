@@ -563,6 +563,9 @@ class JobManager:
             if job.kind == "hbt_core_auto":
                 self._run_hbt_core_auto(job)
                 return
+            if job.kind == "hbt_core_images":
+                self._run_hbt_core_images(job)
+                return
             if job.kind in ("stickv", "stickv_render"):
                 self._run_stickv_render(job)
                 return
@@ -1210,6 +1213,212 @@ class JobManager:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job hbt_core_auto: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_images(
+        self,
+        slug: str,
+        *,
+        overwrite: bool = False,
+        economy_mode: bool = False,
+    ) -> Job:
+        """Job nền sinh tuần tự toàn bộ ảnh 2D cho các cảnh HBT Core qua Cloudflare Workers AI."""
+        project = self.storage.load(slug)
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận, hãy đợi xong hoặc huỷ job hiện tại")
+        total = len(project.scenes)
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="hbt_core_images",
+            stage="Tự vẽ ảnh 2D",
+            current_beat=0,
+            total_beats=total,
+        )
+        job.core_images_overwrite = overwrite  # type: ignore[attr-defined]
+        job.core_images_economy = economy_mode  # type: ignore[attr-defined]
+        job._progress(
+            2.0,
+            "images",
+            f"Chuẩn bị vẽ {total} ảnh 2D...",
+            stage="Tự vẽ ảnh 2D",
+            current_beat=0,
+            total_beats=total,
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_images(self, job: Job) -> None:
+        """Thực thi job sinh ảnh tuần tự 1/N -> N/N cho HBT Core và cập nhật `project.json`."""
+        from hbt.app_settings import resolve_cloudflare_config
+        from hbt.shared.image_gen.cloudflare_flux import (
+            CloudflareImageError,
+            derive_project_seed,
+            generate_scene_image,
+        )
+
+        overwrite = bool(getattr(job, "core_images_overwrite", False))
+        economy_mode = bool(getattr(job, "core_images_economy", False))
+
+        try:
+            account_id, api_token, model = resolve_cloudflare_config(self.storage.workspace_dir)
+            if not account_id or not api_token:
+                raise CloudflareImageError(
+                    "Chưa cấu hình Cloudflare Account ID hoặc API Token. Vào Cài đặt để nhập khóa.",
+                    code="missing_cloudflare_key",
+                )
+
+            project = self.storage.load(job.slug)
+            folder = self.storage.project_dir(job.slug)
+            images_dir = folder / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+
+            core_script_path = folder / "core_script.json"
+            core_script_data: dict[str, Any] | None = None
+            prompt_by_index: list[str] = []
+            if core_script_path.is_file():
+                try:
+                    raw = json.loads(core_script_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict) and isinstance(raw.get("segments"), list):
+                        core_script_data = raw
+                        prompt_by_index = [
+                            str(seg.get("image_prompt") or "").strip()
+                            if isinstance(seg, dict)
+                            else ""
+                            for seg in raw["segments"]
+                        ]
+                except Exception:  # noqa: BLE001
+                    core_script_data = None
+
+            total = len(project.scenes)
+            seed = derive_project_seed(job.slug)
+            generated = 0
+            skipped = 0
+            saved_images: list[str] = []
+            scene1_ref: Path | None = None
+            if project.scenes and project.scenes[0].image:
+                cand_ref = folder / project.scenes[0].image
+                if cand_ref.is_file():
+                    scene1_ref = cand_ref
+
+            for idx, scene in enumerate(project.scenes, start=1):
+                job.token.check()
+                rel_img = f"images/scene-{idx:02d}.png"
+                dest = images_dir / f"scene-{idx:02d}.png"
+                existing_file = folder / scene.image if scene.image else dest
+
+                if not overwrite and existing_file.is_file() and scene.image:
+                    skipped += 1
+                    saved_images.append(scene.image)
+                    if idx == 1:
+                        scene1_ref = existing_file
+                    pct = round((idx / max(1, total)) * 98.0, 1)
+                    job._progress(
+                        pct,
+                        "images",
+                        f"Giữ ảnh có sẵn cảnh {idx}/{total}",
+                        stage="Tự vẽ ảnh 2D",
+                        current_beat=idx,
+                        total_beats=total,
+                    )
+                    continue
+
+                pct_start = round(((idx - 1) / max(1, total)) * 96.0 + 2.0, 1)
+                job._progress(
+                    pct_start,
+                    "images",
+                    f"Đang vẽ ảnh cảnh {idx}/{total}",
+                    stage="Tự vẽ ảnh 2D",
+                    current_beat=idx,
+                    total_beats=total,
+                )
+
+                raw_prompt = prompt_by_index[idx - 1] if idx - 1 < len(prompt_by_index) else ""
+                card_text = " ".join(ln.text for ln in scene.card.lines).strip()
+                fallback_ctx = f"{card_text}. {scene.voice}".strip(". ")
+                fallback_ref = images_dir / "scene-01.png"
+                reference_image = (
+                    (scene1_ref if scene1_ref and scene1_ref.is_file() else fallback_ref)
+                    if idx > 1
+                    else None
+                )
+                if reference_image is not None and not reference_image.is_file():
+                    reference_image = None
+
+                generate_scene_image(
+                    raw_prompt,
+                    dest,
+                    account_id=account_id,
+                    api_token=api_token,
+                    model=model,
+                    seed=seed,
+                    reference_image=reference_image,
+                    economy_mode=economy_mode,
+                    fallback_context=fallback_ctx,
+                )
+                generated += 1
+
+                latest = self.storage.load(job.slug)
+                actual_rel = rel_img
+                if idx - 1 < len(latest.scenes):
+                    latest.scenes[idx - 1].image = rel_img
+                    self.storage.save(job.slug, latest)
+                    reloaded = self.storage.load(job.slug)
+                    actual_rel = reloaded.scenes[idx - 1].image or rel_img
+                    if idx == 1:
+                        cand1 = folder / actual_rel
+                        if cand1.is_file():
+                            scene1_ref = cand1
+                saved_images.append(actual_rel)
+                if core_script_data is not None and idx - 1 < len(core_script_data["segments"]):
+                    if isinstance(core_script_data["segments"][idx - 1], dict):
+                        core_script_data["segments"][idx - 1]["image"] = actual_rel
+                        core_script_path.write_text(
+                            json.dumps(core_script_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+
+                pct_done = round((idx / max(1, total)) * 98.0, 1)
+                job._progress(
+                    pct_done,
+                    "images",
+                    f"Đã vẽ xong cảnh {idx}/{total}",
+                    stage="Tự vẽ ảnh 2D",
+                    current_beat=idx,
+                    total_beats=total,
+                )
+
+            job._progress(
+                100.0,
+                "images",
+                f"Hoàn tất {total}/{total} ảnh 2D",
+                stage="Tự vẽ ảnh 2D",
+                current_beat=total,
+                total_beats=total,
+            )
+            job._finish(
+                DONE,
+                output={
+                    "slug": job.slug,
+                    "generated": generated,
+                    "skipped": skipped,
+                    "total": total,
+                    "images": saved_images,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except CloudflareImageError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_images: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
     @staticmethod

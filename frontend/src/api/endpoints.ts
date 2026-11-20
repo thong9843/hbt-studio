@@ -400,6 +400,25 @@ export const api = {
     aspect_mode?: 'fill' | 'fit';
     auto_render?: boolean;
   }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v2/prompt', { json: body }),
+  generateHbtCoreImages: (
+    slug: string,
+    body?: { overwrite?: boolean; economy_mode?: boolean; script?: HbtCoreScript },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; job_id: string; total?: number }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/generate-images`,
+      { json: body ?? {} },
+    ),
+  generateHbtCoreSceneImage: (
+    slug: string,
+    sceneIndex: number,
+    body?: { image_prompt?: string; economy_mode?: boolean; script?: HbtCoreScript },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; scene_index: number; image: string; url: string }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/scenes/${sceneIndex}/generate-image`,
+      { json: body ?? {} },
+    ),
 
   listAssetHub: (category: AssetHubCategory) =>
     apiGet<{ category: AssetHubCategory; items: AssetHubItem[] }>(`/asset-hub/${enc(category)}`),

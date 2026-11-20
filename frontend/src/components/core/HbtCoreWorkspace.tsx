@@ -15,6 +15,7 @@ import type {
   HbtCoreTopic,
 } from '../../api/types';
 import { SAMPLE_V1_SCRIPT, useStudioWorkspace } from '../../hooks/studioWorkspace';
+import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { WaterfallProgress, type WaterfallStep, type WaterfallStepState } from '../../shared';
@@ -69,6 +70,46 @@ interface VoiceProgressDetail {
   percent: number;
 }
 
+function AutoImageProgressBar({
+  totalFallback,
+  onCancel,
+}: {
+  totalFallback: number;
+  onCancel: () => void;
+}) {
+  const progress = useRenderJobProgress();
+  const cur = progress.currentBeat ?? 0;
+  const total = progress.totalBeats ?? totalFallback;
+  const pct = Math.max(0, Math.min(100, Math.round(progress.percent)));
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line bg-soft px-3 py-2 text-tiny"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="font-bold text-text whitespace-nowrap">
+          {T.autoImage.progressLabel(cur, total)}
+        </span>
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+          <div
+            className="h-full rounded-full bg-brand transition-all duration-200"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-mono text-muted tabular-nums">{pct}%</span>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-inner border border-line bg-card px-2 py-0.5 text-tiny font-bold text-muted hover:text-text"
+      >
+        {vi.common.cancel}
+      </button>
+    </div>
+  );
+}
+
 export function HbtCoreWorkspace({
   slug: initialSlug,
   onClose,
@@ -77,6 +118,7 @@ export function HbtCoreWorkspace({
   const toast = useToast();
   const queryClient = useQueryClient();
   const shared = useStudioWorkspace();
+  const renderJob = useRenderJobStatus();
   const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   const [localTitle, setLocalTitle] = useState(SAMPLE_V1_SCRIPT.title);
@@ -120,6 +162,14 @@ export function HbtCoreWorkspace({
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [v2Loading, setV2Loading] = useState(false);
+  const [imageBusyStarting, setImageBusyStarting] = useState(false);
+  const [regenSceneIdx, setRegenSceneIdx] = useState<number | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageMissingKey, setImageMissingKey] = useState(false);
+  const [imgVersion, setImgVersion] = useState(0);
+
+  const isGeneratingImages =
+    imageBusyStarting || (renderJob.running && renderJob.kind === 'hbt_core_images');
 
   // Render & SSE state
   const [rendering, setRendering] = useState(false);
@@ -182,6 +232,19 @@ export function HbtCoreWorkspace({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (renderJob.kind !== 'hbt_core_images' || !renderJob.finished) return;
+    if (renderJob.finished.status === 'done') {
+      setImgVersion((v) => v + 1);
+      setImageError(null);
+      setImageMissingKey(false);
+      void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+    } else if (renderJob.finished.status === 'failed' && renderJob.finished.error) {
+      setImageError(renderJob.finished.error);
+      setImageMissingKey(/cloudflare|cài đặt/i.test(renderJob.finished.error));
+    }
+  }, [renderJob.finished, renderJob.kind, queryClient]);
 
   const safeIndex = Math.min(selectedSegIndex, Math.max(0, segments.length - 1));
   const activeSegment = segments[safeIndex];
@@ -306,6 +369,99 @@ export function HbtCoreWorkspace({
       setTimeout(() => setCopiedIdx((curr) => (curr === idx ? null : curr)), 1600);
     } catch {
       toast.error(new Error(vi.export.publish.copyFailed));
+    }
+  };
+
+  const buildCurrentScript = (): HbtCoreScript => ({
+    title,
+    topic,
+    total_segments: segments.length,
+    segments: segments.map((s, idx) => ({
+      id: idx + 1,
+      order: idx + 1,
+      title: s.title ?? '',
+      text: s.text,
+      sticker: s.sticker || 'question',
+      image_prompt: s.image_prompt ?? '',
+      image: s.image || `images/scene-${String(idx + 1).padStart(2, '0')}.png`,
+      sfx: s.sfx || 'whoosh',
+    })),
+  });
+
+  const handleImageApiError = (err: unknown) => {
+    let msg: string = T.autoImage.missingKeyError;
+    let missingKey = false;
+    if (err instanceof ApiError) {
+      const body = err.body as { code?: unknown; detail?: unknown; message?: unknown } | null;
+      if (body?.code === 'missing_cloudflare_key') missingKey = true;
+      if (typeof body?.detail === 'string' && body.detail.trim()) msg = body.detail;
+      else if (typeof body?.message === 'string' && body.message.trim()) msg = body.message;
+      else if (err.message) msg = err.message;
+    } else if (err instanceof Error && err.message) {
+      msg = err.message;
+    }
+    if (/cloudflare|cài đặt/i.test(msg)) missingKey = true;
+    setImageError(msg);
+    setImageMissingKey(missingKey);
+    toast.error(new Error(msg));
+  };
+
+  const handleGenerateAllImages = async () => {
+    setImageError(null);
+    setImageMissingKey(false);
+    if (assets?.cloudflare_configured === false) {
+      setImageError(T.autoImage.missingKeyError);
+      setImageMissingKey(true);
+      return;
+    }
+    setImageBusyStarting(true);
+    try {
+      const targetSlug = resultSlug ?? initialSlug ?? '_new';
+      const res = await api.generateHbtCoreImages(targetSlug, {
+        script: buildCurrentScript(),
+      });
+      if (res.slug) setResultSlug(res.slug);
+      renderJob.attachJob({
+        jobId: res.job_id,
+        slug: res.slug,
+        kind: 'hbt_core_images',
+        stage: 'Tự vẽ ảnh 2D',
+        currentBeat: 0,
+        totalBeats: res.total ?? segments.length,
+      });
+    } catch (err) {
+      handleImageApiError(err);
+    } finally {
+      setImageBusyStarting(false);
+    }
+  };
+
+  const handleGenerateSingleImage = async (idx: number) => {
+    const seg = segments[idx];
+    if (!seg) return;
+    setImageError(null);
+    setImageMissingKey(false);
+    if (assets?.cloudflare_configured === false) {
+      setImageError(T.autoImage.missingKeyError);
+      setImageMissingKey(true);
+      return;
+    }
+    setRegenSceneIdx(idx);
+    try {
+      const targetSlug = resultSlug ?? initialSlug ?? '_new';
+      const res = await api.generateHbtCoreSceneImage(targetSlug, idx, {
+        image_prompt: seg.image_prompt ?? '',
+        script: buildCurrentScript(),
+      });
+      if (res.slug) setResultSlug(res.slug);
+      updateSegment(idx, { image: res.image });
+      setImgVersion((v) => v + 1);
+      void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+      toast.info(T.autoImage.sceneDoneToast(idx + 1));
+    } catch (err) {
+      handleImageApiError(err);
+    } finally {
+      setRegenSceneIdx(null);
     }
   };
 
@@ -530,8 +686,17 @@ export function HbtCoreWorkspace({
     if (activeSegment.image.startsWith('http') || activeSegment.image.startsWith('/')) {
       return activeSegment.image;
     }
-    if (resultSlug && existingImages.includes(activeSegment.image)) {
-      return projectFileUrl(resultSlug, activeSegment.image);
+    const normalizedRel = activeSegment.image.startsWith('images/')
+      ? activeSegment.image
+      : `images/${activeSegment.image}`;
+    if (
+      resultSlug &&
+      (existingImages.includes(activeSegment.image) ||
+        existingImages.includes(normalizedRel) ||
+        imgVersion > 0)
+    ) {
+      const base = projectFileUrl(resultSlug, normalizedRel);
+      return imgVersion > 0 ? `${base}?v=${imgVersion}` : base;
     }
     return null;
   })();
@@ -619,6 +784,17 @@ export function HbtCoreWorkspace({
               )}
               <button
                 type="button"
+                disabled={isGeneratingImages || v2Loading || rendering}
+                onClick={() => void handleGenerateAllImages()}
+                className="ui-btn ui-btn-soft ui-btn-sm"
+              >
+                <SparklesIcon size={15} />
+                <span>
+                  {isGeneratingImages ? T.autoImage.generatingBtn : T.autoImage.generateAllBtn}
+                </span>
+              </button>
+              <button
+                type="button"
                 disabled={v2Loading || rendering || !prompt.trim()}
                 onClick={() => void handleRunV2Prompt()}
                 className="ui-btn ui-btn-ink ui-btn-sm"
@@ -638,7 +814,30 @@ export function HbtCoreWorkspace({
               />
             </div>
           </div>
+          {isGeneratingImages && (
+            <AutoImageProgressBar
+              totalFallback={segments.length}
+              onCancel={() => void renderJob.cancel()}
+            />
+          )}
         </section>
+
+        {imageError && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-danger/30 bg-danger-soft p-3.5 text-small text-danger"
+          >
+            <div className="flex items-start gap-2">
+              <AlertIcon size={18} />
+              <span>{imageError}</span>
+            </div>
+            {imageMissingKey && (
+              <Link to="/settings" className="ui-btn ui-btn-soft ui-btn-sm">
+                {T.autoImage.openSettingsLink}
+              </Link>
+            )}
+          </div>
+        )}
 
         {/* Thông báo fallback V2 -> V1 nếu Gemini lỗi / hết quota */}
         {fallbackNotice && (
@@ -792,14 +991,29 @@ export function HbtCoreWorkspace({
                       <label htmlFor={`hbt-core-img-prompt-${idx}`} className="ui-label !mb-0">
                         {T.v1.segmentImagePromptLabel}
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyImagePrompt(idx, seg.image_prompt ?? '')}
-                        className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2"
-                      >
-                        {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
-                        <span>{T.studio.copyPrompt}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={regenSceneIdx === idx || isGeneratingImages || rendering}
+                          onClick={() => void handleGenerateSingleImage(idx)}
+                          className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2 disabled:opacity-50"
+                        >
+                          <SparklesIcon size={13} />
+                          <span>
+                            {regenSceneIdx === idx
+                              ? T.autoImage.regeningSceneBtn
+                              : T.autoImage.regenSceneBtn}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyImagePrompt(idx, seg.image_prompt ?? '')}
+                          className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2"
+                        >
+                          {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+                          <span>{T.studio.copyPrompt}</span>
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       id={`hbt-core-img-prompt-${idx}`}
