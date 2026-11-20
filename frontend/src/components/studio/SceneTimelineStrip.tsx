@@ -62,7 +62,7 @@ const TimelineCard = memo(function TimelineCard({
           >
             #{item.index}
           </span>
-          {item.durationSec !== undefined && (
+          {typeof item.durationSec === 'number' && Number.isFinite(item.durationSec) && (
             <span className="shrink-0 text-[11px] font-semibold text-muted tabular-nums">
               · {item.durationSec.toFixed(1)}s
             </span>
@@ -118,7 +118,7 @@ export function SceneTimelineStrip({
         <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
           {vi.studioShell.timelineTitle} ({items.length})
         </span>
-        {totalDurationSec !== undefined && (
+        {typeof totalDurationSec === 'number' && Number.isFinite(totalDurationSec) && (
           <span className="text-[10px] font-semibold text-muted tabular-nums">
             ≈ {totalDurationSec.toFixed(1)}s
           </span>

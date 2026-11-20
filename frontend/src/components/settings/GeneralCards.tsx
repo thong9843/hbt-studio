@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import type { AppSettings, Fps } from '../../api/types';
+import type { AppSettings, CloudflareImageModel, Fps } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
@@ -276,6 +276,60 @@ export function OnlineApiKeysCard({ value, onChange }: Props) {
             value={value.giphy_api_key ?? ''}
             onChange={(e) => onChange({ giphy_api_key: e.target.value })}
           />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const CF_MODELS: { id: CloudflareImageModel; label: string }[] = [
+  { id: '@cf/black-forest-labs/flux-2-klein-4b', label: S.cloudflareCard.modelKlein },
+  { id: '@cf/black-forest-labs/flux-1-schnell', label: S.cloudflareCard.modelSchnell },
+];
+
+/** Thẻ cấu hình Cloudflare Workers AI (Account ID, API Token, mô hình Flux) cho HBT Core. */
+export function CloudflareAiCard({ value, onChange }: Props) {
+  const C = S.cloudflareCard;
+  const accountId = value.cloudflare_account_id ?? '';
+  const apiToken = value.cloudflare_api_token ?? '';
+  const activeModel: CloudflareImageModel =
+    value.cloudflare_image_model ?? '@cf/black-forest-labs/flux-2-klein-4b';
+  const configured = accountId.trim().length > 0 && apiToken.trim().length > 0;
+
+  return (
+    <Card as="section" aria-label={C.title} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-h2 font-bold">{C.title}</h2>
+        <ApiKeyStatusBadge configured={configured} />
+      </div>
+      <p className="text-small text-muted">{C.help}</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label={C.accountIdLabel}
+          placeholder={C.accountIdPlaceholder}
+          value={accountId}
+          onChange={(e) => onChange({ cloudflare_account_id: e.target.value })}
+        />
+        <Input
+          label={C.apiTokenLabel}
+          type="password"
+          placeholder={C.apiTokenPlaceholder}
+          value={apiToken}
+          onChange={(e) => onChange({ cloudflare_api_token: e.target.value })}
+        />
+      </div>
+      <div className="space-y-2">
+        <p className="ui-label !mb-0">{C.modelLabel}</p>
+        <div role="group" aria-label={C.modelLabel} className="flex flex-wrap gap-2">
+          {CF_MODELS.map((m) => (
+            <Chip
+              key={m.id}
+              selected={activeModel === m.id}
+              onClick={() => onChange({ cloudflare_image_model: m.id })}
+            >
+              {m.label}
+            </Chip>
+          ))}
         </div>
       </div>
     </Card>

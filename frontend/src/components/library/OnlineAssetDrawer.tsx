@@ -432,7 +432,11 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
                       </span>
                     </div>
                     <p className="truncate text-tiny text-muted">
-                      {it.subtitle} · {it.duration.toFixed(1)}s
+                      {it.subtitle} ·{' '}
+                      {typeof it.duration === 'number' && Number.isFinite(it.duration)
+                        ? it.duration.toFixed(1)
+                        : '0.0'}
+                      s
                     </p>
                   </div>
                   <Button

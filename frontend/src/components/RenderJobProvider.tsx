@@ -16,8 +16,11 @@ import { vi } from '../i18n/vi';
 function toSnapshot(p: Partial<JobProgress> | null | undefined) {
   if (!p) return EMPTY_PROGRESS_SNAPSHOT;
   const step = p.step ?? p.stage ?? '';
+  const rawPct = p.progress ?? p.percent;
+  const percent =
+    typeof rawPct === 'number' && Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 0;
   return {
-    percent: p.progress ?? p.percent ?? 0,
+    percent,
     step,
     stage: p.stage || step,
     message: p.message ?? '',
@@ -69,12 +72,25 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['renders', job.project] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       const isStickv = kindRef.current === 'stickv' || job.kind === 'stickv';
+      const isCoreImages = kindRef.current === 'hbt_core_images' || job.kind === 'hbt_core_images';
+      const isCorePrepare =
+        kindRef.current === 'hbt_core_prepare' || job.kind === 'hbt_core_prepare';
       if (isStickv) {
         void queryClient.invalidateQueries({ queryKey: ['stickv-list'] });
         void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
         if (job.status === 'done') toast.info(vi.stickvJob.renderDone);
         else if (job.status === 'failed') toast.error(job.error || vi.stickvJob.renderFailed);
         else if (job.status === 'cancelled') toast.info(vi.stickvJob.renderCancelled);
+      } else if (isCoreImages) {
+        void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+        void queryClient.invalidateQueries({ queryKey: ['project', job.project] });
+        if (job.status === 'done') toast.info(vi.hbtCore.autoImage.doneToast);
+        else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
+      } else if (isCorePrepare) {
+        void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+        void queryClient.invalidateQueries({ queryKey: ['project', job.project] });
+        if (job.status === 'done') toast.info(vi.hbtCore.prepare.doneToast);
+        else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
       } else if (job.status === 'done') {
         toast.info(vi.export.done);
       }

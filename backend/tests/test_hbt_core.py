@@ -109,10 +109,12 @@ def test_vieneu_segment_voice_microseconds_and_sse(tmp_path: Path) -> None:
     assert sse_events[2]["total"] == 3
     assert sse_events[2]["percent"] == 100
 
-    # Kiểm tra mốc micro-giây chính xác và liên tục
-    assert timings[0].start_us == 0
+    # Kiểm tra mốc micro-giây chính xác và liên tục (kèm đệm đầu 0.15s)
+    from hbt.core.voice import LEAD_PAD_US
+
+    assert timings[0].start_us == LEAD_PAD_US
     assert timings[0].duration_us > 1_000_000  # > 1 giây
-    assert timings[0].end_us == timings[0].duration_us
+    assert timings[0].end_us == timings[0].start_us + timings[0].duration_us
     assert timings[1].start_us > timings[0].end_us  # cách nhau khoảng nghỉ SEGMENT_GAP_US
     assert timings[2].start_us > timings[1].end_us
 
@@ -589,16 +591,16 @@ def test_hbt_core_full_auto_render_pipeline(tmp_path: Path) -> None:
 def test_hay_biet_tot_schema_markdown_cleanup_no_word_limit_and_tts_pipeline(
     tmp_path: Path,
 ) -> None:
-    # 1. Kiểm tra SYSTEM_PROMPT theo nhịp điệu Hay Biết Tốt & Schema chuẩn ComfyUI
+    # 1. Kiểm tra SYSTEM_PROMPT theo nhịp điệu Hay Biết Tuốt & Schema chuẩn ComfyUI
     assert "total_segments" in SYSTEM_PROMPT
     assert "image_prompt" in SYSTEM_PROMPT
     assert "sticker" in SYSTEM_PROMPT
     assert "Nhưng khoan đã..." in SYSTEM_PROMPT
-    assert "Theo dõi Hay Biết Tốt trên TikTok và YouTube nhé" in SYSTEM_PROMPT
+    assert "Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé" in SYSTEM_PROMPT
     assert "18 đến 40 từ" not in SYSTEM_PROMPT
 
     # 2. Gemini trả về JSON bọc markdown ```json ... ``` với lời thoại > 800 từ (gỡ giới hạn 750 từ)
-    long_text = " ".join(["Kiến thức thú vị chuẩn Hay Biết Tốt không giới hạn."] * 100)
+    long_text = " ".join(["Kiến thức thú vị chuẩn Hay Biết Tuốt không giới hạn."] * 100)
     assert len(long_text.split()) > 750
 
     markdown_wrapped = (
@@ -672,3 +674,283 @@ def test_hay_biet_tot_schema_markdown_cleanup_no_word_limit_and_tts_pipeline(
     assert enriched[0]["end_time"] == enriched[0]["duration"]
     assert enriched[1]["start_time"] > enriched[0]["end_time"]
     assert enriched[1]["end_time"] > enriched[1]["start_time"]
+
+
+def test_core_voice_lead_gap_tail_padding_and_karaoke_phrases(tmp_path: Path) -> None:
+    from hbt.core.models import HbtCoreSegment
+    from hbt.core.render import build_core_karaoke_phrases
+    from hbt.core.voice import (
+        LEAD_PAD_US,
+        SEGMENT_GAP_US,
+        TAIL_PAD_US,
+        synthesize_core_segments,
+        wav_duration_us,
+    )
+
+    segs = [
+        HbtCoreSegment(
+            order=1,
+            title="VỰC MARIANA",
+            text=(
+                "Bạn có biết vực Mariana sâu hơn cả đỉnh Everest rất nhiều không, "
+                "thật đáng kinh ngạc!"
+            ),
+            image="scene-01.png",
+            sfx="whoosh",
+        ),
+        HbtCoreSegment(
+            order=2,
+            title="ÁP SUẤT KHỔNG LỒ",
+            text=(
+                "Ở độ sâu mười một nghìn mét | áp suất nước nghiền nát "
+                "gần như mọi tàu ngầm thông thường."
+            ),
+            image="scene-02.png",
+            sfx="pop",
+        ),
+    ]
+    combined, timings = synthesize_core_segments(segs, tmp_path, voice_provider=None)
+    assert len(timings) == 2
+    assert timings[0].start_us == LEAD_PAD_US
+    assert timings[1].start_us - timings[0].end_us == SEGMENT_GAP_US
+    total_us = wav_duration_us(combined)
+    assert total_us - timings[-1].end_us == TAIL_PAD_US
+
+    phrases = build_core_karaoke_phrases(segs, timings)
+    assert len(phrases) >= 4
+    for p in phrases:
+        assert 1 <= len(p.words) <= 7
+        assert p.end > p.start
+
+
+def test_core_ken_burns_4_modes_and_xfade_and_loudnorm_ducking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PIL import Image
+
+    from hbt.core import render as core_render
+    from hbt.pipeline.ffutil import probe
+
+    kb_results = [
+        core_render.build_ken_burns_filter(i, 120, width=1080, height=1920, fps=60)
+        for i in range(1, 5)
+    ]
+    assert [m for m, _ in kb_results] == ["zoom_in", "zoom_out", "pan_right", "pan_left"]
+    for _, zp in kb_results:
+        assert "cos(PI*on/119)" in zp
+        assert ":fps=60" in zp
+
+    punch_mode, punch_zp = core_render.build_ken_burns_filter(1, 120, punch=True)
+    assert punch_mode == "punch"
+    assert "cos(PI*on/119)" in punch_zp
+    assert ":fps=60" in punch_zp
+
+    fc, out_lbl, total_dur = core_render.build_xfade_filter(
+        [4.45, 5.45, 3.45, 4.45, 3.0], transition_s=0.45, fps=60
+    )
+    assert out_lbl == "[vbody]"
+    assert "fps=60,format=yuv420p,settb=AVTB" in fc
+    for tr in ("fade", "smoothleft", "smoothright", "dissolve"):
+        assert f"transition={tr}:duration=0.450" in fc
+    assert abs(total_dur - 19.0) < 0.01
+
+    # Kiểm chứng filtergraph phóng 4x (4320:7680) trước zoompan 60fps
+    base_png = tmp_path / "base.png"
+    card_png = tmp_path / "card.png"
+    Image.new("RGB", (1080, 1920), (35, 65, 110)).save(base_png)
+    Image.new("RGBA", (1080, 1920), (0, 0, 0, 0)).save(card_png)
+
+    captured_clip_cmd: list[Any] = []
+    real_run_ffmpeg = core_render.run_ffmpeg
+
+    def _spy_ffmpeg(args: list[Any]) -> None:
+        captured_clip_cmd.extend(args)
+        real_run_ffmpeg(args)
+
+    monkeypatch.setattr(core_render, "run_ffmpeg", _spy_ffmpeg)
+    real_clip = tmp_path / "clip_60fps.mp4"
+    core_render.render_core_segment_clip(
+        base_png,
+        card_png,
+        0.8,
+        1,
+        real_clip,
+        fps=60,
+        width=1080,
+        height=1920,
+    )
+    clip_fc = str(captured_clip_cmd[captured_clip_cmd.index("-filter_complex") + 1])
+    assert "scale=4320:7680:flags=lanczos" in clip_fc
+    assert "cos(PI*on/" in clip_fc
+    assert ":fps=60" in clip_fc
+
+    # Kiểm chứng thật bằng ffprobe: tốc độ khung hình đầu ra đúng 60/1
+    info = probe(real_clip)
+    v_stream = next(s for s in info.get("streams", []) if s.get("codec_type") == "video")
+    assert v_stream.get("r_frame_rate") == "60/1"
+
+    captured_cmd: list[Any] = []
+    monkeypatch.setattr(core_render, "run_ffmpeg", lambda args: captured_cmd.extend(args))
+    voice_f = tmp_path / "v.wav"
+    bgm_f = tmp_path / "b.wav"
+    voice_f.write_bytes(b"RIFF")
+    bgm_f.write_bytes(b"RIFF")
+    core_render.mix_core_audio_track(voice_f, bgm_f, [], 10.0, tmp_path / "out.wav")
+    fc_idx = captured_cmd.index("-filter_complex") + 1
+    fc_str = str(captured_cmd[fc_idx])
+    assert "loudnorm=I=-14:TP=-1.5:LRA=11" in fc_str
+    assert "loudnorm=I=-27:TP=-6:LRA=11" in fc_str
+    assert "sidechaincompress=" in fc_str
+
+
+def test_core_prepare_3_phase_endpoint_without_and_with_cloudflare(
+    client,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hbt_state = client.app.state.hbt
+    monkeypatch.setattr(hbt_state.jobs, "voice", None)
+    monkeypatch.setattr(
+        "hbt.app_settings.resolve_cloudflare_config",
+        lambda _ws=None: ("", "", "@cf/black-forest-labs/flux-2-klein-4b"),
+    )
+
+    script_payload = {
+        "title": "Bí ẩn Vực Mariana",
+        "topic": "science",
+        "segments": [
+            {"id": 1, "title": "CẢNH 1", "text": "Vực Mariana là nơi sâu nhất đại dương."},
+            {"id": 2, "title": "CẢNH 2", "text": "Áp suất dưới đáy lớn gấp nghìn lần mặt biển."},
+        ],
+    }
+
+    # 1. Không có Cloudflare key: hoàn tất pha 1 + pha 2 kèm cảnh báo nhẹ
+    r1 = client.post("/api/hbt-core/_new/prepare", json={"script": script_payload})
+    assert r1.status_code == 202
+    data1 = r1.json()
+    slug1, job_id1 = data1["slug"], data1["job_id"]
+    job1 = hbt_state.jobs.get(job_id1)
+    assert job1.wait(timeout=15)
+    assert job1.status == "done"
+    assert job1.output is not None
+    assert job1.output["missing_cloudflare_key"] is True
+    assert job1.output["generated_images"] == 0
+    saved1 = client.get(f"/api/projects/{slug1}/core-script").json()["script"]
+    assert saved1["segments"][0]["duration"] > 0.5
+    assert saved1["segments"][0]["audio_path"] == "audio/scene_01.wav"
+
+    # 2. Có Cloudflare key (mock vẽ ảnh): hoàn tất đủ 3 pha
+    monkeypatch.setattr(
+        "hbt.app_settings.resolve_cloudflare_config",
+        lambda _ws=None: ("acc-test-123", "tok-test-456", "@cf/black-forest-labs/flux-2-klein-4b"),
+    )
+
+    def _fake_gen(_prompt: str, dest: Path, **_kw: Any) -> Path:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return dest
+
+    monkeypatch.setattr("hbt.shared.image_gen.cloudflare_flux.generate_scene_image", _fake_gen)
+    r2 = client.post(
+        f"/api/hbt-core/{slug1}/prepare",
+        json={"script": script_payload, "overwrite_images": True},
+    )
+    assert r2.status_code == 202
+    job2 = hbt_state.jobs.get(r2.json()["job_id"])
+    assert job2.wait(timeout=15)
+    assert job2.status == "done"
+    assert job2.output is not None
+    assert job2.output["missing_cloudflare_key"] is False
+    assert job2.output["generated_images"] == 2
+
+
+def test_core_whisper_timeline_xfade_sync_number_weights_and_cream_card_bounds(
+    tmp_path: Path,
+) -> None:
+    from PIL import Image, ImageDraw
+
+    from hbt.core.models import HbtCoreSegment
+    from hbt.core.render import (
+        XFADE_DURATION_S,
+        build_core_karaoke_phrases,
+        compute_scene_timeline,
+        layout_cream_card_lines,
+        token_spoken_weight,
+    )
+    from hbt.core.voice import (
+        LEAD_PAD_US,
+        build_core_voice_full_wav,
+        synthesize_core_segments,
+    )
+    from hbt.pipeline.text import parse_voice
+    from hbt.pipeline.visual import font
+
+    # 1. Trọng số âm tiết cho số và từ viết tắt (2014, Boeing 777, ACARS, MH370)
+    toks = parse_voice("Năm 2014 chiếc Boeing 777 mang số hiệu MH370 tắt hệ thống ACARS.")
+    w_by_disp = {str(t["disp"]).rstrip("."): token_spoken_weight(t) for t in toks}
+    assert w_by_disp["2014"] >= 4.0
+    assert w_by_disp["777"] >= 3.0
+    assert w_by_disp["MH370"] >= 4.5
+    assert w_by_disp["ACARS"] >= 4.5
+    assert w_by_disp["Năm"] < w_by_disp["2014"]
+
+    # 2. Mốc Karaoke khớp đúng timeline đã trừ xfade (0.45s) & ghép core_voice_full.wav
+    segs = [
+        HbtCoreSegment(
+            order=1,
+            title="CHUYẾN BAY MH370 NĂM 2014",
+            text="Năm 2014 chuyến bay MH370 biến mất khỏi radar không để lại dấu vết.",
+            image="scene-01.png",
+            sfx="whoosh",
+        ),
+        HbtCoreSegment(
+            order=2,
+            title="HỆ THỐNG ACARS BỊ TẮT",
+            text="Hệ thống ACARS trên chiếc Boeing 777 ngừng phát tín hiệu giữa biển Đông.",
+            image="scene-02.png",
+            sfx="pop",
+        ),
+    ]
+    _, timings = synthesize_core_segments(segs, tmp_path, voice_provider=None)
+    total_dur = timings[-1].end_s + 1.0
+    scene_starts, clip_durs, body_dur = compute_scene_timeline(
+        timings, total_dur, transition_s=XFADE_DURATION_S
+    )
+    assert scene_starts[0] == 0.0
+    assert abs(scene_starts[1] - timings[1].start_s) < 0.01
+    assert abs(body_dur - total_dur) < 0.02
+    assert len(clip_durs) == 2
+
+    voice_full = build_core_voice_full_wav(
+        timings, scene_starts, body_dur, tmp_path / "core_voice_full.wav"
+    )
+    assert voice_full.is_file()
+    phrases = build_core_karaoke_phrases(
+        segs,
+        timings,
+        voice_full_wav=voice_full,
+        scene_starts=scene_starts,
+    )
+    assert phrases
+    # Cụm đầu bắt đầu sau đệm đầu (0.15s) + khoảng lặng đầu của wav, cụm cảnh 2 khớp scene_starts[1]
+    assert phrases[0].start >= (LEAD_PAD_US / 1_000_000) - 0.02
+    scene2_phrases = [p for p in phrases if p.scene == 1]
+    assert scene2_phrases
+    assert scene2_phrases[0].start >= scene_starts[1] - 0.02
+    assert all(1 <= len(p.words) <= 7 for p in phrases)
+
+    # 3. Thẻ kem tự động hạ cỡ chữ và không tràn biên max_text_width=888 kể cả tiêu đề rất dài
+    long_title = (
+        "BÍ ẨN CHUYẾN BAY MH370 BOEING 777 NĂM 2014 TẮT HỆ THỐNG ACARS "
+        "VÀ BIẾN MẤT KHÔNG DẤU VẾT TRÊN ẤN ĐỘ DƯƠNG"
+    )
+    lines, eff_sz = layout_cream_card_lines(long_title, max_text_width=888, start_size=62)
+    assert 1 <= len(lines) <= 3
+    assert 36 <= eff_sz <= 62
+    scratch = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    try:
+        draw = ImageDraw.Draw(scratch)
+        fnt = font("ExtraBold" if eff_sz >= 70 else "Bold", eff_sz)
+        for ln in lines:
+            assert draw.textlength(ln, font=fnt) <= 888
+    finally:
+        scratch.close()
