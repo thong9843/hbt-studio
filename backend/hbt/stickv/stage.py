@@ -466,6 +466,154 @@ def _measure_rich_wrapped_height(
     return total_h + max(24, line_h) + line_gap
 
 
+def _fit_single_line_font(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: Path,
+    max_size: int,
+    min_size: int,
+    max_width_px: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Giảm cỡ chữ từ `max_size` xuống `min_size` để 1 dòng không vượt quá `max_width_px`."""
+    clean = strip_rich_markup(text) or " "
+    sz = max(min_size, int(max_size))
+    while sz > min_size:
+        fnt = _load_font(font_path, sz)
+        bb = draw.textbbox((0, 0), clean, font=fnt)
+        if (bb[2] - bb[0]) <= max_width_px:
+            return fnt
+        sz = max(min_size, sz - 2)
+    return _load_font(font_path, min_size)
+
+
+def _wrap_rich_tokens_lines(
+    draw: ImageDraw.ImageDraw,
+    tokens: list[tuple[str, bool]],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width_px: int,
+) -> tuple[list[list[tuple[str, bool]]], int, int]:
+    """Tách token `(word, is_hl)` thành các dòng khớp `max_width_px` bằng Pillow `textbbox`."""
+    space_bb = draw.textbbox((0, 0), " ", font=font)
+    space_w = max(4, space_bb[2] - space_bb[0])
+    sample_bb = draw.textbbox((0, 0), "Âg", font=font)
+    base_h = max(14, sample_bb[3] - sample_bb[1])
+
+    lines: list[list[tuple[str, bool]]] = []
+    cur_line: list[tuple[str, bool]] = []
+    cur_w = 0
+    for word, is_hl in tokens:
+        bb = draw.textbbox((0, 0), word, font=font)
+        ww = bb[2] - bb[0]
+        if ww > max_width_px and len(word) > 2:
+            # Cắt bớt từ đơn siêu dài để không bao giờ tràn mép phải
+            trimmed = word
+            while len(trimmed) > 1:
+                trimmed = trimmed[:-1]
+                tbb = draw.textbbox((0, 0), trimmed + "…", font=font)
+                if (tbb[2] - tbb[0]) <= max_width_px:
+                    word = trimmed + "…"
+                    ww = tbb[2] - tbb[0]
+                    break
+        if cur_line and cur_w + space_w + ww > max_width_px:
+            lines.append(cur_line)
+            cur_line = [(word, is_hl)]
+            cur_w = ww
+        else:
+            cur_w = (cur_w + space_w + ww) if cur_line else ww
+            cur_line.append((word, is_hl))
+    if cur_line:
+        lines.append(cur_line)
+    return lines, space_w, base_h
+
+
+def _draw_rich_autofit_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    xy: tuple[int, int],
+    font_path: Path,
+    max_size: int,
+    min_size: int,
+    fill: tuple[int, int, int, int],
+    highlight_fill: tuple[int, int, int, int],
+    *,
+    max_width_px: int,
+    max_height_px: int,
+    line_gap: int = 8,
+    max_lines: int | None = None,
+    align: str = "left",
+) -> int:
+    """Tự xuống dòng và giảm cỡ chữ để khối văn bản giàu định dạng không bao giờ vượt biên box."""
+    tokens: list[tuple[str, bool]] = []
+    for seg, is_hl in parse_rich_spans(text):
+        for w in seg.split():
+            if w:
+                tokens.append((w, is_hl))
+    if not tokens or max_width_px <= 16 or max_height_px <= 12:
+        return xy[1]
+
+    best_font = _load_font(font_path, min_size)
+    best_lines: list[list[tuple[str, bool]]] = []
+    best_space = 4
+    best_lh = 16
+    best_gap = max(2, line_gap)
+
+    for sz in range(max(min_size, int(max_size)), int(min_size) - 1, -2):
+        fnt = _load_font(font_path, sz)
+        gap = max(3, int(round(line_gap * (sz / max(1, max_size)))))
+        lines, space_w, base_h = _wrap_rich_tokens_lines(draw, tokens, fnt, max_width_px)
+        line_count = len(lines)
+        total_h = line_count * base_h + max(0, line_count - 1) * gap
+        best_font, best_lines, best_space, best_lh, best_gap = fnt, lines, space_w, base_h, gap
+        if total_h <= max_height_px and (max_lines is None or line_count <= max_lines):
+            break
+
+    max_fit_lines = max(1, (max_height_px + best_gap) // max(1, best_lh + best_gap))
+    if max_lines is not None:
+        max_fit_lines = min(max_fit_lines, max_lines)
+
+    truncated = len(best_lines) > max_fit_lines
+    vis_lines = best_lines[:max_fit_lines]
+    if truncated and vis_lines:
+        last_line = list(vis_lines[-1])
+        while last_line:
+            w_txt, is_hl = last_line[-1]
+            cand = w_txt.rstrip(".,;:!?…") + "…"
+            test_line = last_line[:-1] + [(cand, is_hl)]
+            line_w = sum(
+                draw.textbbox((0, 0), wd, font=best_font)[2] for wd, _ in test_line
+            ) + best_space * max(0, len(test_line) - 1)
+            if line_w <= max_width_px or len(last_line) == 1:
+                vis_lines[-1] = test_line
+                break
+            last_line.pop()
+
+    x0, cur_y = xy
+    for line in vis_lines:
+        if cur_y + best_lh > xy[1] + max_height_px + 2:
+            break
+        if align == "center":
+            line_w = sum(
+                draw.textbbox((0, 0), wd, font=best_font)[2]
+                - draw.textbbox((0, 0), wd, font=best_font)[0]
+                for wd, _ in line
+            ) + best_space * max(0, len(line) - 1)
+            cur_x = x0 + max(0, (max_width_px - line_w) // 2)
+        else:
+            cur_x = x0
+        for wd, is_hl in line:
+            bb = draw.textbbox((0, 0), wd, font=best_font)
+            ww = bb[2] - bb[0]
+            draw.text(
+                (cur_x, cur_y),
+                wd,
+                font=best_font,
+                fill=highlight_fill if is_hl else fill,
+            )
+            cur_x += ww + best_space
+        cur_y += best_lh + best_gap
+    return cur_y
+
+
 def _draw_topic_circle_badge(
     canvas: Image.Image,
     center_xy: tuple[int, int],
@@ -596,19 +744,22 @@ def _draw_pinned_photo_card(
 
         d.rectangle((ix0, iy0, ix1, iy1), outline=(203, 213, 225, 255), width=2)
 
-        # Chú thích ngắn 3-6 từ căn giữa ở mép dưới Polaroid
-        f_cap = _load_font(FONT_BOLD, 28)
-        cbb = d.textbbox((0, 0), caption, font=f_cap)
-        tw = cbb[2] - cbb[0]
-        th = cbb[3] - cbb[1]
-        if tw > iw:
-            f_cap = _load_font(FONT_BOLD, 22)
-            cbb = d.textbbox((0, 0), caption, font=f_cap)
-            tw = cbb[2] - cbb[0]
-            th = cbb[3] - cbb[1]
-        tx = cx0 + (card_w - tw) // 2
-        ty = iy1 + (footer_h - th) // 2 - cbb[1]
-        d.text((tx, ty), caption, font=f_cap, fill=(30, 41, 59, 255))
+        # Chú thích ngắn căn giữa ở mép dưới Polaroid (auto-fit xuống dòng, không tràn viền)
+        _draw_rich_autofit_text(
+            d,
+            caption,
+            (ix0 + 4, iy1 + 10),
+            FONT_BOLD,
+            28,
+            14,
+            (30, 41, 59, 255),
+            (30, 41, 59, 255),
+            max_width_px=max(80, iw - 8),
+            max_height_px=max(24, footer_h - 14),
+            line_gap=4,
+            max_lines=2,
+            align="center",
+        )
 
         # Đinh ghim đỏ #D9232E hoặc miếng băng dính mờ trên đỉnh
         pin_cx = (cx0 + cx1) // 2
@@ -675,7 +826,6 @@ def _draw_smart_board_content(
     f_title = _load_font(FONT_EXTRABOLD, 42)
     f_body = _load_font(FONT_BOLD, 32)
     f_sub = _load_font(FONT_MEDIUM, 26)
-    f_big = _load_font(FONT_EXTRABOLD, 128)
 
     vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
@@ -817,41 +967,50 @@ def _draw_smart_board_content(
         draw = ImageDraw.Draw(inner_layer)
         cur_y = y0 + 84
 
-        # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính
+        # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính (auto-fit không tràn chiều cao)
+        title_max_h = max(72, int(round((y1 - y0) * 0.24)))
         if beat.board_type in ("none", "bullets", "list", "card", "recap_card"):
             icon_sz = 56
             _draw_topic_circle_badge(inner_layer, (x0 + 62, cur_y + 28), icon_sz, pal, prop_img)
             title_x = x0 + 106
             title_max_w = max(200, bw - 140)
             if eff_title:
-                cur_y = _draw_rich_wrapped_text(
+                cur_y = _draw_rich_autofit_text(
                     draw,
                     eff_title,
                     (title_x, cur_y + 4),
-                    f_title,
+                    FONT_EXTRABOLD,
+                    42,
+                    22,
                     pal["text"],
                     hl_fill,
                     max_width_px=title_max_w,
+                    max_height_px=title_max_h,
                     line_gap=8,
+                    max_lines=3,
                 )
             cur_y = max(cur_y + 12, y0 + 156)
         elif eff_title:
-            cur_y = _draw_rich_wrapped_text(
+            cur_y = _draw_rich_autofit_text(
                 draw,
                 eff_title,
                 (x0 + 36, cur_y),
-                f_title,
+                FONT_EXTRABOLD,
+                42,
+                22,
                 pal["text"],
                 hl_fill,
                 max_width_px=max(200, bw - 72),
+                max_height_px=title_max_h,
                 line_gap=10,
+                max_lines=3,
             )
             cur_y += 10
 
         content_bottom = y1 - (96 if takeaway else 28)
 
         if beat.board_type in ("none", "bullets", "list", "card"):
-            # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & highlight **từ khóa**
+            # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & auto-fit vừa khít `content_bottom`
             items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
             if not items:
                 clauses = [
@@ -860,27 +1019,36 @@ def _draw_smart_board_content(
                     if len(c.strip().split()) >= 3
                 ]
                 items = clauses[:2] or [(beat.narration or "Phân tích trọng tâm")[:75]]
+            avail_h = max(80, content_bottom - cur_y)
+            n_items = max(1, len(items))
+            item_gap = 12
+            per_item_max_h = max(44, (avail_h - item_gap * (n_items - 1)) // n_items)
             for idx, item in enumerate(items):
-                if cur_y > content_bottom - 52:
+                rem_h = content_bottom - cur_y - 4
+                if rem_h < 32:
                     break
                 bar_c = pal["accent"] if idx % 2 == 0 else pal["amber"]
                 row_top = cur_y + 4
-                end_y = _draw_rich_wrapped_text(
+                slot_h = min(rem_h, per_item_max_h)
+                end_y = _draw_rich_autofit_text(
                     draw,
                     item,
                     (x0 + 58, row_top),
-                    f_body,
+                    FONT_BOLD,
+                    32,
+                    18,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(200, bw - 96),
+                    max_height_px=slot_h,
                     line_gap=8,
                 )
                 draw.rounded_rectangle(
-                    (x0 + 38, row_top + 2, x0 + 46, max(row_top + 30, end_y - 10)),
+                    (x0 + 38, row_top + 2, x0 + 46, max(row_top + 24, end_y - 8)),
                     radius=4,
                     fill=bar_c,
                 )
-                cur_y = end_y + 10
+                cur_y = min(content_bottom, end_y + item_gap)
 
         elif beat.board_type == "recap_card":
             # 3 thẻ ngang đúc kết kiến thức cốt lõi (1 · 2 · 3)
@@ -911,14 +1079,17 @@ def _draw_smart_board_content(
                 )
                 draw.ellipse((x0 + 48, cur_y + 14, x0 + 92, cur_y + 58), fill=badge_c)
                 draw.text((x0 + 62, cur_y + 20), str(idx), font=f_body, fill=(255, 255, 255, 255))
-                _draw_rich_wrapped_text(
+                _draw_rich_autofit_text(
                     draw,
                     item,
-                    (x0 + 108, cur_y + 14),
-                    f_body,
+                    (x0 + 108, cur_y + 12),
+                    FONT_BOLD,
+                    32,
+                    16,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(180, bw - 160),
+                    max_height_px=max(28, (cy1 - cur_y) - 20),
                     line_gap=6,
                 )
                 cur_y = cy1 + 12
@@ -926,14 +1097,17 @@ def _draw_smart_board_content(
         elif beat.board_type == "quote":
             q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
             draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
-            _draw_rich_wrapped_text(
+            _draw_rich_autofit_text(
                 draw,
                 f'"{q_txt}"',
                 (x0 + 68, cur_y + 8),
-                f_body,
+                FONT_BOLD,
+                32,
+                18,
                 pal["text"],
                 hl_fill,
                 max_width_px=max(200, bw - 110),
+                max_height_px=max(48, content_bottom - cur_y - 24),
                 line_gap=12,
             )
 
@@ -952,19 +1126,25 @@ def _draw_smart_board_content(
             else:
                 num_str = f"{cur_num:.1f}"
             val_display = f"{num_str} {unit}".strip()
-            draw.text((x0 + 44, cur_y + 4), val_display, font=f_big, fill=pal["accent"])
-            bbox = draw.textbbox((x0 + 44, cur_y + 4), val_display, font=f_big)
+            f_stat = _fit_single_line_font(
+                draw, val_display, FONT_EXTRABOLD, 128, 40, max(200, bw - 88)
+            )
+            draw.text((x0 + 44, cur_y + 4), val_display, font=f_stat, fill=pal["accent"])
+            bbox = draw.textbbox((x0 + 44, cur_y + 4), val_display, font=f_stat)
             cur_y = bbox[3] + 22
             lbl = str(data.get("label") or "")
-            if lbl:
-                _draw_rich_wrapped_text(
+            if lbl and cur_y < content_bottom - 24:
+                _draw_rich_autofit_text(
                     draw,
                     lbl,
                     (x0 + 44, cur_y),
-                    f_title,
+                    FONT_EXTRABOLD,
+                    42,
+                    20,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(200, bw - 88),
+                    max_height_px=max(32, content_bottom - cur_y - 8),
                     line_gap=8,
                 )
 
@@ -1020,29 +1200,37 @@ def _draw_smart_board_content(
             val = strip_rich_markup(str(data.get("value") or "100%"))
             lbl = str(data.get("label") or "")
             sub = str(data.get("sub") or "")
-            draw.text((x0 + 44, cur_y + 4), val, font=f_big, fill=pal["accent"])
-            bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_big)
+            f_stat = _fit_single_line_font(draw, val, FONT_EXTRABOLD, 128, 40, max(200, bw - 88))
+            draw.text((x0 + 44, cur_y + 4), val, font=f_stat, fill=pal["accent"])
+            bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_stat)
             cur_y = bbox[3] + 22
-            if lbl:
-                cur_y = _draw_rich_wrapped_text(
+            if lbl and cur_y < content_bottom - 24:
+                lbl_max_h = max(36, int((content_bottom - cur_y) * (0.55 if sub else 0.92)))
+                cur_y = _draw_rich_autofit_text(
                     draw,
                     lbl,
                     (x0 + 44, cur_y),
-                    f_title,
+                    FONT_EXTRABOLD,
+                    42,
+                    20,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(200, bw - 88),
+                    max_height_px=lbl_max_h,
                     line_gap=8,
                 )
-            if sub:
-                _draw_rich_wrapped_text(
+            if sub and cur_y < content_bottom - 20:
+                _draw_rich_autofit_text(
                     draw,
                     sub,
                     (x0 + 44, cur_y + 6),
-                    f_sub,
+                    FONT_MEDIUM,
+                    26,
+                    16,
                     pal["muted"],
                     hl_fill,
                     max_width_px=max(200, bw - 88),
+                    max_height_px=max(24, content_bottom - cur_y - 12),
                     line_gap=8,
                 )
 
@@ -1092,37 +1280,47 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            for item in (data.get("left_items") or [])[:4]:
-                if ly > box_bottom - 34:
+            left_list = [str(x) for x in (data.get("left_items") or [])[:4] if str(x).strip()]
+            right_list = [str(x) for x in (data.get("right_items") or [])[:4] if str(x).strip()]
+            l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
+            r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
+            for item in left_list:
+                if ly > box_bottom - 24:
                     break
                 ly = (
-                    _draw_rich_wrapped_text(
+                    _draw_rich_autofit_text(
                         draw,
                         f"• {item}",
                         (lx0 + 16, ly),
-                        f_sub,
+                        FONT_MEDIUM,
+                        26,
+                        15,
                         pal["text"],
                         hl_fill,
                         max_width_px=col_w_px,
+                        max_height_px=min(l_slot - 4, box_bottom - ly - 6),
                         line_gap=6,
                     )
-                    + 8
+                    + 6
                 )
-            for item in (data.get("right_items") or [])[:4]:
-                if ry > box_bottom - 34:
+            for item in right_list:
+                if ry > box_bottom - 24:
                     break
                 ry = (
-                    _draw_rich_wrapped_text(
+                    _draw_rich_autofit_text(
                         draw,
                         f"✓ {item}",
                         (rx0 + 16, ry),
-                        f_sub,
+                        FONT_MEDIUM,
+                        26,
+                        15,
                         pal["text"],
                         hl_fill,
                         max_width_px=col_w_px,
+                        max_height_px=min(r_slot - 4, box_bottom - ry - 6),
                         line_gap=6,
                     )
-                    + 8
+                    + 6
                 )
 
         elif beat.board_type == "flow_steps":
@@ -1167,14 +1365,17 @@ def _draw_smart_board_content(
                     font=f_badge,
                     fill=(255, 255, 255, 255),
                 )
-                _draw_rich_wrapped_text(
+                _draw_rich_autofit_text(
                     draw,
                     step,
-                    (x0 + 104, cur_y + 14),
-                    f_sub,
+                    (x0 + 104, cur_y + 12),
+                    FONT_MEDIUM,
+                    26,
+                    15,
                     pal["pill_text"],
                     hl_fill,
                     max_width_px=text_max_w,
+                    max_height_px=max(24, (cy1 - cur_y) - 20),
                     line_gap=6,
                     max_lines=2,
                 )
@@ -1203,11 +1404,12 @@ def _draw_smart_board_content(
             if not events:
                 events = [("Cổ đại", _extract_highlight_keyword(beat.narration))]
             spine_x = x0 + 62
-            end_y = min(content_bottom - 18, cur_y + len(events) * 86 - 20)
+            ev_slot_h = max(58, (content_bottom - cur_y - 8) // max(1, len(events)))
+            end_y = min(content_bottom - 18, cur_y + len(events) * ev_slot_h - 20)
             draw.line([(spine_x, cur_y + 18), (spine_x, end_y)], fill=pal["amber"], width=5)
             lit_n = max(1, int(math.ceil(prog * len(events))))
             for idx, (era_lbl, ev_txt) in enumerate(events, start=1):
-                if cur_y > content_bottom - 52:
+                if cur_y > content_bottom - 48:
                     break
                 lit = idx <= lit_n
                 node_fill = pal["accent"] if lit else pal["pill_bg"]
@@ -1217,19 +1419,30 @@ def _draw_smart_board_content(
                     outline=pal["amber"],
                     width=3,
                 )
-                draw.text((spine_x + 28, cur_y + 2), era_lbl[:22], font=f_badge, fill=pal["accent"])
-                _draw_rich_wrapped_text(
+                draw_rich_text_line(
+                    draw,
+                    era_lbl,
+                    (spine_x + 28, cur_y + 2),
+                    f_badge,
+                    pal["accent"],
+                    pal["accent"],
+                    max_width_px=max(140, bw - 130),
+                )
+                _draw_rich_autofit_text(
                     draw,
                     ev_txt,
-                    (spine_x + 28, cur_y + 30),
-                    f_sub,
+                    (spine_x + 28, cur_y + 28),
+                    FONT_MEDIUM,
+                    26,
+                    15,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(160, bw - 130),
-                    line_gap=6,
+                    max_height_px=max(24, min(ev_slot_h - 32, content_bottom - cur_y - 32)),
+                    line_gap=5,
                     max_lines=2,
                 )
-                cur_y += 84
+                cur_y += ev_slot_h
 
         elif beat.board_type == "location_map":
             loc_name = str(
@@ -1268,7 +1481,15 @@ def _draw_smart_board_content(
                 hl_fill,
                 max_width_px=max(140, (map_x1 - map_x0) - 40),
             )
-            draw.text((map_x0 + 20, map_y1 - 40), coords[:40], font=f_badge, fill=pal["pill_text"])
+            draw_rich_text_line(
+                draw,
+                coords,
+                (map_x0 + 20, map_y1 - 40),
+                f_badge,
+                pal["pill_text"],
+                pal["pill_text"],
+                max_width_px=max(140, (map_x1 - map_x0) - 40),
+            )
 
         elif beat.board_type == "myth_vs_fact":
             myth_title = str(data.get("myth_title") or "").strip()
@@ -1287,7 +1508,7 @@ def _draw_smart_board_content(
             f_text_h = _measure_rich_wrapped_height(
                 draw, fact_full, f_sub, max_width_px=text_w, line_gap=8, max_lines=4
             )
-            avail_h = max(200, content_bottom - cur_y - 16)
+            avail_h = max(180, content_bottom - cur_y - 16)
             m_want = max(96, m_text_h + 56)
             f_want = max(96, f_text_h + 56)
             total_want = m_want + f_want
@@ -1301,7 +1522,7 @@ def _draw_smart_board_content(
                 m_h = m_want + slack // 2
                 f_h = f_want + (slack - slack // 2)
 
-            # Tầng LẦM TƯỞNG
+            # Tầng LẦM TƯỞNG (auto-fit trong đúng `m_h - 52`)
             draw.rounded_rectangle(
                 (x0 + 36, cur_y, x1 - 36, cur_y + m_h),
                 radius=18,
@@ -1310,36 +1531,43 @@ def _draw_smart_board_content(
                 width=2,
             )
             draw.text((x0 + 54, cur_y + 12), "✕ LẦM TƯỞNG", font=f_badge, fill=(185, 28, 28, 255))
-            _draw_rich_wrapped_text(
+            _draw_rich_autofit_text(
                 draw,
                 myth_full,
-                (x0 + 54, cur_y + 44),
-                f_sub,
+                (x0 + 54, cur_y + 42),
+                FONT_MEDIUM,
+                26,
+                14,
                 (69, 10, 10, 255),
                 (185, 28, 28, 255),
                 max_width_px=text_w,
-                line_gap=8,
+                max_height_px=max(24, m_h - 50),
+                line_gap=6,
                 max_lines=4,
             )
-            # Tầng SỰ THẬT
+            # Tầng SỰ THẬT (auto-fit trong đúng `f_h - 52`)
             fy0 = cur_y + m_h + 14
+            fy1 = min(content_bottom - 4, fy0 + f_h)
             draw.rounded_rectangle(
-                (x0 + 36, fy0, x1 - 36, fy0 + f_h),
+                (x0 + 36, fy0, x1 - 36, fy1),
                 radius=18,
                 fill=(209, 250, 229, 240),
                 outline=(5, 150, 105, 255),
                 width=2,
             )
             draw.text((x0 + 54, fy0 + 12), "✓ SỰ THẬT", font=f_badge, fill=(4, 120, 87, 255))
-            _draw_rich_wrapped_text(
+            _draw_rich_autofit_text(
                 draw,
                 fact_full,
-                (x0 + 54, fy0 + 44),
-                f_sub,
+                (x0 + 54, fy0 + 42),
+                FONT_MEDIUM,
+                26,
+                14,
                 (6, 78, 59, 255),
                 (4, 120, 87, 255),
                 max_width_px=text_w,
-                line_gap=8,
+                max_height_px=max(24, (fy1 - fy0) - 50),
+                line_gap=6,
                 max_lines=4,
             )
 

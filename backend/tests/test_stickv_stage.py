@@ -977,3 +977,110 @@ def test_pinned_photo_polaroid_board_on_dynamic_backdrop() -> None:
         bg.close()
         char.close()
         photo.close()
+
+
+def test_stickv_boards_autofit_long_vietnamese_no_overflow() -> None:
+    """Chữ tiếng Việt dài trong bullets, myth_vs_fact, pinned_photo, big_number không vượt biên."""
+    import numpy as np
+
+    from hbt.stickv.stage import _draw_smart_board_content, resolve_stage_palette
+
+    pal = resolve_stage_palette("paper_classic", "cream")
+    box = (80, 140, 1000, 820)
+    long_vi = (
+        "Nghiên cứu thần kinh học hiện đại chứng minh não bộ tiêu thụ lượng đường glucose và oxy "
+        "vượt trội ngay cả khi ngủ sâu REM để củng cố trí nhớ dài hạn và tái tạo khớp thần kinh."
+    )
+    cases = [
+        StickvBeat(
+            id="b_bul",
+            narration=long_vi,
+            board_type="bullets",
+            board_title=(
+                "**Tiêu đề siêu dài tiếng Việt có đầy đủ dấu mũ nặng huyền sắc hỏi ngã** "
+                "kiểm tra tự co chữ"
+            ),
+            board_data={"items": [long_vi, long_vi, long_vi]},
+            takeaway="Ghi nhớ câu chốt rất dài có dấu tiếng Việt không bao giờ tràn viền phải",
+        ),
+        StickvBeat(
+            id="b_mvf",
+            narration=long_vi,
+            board_type="myth_vs_fact",
+            board_title="Giải mã lầm tưởng khoa học cổ điển",
+            board_data={
+                "myth_title": "Quan niệm cũ",
+                "myth": long_vi,
+                "fact_title": "Bằng chứng",
+                "fact": long_vi,
+            },
+        ),
+        StickvBeat(
+            id="b_pin",
+            narration=long_vi,
+            board_type="pinned_photo",
+            board_title="Ảnh tư liệu lịch sử cổ đại với chú thích dài nhiều dấu tiếng Việt",
+            board_data={"caption": "Tượng đài kiến trúc cổ đại khổng lồ giữa sa mạc Sahara"},
+        ),
+        StickvBeat(
+            id="b_big",
+            narration=long_vi,
+            board_type="big_number",
+            board_data={"value": "1.250.000.000 tỷ đồng", "label": long_vi, "sub": long_vi},
+        ),
+        StickvBeat(
+            id="b_tl",
+            narration=long_vi,
+            board_type="timeline_era",
+            board_data={"events": [f"Năm {2000 + i} TCN: {long_vi}" for i in range(4)]},
+        ),
+    ]
+    for beat in cases:
+        canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+        try:
+            x0, y0, x1, y1 = _draw_smart_board_content(canvas, beat, box, pal, progress=1.0)
+            arr = np.array(canvas)
+            # Cho phép sai số bóng đổ nhẹ quanh shell (+14px) và xoay Polaroid trong khung box
+            pad = 16
+            top_out = arr[: max(0, y0 - pad), :, 3]
+            bot_out = arr[min(canvas.height, y1 + pad) :, :, 3]
+            left_out = arr[:, : max(0, x0 - pad), 3]
+            right_out = arr[:, min(canvas.width, x1 + pad) :, 3]
+            assert int(top_out.max()) == 0, f"Tràn mép trên với {beat.board_type}"
+            assert int(bot_out.max()) == 0, f"Tràn mép dưới với {beat.board_type}"
+            assert int(left_out.max()) == 0, f"Tràn mép trái với {beat.board_type}"
+            assert int(right_out.max()) == 0, f"Tràn mép phải với {beat.board_type}"
+        finally:
+            canvas.close()
+
+
+def test_stickv_karaoke_sync_trims_silence_to_active_speech(tmp_path: Path) -> None:
+    """align_beat_karaoke bám sát tiếng nói thật, không trải từ lên đoạn im lặng đầu/cuối."""
+    import wave
+
+    import numpy as np
+
+    from hbt.stickv.audio import align_beat_karaoke
+
+    wav_p = tmp_path / "sync_test.wav"
+    sr = 16000
+    # 0.30s im lặng -> 0.80s sóng sin giọng nói -> 0.40s im lặng (tổng 1.50s)
+    sil_head = np.zeros(int(sr * 0.30), dtype=np.int16)
+    t_sp = np.linspace(0.0, 0.80, int(sr * 0.80), endpoint=False)
+    speech = (np.sin(2 * np.pi * 240 * t_sp) * 18000).astype(np.int16)
+    sil_tail = np.zeros(int(sr * 0.40), dtype=np.int16)
+    with wave.open(str(wav_p), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(np.concatenate([sil_head, speech, sil_tail]).tobytes())
+
+    timings = align_beat_karaoke(
+        "Xin chào các bạn học sinh",
+        wav_p,
+        total_dur=1.50,
+        spoken_segments=[(0.10, 1.35, "Xin chào các bạn học sinh")],
+    )
+    assert len(timings) == 6
+    assert timings[0][1] >= 0.28  # Không bắt đầu trong đoạn im lặng 0.00..0.30s
+    assert timings[-1][2] <= 1.15  # Không kéo dài sang đoạn im lặng 1.10..1.50s

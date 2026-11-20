@@ -120,13 +120,16 @@ def _stream_beat_frames_to_ffmpeg(
     lead_in = (
         GLOBAL_LEAD_SILENCE_S if global_frame_offset == 0 else (LEAD_IN_SILENCE_S * pause_scale)
     )
-    speech_end = max(lead_in + 0.3, dur - pause_after)
     spoken_segs = load_beat_spoken_segments(wav_path)
+    speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+    speech_end = (
+        min(dur, spoken_segs[-1][1]) if spoken_segs else max(lead_in + 0.3, dur - pause_after)
+    )
     word_timings = align_beat_karaoke(
         beat.narration,
         wav_path,
         dur,
-        lead_in_s=lead_in,
+        lead_in_s=speech_start,
         pause_after_s=pause_after,
         spoken_segments=spoken_segs,
     )
@@ -178,7 +181,7 @@ def _stream_beat_frames_to_ffmpeg(
         anim_loop=getattr(beat, "anim_loop", None),
         facing=beat.facing,
         duration_sec=dur,
-        speech_start=lead_in,
+        speech_start=speech_start,
         speech_end=speech_end,
         fps=fps,
         rms_env=rms_env,
@@ -603,13 +606,18 @@ def _stream_chunk_frames_to_ffmpeg(
             rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
             pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
             lead_in = GLOBAL_LEAD_SILENCE_S if g_idx == 0 else (LEAD_IN_SILENCE_S * pause_scale)
-            speech_end = max(lead_in + 0.3, dur_b - pause_after)
             spoken_segs = load_beat_spoken_segments(wav_p)
+            speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+            speech_end = (
+                min(dur_b, spoken_segs[-1][1])
+                if spoken_segs
+                else max(lead_in + 0.3, dur_b - pause_after)
+            )
             word_timings = align_beat_karaoke(
                 beat.narration,
                 wav_p,
                 dur_b,
-                lead_in_s=lead_in,
+                lead_in_s=speech_start,
                 pause_after_s=pause_after,
                 spoken_segments=spoken_segs,
             )
@@ -630,7 +638,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 anim_loop=getattr(beat, "anim_loop", None),
                 facing=beat.facing,
                 duration_sec=dur_b,
-                speech_start=lead_in,
+                speech_start=speech_start,
                 speech_end=speech_end,
                 fps=fps,
                 rms_env=rms_env,

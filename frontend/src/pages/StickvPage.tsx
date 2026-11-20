@@ -927,14 +927,13 @@ export function StickvPage() {
             <StudioSelect
               aria-label="Chọn dự án StickV"
               variant="compact"
-              autoWidth
               value={selectedSlug}
               onChange={(val) => setSelectedSlug(val)}
               options={projects.map((p) => ({
                 value: p.slug,
                 label: `${p.title} (${p.aspect})`,
               }))}
-              className="min-w-[200px]"
+              className="w-full min-w-0 max-w-[260px] lg:max-w-[360px]"
             />
           ) : undefined,
         projectMenuItems: draft
