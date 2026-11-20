@@ -2,7 +2,7 @@
 
 ## Đầu mỗi phiên
 - Nếu chủ dự án chưa chạy `/kickoff`, tự làm theo `.claude/commands/kickoff.md` trước khi làm việc.
-- **Ponytail harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (chế độ mặc định `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, không cắt bỏ quy tắc bắt buộc của `CLAUDE.md`.
+- **Ponytail & Repo Harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (Ponytail mặc định mức `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`) cùng Repo Harness (khi được cài trên `GD-Config`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, giữ nguyên toàn bộ luật bắt buộc của `CLAUDE.md` và `GEMINI.md`.
 
 ## Bối cảnh
 - App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, hai máy (máy cũ: i5-10400, không GPU rời, 16 GB; máy mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB). Không giả định có GPU: IMPLEMENT §0.
@@ -23,10 +23,12 @@
 - Push nhánh khi kế hoạch đã duyệt có ghi. Không push và không merge khi lần chạy cuối của giai đoạn đỏ.
 - Không commit kết thúc giai đoạn khi lần chạy cuối đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
 
-## Quy ước 5 Nhánh & 4 Tag Cố Định (Quy trình Git mới)
-- **Nhánh cố định theo giai đoạn:** `main`, `GD1-HBT` (`v1`), `GD2-PostV` (`v2`), `GD3-Chatting` (`v3`), `GD4-StickV` (`v4`). Tính năng lớn kế tiếp tạo nhánh `GD5-<TenTinhNang>` (`v5`, `v6`... hoặc `v4.1` cho bản sửa nhỏ). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge.
+## Quy ước 6 Nhánh & 4 Tag Cố Định (Quy trình Git mới)
+- **Nhánh cố định theo giai đoạn:** `main`, `GD-Config`, `GD1-HBT` (`v1`), `GD2-PostV` (`v2`), `GD3-Chatting` (`v3`), `GD4-StickV` (`v4`). Tính năng lớn kế tiếp tạo nhánh `GD5-<TenTinhNang>` (`v5`, `v6`... hoặc `v4.1` cho bản sửa nhỏ). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge.
+- **Vai trò nhánh `GD-Config`:** dùng để cài đặt, lưu trữ và cấu hình các extension, skill, repo hỗ trợ bên ngoài (Ponytail, Repo Harness...); sau khi xác nhận sạch lint thì merge `--no-ff` vào `main` để toàn dự án áp dụng.
 - **Luồng commit trong ngày:**
   - Code thuộc tính năng/động cơ nào → commit và push lên đúng nhánh `GDx-...` của tính năng đó.
+  - Cài đặt/cấu hình extension, skill, harness hỗ trợ → commit trên `GD-Config` rồi merge `--no-ff` vào `main`.
   - Code ngoài luồng (UI chung, hạ tầng `shared/`, fix toàn cục, tài liệu) → commit và push thẳng lên `main`.
 - **Luật khóa đầu phiên (Pre-flight Branch Check):** Bắt buộc in `git branch --show-current` và `git log -1 --oneline` trước khi sửa file đầu tiên trong phiên, xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
 
