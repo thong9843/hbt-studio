@@ -135,7 +135,7 @@ describe('StickvPage', () => {
     // 2. 4 Tab Inspector rút gọn vừa khít cột 376px, không cắt chữ
     const tablist = screen.getByRole('tablist', { name: 'Nhóm công cụ Studio' });
     const tabs = within(tablist).getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, '').trim())).toEqual([
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual([
       'Kịch bản',
       'Hình ảnh',
       'Âm thanh',

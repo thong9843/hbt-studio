@@ -37,9 +37,9 @@ import { cx } from '../ui/cx';
 const T = vi.hbtCore;
 
 const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
   { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)' },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
 ];
 
@@ -566,7 +566,10 @@ export function HbtCoreWorkspace({
                 autoWidth
                 value={selectedModel}
                 onChange={(val) => setSelectedModel(val)}
-                options={geminiModels.map((m) => ({ value: m.id, label: m.name }))}
+                options={geminiModels.map((m) => ({
+                  value: m.id,
+                  label: m.name.replace(/\s*\([^)]*\)/g, '').trim(),
+                }))}
                 className="min-w-[180px]"
               />
 
@@ -860,6 +863,7 @@ export function HbtCoreWorkspace({
             exportDisabled={rendering || v2Loading}
             exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
             onExport={() => void handleStartV1Render()}
+            showWatermarkControl={false}
             footer={
               <div className="flex items-center justify-between gap-2 pt-1">
                 <Button

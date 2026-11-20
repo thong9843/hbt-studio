@@ -34,13 +34,13 @@ describe('Chatting Pages (Vitest)', () => {
 
     renderWithProviders(<ChattingHome />, '/chatting');
 
-    expect(await screen.findByText('Chatting')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Chatting' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Từ bài viết' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dán kịch bản' })).toBeInTheDocument();
     expect(screen.queryByText(/Zalo/i)).toBeNull();
     expect(screen.getByPlaceholderText('Dán link Reddit hoặc dán câu chuyện…')).toBeInTheDocument();
-    expect(screen.getByText('Messenger (iOS)')).toBeInTheDocument();
-    expect(screen.getByText('Instagram (iOS)')).toBeInTheDocument();
+    expect(screen.getByText('Messenger')).toBeInTheDocument();
+    expect(screen.getByText('Instagram')).toBeInTheDocument();
     expect(screen.getByText('Tạo video')).toBeInTheDocument();
     expect(await screen.findByText('Dự án chat mẫu')).toBeInTheDocument();
   });

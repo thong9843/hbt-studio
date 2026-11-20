@@ -87,35 +87,22 @@ function Continue({
     <Card
       as="section"
       aria-label={t.continue}
-      className="flex flex-col gap-4 sm:flex-row lg:col-span-2"
+      padded={false}
+      className="flex flex-wrap items-center gap-4 px-4 py-3"
     >
-      <div className="aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-inner border border-line bg-soft">
+      <div className="aspect-[2/3] w-14 shrink-0 overflow-hidden rounded-lg border border-line bg-soft">
         <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-tiny font-bold uppercase tracking-wider text-muted">{t.continue}</p>
-          <Menu
-            label={vi.projects.menu(project.title)}
-            icon={<MoreIcon />}
-            items={[
-              {
-                key: 'delete',
-                label: vi.projects.delete,
-                danger: true,
-                onSelect: () => onDelete(project),
-              },
-            ]}
-          />
-        </div>
-        <h2 className="line-clamp-2 text-body font-extrabold text-text">{project.title}</h2>
-        <div className="flex flex-wrap items-center gap-1.5">
+
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="truncate text-body font-extrabold text-text">{project.title}</h2>
           <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
           <Badge tone={TONE[status.kind]}>{status.label}</Badge>
           {series && <span className="text-tiny text-muted">{series}</span>}
         </div>
         {ready ? (
-          <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1" aria-label={t.dot.label}>
+          <ul className="flex flex-wrap gap-x-3 gap-y-1" aria-label={t.dot.label}>
             <Dot
               on={ready.images.total > 0 && ready.images.done === ready.images.total}
               label={t.dot.images(ready.images.done, ready.images.total)}
@@ -125,24 +112,32 @@ function Continue({
             <Dot on={ready.cover} label={t.dot.cover} />
           </ul>
         ) : (
-          project.kind !== 'postv' && !brief.isError && <Skeleton width={200} height={18} />
+          project.kind !== 'postv' && !brief.isError && <Skeleton width={180} height={16} />
         )}
-        <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
-          <Link to={projectHref(project)} className="ui-btn ui-btn-ink ui-btn-sm">
-            Mở lại dự án
-          </Link>
-          {video && (
-            <a
-              href={video}
-              target="_blank"
-              rel="noreferrer"
-              className="ui-btn ui-btn-soft ui-btn-sm"
-            >
-              <PlayIcon size={14} />
-              {t.watch}
-            </a>
-          )}
-        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        {video && (
+          <a href={video} target="_blank" rel="noreferrer" className="ui-btn ui-btn-soft ui-btn-sm">
+            <PlayIcon size={14} />
+            {t.watch}
+          </a>
+        )}
+        <Link to={projectHref(project)} className="ui-btn ui-btn-ink ui-btn-sm">
+          Tiếp tục
+        </Link>
+        <Menu
+          label={vi.projects.menu(project.title)}
+          icon={<MoreIcon />}
+          items={[
+            {
+              key: 'delete',
+              label: vi.projects.delete,
+              danger: true,
+              onSelect: () => onDelete(project),
+            },
+          ]}
+        />
       </div>
     </Card>
   );
@@ -364,28 +359,25 @@ export function HomePage() {
         </div>
       )}
 
-      {/* Lưới Bento chặt chẽ: Dự án đang làm (không còn khung trắng trống 75%) */}
-      <section aria-label="Tiếp tục dự án dở" className="space-y-3.5">
+      {/* Tầng 1: Thanh Tiếp tục làm nhỏ gọn (không kéo giãn tạo mảng trắng) */}
+      <section aria-label="Tiếp tục dự án dở" className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-title font-extrabold text-text">Tiếp tục dự án dở</h2>
+          <h2 className="text-title font-extrabold text-text">Tiếp tục làm</h2>
           <Link to="/projects" className="text-small font-bold text-text hover:underline">
             Xem tất cả →
           </Link>
         </div>
 
         {isPending ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Skeleton height={180} className="!rounded-card lg:col-span-2" />
-            <Skeleton height={180} className="!rounded-card" />
-          </div>
+          <Skeleton height={88} className="!rounded-card" />
         ) : filteredProjects.length === 0 ? (
           <EmptyProjects onCreate={() => openNew()} />
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <div className="space-y-4">
             {latest && <Continue project={latest} onDelete={setDeleting} />}
             {recent.length > 0 && (
-              <ul className="grid grid-cols-2 gap-4 lg:col-span-2">
-                {recent.slice(0, 2).map((p) => (
+              <ul className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {recent.map((p) => (
                   <RecentCard key={p.slug} project={p} onDelete={setDeleting} />
                 ))}
               </ul>
@@ -430,7 +422,7 @@ export function HomePage() {
             </p>
           </Card>
         ) : (
-          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <ul className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {filteredRenders.slice(0, 8).map((item) => (
               <Card
                 key={item.id}

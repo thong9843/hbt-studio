@@ -17,7 +17,7 @@ const BACKGROUND_OPTIONS = [
 ];
 
 const DURATION_OPTIONS = [
-  { id: '', label: 'Tự động (tối đa 5p)' },
+  { id: '', label: 'Tự động (≤ 5p)' },
   { id: '60', label: '1 phút (60s)' },
   { id: '90', label: '1 phút 30s (90s)' },
   { id: '120', label: '2 phút (120s)' },
@@ -99,18 +99,7 @@ export function ChattingHome() {
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-bg">
-      <StudioTopBar
-        engineBadge="Chatting · 60fps"
-        title="Hội thoại Tin nhắn Messenger / Instagram"
-        exportProps={{
-          aspect: '9:16',
-          showWatermarkControl: true,
-          onExportFinal: () => void handleCreate(),
-          finalLabel: isSubmitting ? 'Đang khởi tạo…' : vi.chatting.createBtn,
-          disabled: !inputText.trim() || isSubmitting,
-          isSubmitting,
-        }}
-      />
+      <StudioTopBar engineBadge="Chatting" />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-7 lg:px-8">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-2.5 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-card text-text shadow-card">
@@ -190,7 +179,7 @@ export function ChattingHome() {
                 <button
                   type="button"
                   onClick={() => setPlatform('messenger')}
-                  className={`truncate rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
                     platform === 'messenger'
                       ? 'bg-primary text-on-primary'
                       : 'bg-soft text-text hover:bg-soft-2'
@@ -201,7 +190,7 @@ export function ChattingHome() {
                 <button
                   type="button"
                   onClick={() => setPlatform('instagram')}
-                  className={`truncate rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
                     platform === 'instagram'
                       ? 'bg-primary text-on-primary'
                       : 'bg-soft text-text hover:bg-soft-2'
@@ -242,7 +231,10 @@ export function ChattingHome() {
                     { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
                     { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
                   ]
-                ).map((m) => ({ value: m.id, label: m.name }))}
+                ).map((m) => ({
+                  value: m.id,
+                  label: m.name.replace(/\s*\([^)]*\)/g, '').trim(),
+                }))}
               />
             </div>
 

@@ -19,7 +19,7 @@ export function HbtCorePage() {
           >
             <ArrowLeftIcon size={15} />
           </Link>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
+          <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill bg-[var(--accent-soft)] px-2.5 py-1 text-[13px] font-semibold text-[var(--on-accent-soft)]">
             <ZapIcon size={13} />
             {vi.nav.hbtCore}
           </span>

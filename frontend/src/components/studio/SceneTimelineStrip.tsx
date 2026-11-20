@@ -48,7 +48,7 @@ const TimelineCard = memo(function TimelineCard({
         }
       }}
       className={cx(
-        'group relative flex h-[84px] w-[176px] shrink-0 cursor-pointer flex-col justify-between rounded-inner border px-3 py-2.5 text-left transition-colors',
+        'group relative flex h-[88px] w-[184px] shrink-0 cursor-pointer flex-col justify-between rounded-inner border px-3 py-2 text-left transition-colors',
         selected ? 'border-brand bg-[var(--accent-soft)]' : 'border-line bg-card hover:bg-soft',
       )}
     >
@@ -89,7 +89,7 @@ const TimelineCard = memo(function TimelineCard({
         )}
       </div>
 
-      <p className="w-full truncate text-[12px] font-medium leading-5 text-text">
+      <p className="line-clamp-2 w-full text-[11.5px] font-medium leading-4 text-text">
         {item.summary || item.title || 'Chưa có lời thoại…'}
       </p>
     </div>
@@ -112,7 +112,7 @@ export function SceneTimelineStrip({
   return (
     <footer
       aria-label={vi.studioShell.timelineTitle}
-      className="flex h-[116px] shrink-0 flex-col justify-center border-t border-line bg-card px-3.5 py-2"
+      className="flex h-[120px] shrink-0 flex-col justify-center border-t border-line bg-card px-3.5 py-2"
     >
       <div className="mb-1.5 flex items-center justify-between gap-2 leading-none">
         <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
@@ -139,7 +139,7 @@ export function SceneTimelineStrip({
           <button
             type="button"
             onClick={onAdd}
-            className="flex h-[84px] shrink-0 items-center gap-1 rounded-inner border border-dashed border-line-input bg-soft px-3.5 text-tiny font-bold text-text-2 transition-colors hover:border-brand hover:text-brand"
+            className="flex h-[88px] shrink-0 items-center gap-1 rounded-inner border border-dashed border-line-input bg-soft px-3.5 text-tiny font-bold text-text-2 transition-colors hover:border-brand hover:text-brand"
           >
             <PlusIcon size={13} />
             {addLabel}

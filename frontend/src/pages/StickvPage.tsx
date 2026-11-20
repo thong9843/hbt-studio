@@ -898,7 +898,6 @@ export function StickvPage() {
           id: 'script',
           label: vi.studioShell.tabs.script,
           icon: <SparklesIcon size={13} />,
-          badge: draft?.beats.length,
           content: (
             <div className="space-y-3.5">
               {/* Khung Khởi tạo Kịch bản AI: tự động gấp gọn khi dự án đã có >= 1 beat */}

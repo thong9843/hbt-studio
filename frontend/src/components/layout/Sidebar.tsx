@@ -299,14 +299,9 @@ export function Sidebar({ mini, onToggleMini, render, renderSlot }: SidebarProps
         >
           <img src="/brand/hbt-logo-mark.png" alt="" className="h-8 w-auto shrink-0 rounded-lg" />
           {!mini && (
-            <div className="min-w-0">
-              <span className="block truncate text-body font-extrabold tracking-tight">
-                {vi.appName}
-              </span>
-              <span className="block truncate text-[11px] font-semibold text-muted">
-                Creator Workstation
-              </span>
-            </div>
+            <span className="whitespace-nowrap text-[15px] font-bold tracking-tight text-text">
+              {vi.appName}
+            </span>
           )}
         </Link>
 
