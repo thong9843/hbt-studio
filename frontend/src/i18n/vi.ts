@@ -1392,11 +1392,12 @@ export const vi = {
     contactSheetBtn: 'Xem Contact Sheet 1 trang',
     contactSheetTitle: 'Contact Sheet toàn bộ kịch bản',
     contactSheetMeta: (beats: number, ms: number) =>
-      `${beats} beat · Xuất trong ${ms.toFixed(0)} ms`,
+      `${beats} beat · Xuất trong ${typeof ms === 'number' && Number.isFinite(ms) ? ms.toFixed(0) : '0'} ms`,
     renderBeatBtn: 'Xem nhanh Beat hiện tại',
     beatCacheHit: 'Cache HIT (tức thì)',
     beatCacheMiss: 'Dựng mới & đã lưu Cache',
-    beatElapsed: (ms: number) => `${ms.toFixed(0)} ms`,
+    beatElapsed: (ms: number) =>
+      `${typeof ms === 'number' && Number.isFinite(ms) ? ms.toFixed(0) : '0'} ms`,
     statReflows: (n: number) => `Nắn hộp: ${n}`,
     statAntiParrot: (n: number) => `Chống chép lời: ${n}`,
     statPacing: (n: number) => `Đa dạng góc máy: ${n}`,

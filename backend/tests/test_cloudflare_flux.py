@@ -279,3 +279,63 @@ def test_hbt_core_generate_images_endpoints(tmp_path: Path, monkeypatch: pytest.
         assert body_one["image"].startswith("images/")
         assert (pdir / body_one["image"]).is_file()
         assert len(gen_calls) == 4
+
+
+def test_spoken_text_for_segment_preserves_vietnamese_and_sync_preserves_generated_images(
+    tmp_path: Path,
+) -> None:
+    """Hồi quy: spoken_text_for_segment giữ tiếng Việt và sync_script_to_project giữ ảnh đã gen."""
+    from hbt.core.models import HbtCoreScript
+    from hbt.core.render import sync_script_to_project
+    from hbt.core.voice import spoken_text_for_segment
+    from hbt.models import Project, Scene
+
+    spoken = spoken_text_for_segment("Nhưng khoan đã, 2000{hai nghìn} năm | bí mật nằm ở đây!")
+    assert "Nhưng khoan đã," in spoken
+    assert "hai nghìn" in spoken
+    assert "bí mật nằm ở đây!" in spoken
+    assert spoken != ","
+
+    pdir = tmp_path / "proj"
+    (pdir / "images").mkdir(parents=True)
+    hashed_img = pdir / "images" / "a1b2c3d4e5f60708.png"
+    hashed_img.write_bytes(_png_bytes((1080, 1920), (12, 34, 56)))
+
+    proj = Project(
+        slug="proj",
+        title="Test",
+        scenes=[
+            Scene(image="images/a1b2c3d4e5f60708.png"),
+            Scene(image=""),
+            Scene(image=""),
+        ],
+    )
+    script = HbtCoreScript(
+        title="Test",
+        topic="history",
+        segments=[
+            {"order": 1, "text": "Cảnh một", "image": "scene-01.png", "sfx": "whoosh"},
+            {"order": 2, "text": "Cảnh hai", "image": "scene-02.png", "sfx": "pop"},
+            {"order": 3, "text": "Cảnh ba", "image": "scene-03.png", "sfx": "whoosh"},
+        ],
+    )
+    synced = sync_script_to_project(proj, pdir, script)
+    assert synced.scenes[0].image == "images/a1b2c3d4e5f60708.png"
+
+
+def test_no_hay_biet_tot_typo_in_codebase() -> None:
+    """Chặn tuyệt đối lỗi chính tả 'Hay Biết Tốt' trong backend/hbt/ và frontend/src/."""
+    import re
+
+    from hbt.config import REPO_ROOT
+
+    bad_re = re.compile(r"hay\s+bi[eế]t\s+t[oố]t", re.IGNORECASE)
+    hits: list[str] = []
+    for root in (REPO_ROOT / "backend" / "hbt", REPO_ROOT / "frontend" / "src"):
+        for p in root.rglob("*"):
+            if not p.is_file() or p.suffix not in (".py", ".ts", ".tsx"):
+                continue
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            if bad_re.search(text):
+                hits.append(str(p.relative_to(REPO_ROOT)))
+    assert hits == [], f"Phát hiện lỗi chính tả 'Hay Biết Tốt' tại: {hits}"

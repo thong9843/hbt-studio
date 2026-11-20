@@ -589,16 +589,16 @@ def test_hbt_core_full_auto_render_pipeline(tmp_path: Path) -> None:
 def test_hay_biet_tot_schema_markdown_cleanup_no_word_limit_and_tts_pipeline(
     tmp_path: Path,
 ) -> None:
-    # 1. Kiểm tra SYSTEM_PROMPT theo nhịp điệu Hay Biết Tốt & Schema chuẩn ComfyUI
+    # 1. Kiểm tra SYSTEM_PROMPT theo nhịp điệu Hay Biết Tuốt & Schema chuẩn ComfyUI
     assert "total_segments" in SYSTEM_PROMPT
     assert "image_prompt" in SYSTEM_PROMPT
     assert "sticker" in SYSTEM_PROMPT
     assert "Nhưng khoan đã..." in SYSTEM_PROMPT
-    assert "Theo dõi Hay Biết Tốt trên TikTok và YouTube nhé" in SYSTEM_PROMPT
+    assert "Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé" in SYSTEM_PROMPT
     assert "18 đến 40 từ" not in SYSTEM_PROMPT
 
     # 2. Gemini trả về JSON bọc markdown ```json ... ``` với lời thoại > 800 từ (gỡ giới hạn 750 từ)
-    long_text = " ".join(["Kiến thức thú vị chuẩn Hay Biết Tốt không giới hạn."] * 100)
+    long_text = " ".join(["Kiến thức thú vị chuẩn Hay Biết Tuốt không giới hạn."] * 100)
     assert len(long_text.split()) > 750
 
     markdown_wrapped = (

@@ -293,8 +293,30 @@ def generate_scene_image(
             )
 
         if resp.status_code >= 400:
+            raw_snippet = (resp.text or "").strip()[:400]
+            logger.error(
+                "Cloudflare Workers AI lỗi HTTP %s (%s): %s",
+                resp.status_code,
+                effective_model,
+                raw_snippet,
+            )
+            detail = _extract_error_detail(resp)
+            if resp.status_code in (401, 403):
+                msg = (
+                    f"Cloudflare từ chối xác thực (HTTP {resp.status_code}): "
+                    f"Kiểm tra lại Account ID, API Token và quyền Workers AI. ({detail})"
+                )
+            elif resp.status_code == 404:
+                msg = (
+                    f"Không tìm thấy Account ID hoặc model Cloudflare (HTTP 404). "
+                    f"Kiểm tra lại Account ID. ({detail})"
+                )
+            elif resp.status_code == 429:
+                msg = f"Cloudflare Workers AI đã hết hạn mức (HTTP 429 / hết neurons). ({detail})"
+            else:
+                msg = f"Cloudflare Workers AI lỗi HTTP {resp.status_code}: {detail}"
             raise CloudflareImageError(
-                f"Cloudflare Workers AI lỗi HTTP {resp.status_code}: {_extract_error_detail(resp)}",
+                msg,
                 status_code=502 if resp.status_code >= 500 else resp.status_code,
             )
 

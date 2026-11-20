@@ -209,13 +209,21 @@ def sync_script_to_project(
     """
     music_topic = infer_music_topic(script.topic, script.title)
     project.title = script.title
-    project.series = TOPIC_SERIES_LABELS.get(music_topic, project.series or "Hay Biết Tốt")
+    project.series = TOPIC_SERIES_LABELS.get(music_topic, project.series or "Hay Biết Tuốt")
 
+    old_scene_images = [s.image for s in project.scenes]
     new_scenes: list[Scene] = []
-    for seg in script.segments:
+    for idx_seg, seg in enumerate(script.segments):
+        # Ưu tiên ảnh thật trong project.scenes (tránh mất ảnh sau khi Storage.load() hash tên)
+        img_ref = seg.image
+        if idx_seg < len(old_scene_images) and old_scene_images[idx_seg]:
+            cand_old = project_dir / old_scene_images[idx_seg]
+            cand_seg = project_dir / img_ref if img_ref else None
+            if cand_old.is_file() and (cand_seg is None or not cand_seg.is_file()):
+                img_ref = old_scene_images[idx_seg]
         rel_img = resolve_segment_image(
             project_dir,
-            seg.image,
+            img_ref,
             seg.order,
             topic=music_topic,
             title=script.title,
@@ -637,7 +645,7 @@ def _render_hbt_core_auto_impl(
             lf.write(line + "\n")
         emitter.emit(pct, step, message, **extra)
 
-    # 1. Đồng bộ script vào project.json
+    # 1. Đồng bộ script vào project.json (tự vẽ Cloudflare AI cho cảnh chưa có ảnh nếu có key)
     emit(2.0, "init", f"Khởi tạo kịch bản '{script.title}' (chủ đề: {script.topic})")
     pj_path = project_dir / "project.json"
     if pj_path.is_file():
@@ -646,7 +654,92 @@ def _render_hbt_core_auto_impl(
         project = Project(
             slug=project_dir.name, title=script.title, scenes=[Scene() for _ in range(3)]
         )
+
+    # Tự vẽ ảnh 2D Cloudflare cho các cảnh chưa có ảnh thật (bỏ qua khi chạy pytest)
+    import os
+
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        from hbt.app_settings import resolve_cloudflare_config
+        from hbt.shared.image_gen.cloudflare_flux import (
+            CloudflareImageError,
+            derive_project_seed,
+            generate_scene_image,
+        )
+
+        cf_acc, cf_tok, cf_model = resolve_cloudflare_config(settings.workspace_dir)
+        if cf_acc and cf_tok:
+            images_dir = project_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            seed = derive_project_seed(project.slug)
+            scene1_ref: Path | None = None
+            total_s = len(script.segments)
+            for idx_s, seg in enumerate(script.segments, start=1):
+                existing_rel = (
+                    project.scenes[idx_s - 1].image
+                    if idx_s - 1 < len(project.scenes)
+                    else seg.image
+                )
+                cand_existing = (project_dir / existing_rel) if existing_rel else None
+                cand_named = images_dir / f"scene-{idx_s:02d}.png"
+                has_real = (
+                    cand_existing is not None and cand_existing.is_file()
+                ) or cand_named.is_file()
+                if has_real:
+                    if idx_s == 1:
+                        scene1_ref = (
+                            cand_existing
+                            if cand_existing is not None and cand_existing.is_file()
+                            else cand_named
+                        )
+                    continue
+                emit(
+                    round(2.0 + (idx_s / max(1, total_s)) * 3.0, 1),
+                    "images",
+                    f"Tự vẽ ảnh 2D Cloudflare cảnh {idx_s}/{total_s}",
+                )
+                try:
+                    generate_scene_image(
+                        seg.image_prompt or "",
+                        cand_named,
+                        account_id=cf_acc,
+                        api_token=cf_tok,
+                        model=cf_model,
+                        seed=seed,
+                        reference_image=scene1_ref if idx_s > 1 else None,
+                        fallback_context=f"{seg.title or ''}. {seg.text}".strip(". "),
+                    )
+                    seg.image = f"images/{cand_named.name}"
+                    if idx_s == 1:
+                        scene1_ref = cand_named
+                except CloudflareImageError as exc:
+                    warn_cf = f"Cloudflare vẽ ảnh cảnh {idx_s} lỗi: {exc}"
+                    logger.error(warn_cf)
+                    warnings.append(warn_cf)
+
     project = sync_script_to_project(project, project_dir, script)
+
+    # Nếu chưa có voice_provider truyền vào, tự nạp VieNeuProvider cục bộ nếu khả dụng
+    active_voice_provider = voice_provider
+    if active_voice_provider is None:
+        try:
+            from hbt.postv.voice import VieNeuProvider
+
+            cache_file = settings.workspace_dir / "cache" / "vieneu_voices.json"
+            cand_vp = VieNeuProvider(settings.models_dir, cache_file=cache_file)
+            if cand_vp.status().ok:
+                active_voice_provider = cand_vp
+        except Exception:
+            active_voice_provider = None
+
+    if active_voice_provider is None or not getattr(active_voice_provider.status(), "ok", False):
+        note = (
+            getattr(active_voice_provider.status(), "note", "")
+            if active_voice_provider is not None
+            else "Chưa cài đặt .venv-tts"
+        )
+        warn_msg = f"VieNeu-TTS chưa sẵn sàng ({note}), đang dùng âm thanh dự phòng."
+        logger.warning(warn_msg)
+        warnings.append(warn_msg)
 
     # 2. Sinh giọng VieNeu-TTS từng phân đoạn + bắn SSE {step: "voice", current, total, percent}
     def on_voice_sse(ev: dict[str, Any]) -> None:
@@ -664,7 +757,7 @@ def _render_hbt_core_auto_impl(
     voice_wav, timings = synthesize_core_segments(
         script.segments,
         project_dir,
-        voice_provider=voice_provider,
+        voice_provider=active_voice_provider,
         voice_id=voice_id,
         on_sse_event=on_voice_sse,
     )
@@ -766,9 +859,14 @@ def _render_hbt_core_auto_impl(
             percent=int(round((idx / max(1, total_segs)) * 100)),
         )
 
+        scene_img_ref = (
+            project.scenes[idx - 1].image
+            if idx - 1 < len(project.scenes) and project.scenes[idx - 1].image
+            else seg.image
+        )
         rel_img = resolve_segment_image(
             project_dir,
-            seg.image,
+            scene_img_ref,
             seg.order,
             topic=music_topic,
             title=script.title,

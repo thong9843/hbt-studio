@@ -1,4 +1,4 @@
-"""Mô hình dữ liệu JSON cho HBT Core (Chế độ V1 & V2 — Chuẩn Hay Biết Tốt, không giới hạn từ)."""
+"""Mô hình dữ liệu JSON cho HBT Core (Chế độ V1 & V2 — Chuẩn Hay Biết Tuốt, không giới hạn từ)."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def infer_music_topic(topic: str, fallback_text: str = "") -> str:
 
 
 class HbtCoreSegment(BaseModel):
-    """Một phân đoạn trong kịch bản HBT Core (chuẩn Hay Biết Tốt, không giới hạn từ)."""
+    """Một phân đoạn trong kịch bản HBT Core (chuẩn Hay Biết Tuốt, không giới hạn từ)."""
 
     id: int = Field(default=1, ge=1)
     order: int = Field(default=1, ge=1)
@@ -125,7 +125,7 @@ class HbtCoreSegment(BaseModel):
 
 
 class HbtCoreScript(BaseModel):
-    """Cấu trúc kịch bản chuẩn của HBT Core (dùng chung cho V1 & V2, hỗ trợ đầy đủ Hay Biết Tốt)."""
+    """Cấu trúc kịch bản chuẩn HBT Core (dùng chung V1 & V2, hỗ trợ đầy đủ Hay Biết Tuốt)."""
 
     topic: str = Field(default="science")
     total_segments: int = Field(default=0, ge=0)
@@ -180,7 +180,7 @@ class HbtCoreScript(BaseModel):
                 (s.title or s.card_text or s.text[:60] for s in self.segments if s.text),
                 "",
             )
-            self.title = self.topic or first_headline or "Video Hay Biết Tốt"
+            self.title = self.topic or first_headline or "Video Hay Biết Tuốt"
         return self
 
 

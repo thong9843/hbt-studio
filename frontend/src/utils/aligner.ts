@@ -15,7 +15,11 @@ export function alignerLabel(aligner: string | null, info?: AlignerInfo | null):
 export function alignerNotes(aligner: string | null, info?: AlignerInfo | null): string[] {
   const R = vi.export.result;
   const notes: string[] = [];
-  if (aligner === 'whisper' && info?.match_ratio !== undefined) {
+  if (
+    aligner === 'whisper' &&
+    typeof info?.match_ratio === 'number' &&
+    Number.isFinite(info.match_ratio)
+  ) {
     notes.push(R.alignerMatch(`${(info.match_ratio * 100).toFixed(1).replace('.', ',')}%`));
   }
   if (info?.skipped?.length) notes.push(R.alignerSkipped(info.skipped.join('; ')));

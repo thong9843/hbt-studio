@@ -89,7 +89,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
-  it('reveals hidden JSON editor via advanced toggle and parses Hay Biet Tot schema without 750-word warnings', async () => {
+  it('reveals hidden JSON editor via advanced toggle and parses Hay Biet Tuot schema without 750-word warnings', async () => {
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
       'GET /api/hbt/core/models': geminiModelsMock,

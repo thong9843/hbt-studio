@@ -16,8 +16,11 @@ import { vi } from '../i18n/vi';
 function toSnapshot(p: Partial<JobProgress> | null | undefined) {
   if (!p) return EMPTY_PROGRESS_SNAPSHOT;
   const step = p.step ?? p.stage ?? '';
+  const rawPct = p.progress ?? p.percent;
+  const percent =
+    typeof rawPct === 'number' && Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 0;
   return {
-    percent: p.progress ?? p.percent ?? 0,
+    percent,
     step,
     stage: p.stage || step,
     message: p.message ?? '',

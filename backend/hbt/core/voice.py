@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Any
 
 from hbt.core.models import HbtCoreSegment, SegmentVoiceTiming
-from hbt.pipeline.text import parse_voice
+from hbt.pipeline.text import RAW_TOKEN_RE, TOKEN_RE
 from hbt.postv.voice import DEFAULT_NARRATOR as DEFAULT_VOICE
 from hbt.postv.voice import SynthItem, VoiceProvider
+from hbt.shared.tts_client import resolve_voice_id as _resolve_voice_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +33,28 @@ TAIL_PAD_US = 300_000  # 0.30 giây đuôi cuối file giọng
 
 def spoken_text_for_segment(raw_text: str) -> str:
     """Chuyển lời thoại có thể chứa `{cách đọc}` hoặc `|` sang văn bản đọc cho VieNeu-TTS."""
-    tokens = parse_voice(raw_text or "")
-    if not tokens:
-        return (raw_text or "").replace("|", " ").strip()
+    raw = (raw_text or "").strip()
+    if not raw:
+        return ""
     parts: list[str] = []
-    for i, tok in enumerate(tokens):
-        if (
-            i > 0
-            and tok.get("chunk_start")
-            and parts
-            and not parts[-1].endswith((",", ".", "!", "?", ";", ":"))
-        ):
+    pending_break = False
+    for token in RAW_TOKEN_RE.findall(raw):
+        if token == "|":
+            pending_break = True
+            continue
+        m = TOKEN_RE.match(token)
+        if m:
+            spoken = (m.group("spoken") or "").strip() or (m.group("disp") or "").strip()
+            word = f"{spoken}{m.group('punct') or ''}".strip()
+        else:
+            word = token.strip()
+        if not word:
+            continue
+        if pending_break and parts and not parts[-1].endswith((",", ".", "!", "?", ";", ":", "…")):
             parts[-1] = parts[-1] + ","
-        parts.append(str(tok.get("spoken", "")).strip())
-    return " ".join(p for p in parts if p).strip()
+        parts.append(word)
+        pending_break = False
+    return " ".join(parts).strip()
 
 
 def _segment_hash(voice_id: str, spoken: str) -> str:
@@ -150,55 +159,104 @@ def synthesize_core_segments(
         raise ValueError("Không có phân đoạn nào để sinh giọng đọc")
 
     tts_ok = False
+    available_voice_ids: list[str] | None = None
     if voice_provider is not None and hasattr(voice_provider, "status"):
         try:
             st = voice_provider.status()
             tts_ok = bool(st and st.ok)
+            if tts_ok and hasattr(voice_provider, "list_voices"):
+                available_voice_ids = [v.id for v in voice_provider.list_voices()]
         except Exception:
             tts_ok = False
+
+    if tts_ok and available_voice_ids:
+        chosen_voice = _resolve_voice_id(
+            chosen_voice, DEFAULT_VOICE, available_voices=available_voice_ids
+        )
 
     if strict_tts and not tts_ok:
         raise RuntimeError("VieNeu-TTS (.venv-tts) chưa sẵn sàng trên máy")
 
-    segment_wavs: list[tuple[HbtCoreSegment, Path, bool]] = []
-
+    segment_entries: list[tuple[int, HbtCoreSegment, str, Path, bool]] = []
+    pending_items: list[tuple[int, SynthItem]] = []
     for idx, seg in enumerate(segments, start=1):
         spoken = spoken_text_for_segment(seg.text)
         h = _segment_hash(chosen_voice, spoken or f"empty_{idx}")
         seg_wav = cache_dir / f"seg_{idx:02d}_{h}.wav"
-        was_cached = seg_wav.is_file() and seg_wav.stat().st_size > 44
+        was_cached = (
+            seg_wav.is_file()
+            and seg_wav.stat().st_size > 44
+            and wav_duration_us(seg_wav) >= 100_000
+        )
+        segment_entries.append((idx, seg, spoken, seg_wav, was_cached))
+        if not was_cached and tts_ok and voice_provider is not None and spoken:
+            pending_items.append((idx, SynthItem(text=spoken, voice_id=chosen_voice, out=seg_wav)))
 
-        if not was_cached:
-            if tts_ok and voice_provider is not None and spoken:
-                try:
-                    voice_provider.synthesize_many(
-                        [SynthItem(text=spoken, voice_id=chosen_voice, out=seg_wav)]
-                    )
-                except Exception as exc:
-                    if strict_tts:
-                        raise
-                    logger.warning(
-                        "VieNeu-TTS lỗi ở phân đoạn %d (%s), dùng WAV dự phòng: %s",
-                        idx,
-                        chosen_voice,
-                        exc,
-                    )
-                    create_fallback_speech_wav(seg_wav, spoken)
-            else:
-                create_fallback_speech_wav(seg_wav, spoken or "phân đoạn")
+    # Gọi VieNeu-TTS theo 1 lô duy nhất (nạp mô hình 1 lần thay vì lặp lại từng phân đoạn)
+    if pending_items and voice_provider is not None:
+        batch_items = [item for _, item in pending_items]
+        done_count = sum(1 for _, _, _, _, c in segment_entries if c)
+
+        def _on_item(batch_idx: int, state: str) -> None:
+            nonlocal done_count
+            if state != "done" or on_sse_event is None:
+                return
+            done_count = min(total, done_count + 1)
+            pct = int(round((done_count / total) * 100))
+            on_sse_event(
+                {
+                    "step": "voice",
+                    "current": done_count,
+                    "total": total,
+                    "percent": pct,
+                    "message": f"Đã sinh giọng đọc phân đoạn {done_count}/{total} ({pct}%)",
+                }
+            )
+
+        try:
+            try:
+                voice_provider.synthesize_many(batch_items, on_item=_on_item)
+            except TypeError:
+                voice_provider.synthesize_many(batch_items)
+        except Exception as exc:
+            if strict_tts:
+                raise
+            logger.warning(
+                "VieNeu-TTS lỗi khi sinh lô giọng (%s), rơi về WAV dự phòng: %s",
+                chosen_voice,
+                exc,
+            )
+
+    segment_wavs: list[tuple[HbtCoreSegment, Path, bool]] = []
+    for idx, seg, spoken, seg_wav, was_cached in segment_entries:
+        valid_wav = (
+            seg_wav.is_file()
+            and seg_wav.stat().st_size > 44
+            and wav_duration_us(seg_wav) >= 100_000
+        )
+        if not valid_wav:
+            if tts_ok and spoken:
+                logger.warning(
+                    "VieNeu-TTS không tạo WAV hợp lệ phân đoạn %d (size=%s), dùng WAV dự phòng",
+                    idx,
+                    seg_wav.stat().st_size if seg_wav.is_file() else 0,
+                )
+            create_fallback_speech_wav(seg_wav, spoken or "phân đoạn")
 
         segment_wavs.append((seg, seg_wav, was_cached))
 
-        percent = int(round((idx / total) * 100))
-        event_payload = {
-            "step": "voice",
-            "current": idx,
-            "total": total,
-            "percent": percent,
-            "message": f"Đã sinh giọng đọc phân đoạn {idx}/{total} ({percent}%)",
-        }
-        if on_sse_event is not None:
-            on_sse_event(event_payload)
+        if not pending_items or was_cached:
+            percent = int(round((idx / total) * 100))
+            if on_sse_event is not None:
+                on_sse_event(
+                    {
+                        "step": "voice",
+                        "current": idx,
+                        "total": total,
+                        "percent": percent,
+                        "message": f"Đã sinh giọng đọc phân đoạn {idx}/{total} ({percent}%)",
+                    }
+                )
 
     # Ghép nối tất cả segment WAV thành project_dir / "voice.wav" và tính mốc micro-giây chính xác
     combined_wav = project_dir / "voice.wav"

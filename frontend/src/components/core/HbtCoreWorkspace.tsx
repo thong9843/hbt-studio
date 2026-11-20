@@ -240,10 +240,23 @@ export function HbtCoreWorkspace({
       setImageError(null);
       setImageMissingKey(false);
       void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+      const doneSlug = renderJob.finished.project || resultSlug || initialSlug;
+      if (doneSlug) {
+        void api
+          .getProjectCoreScript(doneSlug)
+          .then((res) => {
+            if (res?.script?.segments?.length) {
+              setSegments(res.script.segments);
+              setJsonText(JSON.stringify(res.script, null, 2));
+            }
+          })
+          .catch(() => undefined);
+      }
     } else if (renderJob.finished.status === 'failed' && renderJob.finished.error) {
       setImageError(renderJob.finished.error);
       setImageMissingKey(/cloudflare|cài đặt/i.test(renderJob.finished.error));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderJob.finished, renderJob.kind, queryClient]);
 
   const safeIndex = Math.min(selectedSegIndex, Math.max(0, segments.length - 1));
@@ -418,6 +431,7 @@ export function HbtCoreWorkspace({
     try {
       const targetSlug = resultSlug ?? initialSlug ?? '_new';
       const res = await api.generateHbtCoreImages(targetSlug, {
+        overwrite: true,
         script: buildCurrentScript(),
       });
       if (res.slug) setResultSlug(res.slug);
