@@ -31,10 +31,17 @@ POSES_V9: tuple[str, ...] = (
     "facepalm_light",
     "nod_yes",
     "shake_no",
+    "guide_sweep_board",
+    "guide_two_sides",
+    "guide_step_count",
+    "guide_zoom_focus",
+    "welcome_open",
+    "lean_curious",
 )
 POSES_V8: tuple[str, ...] = POSES_V9
 VALID_MOTIONS = {"bounce", "slide_left", "slide_right", "float", "static"}
 VALID_CAMERA_SHOTS = {"wide_stage", "focus_board", "closeup_react"}
+VALID_FACE_MOODS = {"explaining", "curious", "excited", "skeptical", "shocked", "warm_cta"}
 VALID_BOARD_TYPES = {
     "none",
     "bullets",
@@ -50,6 +57,7 @@ VALID_BOARD_TYPES = {
     "location_map",
     "myth_vs_fact",
     "recap_card",
+    "pinned_photo",
 }
 VALID_INTERACTIONS = {"none", "hold_prop", "point_chart", "versus_split"}
 VALID_SFX = {"none", "whoosh", "pop", "vine_boom", "ding"}
@@ -79,19 +87,21 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "LUẬT ĐA DẠNG: Không dùng cùng 1 `pose` hoặc 1 `emotion` cho 2 beat đứng liền kề.\n"
         "domain: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
-        f"pose (18 hành động 2-đoạn): {pose_str}.\n"
+        f"pose (cử chỉ hướng dẫn 2-đoạn, không lặp liền kề): {pose_str}.\n"
         "emotion (10 biểu cảm): neutral|confident|curious|idea|shock|skeptical|"
         "serious|sad|happy|excited.\n"
+        "face_mood (6 sắc thái khuôn mặt): explaining|curious|excited|skeptical|shocked|warm_cta.\n"
         "anim_oneshot: null|shock_jump|idea_bulb|point_board|facepalm|nod_agree|celebrate. "
         "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
         "interaction: none|hold_prop|point_chart|versus_split "
-        "(nếu hold_prop hoặc bullets thêm prop_query 1-2 từ tiếng Anh). "
+        "(nếu hold_prop, bullets hoặc pinned_photo thêm prop_query 2-4 từ tiếng Anh). "
         "camera_shot: wide_stage|focus_board|closeup_react. "
         "motion: bounce|slide_left|slide_right|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
-        "board_type: bullets|big_number|comparison|flow_steps|bar_compare|counter_grow|"
-        "timeline_era|location_map|myth_vs_fact|recap_card|card|quote|list|none.\n"
-        "board_data: bullets/recap_card={items:['...**từ khóa**...'],takeaway:'...'}, "
+        "board_type: pinned_photo|bullets|big_number|comparison|flow_steps|bar_compare|"
+        "counter_grow|timeline_era|location_map|myth_vs_fact|recap_card|card|quote|list|none.\n"
+        "board_data: pinned_photo={caption:'3-6 từ tiếng Việt',pin_style:'pin'|'tape'}, "
+        "bullets/recap_card={items:['...**từ khóa**...'],takeaway:'...'}, "
         "big_number={value,label,sub,takeaway}, bar_compare={values:[{label,value}],takeaway}, "
         "counter_grow={target,unit,label}, timeline_era={events:[{year,title}],takeaway}, "
         "location_map={location,coordinates,takeaway}, myth_vs_fact={myth,fact,takeaway}, "
@@ -194,6 +204,7 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         "timeline_era",
         "location_map",
         "myth_vs_fact",
+        "pinned_photo",
     ):
         return dict(raw)
     return {}
@@ -573,6 +584,8 @@ def sanitize_beats(
             pose = "explain"
         raw_emo = str(item.get("emotion") or "auto").strip().lower()
         emotion = raw_emo if (raw_emo == "auto" or raw_emo in VALID_EMOTIONS) else "auto"
+        raw_mood = str(item.get("face_mood") or "").strip().lower()
+        face_mood = raw_mood if raw_mood in VALID_FACE_MOODS else None
         motion = str(item.get("motion") or "bounce").strip().lower()
         if motion == "shake":
             motion = "float"
@@ -622,6 +635,7 @@ def sanitize_beats(
                 narration=narration[:750],
                 pose=pose,
                 emotion=emotion,  # type: ignore[arg-type]
+                face_mood=face_mood,  # type: ignore[arg-type]
                 anim_oneshot=anim_oneshot,
                 anim_loop=anim_loop,
                 interaction=interaction,  # type: ignore[arg-type]

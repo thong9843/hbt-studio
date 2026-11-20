@@ -1010,6 +1010,8 @@ export type StickvEmotion =
   | 'sad'
   | 'happy'
   | 'excited';
+export type StickvFaceMood =
+  'explaining' | 'curious' | 'excited' | 'skeptical' | 'shocked' | 'warm_cta';
 export type StickvBoardType =
   | 'none'
   | 'bullets'
@@ -1024,7 +1026,8 @@ export type StickvBoardType =
   | 'timeline_era'
   | 'location_map'
   | 'myth_vs_fact'
-  | 'recap_card';
+  | 'recap_card'
+  | 'pinned_photo';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
@@ -1034,6 +1037,7 @@ export interface StickvBeat {
   narration: string;
   pose: string;
   emotion?: StickvEmotion;
+  face_mood?: StickvFaceMood | null;
   anim_oneshot?: string | null;
   anim_loop?: string;
   interaction?: StickvInteraction;

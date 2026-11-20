@@ -16,7 +16,6 @@ import numpy as np
 
 from hbt.app_settings import resolve_online_api_key
 from hbt.core.audio import build_topic_bgm_playlist
-from hbt.pipeline.align import align_silence
 from hbt.pipeline.ffutil import run_ffmpeg
 from hbt.postv.voice import SynthItem, VoiceProvider
 from hbt.shared.ffmpeg_utils import (
@@ -586,6 +585,56 @@ def compute_word_timings(
     return timings
 
 
+def _active_speech_bounds(
+    wav_path: Path,
+    start_s: float,
+    end_s: float,
+    *,
+    rms_thresh: float = 0.012,
+) -> tuple[float, float]:
+    """Thu hẹp `[start_s, end_s]` về đúng vùng có năng lượng giọng nói thật trong WAV."""
+    lo = max(0.0, float(start_s))
+    hi = max(lo, float(end_s))
+    if hi - lo <= 0.12 or not wav_path.is_file():
+        return lo, hi
+    try:
+        with wave.open(str(wav_path), "rb") as wf:
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            n_total = wf.getnframes()
+            if sw != 2 or sr <= 0 or n_total <= 0:
+                return lo, hi
+            s0 = min(n_total, max(0, int(round(lo * sr))))
+            s1 = min(n_total, max(s0, int(round(hi * sr))))
+            if s1 - s0 < int(sr * 0.05):
+                return lo, hi
+            wf.setpos(s0)
+            raw = wf.readframes(s1 - s0)
+        pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        if ch > 1:
+            pcm = pcm.reshape(-1, ch).mean(axis=1)
+        win = max(1, int(round(sr * 0.01)))  # 10ms
+        n_win = len(pcm) // win
+        if n_win < 2:
+            return lo, hi
+        frames = pcm[: n_win * win].reshape(n_win, win)
+        rms = np.sqrt(np.mean(frames * frames, axis=1))
+        peak = float(np.max(rms)) if len(rms) else 0.0
+        if peak < 1e-4:
+            return lo, hi
+        active_idx = np.flatnonzero(rms >= max(rms_thresh, peak * 0.08))
+        if len(active_idx) == 0:
+            return lo, hi
+        act_lo = lo + (int(active_idx[0]) * win) / sr
+        act_hi = lo + ((int(active_idx[-1]) + 1) * win) / sr
+        if act_hi - act_lo < 0.12:
+            return lo, hi
+        return round(max(lo, act_lo), 4), round(min(hi, act_hi), 4)
+    except Exception:
+        return lo, hi
+
+
 def align_beat_karaoke(
     narration: str,
     wav_path: Path,
@@ -595,13 +644,14 @@ def align_beat_karaoke(
     pause_after_s: float = PAUSE_END_SENTENCE_S,
     spoken_segments: list[tuple[float, float, str]] | None = None,
 ) -> list[tuple[str, float, float]]:
-    """Khóa mốc Karaoke chặt vào từng câu trong `spoken_segments` (không lấn khoảng lặng)."""
+    """Khóa mốc Karaoke chặt vào tiếng nói thật trong `spoken_segments` (không lấn khoảng lặng)."""
     segs = spoken_segments if spoken_segments is not None else load_beat_spoken_segments(wav_path)
     if segs:
         timings: list[tuple[str, float, float]] = []
         for seg_start, seg_end, seg_text in segs:
-            seg_dur = max(0.15, float(seg_end) - float(seg_start))
-            timings.extend(compute_word_timings(seg_text, seg_dur, start_offset_s=float(seg_start)))
+            act_st, act_en = _active_speech_bounds(wav_path, float(seg_start), float(seg_end))
+            seg_dur = max(0.15, act_en - act_st)
+            timings.extend(compute_word_timings(seg_text, seg_dur, start_offset_s=act_st))
         if timings:
             return timings
 
@@ -609,18 +659,9 @@ def align_beat_karaoke(
     if not words:
         return []
     max_speech_end = max(lead_in_s + 0.3, float(total_dur) - max(0.0, pause_after_s))
-    if wav_path.is_file():
-        try:
-            spans = align_silence(words, wav_path, total_dur)
-            if spans and len(spans) == len(words) and all(s is not None for s in spans):
-                return [
-                    (w, round(float(s[0]), 3), round(min(max_speech_end, float(s[1])), 3))
-                    for w, s in zip(words, spans, strict=True)
-                ]
-        except Exception:
-            pass
-    speech_span = max(0.3, max_speech_end - lead_in_s)
-    return compute_word_timings(narration, speech_span, start_offset_s=lead_in_s)
+    act_st, act_en = _active_speech_bounds(wav_path, lead_in_s, max_speech_end)
+    speech_span = max(0.3, act_en - act_st)
+    return compute_word_timings(narration, speech_span, start_offset_s=act_st)
 
 
 def synth_stickv_beats_audio(

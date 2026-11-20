@@ -33,6 +33,14 @@ StickvEmotion = Literal[
     "happy",
     "excited",
 ]
+StickvFaceMood = Literal[
+    "explaining",
+    "curious",
+    "excited",
+    "skeptical",
+    "shocked",
+    "warm_cta",
+]
 StickvBoardType = Literal[
     "none",
     "bullets",
@@ -48,6 +56,7 @@ StickvBoardType = Literal[
     "location_map",
     "myth_vs_fact",
     "recap_card",
+    "pinned_photo",
 ]
 StickvSfxTag = Literal["none", "whoosh", "pop", "vine_boom", "ding"]
 StickvFacing = Literal["left", "right"]
@@ -71,6 +80,7 @@ class StickvBeat(BaseModel):
     narration: str = Field(default="", max_length=1200)
     pose: str = Field(default="present_board", max_length=120)
     emotion: StickvEmotion = "auto"
+    face_mood: StickvFaceMood | None = None
     anim_oneshot: str | None = Field(default=None, max_length=120)
     anim_loop: str = Field(default="talk_explain", max_length=120)
     interaction: StickvInteraction = "none"
@@ -133,6 +143,9 @@ class StickvBeat(BaseModel):
             "excited",
         }
         out["emotion"] = raw_emo if raw_emo in valid_emos else "auto"
+        raw_mood = str(out.get("face_mood") or "").strip().lower()
+        valid_moods = {"explaining", "curious", "excited", "skeptical", "shocked", "warm_cta"}
+        out["face_mood"] = raw_mood if raw_mood in valid_moods else None
         return out
 
 
@@ -146,7 +159,7 @@ class StickvProject(BaseModel):
     animation_mode: StickvAnimationMode = "auto"
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
-    fps: int = Field(default=30, ge=15, le=60)
+    fps: int = Field(default=60, ge=15, le=60)
     voice_id: str = Field(default="Thanh Bình", max_length=120)
     music_mood: str = Field(default="curious_science", max_length=60)
     pause_scale: float = Field(default=1.0, ge=0.5, le=2.0)
