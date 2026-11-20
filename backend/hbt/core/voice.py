@@ -27,8 +27,35 @@ from hbt.shared.tts_client import resolve_voice_id as _resolve_voice_id
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 24_000
-SEGMENT_GAP_US = 220_000  # 0.22 giây khoảng nghỉ tự nhiên giữa các phân đoạn
-TAIL_PAD_US = 300_000  # 0.30 giây đuôi cuối file giọng
+LEAD_PAD_US = 150_000  # 0.15 giây đệm đầu trước phân đoạn 1
+SEGMENT_GAP_US = 450_000  # 0.45 giây khoảng nghỉ tự nhiên giữa các phân đoạn
+TAIL_PAD_US = 1_000_000  # 1.00 giây đuôi cuối để không bao giờ cắt cụt âm tiết cuối
+_TARGET_SEG_RMS = 0.14  # ~ -17 dBFS trước khi loudnorm tổng -14 LUFS
+
+
+def _normalize_pcm_rms(pcm: bytes) -> bytes:
+    """Cân đều độ lớn giữa các đoạn giọng VieNeu trước khi ghép tổng (giữ đỉnh <= 0.95)."""
+    if len(pcm) < 4:
+        return pcm
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    n = len(samples)
+    if n == 0:
+        return pcm
+    peak = max(abs(min(samples)), abs(max(samples)))
+    if peak < 150:
+        return pcm
+    sq_sum = sum(s * s for s in samples)
+    rms = math.sqrt(sq_sum / n) / 32768.0
+    if rms <= 1e-4:
+        return pcm
+    gain = min(_TARGET_SEG_RMS / rms, (0.95 * 32767.0) / peak, 3.0)
+    if 0.92 <= gain <= 1.08:
+        return pcm
+    out = array.array("h", (max(-32767, min(32767, int(round(s * gain)))) for s in samples))
+    return out.tobytes()
 
 
 def spoken_text_for_segment(raw_text: str) -> str:
@@ -264,8 +291,10 @@ def synthesize_core_segments(
     timings: list[SegmentVoiceTiming] = []
 
     cursor_us = 0
+    lead_frames = int(round((LEAD_PAD_US / 1_000_000) * SAMPLE_RATE))
     gap_frames = int(round((SEGMENT_GAP_US / 1_000_000) * SAMPLE_RATE))
     tail_frames = int(round((TAIL_PAD_US / 1_000_000) * SAMPLE_RATE))
+    silence_lead_bytes = b"\x00\x00" * lead_frames
     silence_gap_bytes = b"\x00\x00" * gap_frames
     silence_tail_bytes = b"\x00\x00" * tail_frames
 
@@ -274,8 +303,12 @@ def synthesize_core_segments(
         out_wf.setsampwidth(2)
         out_wf.setframerate(SAMPLE_RATE)
 
+        if lead_frames > 0:
+            out_wf.writeframes(silence_lead_bytes)
+            cursor_us += int(round((lead_frames * 1_000_000) / SAMPLE_RATE))
+
         for i, (seg, seg_wav, was_cached) in enumerate(segment_wavs):
-            pcm = _read_mono_16bit_pcm(seg_wav, SAMPLE_RATE)
+            pcm = _normalize_pcm_rms(_read_mono_16bit_pcm(seg_wav, SAMPLE_RATE))
             num_frames = len(pcm) // 2
             dur_us = int(round((num_frames * 1_000_000) / SAMPLE_RATE))
             start_us = cursor_us

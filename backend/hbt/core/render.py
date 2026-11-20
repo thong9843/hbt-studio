@@ -34,13 +34,15 @@ from hbt.core.audio import (
     render_smart_bgm_wav,
     resolve_sfx_file,
 )
-from hbt.core.models import HbtCoreScript, SegmentVoiceTiming, infer_music_topic
+from hbt.core.models import HbtCoreScript, HbtCoreSegment, SegmentVoiceTiming, infer_music_topic
 from hbt.core.tts_pipeline import sync_wavs_to_audio_folder
 from hbt.core.voice import synthesize_core_segments
 from hbt.models import Card, CardLine, Music, Project, Scene, Voice
-from hbt.pipeline import cache, cancel
+from hbt.pipeline import cache, cancel, captions
+from hbt.pipeline.audio import OUTRO_CROSSFADE, build_outro_audio, join_audio
 from hbt.pipeline.ffutil import media_duration, probe, run_ffmpeg
 from hbt.pipeline.publish import build_publish_text
+from hbt.pipeline.text import parse_voice, weight
 from hbt.pipeline.visual import CARD_Y, CREAM, SIZES, H, W, color_of, font
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
@@ -370,39 +372,6 @@ def build_core_scene_layers_safe(
             finally:
                 card_im.close()
 
-        # Vẽ phụ đề lời thoại ở vùng an toàn dưới (y=1380)
-        voice_text = str(scene_dict.get("voice", "")).replace("|", " ").strip()
-        if voice_text:
-            f_cap = font("ExtraBold", 56)
-            words = voice_text.split()
-            cap_lines: list[str] = []
-            cur = ""
-            for w_tok in words:
-                cand = f"{cur} {w_tok}".strip()
-                if tmp_draw.textlength(cand, font=f_cap) <= 920 or not cur:
-                    cur = cand
-                else:
-                    cap_lines.append(cur)
-                    cur = w_tok
-            if cur:
-                cap_lines.append(cur)
-            cap_lines = cap_lines[:4]
-            lh = 74
-            y0 = 1420 - (len(cap_lines) * lh) // 2
-            for li, line_str in enumerate(cap_lines):
-                tw = tmp_draw.textlength(line_str, font=f_cap)
-                xx = (W - tw) / 2
-                yy = y0 + li * lh
-                tmp_draw.text((xx + 3, yy + 6), line_str, font=f_cap, fill=(0, 0, 0, 160))
-                tmp_draw.text(
-                    (xx, yy),
-                    line_str,
-                    font=f_cap,
-                    fill=(255, 212, 59) if li == 0 else (255, 255, 255),
-                    stroke_width=6,
-                    stroke_fill=(15, 15, 25),
-                )
-
         if watermark_png is not None and watermark_png.is_file():
             try:
                 with Image.open(watermark_png) as wm_raw:
@@ -422,6 +391,121 @@ def build_core_scene_layers_safe(
         gc.collect()
 
 
+KEN_BURNS_MODES: tuple[str, ...] = ("zoom_in", "zoom_out", "pan_right", "pan_left")
+XFADE_DURATION_S = 0.32
+
+
+def build_ken_burns_filter(
+    segment_index1: int,
+    n_frames: int,
+    *,
+    width: int = 1080,
+    height: int = 1920,
+    fps: int = 30,
+    punch: bool = False,
+) -> tuple[str, str]:
+    """Tạo bộ lọc `zoompan` luân phiên 4 chuyển động Ken Burns mượt (hoặc `punch` nhấn mạnh)."""
+    n = max(1, int(n_frames))
+    if punch:
+        mode = "punch"
+        z_expr = f"1.12-0.08*(on/{n})"
+        x_expr = "iw/2-(iw/zoom/2)"
+        y_expr = "ih/2-(ih/zoom/2)"
+    else:
+        mode = KEN_BURNS_MODES[(max(1, segment_index1) - 1) % len(KEN_BURNS_MODES)]
+        if mode == "zoom_in":
+            z_expr = f"1.00+0.08*(on/{n})"
+            x_expr = "iw/2-(iw/zoom/2)"
+            y_expr = "ih/2-(ih/zoom/2)"
+        elif mode == "zoom_out":
+            z_expr = f"1.08-0.08*(on/{n})"
+            x_expr = "iw/2-(iw/zoom/2)"
+            y_expr = "ih/2-(ih/zoom/2)"
+        elif mode == "pan_right":
+            z_expr = "1.08"
+            x_expr = f"(iw-iw/zoom)*(on/{n})"
+            y_expr = "ih/2-(ih/zoom/2)"
+        else:
+            z_expr = "1.08"
+            x_expr = f"(iw-iw/zoom)*(1-on/{n})"
+            y_expr = "ih/2-(ih/zoom/2)"
+
+    zp = f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={n}:s={width}x{height}:fps={fps}"
+    return mode, zp
+
+
+def build_xfade_filter(
+    clip_durations_s: list[float],
+    *,
+    transition_s: float = XFADE_DURATION_S,
+    fps: int = 30,
+) -> tuple[str, str, float]:
+    """Nối danh sách clip bằng `xfade` luân phiên `fade` / `slideleft`.
+
+    Trả về `(filter_complex, out_label, total_duration_s)`.
+    """
+    if not clip_durations_s:
+        raise ValueError("Cần ít nhất 1 clip để nối xfade")
+    if len(clip_durations_s) == 1:
+        return (
+            f"[0:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS[vbody]",
+            "[vbody]",
+            float(clip_durations_s[0]),
+        )
+
+    parts: list[str] = [
+        f"[{i}:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS[c{i}]"
+        for i in range(len(clip_durations_s))
+    ]
+    cur_label = "[c0]"
+    acc_dur = float(clip_durations_s[0])
+    for idx in range(1, len(clip_durations_s)):
+        tr = "fade" if idx % 2 == 1 else "slideleft"
+        eff_t = min(transition_s, max(0.05, clip_durations_s[idx] * 0.4), max(0.05, acc_dur * 0.4))
+        offset = max(0.0, acc_dur - eff_t)
+        next_label = "[vbody]" if idx == len(clip_durations_s) - 1 else f"[xf{idx}]"
+        parts.append(
+            f"{cur_label}[c{idx}]xfade=transition={tr}:duration={eff_t:.3f}"
+            f":offset={offset:.3f}{next_label}"
+        )
+        acc_dur = offset + float(clip_durations_s[idx])
+        cur_label = next_label
+    return ";".join(parts), "[vbody]", round(acc_dur, 4)
+
+
+def build_core_karaoke_phrases(
+    segments: list[HbtCoreSegment],
+    timings: list[SegmentVoiceTiming],
+) -> list[captions.Phrase]:
+    """Tách lời thoại từng phân đoạn thành các cụm Karaoke ngắn 4-7 từ (tối đa 2 dòng) khớp
+    chính xác với mốc thời gian giọng đọc `[start_s, end_s]` của từng phân đoạn."""
+    all_tokens: list[Any] = []
+    all_times: list[tuple[float, float]] = []
+    all_scenes: list[int] = []
+
+    for seg_idx, (seg, timing) in enumerate(zip(segments, timings, strict=False)):
+        toks = parse_voice(seg.text or "")
+        if not toks:
+            continue
+        start_s = float(timing.start_s)
+        end_s = max(start_s + 0.2, float(timing.end_s))
+        span = end_s - start_s
+        weights = [max(0.2, float(weight(tok))) for tok in toks]
+        total_w = sum(weights) or 1.0
+        cursor = start_s
+        for tok, w in zip(toks, weights, strict=False):
+            dur = span * (w / total_w)
+            t_hi = min(end_s, cursor + dur)
+            all_tokens.append(tok)
+            all_times.append((cursor, max(cursor + 0.02, t_hi)))
+            all_scenes.append(seg_idx)
+            cursor = t_hi
+
+    if not all_tokens:
+        return []
+    return captions.build_phrases(all_tokens, all_times, all_scenes)
+
+
 def render_core_segment_clip(
     base_png: Path,
     card_png: Path,
@@ -435,53 +519,49 @@ def render_core_segment_clip(
     punch: bool = False,
     aspect_mode: AspectMode = "fill",
 ) -> Path:
-    """Dựng video clip cho 1 phân đoạn với kẹp chuẩn tài nguyên FFmpeg:
+    """Dựng video clip cho 1 phân đoạn với Ken Burns 4 kiểu động và kẹp chuẩn tài nguyên FFmpeg:
     `-threads 2`, `-filter_threads 2`, `-preset veryfast`, `-crf 22`, `-max_muxing_queue_size 512`.
     """
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     dur = max(0.8, round(duration_s, 3))
     n_frames = max(1, int(round(dur * fps)))
 
-    if punch:
-        z_expr = "1.12-0.08*(on/" + str(n_frames) + ")"
-    elif segment_index1 % 2 == 1:
-        z_expr = "1.0+0.06*(on/" + str(n_frames) + ")"
-    else:
-        z_expr = "1.06-0.06*(on/" + str(n_frames) + ")"
-
-    aspect_fc = build_aspect_filter(
-        aspect_mode,
+    _, zp_filter = build_ken_burns_filter(
+        segment_index1,
+        n_frames,
         width=width,
         height=height,
+        fps=fps,
+        punch=punch,
+    )
+    sw, sh = (640, 1138) if width <= 540 else (1280, 2276)
+    aspect_fc = build_aspect_filter(
+        aspect_mode,
+        width=sw,
+        height=sh,
         input_label="0:v",
         output_label="bg_norm",
     )
     fc = (
         f"{aspect_fc};"
-        f"[bg_norm]zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={n_frames}:s={width}x{height}:fps={fps}[bg];"
+        f"[bg_norm]{zp_filter}[bg];"
         f"[1:v]scale={width}:{height},format=rgba,fade=t=in:st=0.10:d=0.30:alpha=1[card];"
         f"[bg][card]overlay=0:0:shortest=1,format=yuv420p[v]"
     )
 
     tmp_mp4 = out_mp4.with_name(out_mp4.stem + ".tmp.mp4")
+    # KHÔNG dùng `-loop 1` cho `base_png` vì `zoompan` sẽ reset `on=0` mỗi frame làm ảnh đứng im.
     run_ffmpeg(
         [
             *FFMPEG_RESOURCE_CLAMP,
-            "-loop",
-            "1",
-            "-t",
-            f"{dur:.3f}",
-            "-framerate",
-            str(fps),
             "-i",
             base_png,
+            "-framerate",
+            str(fps),
             "-loop",
             "1",
             "-t",
             f"{dur:.3f}",
-            "-framerate",
-            str(fps),
             "-i",
             card_png,
             "-filter_complex",
@@ -508,26 +588,37 @@ def mix_core_audio_track(
     total_duration_s: float,
     out_wav: Path,
 ) -> Path:
-    """Trộn giọng đọc VieNeu-TTS + BGM (đã nối acrossfade=d=2.0) + các hiệu ứng SFX chuyển cảnh
-    theo mốc thời gian bằng FFmpeg kẹp `-threads 2`, `-filter_threads 2`.
+    """Trộn giọng đọc VieNeu-TTS (-14 LUFS) + BGM (-27 LUFS + sidechaincompress ducking) + SFX
+    theo mốc thời gian, chuẩn hóa tổng đầu ra `-14 LUFS`, `TP=-1.5` (kẹp `-threads 2`).
     """
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     inputs: list[str | Path] = ["-i", voice_wav]
-    filter_parts: list[str] = [
+    has_bgm = bgm_wav is not None and bgm_wav.is_file()
+
+    voice_chain = (
         f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        f"apad=whole_dur={total_duration_s:.3f},atrim=0:{total_duration_s:.3f},volume=1.0[voice]"
-    ]
+        f"highpass=f=70,loudnorm=I=-14:TP=-1.5:LRA=11,"
+        f"apad=whole_dur={total_duration_s:.3f},atrim=0:{total_duration_s:.3f}"
+    )
+    filter_parts: list[str] = []
     mix_labels: list[str] = ["[voice]"]
     input_idx = 1
 
-    if bgm_wav is not None and bgm_wav.is_file():
+    if has_bgm and bgm_wav is not None:
+        filter_parts.append(f"{voice_chain},asplit=2[voice][sc]")
         inputs.extend(["-i", bgm_wav])
         filter_parts.append(
             f"[{input_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"atrim=0:{total_duration_s:.3f},volume=0.16[bgm]"
+            f"apad=whole_dur={total_duration_s:.3f},atrim=0:{total_duration_s:.3f},"
+            f"loudnorm=I=-27:TP=-6:LRA=11[bgm_raw]"
+        )
+        filter_parts.append(
+            "[bgm_raw][sc]sidechaincompress=threshold=0.03:ratio=3:attack=40:release=350[bgm]"
         )
         mix_labels.append("[bgm]")
         input_idx += 1
+    else:
+        filter_parts.append(f"{voice_chain}[voice]")
 
     for sfx_i, (sfx_path, delay_ms) in enumerate(sfx_events):
         if not sfx_path.is_file():
@@ -543,11 +634,13 @@ def mix_core_audio_track(
         input_idx += 1
 
     if len(mix_labels) == 1:
-        filter_parts.append("[voice]alimiter=limit=0.95[aout]")
+        filter_parts.append("[voice]loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=0.95[aout]")
     else:
         filter_parts.append(
-            f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=first:dropout_transition=0,"
-            f"alimiter=limit=0.95[aout]"
+            f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:duration=first"
+            f":normalize=0:dropout_transition=0,"
+            f"atrim=0:{total_duration_s:.3f},"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=0.95[aout]"
         )
 
     fc = ";".join(filter_parts)
@@ -776,7 +869,7 @@ def _render_hbt_core_auto_impl(
 
     total_duration_s = max(
         float(media_duration(voice_wav) or 0.0),
-        sum(max(0.8, t.duration_s + 0.22) for t in timings),
+        (timings[-1].end_s + 1.0) if timings else 2.0,
     )
 
     # 3. Nhạc nền BGM thông minh (theo topic + acrossfade=d=2.0)
@@ -847,9 +940,11 @@ def _render_hbt_core_auto_impl(
             assets_dir=getattr(settings, "assets_dir", None),
         )
 
+    xfade_d = XFADE_DURATION_S if total_segs > 1 else 0.0
+    segment_durations: list[float] = []
     for idx, (seg, timing) in enumerate(zip(script.segments, timings, strict=False), start=1):
         cancel.check_current()
-        seg_pct = round(50.0 + (idx / max(1, total_segs)) * 30.0, 1)
+        seg_pct = round(50.0 + (idx / max(1, total_segs)) * 28.0, 1)
         emit(
             seg_pct,
             "render",
@@ -900,9 +995,12 @@ def _render_hbt_core_auto_impl(
             watermark_png=wm_png,
         )
 
-        # Thời lượng clip phân đoạn khớp với thời lượng giọng đọc + khoảng nghỉ
-        seg_dur_s = timing.duration_s + (0.22 if idx < total_segs else 0.30)
-        seg_dur_s = max(0.8, seg_dur_s)
+        # Thời lượng clip phân đoạn khớp chính xác mốc giọng + bù chồng xfade để không cắt cụt cuối
+        slot_start = 0.0 if idx == 1 else float(timing.start_s)
+        slot_end = float(timings[idx].start_s) if idx < len(timings) else float(total_duration_s)
+        seg_dur_s = max(
+            0.8, round((slot_end - slot_start) + (xfade_d if idx < total_segs else 0.0), 3)
+        )
         clip_path = build_dir / f"seg_clip_{idx:02d}.mp4"
         render_core_segment_clip(
             base_png,
@@ -917,6 +1015,7 @@ def _render_hbt_core_auto_impl(
             aspect_mode=aspect_mode,
         )
         segment_clips.append(clip_path)
+        segment_durations.append(seg_dur_s)
         gc.collect()
 
     # Lưu lại project.json đã đồng bộ đầy đủ ảnh, giọng, nhạc
@@ -925,37 +1024,112 @@ def _render_hbt_core_auto_impl(
         encoding="utf-8",
     )
 
-    # 6. Trộn âm thanh tổng (Giọng VieNeu + BGM acrossfade + SFX)
-    emit(84.0, "mix", "Trộn âm thanh (Giọng VieNeu-TTS + BGM acrossfade + SFX)")
+    # 5b. Vẽ phụ đề Karaoke từng cụm ngắn 4-7 từ (tối đa 2 dòng, vùng an toàn TikTok)
+    emit(80.0, "captions", "Tạo phụ đề Karaoke từng cụm 2 dòng")
+    phrases = build_core_karaoke_phrases(script.segments, timings)
+    cap_concat: Path | None = None
+    if phrases:
+        cap_dir = build_dir / "captions"
+        if cap_dir.is_dir():
+            shutil.rmtree(cap_dir, ignore_errors=True)
+        cap_timeline = captions.render_states(
+            phrases,
+            [captions.DEFAULT_Y] * max(1, total_segs),
+            cap_dir,
+            total_duration_s,
+        )
+        cap_concat = build_dir / "captions.ffconcat"
+        captions.write_ffconcat(cap_timeline, cap_concat)
+        captions.write_srt(phrases, job_dir / "captions.srt")
+
+    # 6. Trộn âm thanh tổng (Giọng VieNeu -14 LUFS + BGM -27 LUFS ducking + SFX)
+    emit(84.0, "mix", "Trộn âm thanh (-14 LUFS, ducking BGM + SFX)")
     mixed_wav = build_dir / "final_mix.wav"
     mix_core_audio_track(voice_wav, bgm_wav, sfx_events, total_duration_s, mixed_wav)
 
-    # 7. Ghép các clip phân đoạn và âm thanh thành video.mp4 hoàn chỉnh với kẹp tài nguyên FFmpeg
-    emit(90.0, "compose", "Ghép nối video hoàn chỉnh (kẹp tài nguyên CPU/RAM)")
-    concat_list_path = build_dir / "clips.ffconcat"
-    concat_lines = ["ffconcat version 1.0"]
+    # 6b. Ghép Outro 4s chuẩn thương hiệu (nếu bật và không phải preview)
+    active_brand_dir = Path(brand_dir or BRAND_DIR).resolve()
+    outro_mp4 = active_brand_dir / "outro" / "outro_4s_50fps.mp4"
+    outro_voice = lib_dir / "outro" / "voice.wav"
+    use_outro = bool(project.settings.outro) and not preview and outro_mp4.is_file()
+    final_audio_wav = mixed_wav
+    if use_outro:
+        try:
+            outro_dir = build_dir / "outro"
+            outro_dir.mkdir(parents=True, exist_ok=True)
+            outro_wav = outro_dir / "outro_audio.wav"
+            build_outro_audio(
+                outro_voice if outro_voice.is_file() else None,
+                outro_wav,
+                outro_dir,
+            )
+            joined_wav = build_dir / "final_with_outro.wav"
+            join_audio(mixed_wav, outro_wav, joined_wav)
+            if joined_wav.is_file():
+                final_audio_wav = joined_wav
+            else:
+                use_outro = False
+        except Exception as exc:
+            logger.warning("Không ghép được âm thanh Outro 4s: %s", exc)
+            warnings.append(f"Bỏ qua Outro 4s do lỗi: {exc}")
+            use_outro = False
+
+    # 7. Ghép các clip phân đoạn (xfade) + phủ Karaoke + nối Outro (nếu có) thành video.mp4
+    emit(90.0, "compose", "Ghép nối video hoàn chỉnh (xfade + Karaoke + kẹp CPU/RAM)")
+    compose_inputs: list[str | Path] = []
     for cp in segment_clips:
-        escaped = cp.resolve().as_posix().replace("'", "'\\''")
-        concat_lines.append(f"file '{escaped}'")
-    concat_list_path.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+        compose_inputs.extend(["-i", cp])
+
+    xfade_fc, body_label, body_dur = build_xfade_filter(
+        segment_durations, transition_s=xfade_d, fps=out_fps
+    )
+    fc_parts: list[str] = [xfade_fc]
+    cur_v = body_label
+    next_in_idx = len(segment_clips)
+
+    if cap_concat is not None and cap_concat.is_file():
+        compose_inputs.extend(["-f", "concat", "-safe", "0", "-i", cap_concat])
+        cap_idx = next_in_idx
+        next_in_idx += 1
+        scale_cap = f"scale={width}:{height}," if width != W or height != H else ""
+        fc_parts.append(
+            f"[{cap_idx}:v]fps={out_fps},{scale_cap}format=rgba[cap];"
+            f"{cur_v}[cap]overlay=0:0:eof_action=pass:format=auto,format=yuv420p[vcap]"
+        )
+        cur_v = "[vcap]"
+
+    if use_outro:
+        compose_inputs.extend(["-i", outro_mp4])
+        outro_idx = next_in_idx
+        next_in_idx += 1
+        outro_offset = max(0.0, round(body_dur - OUTRO_CROSSFADE, 3))
+        fc_parts.append(
+            f"[{outro_idx}:v]fps={out_fps},scale={width}:{height}:flags=lanczos,"
+            f"format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[voutro];"
+            f"{cur_v}fps={out_fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[vbody_fmt];"
+            f"[vbody_fmt][voutro]xfade=transition=fade:duration={OUTRO_CROSSFADE:.3f}"
+            f":offset={outro_offset:.3f},format=yuv420p[vfinal]"
+        )
+        cur_v = "[vfinal]"
+    else:
+        fc_parts.append(f"{cur_v}format=yuv420p[vfinal]")
+        cur_v = "[vfinal]"
+
+    compose_inputs.extend(["-i", final_audio_wav])
+    audio_idx = next_in_idx
 
     video_out = job_dir / "video.mp4"
     partial_video = job_dir / "video.part.mp4"
     run_ffmpeg(
         [
             *FFMPEG_RESOURCE_CLAMP,
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            concat_list_path,
-            "-i",
-            mixed_wav,
+            *compose_inputs,
+            "-filter_complex",
+            ";".join(fc_parts),
             "-map",
-            "0:v:0",
+            cur_v,
             "-map",
-            "1:a:0",
+            f"{audio_idx}:a:0",
             "-r",
             str(out_fps),
             *FFMPEG_ENCODE_CLAMP,

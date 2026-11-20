@@ -354,12 +354,71 @@ class CoreGenerateSceneImageBody(BaseModel):
     script: str | dict[str, Any] | None = None
 
 
+class CorePrepareBody(BaseModel):
+    """Yêu cầu 1 nút 'Chuẩn bị nội dung' 3 pha: Kịch bản -> Giọng VieNeu -> Ảnh 2D Cloudflare."""
+
+    prompt: str = ""
+    topic: str | None = None
+    model_name: str | None = None
+    selectedModel: str | None = None
+    script: str | dict[str, Any] | None = None
+    voice_id: str | None = None
+    economy_mode: bool = False
+    overwrite_images: bool = False
+
+
 def _missing_cloudflare_response() -> JSONResponse:
     msg = "Chưa cấu hình Cloudflare Account ID hoặc API Token. Vào Cài đặt để nhập khóa."
     return JSONResponse(
         status_code=400,
         content={"ok": False, "code": "missing_cloudflare_key", "detail": msg, "message": msg},
     )
+
+
+@router.post("/hbt-core/{slug}/prepare", status_code=202)
+def prepare_hbt_core(
+    slug: str,
+    state: State,
+    body: CorePrepareBody | None = None,
+) -> Any:
+    """Chạy 1 job nền 3 pha: Kịch bản (0-25%) -> Giọng VieNeu (25-55%) -> Ảnh 2D (55-100%)."""
+    body = body or CorePrepareBody()
+    parsed_script: HbtCoreScript | None = None
+    if body.script is not None:
+        parsed_script = _parse_v1_script(body.script)
+    elif not body.prompt.strip():
+        raise BadRequest(
+            "Cần nhập chủ đề (prompt) hoặc cung cấp kịch bản JSON để chuẩn bị nội dung"
+        )
+
+    target_slug = None if slug in ("_new", "new") else slug
+    if parsed_script is not None:
+        actual_slug, _ = _ensure_project_for_script(state, parsed_script, slug=target_slug)
+    elif target_slug and state.storage.exists(target_slug):
+        actual_slug = target_slug
+    else:
+        series_name = TOPIC_SERIES_LABELS.get((body.topic or "science").lower(), "Vì Sao")
+        title_seed = body.prompt.strip()[:80] or "Video Hay Biết Tuốt"
+        project = state.storage.create(title=title_seed, series=series_name, scene_count=3)
+        actual_slug = project.slug
+
+    chosen_model = body.model_name or body.selectedModel
+    job = state.jobs.submit_hbt_core_prepare(
+        actual_slug,
+        prompt=body.prompt.strip(),
+        topic=body.topic,
+        model_name=chosen_model,
+        script=parsed_script,
+        voice_id=body.voice_id,
+        economy_mode=body.economy_mode,
+        overwrite_images=body.overwrite_images,
+    )
+    return {
+        "ok": True,
+        "slug": actual_slug,
+        "job_id": job.id,
+        "total": job.total_beats,
+    }
 
 
 @router.post("/hbt-core/{slug}/generate-images", status_code=202)

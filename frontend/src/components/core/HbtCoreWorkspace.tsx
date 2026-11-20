@@ -70,7 +70,7 @@ interface VoiceProgressDetail {
   percent: number;
 }
 
-function AutoImageProgressBar({
+function PrepareProgressBar({
   totalFallback,
   onCancel,
 }: {
@@ -80,7 +80,12 @@ function AutoImageProgressBar({
   const progress = useRenderJobProgress();
   const cur = progress.currentBeat ?? 0;
   const total = progress.totalBeats ?? totalFallback;
-  const pct = Math.max(0, Math.min(100, Math.round(progress.percent)));
+  const rawPct =
+    typeof progress.percent === 'number' && Number.isFinite(progress.percent)
+      ? progress.percent
+      : 0;
+  const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const label = progress.message || progress.stage || T.prepare.stageFallback;
   return (
     <div
       role="status"
@@ -88,8 +93,9 @@ function AutoImageProgressBar({
       className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line bg-soft px-3 py-2 text-tiny"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="font-bold text-text whitespace-nowrap">
-          {T.autoImage.progressLabel(cur, total)}
+        <span className="font-bold text-text truncate">
+          {label}
+          {total > 0 && cur > 0 ? ` (${cur}/${total})` : ''}
         </span>
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
           <div
@@ -161,15 +167,16 @@ export function HbtCoreWorkspace({
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const [v2Loading, setV2Loading] = useState(false);
-  const [imageBusyStarting, setImageBusyStarting] = useState(false);
+  const [preparingStarting, setPreparingStarting] = useState(false);
   const [regenSceneIdx, setRegenSceneIdx] = useState<number | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageMissingKey, setImageMissingKey] = useState(false);
   const [imgVersion, setImgVersion] = useState(0);
 
-  const isGeneratingImages =
-    imageBusyStarting || (renderJob.running && renderJob.kind === 'hbt_core_images');
+  const isPreparing =
+    preparingStarting ||
+    (renderJob.running &&
+      (renderJob.kind === 'hbt_core_prepare' || renderJob.kind === 'hbt_core_images'));
 
   // Render & SSE state
   const [rendering, setRendering] = useState(false);
@@ -234,18 +241,33 @@ export function HbtCoreWorkspace({
   }, []);
 
   useEffect(() => {
-    if (renderJob.kind !== 'hbt_core_images' || !renderJob.finished) return;
+    if (
+      (renderJob.kind !== 'hbt_core_images' && renderJob.kind !== 'hbt_core_prepare') ||
+      !renderJob.finished
+    ) {
+      return;
+    }
     if (renderJob.finished.status === 'done') {
       setImgVersion((v) => v + 1);
-      setImageError(null);
-      setImageMissingKey(false);
+      const out = renderJob.finished.output as
+        { missing_cloudflare_key?: boolean; warning?: string } | null | undefined;
+      if (out?.missing_cloudflare_key) {
+        setImageError(out.warning || T.prepare.missingCfWarning);
+        setImageMissingKey(true);
+      } else {
+        setImageError(null);
+        setImageMissingKey(false);
+      }
       void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
       const doneSlug = renderJob.finished.project || resultSlug || initialSlug;
       if (doneSlug) {
+        setResultSlug(doneSlug);
         void api
           .getProjectCoreScript(doneSlug)
           .then((res) => {
             if (res?.script?.segments?.length) {
+              setTitle(res.script.title);
+              setTopic((res.script.topic as HbtCoreTopic) || 'science');
               setSegments(res.script.segments);
               setJsonText(JSON.stringify(res.script, null, 2));
             }
@@ -419,34 +441,38 @@ export function HbtCoreWorkspace({
     toast.error(new Error(msg));
   };
 
-  const handleGenerateAllImages = async () => {
+  const handlePrepareContent = async () => {
     setImageError(null);
     setImageMissingKey(false);
-    if (assets?.cloudflare_configured === false) {
-      setImageError(T.autoImage.missingKeyError);
-      setImageMissingKey(true);
-      return;
-    }
-    setImageBusyStarting(true);
+    setFallbackNotice(null);
+    setRenderError(null);
+    setPreparingStarting(true);
     try {
       const targetSlug = resultSlug ?? initialSlug ?? '_new';
-      const res = await api.generateHbtCoreImages(targetSlug, {
-        overwrite: true,
-        script: buildCurrentScript(),
-      });
+      const cleanPrompt = prompt.trim();
+      const payload = cleanPrompt
+        ? {
+            prompt: cleanPrompt,
+            topic: v2Topic,
+            selectedModel,
+          }
+        : {
+            script: buildCurrentScript(),
+          };
+      const res = await api.prepareHbtCore(targetSlug, payload);
       if (res.slug) setResultSlug(res.slug);
       renderJob.attachJob({
         jobId: res.job_id,
         slug: res.slug,
-        kind: 'hbt_core_images',
-        stage: 'Tự vẽ ảnh 2D',
+        kind: 'hbt_core_prepare',
+        stage: cleanPrompt ? 'Tạo kịch bản' : 'Sinh giọng đọc',
         currentBeat: 0,
         totalBeats: res.total ?? segments.length,
       });
     } catch (err) {
       handleImageApiError(err);
     } finally {
-      setImageBusyStarting(false);
+      setPreparingStarting(false);
     }
   };
 
@@ -612,80 +638,6 @@ export function HbtCoreWorkspace({
     }
   };
 
-  const handleRunV2Prompt = async () => {
-    const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) return;
-
-    setV2Loading(true);
-    setFallbackNotice(null);
-    setRenderError(null);
-    setStepLogs({
-      script: [`Gửi yêu cầu Gemini (${selectedModel}) cho chủ đề: "${cleanPrompt}"`],
-      voice: [],
-      assets: [],
-      render: [],
-    });
-    try {
-      const res = await api.promptHbtCoreV2({
-        prompt: cleanPrompt,
-        topic: v2Topic,
-        selectedModel,
-        slug: resultSlug ?? initialSlug ?? null,
-        auto_render: true,
-      });
-      if (res.fallback_v1 || res.success === false || res.ok === false || !res.script) {
-        const fallbackMsg =
-          res.message ||
-          res.detail ||
-          res.error ||
-          'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
-        setFallbackNotice(fallbackMsg);
-        setShowAdvancedJson(true);
-        toast.error(new Error(fallbackMsg));
-        return;
-      }
-
-      const sc = res.script;
-      setTitle(sc.title);
-      setTopic((sc.topic as HbtCoreTopic) || v2Topic);
-      setSegments(sc.segments);
-      setSelectedSegIndex(0);
-      setJsonText(JSON.stringify(sc, null, 2));
-      if (res.slug) {
-        setResultSlug(res.slug);
-      }
-      toast.info(T.v2.successToast);
-      if (res.job_id && res.slug) {
-        connectJobSse(res.job_id, res.slug);
-      }
-    } catch (err) {
-      let msg = 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
-      if (err instanceof ApiError) {
-        const errBody = err.body as {
-          message?: unknown;
-          detail?: unknown;
-          error?: unknown;
-        } | null;
-        if (errBody && typeof errBody.message === 'string' && errBody.message.trim()) {
-          msg = errBody.message;
-        } else if (errBody && typeof errBody.detail === 'string' && errBody.detail.trim()) {
-          msg = errBody.detail;
-        } else if (errBody && typeof errBody.error === 'string' && errBody.error.trim()) {
-          msg = errBody.error;
-        } else if (err.message) {
-          msg = err.message;
-        }
-      } else if (err instanceof Error && err.message) {
-        msg = err.message;
-      }
-      setFallbackNotice(msg);
-      setShowAdvancedJson(true);
-      toast.error(new Error(msg));
-    } finally {
-      setV2Loading(false);
-    }
-  };
-
   const sfxOptions = assets?.sfx_presets ?? ['whoosh', 'pop', 'impact', 'none'];
   const existingImages = assets?.images ?? [];
   const geminiModels =
@@ -792,44 +744,33 @@ export function HbtCoreWorkspace({
 
             <div className="flex flex-wrap items-center gap-2">
               {onClose && (
-                <Button tone="soft" size="sm" disabled={rendering || v2Loading} onClick={onClose}>
+                <Button tone="soft" size="sm" disabled={rendering || isPreparing} onClick={onClose}>
                   {vi.common.close}
                 </Button>
               )}
               <button
                 type="button"
-                disabled={isGeneratingImages || v2Loading || rendering}
-                onClick={() => void handleGenerateAllImages()}
-                className="ui-btn ui-btn-soft ui-btn-sm"
-              >
-                <SparklesIcon size={15} />
-                <span>
-                  {isGeneratingImages ? T.autoImage.generatingBtn : T.autoImage.generateAllBtn}
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={v2Loading || rendering || !prompt.trim()}
-                onClick={() => void handleRunV2Prompt()}
+                disabled={isPreparing || rendering}
+                onClick={() => void handlePrepareContent()}
                 className="ui-btn ui-btn-ink ui-btn-sm"
               >
                 <SparklesIcon size={16} />
-                <span>{v2Loading ? T.studio.generatingBtn : T.studio.generateBtn}</span>
+                <span>{isPreparing ? T.prepare.preparingBtn : T.prepare.prepareBtn}</span>
               </button>
               <ExportPopover
                 aspect="9:16"
                 showWatermarkControl
                 onExportFinal={() => void handleStartV1Render()}
-                finalLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-                disabled={rendering || v2Loading}
+                finalLabel={rendering ? T.v1.renderingBtn : T.prepare.exportBtn}
+                disabled={rendering || isPreparing}
                 isRendering={rendering}
                 progressPct={progressPct}
                 progressStage={progressStep}
               />
             </div>
           </div>
-          {isGeneratingImages && (
-            <AutoImageProgressBar
+          {isPreparing && (
+            <PrepareProgressBar
               totalFallback={segments.length}
               onCancel={() => void renderJob.cancel()}
             />
@@ -957,6 +898,9 @@ export function HbtCoreWorkspace({
                         {STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'}{' '}
                         {seg.sticker || 'question'}
                       </Badge>
+                      {typeof seg.duration === 'number' && Number.isFinite(seg.duration) && (
+                        <Badge tone="ok">{seg.duration.toFixed(1)}s</Badge>
+                      )}
                     </div>
                     {segments.length > 1 && (
                       <button
@@ -969,6 +913,20 @@ export function HbtCoreWorkspace({
                       </button>
                     )}
                   </div>
+
+                  {seg.audio_path && resultSlug && (
+                    <div className="flex items-center gap-2 rounded-inner border border-line bg-soft px-2.5 py-1.5">
+                      <span className="text-tiny font-bold text-muted whitespace-nowrap">
+                        {T.prepare.audioPreviewLabel}
+                      </span>
+                      <audio
+                        controls
+                        preload="none"
+                        src={`${projectFileUrl(resultSlug, seg.audio_path)}?v=${imgVersion}`}
+                        className="h-7 flex-1"
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Input
@@ -1008,7 +966,7 @@ export function HbtCoreWorkspace({
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          disabled={regenSceneIdx === idx || isGeneratingImages || rendering}
+                          disabled={regenSceneIdx === idx || isPreparing || rendering}
                           onClick={() => void handleGenerateSingleImage(idx)}
                           className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2 disabled:opacity-50"
                         >
@@ -1088,8 +1046,8 @@ export function HbtCoreWorkspace({
             safeZone={safeZone}
             onSafeZoneChange={setSafeZone}
             exportBusy={rendering}
-            exportDisabled={rendering || v2Loading}
-            exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
+            exportDisabled={rendering || isPreparing}
+            exportLabel={rendering ? T.v1.renderingBtn : T.prepare.exportBtn}
             onExport={() => void handleStartV1Render()}
             showWatermarkControl={false}
             footer={
@@ -1159,18 +1117,15 @@ export function HbtCoreWorkspace({
             segments,
           }}
           beatIndex={safeIndex}
-          disabled={rendering || v2Loading}
+          disabled={rendering || isPreparing}
         />
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
-        {(v2Loading || rendering || resultVideoUrl || renderError) &&
+        {(rendering || resultVideoUrl || renderError) &&
           (() => {
             const done = Boolean(resultVideoUrl) && !rendering;
-            const scriptState: WaterfallStepState = v2Loading
-              ? 'running'
-              : renderError && !rendering && progressPct <= 5
-                ? 'error'
-                : 'done';
+            const scriptState: WaterfallStepState =
+              renderError && !rendering && progressPct <= 5 ? 'error' : 'done';
             const voiceState: WaterfallStepState = done
               ? 'done'
               : progressStep === 'voice' && rendering
@@ -1231,7 +1186,7 @@ export function HbtCoreWorkspace({
               <div className="space-y-3">
                 <WaterfallProgress
                   title={T.progress.title}
-                  overallPercent={v2Loading ? 10 : progressPct}
+                  overallPercent={progressPct}
                   steps={wfSteps}
                   error={renderError}
                 />

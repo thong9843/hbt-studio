@@ -566,6 +566,9 @@ class JobManager:
             if job.kind == "hbt_core_images":
                 self._run_hbt_core_images(job)
                 return
+            if job.kind == "hbt_core_prepare":
+                self._run_hbt_core_prepare(job)
+                return
             if job.kind in ("stickv", "stickv_render"):
                 self._run_stickv_render(job)
                 return
@@ -1419,6 +1422,338 @@ class JobManager:
             job._finish(FAILED, error=str(e))
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job hbt_core_images: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_prepare(
+        self,
+        slug: str,
+        *,
+        prompt: str = "",
+        topic: str | None = None,
+        model_name: str | None = None,
+        script: Any = None,
+        voice_id: str | None = None,
+        economy_mode: bool = False,
+        overwrite_images: bool = False,
+    ) -> Job:
+        """Đưa job chuẩn bị 3 pha (Kịch bản -> Giọng VieNeu -> Ảnh 2D Cloudflare) vào hàng đợi."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang chạy tác vụ khác, hãy đợi xong hoặc huỷ")
+        total = (
+            len(script.segments) if script is not None and getattr(script, "segments", None) else 0
+        )
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="hbt_core_prepare",
+            stage="Tạo kịch bản",
+            current_beat=0,
+            total_beats=total or None,
+        )
+        job.core_prepare_options = {  # type: ignore[attr-defined]
+            "prompt": prompt,
+            "topic": topic,
+            "model_name": model_name,
+            "script": script,
+            "voice_id": voice_id,
+            "economy_mode": economy_mode,
+            "overwrite_images": overwrite_images,
+        }
+        job._progress(
+            2.0,
+            "script",
+            "Bắt đầu chuẩn bị nội dung 3 pha",
+            stage="Tạo kịch bản",
+            current_beat=0,
+            total_beats=total or None,
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_prepare(self, job: Job) -> None:
+        """Thực thi chuỗi 3 pha HBT Core:
+        Pha 1 (0-25%): Gemini tạo kịch bản (bỏ qua nếu người dùng đã dán JSON).
+        Pha 2 (25-55%): VieNeu-TTS sinh giọng từng cảnh & lưu cache.
+        Pha 3 (55-100%): Cloudflare Flux vẽ ảnh 2D (nếu thiếu key thì kết thúc gọn kèm cảnh báo).
+        """
+        from hbt.app_settings import resolve_cloudflare_config
+        from hbt.core.gemini_client import GeminiClientError, generate_script_from_prompt
+        from hbt.core.render import sync_script_to_project
+        from hbt.core.tts_pipeline import sync_wavs_to_audio_folder
+        from hbt.core.voice import synthesize_core_segments
+        from hbt.shared.image_gen.cloudflare_flux import (
+            CloudflareImageError,
+            derive_project_seed,
+            generate_scene_image,
+        )
+
+        opts: dict[str, Any] = getattr(job, "core_prepare_options", {})
+        prompt_text = str(opts.get("prompt") or "").strip()
+        topic_hint = opts.get("topic")
+        model_name = opts.get("model_name")
+        script = opts.get("script")
+        voice_id = opts.get("voice_id")
+        economy_mode = bool(opts.get("economy_mode", False))
+        overwrite_images = bool(opts.get("overwrite_images", False))
+        warnings: list[str] = []
+
+        try:
+            with cancel.use_token(job.token):
+                folder = self.storage.project_dir(job.slug)
+
+                # Pha 1 (0 -> 25%): Kịch bản
+                if script is None:
+                    job._progress(
+                        8.0,
+                        "script",
+                        "Pha 1/3: Đang tạo kịch bản bằng Gemini",
+                        stage="Tạo kịch bản",
+                    )
+                    script = generate_script_from_prompt(
+                        prompt_text,
+                        topic_hint=topic_hint,
+                        model_name=model_name,
+                    )
+                    project = self.storage.load(job.slug)
+                    project = sync_script_to_project(project, folder, script)
+                    self.storage.save(job.slug, project)
+                else:
+                    project = self.storage.load(job.slug)
+                    project = sync_script_to_project(project, folder, script)
+                    self.storage.save(job.slug, project)
+
+                total = len(script.segments)
+                job.total_beats = total
+                job._progress(
+                    25.0,
+                    "script",
+                    f"Pha 1/3: Hoàn tất kịch bản {total} cảnh",
+                    stage="Tạo kịch bản",
+                    current_beat=total,
+                    total_beats=total,
+                )
+
+                # Pha 2 (25 -> 55%): Sinh giọng VieNeu-TTS trước để nghe thử & tái dùng khi xuất
+                job.token.check()
+                job._progress(
+                    27.0,
+                    "voice",
+                    f"Pha 2/3: Đang sinh giọng đọc cho {total} cảnh",
+                    stage="Sinh giọng đọc",
+                    current_beat=0,
+                    total_beats=total,
+                )
+
+                def _on_voice_sse(ev: dict[str, Any]) -> None:
+                    v_pct = float(ev.get("percent", 0))
+                    pct = round(25.0 + v_pct * 0.30, 1)
+                    job._progress(
+                        pct,
+                        "voice",
+                        str(ev.get("message", "Đang sinh giọng VieNeu-TTS")),
+                        stage="Sinh giọng đọc",
+                        current_beat=int(ev.get("current", 0)),
+                        total_beats=int(ev.get("total", total)),
+                    )
+
+                _, timings = synthesize_core_segments(
+                    script.segments,
+                    folder,
+                    voice_provider=self.voice,
+                    voice_id=voice_id,
+                    on_sse_event=_on_voice_sse,
+                )
+                sync_wavs_to_audio_folder(
+                    [(t.order, Path(t.wav_path)) for t in timings],
+                    folder,
+                )
+                latest_p = self.storage.load(job.slug)
+                latest_p.voice = Voice(file="voice.wav")
+                self.storage.save(job.slug, latest_p)
+
+                core_script_path = folder / "core_script.json"
+                script_dict = script.model_dump(mode="json")
+                for idx_t, t in enumerate(timings):
+                    if idx_t < len(script_dict["segments"]):
+                        seg_d = script_dict["segments"][idx_t]
+                        seg_d["duration"] = round(float(t.duration_s), 2)
+                        seg_d["audio_path"] = f"audio/scene_{t.order:02d}.wav"
+                        seg_d["start_time"] = round(float(t.start_s), 3)
+                        seg_d["end_time"] = round(float(t.end_s), 3)
+                core_script_path.write_text(
+                    json.dumps(script_dict, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                job._progress(
+                    55.0,
+                    "voice",
+                    f"Pha 2/3: Đã sinh xong giọng đọc {total}/{total} cảnh",
+                    stage="Sinh giọng đọc",
+                    current_beat=total,
+                    total_beats=total,
+                )
+
+                # Pha 3 (55 -> 100%): Tự vẽ ảnh 2D Cloudflare Workers AI
+                job.token.check()
+                account_id, api_token, cf_model = resolve_cloudflare_config(
+                    self.storage.workspace_dir
+                )
+                if not account_id or not api_token:
+                    warn_msg = (
+                        "Chưa cấu hình Cloudflare Account ID hoặc API Token. "
+                        "Đã xong kịch bản và giọng đọc; vào Cài đặt để bật tự vẽ ảnh 2D."
+                    )
+                    warnings.append(warn_msg)
+                    job._progress(
+                        100.0,
+                        "done",
+                        warn_msg,
+                        stage="Hoàn tất",
+                        current_beat=total,
+                        total_beats=total,
+                    )
+                    job._finish(
+                        DONE,
+                        output={
+                            "slug": job.slug,
+                            "script": script_dict,
+                            "generated_images": 0,
+                            "total": total,
+                            "missing_cloudflare_key": True,
+                            "warning": warn_msg,
+                            "warnings": warnings,
+                        },
+                    )
+                    return
+
+                images_dir = folder / "images"
+                images_dir.mkdir(parents=True, exist_ok=True)
+                seed = derive_project_seed(job.slug)
+                scene1_ref: Path | None = None
+                generated_images = 0
+
+                for idx_i, seg_d in enumerate(script_dict["segments"], start=1):
+                    job.token.check()
+                    rel_img = f"images/scene-{idx_i:02d}.png"
+                    dest = images_dir / f"scene-{idx_i:02d}.png"
+                    cur_img_rel = str(seg_d.get("image") or "")
+                    existing_f = folder / cur_img_rel if cur_img_rel else dest
+
+                    if not overwrite_images and existing_f.is_file() and cur_img_rel:
+                        if idx_i == 1:
+                            scene1_ref = existing_f
+                        pct = round(55.0 + (idx_i / max(1, total)) * 43.0, 1)
+                        job._progress(
+                            pct,
+                            "images",
+                            f"Pha 3/3: Giữ ảnh có sẵn cảnh {idx_i}/{total}",
+                            stage="Vẽ ảnh 2D",
+                            current_beat=idx_i,
+                            total_beats=total,
+                        )
+                        continue
+
+                    pct_s = round(55.0 + ((idx_i - 1) / max(1, total)) * 43.0, 1)
+                    job._progress(
+                        pct_s,
+                        "images",
+                        f"Pha 3/3: Đang vẽ ảnh cảnh {idx_i}/{total}",
+                        stage="Vẽ ảnh 2D",
+                        current_beat=idx_i,
+                        total_beats=total,
+                    )
+
+                    fallback_ref = images_dir / "scene-01.png"
+                    ref_img = (
+                        (scene1_ref if scene1_ref and scene1_ref.is_file() else fallback_ref)
+                        if idx_i > 1
+                        else None
+                    )
+                    if ref_img is not None and not ref_img.is_file():
+                        ref_img = None
+
+                    raw_prompt = str(seg_d.get("image_prompt") or "").strip()
+                    fallback_ctx = f"{seg_d.get('title') or ''}. {seg_d.get('text') or ''}".strip(
+                        ". "
+                    )
+                    try:
+                        generate_scene_image(
+                            raw_prompt,
+                            dest,
+                            account_id=account_id,
+                            api_token=api_token,
+                            model=cf_model,
+                            seed=seed,
+                            reference_image=ref_img,
+                            economy_mode=economy_mode,
+                            fallback_context=fallback_ctx,
+                        )
+                        generated_images += 1
+                    except CloudflareImageError as exc:
+                        w = f"Vẽ ảnh cảnh {idx_i} lỗi: {exc}"
+                        warnings.append(w)
+                        log.warning(w)
+                        continue
+
+                    latest = self.storage.load(job.slug)
+                    actual_rel = rel_img
+                    if idx_i - 1 < len(latest.scenes):
+                        latest.scenes[idx_i - 1].image = rel_img
+                        self.storage.save(job.slug, latest)
+                        reloaded = self.storage.load(job.slug)
+                        actual_rel = reloaded.scenes[idx_i - 1].image or rel_img
+                        if idx_i == 1:
+                            cand1 = folder / actual_rel
+                            if cand1.is_file():
+                                scene1_ref = cand1
+                    seg_d["image"] = actual_rel
+                    core_script_path.write_text(
+                        json.dumps(script_dict, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+
+                    pct_e = round(55.0 + (idx_i / max(1, total)) * 43.0, 1)
+                    job._progress(
+                        pct_e,
+                        "images",
+                        f"Pha 3/3: Đã vẽ xong cảnh {idx_i}/{total}",
+                        stage="Vẽ ảnh 2D",
+                        current_beat=idx_i,
+                        total_beats=total,
+                    )
+
+                job._progress(
+                    100.0,
+                    "done",
+                    f"Hoàn tất chuẩn bị {total} cảnh (kịch bản, giọng đọc, ảnh 2D)",
+                    stage="Hoàn tất",
+                    current_beat=total,
+                    total_beats=total,
+                )
+                job._finish(
+                    DONE,
+                    output={
+                        "slug": job.slug,
+                        "script": script_dict,
+                        "generated_images": generated_images,
+                        "total": total,
+                        "missing_cloudflare_key": False,
+                        "warnings": warnings,
+                    },
+                )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except GeminiClientError as e:
+            job._finish(FAILED, error=e.message)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_prepare: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
     @staticmethod

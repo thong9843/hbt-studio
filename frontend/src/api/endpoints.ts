@@ -409,6 +409,23 @@ export const api = {
       `/hbt-core/${enc(slug)}/generate-images`,
       { json: body ?? {} },
     ),
+  prepareHbtCore: (
+    slug: string,
+    body: {
+      prompt?: string;
+      topic?: string | null;
+      selectedModel?: string | null;
+      script?: HbtCoreScript | null;
+      voice_id?: string | null;
+      economy_mode?: boolean;
+      overwrite_images?: boolean;
+    },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; job_id: string; total?: number }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/prepare`,
+      { json: body },
+    ),
   generateHbtCoreSceneImage: (
     slug: string,
     sceneIndex: number,

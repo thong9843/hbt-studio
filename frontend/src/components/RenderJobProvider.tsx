@@ -73,6 +73,8 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       const isStickv = kindRef.current === 'stickv' || job.kind === 'stickv';
       const isCoreImages = kindRef.current === 'hbt_core_images' || job.kind === 'hbt_core_images';
+      const isCorePrepare =
+        kindRef.current === 'hbt_core_prepare' || job.kind === 'hbt_core_prepare';
       if (isStickv) {
         void queryClient.invalidateQueries({ queryKey: ['stickv-list'] });
         void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
@@ -83,6 +85,11 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
         void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
         void queryClient.invalidateQueries({ queryKey: ['project', job.project] });
         if (job.status === 'done') toast.info(vi.hbtCore.autoImage.doneToast);
+        else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
+      } else if (isCorePrepare) {
+        void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+        void queryClient.invalidateQueries({ queryKey: ['project', job.project] });
+        if (job.status === 'done') toast.info(vi.hbtCore.prepare.doneToast);
         else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
       } else if (job.status === 'done') {
         toast.info(vi.export.done);

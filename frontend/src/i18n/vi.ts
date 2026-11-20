@@ -1356,6 +1356,16 @@ export const vi = {
       sceneDoneToast: (n: number) => `Đã vẽ lại ảnh cảnh ${n}`,
       progressLabel: (cur: number, total: number) => `Đang vẽ ảnh ${cur}/${total}`,
     },
+    prepare: {
+      prepareBtn: 'Chuẩn bị nội dung',
+      preparingBtn: 'Đang chuẩn bị',
+      exportBtn: 'Xuất video',
+      doneToast: 'Đã chuẩn bị xong kịch bản, giọng đọc và ảnh 2D',
+      missingCfWarning:
+        'Đã xong kịch bản và giọng đọc. Nhập khóa Cloudflare ở Cài đặt để tự vẽ ảnh 2D.',
+      audioPreviewLabel: 'Nghe thử giọng cảnh',
+      stageFallback: 'Đang chuẩn bị nội dung',
+    },
   },
   assetHub: {
     title: 'Thư viện tài nguyên',

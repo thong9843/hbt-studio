@@ -149,9 +149,12 @@ def render_smart_bgm_wav(
     *,
     crossfade_s: float = ACROSSFADE_DURATION_S,
 ) -> Path | None:
-    """Nối danh sách nhạc nền bằng bộ lọc FFmpeg `acrossfade=d=2.0` và kẹp `-threads 2`."""
+    """Nối danh sách nhạc nền bằng bộ lọc FFmpeg `acrossfade=d=2.0`, chọn điểm vào có nhạc
+    (`pick_music_start`) và chuẩn hóa `-27 LUFS` đều ngay từ giây 0 (kẹp `-threads 2`)."""
     if not playlist:
         return None
+
+    from hbt.pipeline.audio import pick_music_start
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     if len(playlist) == 1:
@@ -164,14 +167,28 @@ def render_smart_bgm_wav(
             repeats = max(2, int((target_duration_s + 4.0) / max(d0 - crossfade_s, 2.0)) + 1)
             playlist = [playlist[0]] * min(repeats, 12)
 
+    try:
+        first_start = max(0.0, float(pick_music_start(playlist[0], target_duration_s)))
+    except Exception:
+        first_start = 0.0
+
     inputs: list[str | Path] = []
-    for track in playlist:
+    for idx, track in enumerate(playlist):
+        if idx == 0 and first_start > 0.0:
+            inputs.extend(["-ss", f"{first_start:.3f}"])
         inputs.extend(["-i", track])
 
     fc, out_label = build_acrossfade_filter_graph(
         len(playlist),
         target_duration_s,
         crossfade_s=crossfade_s,
+    )
+    fade_out_st = max(0.0, target_duration_s - 1.5)
+    fc_norm = (
+        f"{fc};{out_label}"
+        f"afade=t=in:st=0:d=0.8,"
+        f"afade=t=out:st={fade_out_st:.3f}:d=1.5,"
+        f"loudnorm=I=-27:TP=-6:LRA=11[bgm_norm]"
     )
     run_ffmpeg(
         [
@@ -181,9 +198,9 @@ def render_smart_bgm_wav(
             "2",
             *inputs,
             "-filter_complex",
-            fc,
+            fc_norm,
             "-map",
-            out_label,
+            "[bgm_norm]",
             "-ar",
             "48000",
             "-ac",

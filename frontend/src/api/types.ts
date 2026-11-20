@@ -245,6 +245,7 @@ export interface ActiveJob {
     | 'postv_auto'
     | 'hbt_core_auto'
     | 'hbt_core_images'
+    | 'hbt_core_prepare'
     | 'stickv';
   mode?: 'preview' | 'final';
   status: JobStatus;

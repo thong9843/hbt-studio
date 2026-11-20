@@ -109,10 +109,12 @@ def test_vieneu_segment_voice_microseconds_and_sse(tmp_path: Path) -> None:
     assert sse_events[2]["total"] == 3
     assert sse_events[2]["percent"] == 100
 
-    # Kiểm tra mốc micro-giây chính xác và liên tục
-    assert timings[0].start_us == 0
+    # Kiểm tra mốc micro-giây chính xác và liên tục (kèm đệm đầu 0.15s)
+    from hbt.core.voice import LEAD_PAD_US
+
+    assert timings[0].start_us == LEAD_PAD_US
     assert timings[0].duration_us > 1_000_000  # > 1 giây
-    assert timings[0].end_us == timings[0].duration_us
+    assert timings[0].end_us == timings[0].start_us + timings[0].duration_us
     assert timings[1].start_us > timings[0].end_us  # cách nhau khoảng nghỉ SEGMENT_GAP_US
     assert timings[2].start_us > timings[1].end_us
 
@@ -672,3 +674,144 @@ def test_hay_biet_tot_schema_markdown_cleanup_no_word_limit_and_tts_pipeline(
     assert enriched[0]["end_time"] == enriched[0]["duration"]
     assert enriched[1]["start_time"] > enriched[0]["end_time"]
     assert enriched[1]["end_time"] > enriched[1]["start_time"]
+
+
+def test_core_voice_lead_gap_tail_padding_and_karaoke_phrases(tmp_path: Path) -> None:
+    from hbt.core.models import HbtCoreSegment
+    from hbt.core.render import build_core_karaoke_phrases
+    from hbt.core.voice import (
+        LEAD_PAD_US,
+        SEGMENT_GAP_US,
+        TAIL_PAD_US,
+        synthesize_core_segments,
+        wav_duration_us,
+    )
+
+    segs = [
+        HbtCoreSegment(
+            order=1,
+            title="VỰC MARIANA",
+            text=(
+                "Bạn có biết vực Mariana sâu hơn cả đỉnh Everest rất nhiều không, "
+                "thật đáng kinh ngạc!"
+            ),
+            image="scene-01.png",
+            sfx="whoosh",
+        ),
+        HbtCoreSegment(
+            order=2,
+            title="ÁP SUẤT KHỔNG LỒ",
+            text=(
+                "Ở độ sâu mười một nghìn mét | áp suất nước nghiền nát "
+                "gần như mọi tàu ngầm thông thường."
+            ),
+            image="scene-02.png",
+            sfx="pop",
+        ),
+    ]
+    combined, timings = synthesize_core_segments(segs, tmp_path, voice_provider=None)
+    assert len(timings) == 2
+    assert timings[0].start_us == LEAD_PAD_US
+    assert timings[1].start_us - timings[0].end_us == SEGMENT_GAP_US
+    total_us = wav_duration_us(combined)
+    assert total_us - timings[-1].end_us == TAIL_PAD_US
+
+    phrases = build_core_karaoke_phrases(segs, timings)
+    assert len(phrases) >= 4
+    for p in phrases:
+        assert 1 <= len(p.words) <= 7
+        assert p.end > p.start
+
+
+def test_core_ken_burns_4_modes_and_xfade_and_loudnorm_ducking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hbt.core import render as core_render
+
+    modes = [
+        core_render.build_ken_burns_filter(i, 90, width=1080, height=1920, fps=30)[0]
+        for i in range(1, 5)
+    ]
+    assert modes == ["zoom_in", "zoom_out", "pan_right", "pan_left"]
+    punch_mode, punch_zp = core_render.build_ken_burns_filter(1, 90, punch=True)
+    assert punch_mode == "punch"
+    assert "zoompan=" in punch_zp
+
+    fc, out_lbl, total_dur = core_render.build_xfade_filter([4.32, 5.32, 3.0], transition_s=0.32)
+    assert out_lbl == "[vbody]"
+    assert "transition=fade" in fc
+    assert "transition=slideleft" in fc
+    assert abs(total_dur - 12.0) < 0.01
+
+    captured_cmd: list[Any] = []
+    monkeypatch.setattr(core_render, "run_ffmpeg", lambda args: captured_cmd.extend(args))
+    voice_f = tmp_path / "v.wav"
+    bgm_f = tmp_path / "b.wav"
+    voice_f.write_bytes(b"RIFF")
+    bgm_f.write_bytes(b"RIFF")
+    core_render.mix_core_audio_track(voice_f, bgm_f, [], 10.0, tmp_path / "out.wav")
+    fc_idx = captured_cmd.index("-filter_complex") + 1
+    fc_str = str(captured_cmd[fc_idx])
+    assert "loudnorm=I=-14:TP=-1.5:LRA=11" in fc_str
+    assert "loudnorm=I=-27:TP=-6:LRA=11" in fc_str
+    assert "sidechaincompress=" in fc_str
+
+
+def test_core_prepare_3_phase_endpoint_without_and_with_cloudflare(
+    client,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hbt_state = client.app.state.hbt
+    monkeypatch.setattr(hbt_state.jobs, "voice", None)
+    monkeypatch.setattr(
+        "hbt.app_settings.resolve_cloudflare_config",
+        lambda _ws=None: ("", "", "@cf/black-forest-labs/flux-2-klein-4b"),
+    )
+
+    script_payload = {
+        "title": "Bí ẩn Vực Mariana",
+        "topic": "science",
+        "segments": [
+            {"id": 1, "title": "CẢNH 1", "text": "Vực Mariana là nơi sâu nhất đại dương."},
+            {"id": 2, "title": "CẢNH 2", "text": "Áp suất dưới đáy lớn gấp nghìn lần mặt biển."},
+        ],
+    }
+
+    # 1. Không có Cloudflare key: hoàn tất pha 1 + pha 2 kèm cảnh báo nhẹ
+    r1 = client.post("/api/hbt-core/_new/prepare", json={"script": script_payload})
+    assert r1.status_code == 202
+    data1 = r1.json()
+    slug1, job_id1 = data1["slug"], data1["job_id"]
+    job1 = hbt_state.jobs.get(job_id1)
+    assert job1.wait(timeout=15)
+    assert job1.status == "done"
+    assert job1.output is not None
+    assert job1.output["missing_cloudflare_key"] is True
+    assert job1.output["generated_images"] == 0
+    saved1 = client.get(f"/api/projects/{slug1}/core-script").json()["script"]
+    assert saved1["segments"][0]["duration"] > 0.5
+    assert saved1["segments"][0]["audio_path"] == "audio/scene_01.wav"
+
+    # 2. Có Cloudflare key (mock vẽ ảnh): hoàn tất đủ 3 pha
+    monkeypatch.setattr(
+        "hbt.app_settings.resolve_cloudflare_config",
+        lambda _ws=None: ("acc-test-123", "tok-test-456", "@cf/black-forest-labs/flux-2-klein-4b"),
+    )
+
+    def _fake_gen(_prompt: str, dest: Path, **_kw: Any) -> Path:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return dest
+
+    monkeypatch.setattr("hbt.shared.image_gen.cloudflare_flux.generate_scene_image", _fake_gen)
+    r2 = client.post(
+        f"/api/hbt-core/{slug1}/prepare",
+        json={"script": script_payload, "overwrite_images": True},
+    )
+    assert r2.status_code == 202
+    job2 = hbt_state.jobs.get(r2.json()["job_id"])
+    assert job2.wait(timeout=15)
+    assert job2.status == "done"
+    assert job2.output is not None
+    assert job2.output["missing_cloudflare_key"] is False
+    assert job2.output["generated_images"] == 2
