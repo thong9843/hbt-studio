@@ -199,6 +199,8 @@ describe('StickvPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Thêm Beat' }));
     expect(screen.getByLabelText('Lời đọc beat')).toHaveValue('');
     const timeline = screen.getByRole('contentinfo', { name: /Dải phân cảnh/i });
+    expect(within(timeline).queryByText('explain')).toBeNull();
+    expect(within(timeline).getByText('· 2.5s')).toBeInTheDocument();
     fireEvent.click(within(timeline).getByText('Lời thoại mới chưa lưu.'));
     expect(screen.getByLabelText('Lời đọc beat')).toHaveValue('Lời thoại mới chưa lưu.');
   });

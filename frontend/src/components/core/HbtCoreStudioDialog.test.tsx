@@ -78,7 +78,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     expect(screen.getByRole('region', { name: 'Xem trước trực tiếp 9:16' })).toBeVisible();
 
     // Chỉnh sửa trực tiếp lời thoại phân đoạn 1
-    const seg1Input = screen.getByLabelText('Lời thoại phân đoạn 1');
+    const seg1Input = screen.getByLabelText('Lời thoại');
     await user.clear(seg1Input);
     await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa.');
 

@@ -39,7 +39,7 @@ export function StageCanvas({
     <section
       aria-label="Sân khấu xem trước video"
       className={cx(
-        'flex flex-1 flex-col items-center justify-between gap-3 bg-[var(--bg-canvas)] p-4 lg:p-5',
+        'ui-stage-dots flex flex-1 flex-col items-center justify-between gap-3 p-4 lg:p-5',
         className,
       )}
     >
@@ -53,7 +53,7 @@ export function StageCanvas({
       <div className="flex min-h-0 w-full flex-1 items-center justify-center">
         <div
           className={cx(
-            'relative max-h-full overflow-hidden rounded-preview border border-line bg-card shadow-card',
+            'ui-stage-frame relative max-h-full overflow-hidden rounded-preview border border-line bg-card',
             aspect === '9:16'
               ? 'aspect-[9/16] h-full max-w-[310px]'
               : 'aspect-video w-full max-w-[620px]',

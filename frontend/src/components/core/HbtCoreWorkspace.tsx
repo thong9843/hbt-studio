@@ -537,9 +537,9 @@ export function HbtCoreWorkspace({
   })();
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
       {/* KHU VỰC TRÁI: WORKSPACE & PROMPT-FIRST INPUT */}
-      <div className="min-w-0 space-y-6">
+      <div className="min-w-0 space-y-5">
         {/* Thanh Prompt thông minh trung tâm */}
         <section
           aria-label="Thanh Prompt trung tâm"
@@ -714,7 +714,6 @@ export function HbtCoreWorkspace({
                 index: idx + 1,
                 title: seg.title,
                 summary: seg.text,
-                badge: `${STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'} ${seg.sticker || 'question'}`,
               }))}
               selectedId={String(safeIndex)}
               onSelect={(id) => setSelectedSegIndex(Number(id))}
@@ -757,7 +756,7 @@ export function HbtCoreWorkspace({
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Input
-                      label={T.v1.segmentCardTitleLabel(idx + 1)}
+                      label={T.v1.segmentCardTitleLabel}
                       value={seg.title ?? ''}
                       placeholder="TIÊU ĐỀ THẺ KEM NGẮN"
                       onChange={(e) =>
@@ -767,7 +766,7 @@ export function HbtCoreWorkspace({
                     <div className="ui-field">
                       <StudioSelect
                         id={`hbt-core-sticker-${idx}`}
-                        label={T.v1.segmentStickerLabel(idx + 1)}
+                        label={T.v1.segmentStickerLabel}
                         value={seg.sticker || 'question'}
                         onChange={(val) => updateSegment(idx, { sticker: val })}
                         options={STICKER_PRESETS.map((st) => ({
@@ -779,7 +778,7 @@ export function HbtCoreWorkspace({
                   </div>
 
                   <Textarea
-                    label={T.v1.segmentTextLabel(idx + 1)}
+                    label={T.v1.segmentTextLabel}
                     rows={2}
                     value={seg.text}
                     onChange={(e) => updateSegment(idx, { text: e.target.value })}
@@ -788,7 +787,7 @@ export function HbtCoreWorkspace({
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <label htmlFor={`hbt-core-img-prompt-${idx}`} className="ui-label !mb-0">
-                        {T.v1.segmentImagePromptLabel(idx + 1)}
+                        {T.v1.segmentImagePromptLabel}
                       </label>
                       <button
                         type="button"
@@ -812,7 +811,7 @@ export function HbtCoreWorkspace({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <Input
-                        label={T.v1.segmentImageLabel(idx + 1)}
+                        label={T.v1.segmentImageLabel}
                         value={seg.image}
                         placeholder={T.v1.imagePlaceholder}
                         list={`hbt-core-imgs-${idx}`}
@@ -830,7 +829,7 @@ export function HbtCoreWorkspace({
                     <div className="ui-field">
                       <StudioSelect
                         id={`hbt-core-sfx-${idx}`}
-                        label={T.v1.segmentSfxLabel(idx + 1)}
+                        label={T.v1.segmentSfxLabel}
                         value={seg.sfx}
                         onChange={(val) => updateSegment(idx, { sfx: val })}
                         options={[
@@ -849,74 +848,76 @@ export function HbtCoreWorkspace({
         </section>
       </div>
 
-      {/* KHU VỰC PHẢI: LIVE VERTICAL PREVIEW 9:16 & TIẾN TRÌNH */}
-      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-        <PhonePreviewStage
-          title={T.studio.previewTitle}
-          badgeText={T.studio.segmentLabel(safeIndex + 1, segments.length)}
-          safeZone={safeZone}
-          onSafeZoneChange={setSafeZone}
-          exportBusy={rendering}
-          exportDisabled={rendering || v2Loading}
-          exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-          onExport={() => void handleStartV1Render()}
-          footer={
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={safeIndex <= 0}
-                onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
-              >
-                ← Trước
-              </Button>
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={safeIndex >= segments.length - 1}
-                onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
-              >
-                Sau →
-              </Button>
-            </div>
-          }
-        >
-          {activeImageSrc ? (
-            <img
-              src={activeImageSrc}
-              alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
-              <span className="text-3xl opacity-60">🖼️</span>
-              <p className="mt-2 line-clamp-3 text-tiny text-muted-on-dark">
-                {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+      {/* KHU VỰC PHẢI: SÂN KHẤU DOT-GRID XEM TRƯỚC 9:16 & TIẾN TRÌNH */}
+      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+        <div className="ui-stage-dots rounded-card border border-line p-3">
+          <PhonePreviewStage
+            title={T.studio.previewTitle}
+            badgeText={T.studio.segmentLabel(safeIndex + 1, segments.length)}
+            safeZone={safeZone}
+            onSafeZoneChange={setSafeZone}
+            exportBusy={rendering}
+            exportDisabled={rendering || v2Loading}
+            exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
+            onExport={() => void handleStartV1Render()}
+            footer={
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <Button
+                  tone="soft"
+                  size="sm"
+                  disabled={safeIndex <= 0}
+                  onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
+                >
+                  ← Trước
+                </Button>
+                <Button
+                  tone="soft"
+                  size="sm"
+                  disabled={safeIndex >= segments.length - 1}
+                  onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
+                >
+                  Sau →
+                </Button>
+              </div>
+            }
+          >
+            {activeImageSrc ? (
+              <img
+                src={activeImageSrc}
+                alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
+                <span className="text-3xl opacity-60">🖼️</span>
+                <p className="mt-2 line-clamp-3 text-tiny text-muted-on-dark">
+                  {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+                </p>
+              </div>
+            )}
+
+            {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
+            <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
+              <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
+                {activeSegment?.title || title}
               </p>
             </div>
-          )}
 
-          {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
-          <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
-            <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
-              {activeSegment?.title || title}
-            </p>
-          </div>
+            {/* Sticker biểu cảm */}
+            <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
+              <span aria-hidden="true">
+                {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
+              </span>
+            </div>
 
-          {/* Sticker biểu cảm */}
-          <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
-            <span aria-hidden="true">
-              {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
-            </span>
-          </div>
-
-          {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
-          <div className="absolute inset-x-4 bottom-8 text-center">
-            <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
-              {activeSegment?.text || '…'}
-            </p>
-          </div>
-        </PhonePreviewStage>
+            {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
+            <div className="absolute inset-x-4 bottom-8 text-center">
+              <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
+                {activeSegment?.text || '…'}
+              </p>
+            </div>
+          </PhonePreviewStage>
+        </div>
 
         <CinemaInspectorPanel
           coreScript={{

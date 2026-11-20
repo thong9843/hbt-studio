@@ -1127,6 +1127,16 @@ textarea.ui-input[data-counter] {
   color: var(--muted);
 }
 
+/* ---- Sân khấu Dot-Grid tĩnh (0% CPU, thích ứng Light/Dark) ---- */
+.ui-stage-dots {
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.ui-stage-frame {
+  box-shadow: var(--shadow-stage);
+}
+
 /* ---- Chuyển Tab Inspector & Accordion mượt mà (0% Lag, GPU transform/opacity) ---- */
 @keyframes panelFadeIn {
   from {

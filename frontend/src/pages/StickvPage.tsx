@@ -1313,7 +1313,6 @@ export function StickvPage() {
                 index: idx + 1,
                 title: b.board_title,
                 summary: b.narration,
-                badge: b.pose,
                 durationSec: b.duration_sec || 3.0,
               })),
               selectedId: activeBeat?.id ?? '',

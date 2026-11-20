@@ -92,13 +92,12 @@ export function StudioShell({
                   aria-selected={isSelected}
                   onClick={() => onTabChange(tab.id)}
                   className={cx(
-                    'inline-flex min-w-0 items-center justify-center gap-1 rounded-lg px-1 py-2 text-[11.5px] font-bold whitespace-nowrap transition-colors',
+                    'inline-flex min-w-0 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[12px] font-bold whitespace-nowrap transition-colors',
                     isSelected
                       ? 'bg-card text-brand shadow-card'
                       : 'text-muted hover:bg-card/60 hover:text-text',
                   )}
                 >
-                  <span className="shrink-0">{tab.icon}</span>
                   <span className="min-w-0 truncate">{tab.label}</span>
                   {tab.badge !== undefined && (
                     <span

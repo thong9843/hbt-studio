@@ -43,13 +43,6 @@ const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', st
   stickv: 'StickV',
 };
 
-function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Chào buổi sáng';
-  if (hour < 18) return 'Chào buổi chiều';
-  return 'Chào buổi tối';
-}
-
 function Dot({ on, label }: { on: boolean; label: string }) {
   const t = vi.home.dot;
   return (
@@ -91,11 +84,15 @@ function Continue({
   const fallbackKind = project.kind === 'postv' ? 'postv' : 'core';
 
   return (
-    <Card as="section" aria-label={t.continue} className="flex flex-col gap-5 sm:flex-row">
-      <div className="aspect-[9/16] w-[124px] shrink-0 overflow-hidden rounded-inner border border-line bg-soft">
+    <Card
+      as="section"
+      aria-label={t.continue}
+      className="flex flex-col gap-4 sm:flex-row lg:col-span-2"
+    >
+      <div className="aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-inner border border-line bg-soft">
         <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <p className="text-tiny font-bold uppercase tracking-wider text-muted">{t.continue}</p>
           <Menu
@@ -111,14 +108,14 @@ function Continue({
             ]}
           />
         </div>
-        <h2 className="line-clamp-2 text-title font-extrabold text-text">{project.title}</h2>
-        <div className="flex flex-wrap items-center gap-2">
+        <h2 className="line-clamp-2 text-body font-extrabold text-text">{project.title}</h2>
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
           <Badge tone={TONE[status.kind]}>{status.label}</Badge>
-          {series && <span className="text-small text-muted">{series}</span>}
+          {series && <span className="text-tiny text-muted">{series}</span>}
         </div>
         {ready ? (
-          <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5" aria-label={t.dot.label}>
+          <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1" aria-label={t.dot.label}>
             <Dot
               on={ready.images.total > 0 && ready.images.done === ready.images.total}
               label={t.dot.images(ready.images.done, ready.images.total)}
@@ -128,7 +125,7 @@ function Continue({
             <Dot on={ready.cover} label={t.dot.cover} />
           </ul>
         ) : (
-          project.kind !== 'postv' && !brief.isError && <Skeleton width={240} height={20} />
+          project.kind !== 'postv' && !brief.isError && <Skeleton width={200} height={18} />
         )}
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
           <Link to={projectHref(project)} className="ui-btn ui-btn-ink ui-btn-sm">
@@ -329,24 +326,15 @@ export function HomePage() {
   };
 
   return (
-    <main className="w-full max-w-full space-y-8 px-6 py-7 lg:px-8">
-      {/* Header VEED Bright Minimalist — Gọn, sáng, 0 KPI rườm rà */}
-      <header className="flex flex-col gap-4 rounded-card border border-line bg-card p-5 shadow-card lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-2 rounded-pill border border-line bg-soft px-2.5 py-0.5 text-tiny font-bold text-text-2">
-            <img src="/brand/hay-biet-tuot_avatar.png" alt="" className="h-4 w-4 rounded-full" />
-            <span>HBT Studio v5.0 · Next-Gen Creator Workstation</span>
-          </div>
-          <h1 className="text-h1 font-bold tracking-tight text-text">
-            {getTimeGreeting()}, {vi.veedHome.heroTitle.toLowerCase()}
-          </h1>
-          <p className="text-small text-muted">{vi.veedHome.heroSubtitle}</p>
-        </div>
+    <main className="w-full max-w-full space-y-6 px-6 py-6 lg:px-8">
+      {/* Header tối giản cực đoan: 1 dòng tiêu đề + tìm kiếm + chip số liệu gọn */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-h1 font-extrabold tracking-tight text-text">{vi.veedHome.heroTitle}</h1>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-full sm:w-[300px]">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative w-full sm:w-[240px]">
             <SearchIcon
-              size={15}
+              size={14}
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
             />
             <input
@@ -355,16 +343,16 @@ export function HomePage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={vi.veedHome.searchPlaceholder}
               aria-label="Tìm dự án hoặc video đã xuất"
-              className="ui-input !min-h-[38px] !pl-9 text-small"
+              className="ui-input !min-h-[36px] !pl-8 text-small"
             />
           </div>
-          <span className="rounded-pill border border-line bg-soft px-3 py-1.5 text-tiny font-semibold text-muted tabular-nums">
+          <span className="rounded-pill border border-line bg-card px-3 py-1.5 text-tiny font-semibold text-muted tabular-nums">
             {allRenders.length} video · {data?.length ?? 0} dự án · {totalAssets} tài nguyên
           </span>
         </div>
       </header>
 
-      {/* 3 Thẻ Động cơ Sáng tạo tương tác */}
+      {/* 4 Thẻ Động cơ Sáng tạo tối giản */}
       <EngineShowcaseCards />
 
       {error && (
@@ -376,28 +364,28 @@ export function HomePage() {
         </div>
       )}
 
-      {/* Khu vực Tiếp tục dự án dở */}
-      <section aria-label="Tiếp tục dự án dở" className="space-y-4">
+      {/* Lưới Bento chặt chẽ: Dự án đang làm (không còn khung trắng trống 75%) */}
+      <section aria-label="Tiếp tục dự án dở" className="space-y-3.5">
         <div className="flex items-center justify-between">
           <h2 className="text-title font-extrabold text-text">Tiếp tục dự án dở</h2>
-          <Link to="/projects" className="text-small font-bold text-engine-postv hover:underline">
-            Xem tất cả dự án →
+          <Link to="/projects" className="text-small font-bold text-text hover:underline">
+            Xem tất cả →
           </Link>
         </div>
 
         {isPending ? (
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <Skeleton height={220} className="!rounded-card" />
-            <Skeleton height={220} className="!rounded-card" />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Skeleton height={180} className="!rounded-card lg:col-span-2" />
+            <Skeleton height={180} className="!rounded-card" />
           </div>
         ) : filteredProjects.length === 0 ? (
           <EmptyProjects onCreate={() => openNew()} />
         ) : (
-          <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
             {latest && <Continue project={latest} onDelete={setDeleting} />}
             {recent.length > 0 && (
-              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                {recent.map((p) => (
+              <ul className="grid grid-cols-2 gap-4 lg:col-span-2">
+                {recent.slice(0, 2).map((p) => (
                   <RecentCard key={p.slug} project={p} onDelete={setDeleting} />
                 ))}
               </ul>
@@ -407,14 +395,9 @@ export function HomePage() {
       </section>
 
       {/* Khu vực Video đã xuất gần đây (GET /api/renders) */}
-      <section aria-label="Video đã xuất gần đây" className="space-y-4">
+      <section aria-label="Video đã xuất gần đây" className="space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-title font-extrabold text-text">Video đã xuất gần đây</h2>
-            <p className="text-small text-muted">
-              Đồng bộ trực tiếp từ thư viện thành phẩm 9:16 của HBT Core, PostV, Chatting và StickV.
-            </p>
-          </div>
+          <h2 className="text-title font-extrabold text-text">Video đã xuất gần đây</h2>
           <div className="flex flex-wrap items-center gap-1.5">
             {(['all', 'core', 'postv', 'chatting', 'stickv'] as const).map((eng) => {
               const active = engineFilter === eng;
