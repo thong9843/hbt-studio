@@ -139,6 +139,90 @@ def wav_duration_us(wav_path: Path) -> int:
     return int(round((frames * 1_000_000) / rate))
 
 
+def trim_wav_speech_bounds(wav_path: Path, frame_ms: int = 20) -> tuple[float, float]:
+    """Đo ngưỡng RMS từng cửa sổ 20ms để tìm mốc bắt đầu/kết thúc tiếng nói thật `[lo, hi]`
+    bên trong file WAV (loại bỏ khoảng lặng đầu/cuối của VieNeu-TTS)."""
+    try:
+        pcm = _read_mono_16bit_pcm(wav_path, SAMPLE_RATE)
+    except Exception:
+        dur = wav_duration_us(wav_path) / 1_000_000 if wav_path.is_file() else 1.0
+        return 0.0, max(0.2, dur)
+
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    n = len(samples)
+    total_s = n / SAMPLE_RATE if n else 0.0
+    if n == 0:
+        return 0.0, 0.2
+
+    peak = max(abs(min(samples)), abs(max(samples)))
+    if peak < 150:
+        return 0.0, max(0.2, total_s)
+
+    step = max(1, int(SAMPLE_RATE * frame_ms / 1000))
+    thresh = max(220.0, peak * 0.05)
+    first_active: int | None = None
+    last_active: int | None = None
+    for i in range(0, n, step):
+        chunk = samples[i : i + step]
+        if not chunk:
+            continue
+        rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
+        if rms >= thresh:
+            if first_active is None:
+                first_active = i
+            last_active = min(n, i + step)
+
+    if first_active is None or last_active is None:
+        return 0.0, max(0.2, total_s)
+
+    lo = max(0.0, (first_active / SAMPLE_RATE) - 0.02)
+    hi = min(total_s, (last_active / SAMPLE_RATE) + 0.04)
+    if hi - lo < 0.15:
+        return 0.0, max(0.2, total_s)
+    return round(lo, 4), round(hi, 4)
+
+
+def build_core_voice_full_wav(
+    timings: list[SegmentVoiceTiming],
+    scene_starts: list[float],
+    total_duration_s: float,
+    dest_wav: Path,
+    *,
+    lead_pad_s: float = LEAD_PAD_US / 1_000_000,
+) -> Path:
+    """Ghép toàn bộ giọng từng cảnh đúng theo mốc `scene_starts` của trục video `xfade` thành
+    `core_voice_full.wav` (16-bit mono 24kHz) để Whisper căn chữ và bộ trộn dùng chung 1 trục."""
+    dest_wav.parent.mkdir(parents=True, exist_ok=True)
+    total_frames = max(1, int(round(max(total_duration_s, 0.5) * SAMPLE_RATE)))
+    buf = bytearray(total_frames * 2)
+
+    for idx, (timing, start_s) in enumerate(zip(timings, scene_starts, strict=False)):
+        seg_wav = Path(timing.wav_path)
+        if not seg_wav.is_file():
+            continue
+        pcm = _normalize_pcm_rms(_read_mono_16bit_pcm(seg_wav, SAMPLE_RATE))
+        place_s = max(0.0, float(start_s) + (lead_pad_s if idx == 0 else 0.0))
+        start_f = int(round(place_s * SAMPLE_RATE))
+        if start_f >= total_frames:
+            continue
+        max_bytes = (total_frames - start_f) * 2
+        chunk = pcm[:max_bytes]
+        byte_off = start_f * 2
+        buf[byte_off : byte_off + len(chunk)] = chunk
+
+    tmp_wav = dest_wav.with_name(dest_wav.name + ".tmp")
+    with wave.open(str(tmp_wav), "wb") as out_wf:
+        out_wf.setnchannels(1)
+        out_wf.setsampwidth(2)
+        out_wf.setframerate(SAMPLE_RATE)
+        out_wf.writeframes(bytes(buf))
+    tmp_wav.replace(dest_wav)
+    return dest_wav
+
+
 def _read_mono_16bit_pcm(wav_path: Path, target_rate: int = SAMPLE_RATE) -> bytes:
     """Đọc dữ liệu PCM 16-bit mono từ file WAV để ghép nối thành voice.wav tổng."""
     with wave.open(str(wav_path), "rb") as wf:

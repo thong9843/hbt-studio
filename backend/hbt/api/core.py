@@ -343,6 +343,7 @@ class CoreGenerateImagesBody(BaseModel):
 
     overwrite: bool = False
     economy_mode: bool = False
+    use_style_ref: bool = False
     script: str | dict[str, Any] | None = None
 
 
@@ -351,6 +352,7 @@ class CoreGenerateSceneImageBody(BaseModel):
 
     image_prompt: str | None = None
     economy_mode: bool = False
+    use_style_ref: bool = False
     script: str | dict[str, Any] | None = None
 
 
@@ -364,6 +366,7 @@ class CorePrepareBody(BaseModel):
     script: str | dict[str, Any] | None = None
     voice_id: str | None = None
     economy_mode: bool = False
+    use_style_ref: bool = False
     overwrite_images: bool = False
 
 
@@ -521,6 +524,7 @@ def generate_hbt_core_scene_image(
             model=model,
             seed=derive_project_seed(actual_slug),
             reference_image=reference_image,
+            use_style_ref=body.use_style_ref,
             economy_mode=body.economy_mode,
             fallback_context=fallback_ctx,
         )

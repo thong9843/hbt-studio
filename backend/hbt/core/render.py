@@ -36,14 +36,22 @@ from hbt.core.audio import (
 )
 from hbt.core.models import HbtCoreScript, HbtCoreSegment, SegmentVoiceTiming, infer_music_topic
 from hbt.core.tts_pipeline import sync_wavs_to_audio_folder
-from hbt.core.voice import synthesize_core_segments
+from hbt.core.voice import (
+    LEAD_PAD_US,
+    build_core_voice_full_wav,
+    synthesize_core_segments,
+    trim_wav_speech_bounds,
+)
 from hbt.models import Card, CardLine, Music, Project, Scene, Voice
 from hbt.pipeline import cache, cancel, captions
+from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import OUTRO_CROSSFADE, build_outro_audio, join_audio
 from hbt.pipeline.ffutil import media_duration, probe, run_ffmpeg
 from hbt.pipeline.publish import build_publish_text
+from hbt.pipeline.render import whisper_alignment
 from hbt.pipeline.text import parse_voice, weight
 from hbt.pipeline.visual import CARD_Y, CREAM, SIZES, H, W, color_of, font
+from hbt.pipeline.whisper import WhisperConfig, WhisperFailed
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import FFMPEG_ENCODE_CLAMP, FFMPEG_RESOURCE_CLAMP
 from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
@@ -274,6 +282,77 @@ def sync_script_to_project(
     return project
 
 
+def layout_cream_card_lines(
+    text: str,
+    *,
+    max_text_width: int = 888,
+    start_size: int = 62,
+    min_size: int = 36,
+    max_lines: int = 3,
+) -> tuple[list[str], int]:
+    """Tự động cân đối xuống dòng (tránh rớt lẻ 1 từ) và hạ cỡ chữ (tối thiểu `min_size=36px`)
+    để tiêu đề thẻ kem tuyệt đối không tràn viền hộp `max_text_width`."""
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return [], start_size
+
+    words = clean.split()
+    scratch = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    try:
+        draw = ImageDraw.Draw(scratch)
+
+        def _wrap(fnt: Any) -> list[str]:
+            lines: list[str] = []
+            cur = ""
+            for tok in words:
+                cand = f"{cur} {tok}".strip()
+                if draw.textlength(cand, font=fnt) <= max_text_width or not cur:
+                    cur = cand
+                else:
+                    lines.append(cur)
+                    cur = tok
+            if cur:
+                lines.append(cur)
+            # Cân đối để tránh rớt lẻ 1 từ ngắn ở dòng cuối khi tổng có 2–3 dòng
+            if len(lines) >= 2 and len(lines[-1].split()) == 1:
+                prev_words = lines[-2].split()
+                if len(prev_words) >= 3:
+                    cand_prev = " ".join(prev_words[:-1])
+                    cand_last = f"{prev_words[-1]} {lines[-1]}"
+                    if draw.textlength(cand_last, font=fnt) <= max_text_width:
+                        lines[-2] = cand_prev
+                        lines[-1] = cand_last
+            return lines
+
+        chosen_size = min_size
+        chosen_lines: list[str] = []
+        for sz in range(start_size, min_size - 1, -4):
+            fnt = font("ExtraBold" if sz >= 70 else "Bold", sz)
+            wrapped = _wrap(fnt)
+            fits_width = all(draw.textlength(ln, font=fnt) <= max_text_width for ln in wrapped)
+            if fits_width and len(wrapped) <= max_lines:
+                chosen_size = sz
+                chosen_lines = wrapped
+                break
+            chosen_size = sz
+            chosen_lines = wrapped
+
+        fnt_final = font("ExtraBold" if chosen_size >= 70 else "Bold", chosen_size)
+        if len(chosen_lines) > max_lines:
+            chosen_lines = chosen_lines[:max_lines]
+        # Cắt gọn an toàn nếu một từ đơn quá dài vượt biên ngay cả ở cỡ tối thiểu 36px
+        safe_lines: list[str] = []
+        for ln in chosen_lines:
+            cur_ln = ln
+            while cur_ln and draw.textlength(cur_ln, font=fnt_final) > max_text_width:
+                cur_ln = cur_ln[:-1].rstrip()
+            if cur_ln:
+                safe_lines.append(cur_ln)
+        return safe_lines, chosen_size
+    finally:
+        scratch.close()
+
+
 def build_core_scene_layers_safe(
     scene_dict: dict[str, Any],
     img_src: Path,
@@ -325,32 +404,30 @@ def build_core_scene_layers_safe(
 
         tmp_draw = ImageDraw.Draw(lay)
         maxw, pad = 960, 36
+        max_text_w = maxw - 2 * pad
         rows: list[tuple[str, Any, tuple[int, int, int], int]] = []
         for ln in lines:
             txt = str(ln.get("text", "")).strip()
             if not txt:
                 continue
-            sz = SIZES.get(ln.get("size", "m"), 62)
-            f = font("ExtraBold" if sz >= 70 else "Bold", sz)
+            base_sz = SIZES.get(ln.get("size", "m"), 62)
             col = color_of(ln.get("color", "ink"), theme)
-            # Wrap dòng
-            words = txt.split()
-            cur = ""
-            wrapped: list[str] = []
-            for w_tok in words:
-                cand = f"{cur} {w_tok}".strip()
-                if tmp_draw.textlength(cand, font=f) <= maxw - 2 * pad or not cur:
-                    cur = cand
-                else:
-                    wrapped.append(cur)
-                    cur = w_tok
-            if cur:
-                wrapped.append(cur)
+            wrapped, eff_sz = layout_cream_card_lines(
+                txt,
+                max_text_width=max_text_w,
+                start_size=base_sz,
+                min_size=36,
+                max_lines=3,
+            )
+            f = font("ExtraBold" if eff_sz >= 70 else "Bold", eff_sz)
             for r_txt in wrapped:
-                rows.append((r_txt, f, col, int(sz * 1.28)))
+                rows.append((r_txt, f, col, int(eff_sz * 1.28)))
 
         if rows:
-            bw = max(tmp_draw.textlength(r[0], font=r[1]) for r in rows) + 2 * pad
+            bw = min(
+                float(maxw),
+                max(tmp_draw.textlength(r[0], font=r[1]) for r in rows) + 2 * pad,
+            )
             bh = sum(r[3] for r in rows) + 2 * pad - 8
             border = color_of("primary", theme)
             card_im = Image.new("RGBA", (int(bw) + 30, int(bh) + 30), (0, 0, 0, 0))
@@ -478,36 +555,179 @@ def build_xfade_filter(
     return ";".join(parts), "[vbody]", round(acc_dur, 4)
 
 
+def compute_scene_timeline(
+    timings: list[SegmentVoiceTiming],
+    total_duration_s: float,
+    *,
+    transition_s: float = XFADE_DURATION_S,
+) -> tuple[list[float], list[float], float]:
+    """Tính mốc bắt đầu (`scene_starts`) và độ dài từng clip (`clip_durations`) trên trục video
+    thực tế đã trừ `xfade`, bảo đảm giọng đọc và hình ảnh khớp từng mili-giây không bị trôi."""
+    n = len(timings)
+    if n == 0:
+        return [], [], 0.0
+    xfade_d = transition_s if n > 1 else 0.0
+    clip_durations: list[float] = []
+    for idx, timing in enumerate(timings, start=1):
+        slot_start = 0.0 if idx == 1 else float(timing.start_s)
+        slot_end = float(timings[idx].start_s) if idx < n else float(total_duration_s)
+        dur = max(0.8, round((slot_end - slot_start) + (xfade_d if idx < n else 0.0), 3))
+        clip_durations.append(dur)
+
+    scene_starts: list[float] = [0.0]
+    acc_dur = clip_durations[0]
+    for idx in range(1, n):
+        eff_t = min(xfade_d, max(0.05, clip_durations[idx] * 0.4), max(0.05, acc_dur * 0.4))
+        offset = max(0.0, acc_dur - eff_t)
+        scene_starts.append(round(offset, 4))
+        acc_dur = offset + clip_durations[idx]
+    return scene_starts, clip_durations, round(acc_dur, 4)
+
+
+def token_spoken_weight(tok: Any) -> float:
+    """Trọng số âm tiết khi fallback không có Whisper: cộng đúng số âm tiết cho số (`2014`,
+    `777`), mã lẫn chữ-số (`MH370`) và chữ viết tắt in hoa (`ACARS`, `NASA`)."""
+    import re
+
+    base = max(0.2, float(weight(tok)))
+    if isinstance(tok, dict):
+        syl = tok.get("syl") or []
+        if isinstance(syl, list) and len(syl) > 1:
+            return base
+        raw = str(tok.get("disp") or "").strip()
+    else:
+        raw = str(getattr(tok, "disp", "") or getattr(tok, "display", "") or "").strip()
+    core = re.sub(r"[^\w]", "", raw)
+    if not core:
+        return base
+
+    # Nếu tác giả đã ghi chú cách đọc rõ nhiều từ (vd 2014{hai nghìn không trăm mười bốn})
+    if len(raw.split()) > 1:
+        return max(base, float(len(raw.split())))
+
+    # Mã lẫn chữ và số (vd MH370, B777, F16) -> mỗi chữ cái & chữ số thường đọc thành 1 âm tiết
+    if any(ch.isdigit() for ch in core) and any(ch.isalpha() for ch in core):
+        return max(base, float(len(core)))
+
+    # Chuỗi toàn chữ số (vd 2014 -> ~4.5 âm tiết, 777 -> 3.5 âm tiết, 370 -> 3.5 âm tiết)
+    if core.isdigit():
+        digits = len(core)
+        if digits >= 4:
+            return max(base, float(digits) + 0.5)
+        if digits == 3:
+            return max(base, 3.5)
+        if digits == 2:
+            return max(base, 2.0)
+        return max(base, 1.0)
+
+    # Từ viết tắt tiếng Anh toàn chữ hoa dài 2–6 ký tự (vd ACARS, FBI, UFO, radar)
+    if core.isupper() and core.isascii() and 2 <= len(core) <= 6:
+        return max(base, float(len(core)))
+
+    return base
+
+
 def build_core_karaoke_phrases(
     segments: list[HbtCoreSegment],
     timings: list[SegmentVoiceTiming],
+    *,
+    voice_full_wav: Path | None = None,
+    scene_starts: list[float] | None = None,
+    cache_dir: Path | None = None,
+    whisper_cfg: WhisperConfig | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> list[captions.Phrase]:
-    """Tách lời thoại từng phân đoạn thành các cụm Karaoke ngắn 4-7 từ (tối đa 2 dòng) khớp
-    chính xác với mốc thời gian giọng đọc `[start_s, end_s]` của từng phân đoạn."""
+    """Tách lời thoại thành các cụm Karaoke ngắn 4-7 từ (tối đa 2 dòng, `y=1400`, `max_width=900`).
+
+    Ưu tiên dùng Whisper word-timestamps thật trên `voice_full_wav` (kèm cache `timing.json`).
+    Khi không có Whisper, tự cắt khoảng lặng đầu/cuối từng `.wav` (RMS) và phân bổ theo trọng số
+    âm tiết chuẩn cho chữ số / từ viết tắt trên đúng trục `scene_starts`.
+    """
     all_tokens: list[Any] = []
-    all_times: list[tuple[float, float]] = []
     all_scenes: list[int] = []
+    per_scene_tokens: list[tuple[int, SegmentVoiceTiming, list[Any]]] = []
 
     for seg_idx, (seg, timing) in enumerate(zip(segments, timings, strict=False)):
         toks = parse_voice(seg.text or "")
         if not toks:
             continue
-        start_s = float(timing.start_s)
-        end_s = max(start_s + 0.2, float(timing.end_s))
-        span = end_s - start_s
-        weights = [max(0.2, float(weight(tok))) for tok in toks]
-        total_w = sum(weights) or 1.0
-        cursor = start_s
-        for tok, w in zip(toks, weights, strict=False):
-            dur = span * (w / total_w)
-            t_hi = min(end_s, cursor + dur)
-            all_tokens.append(tok)
-            all_times.append((cursor, max(cursor + 0.02, t_hi)))
-            all_scenes.append(seg_idx)
-            cursor = t_hi
+        all_tokens.extend(toks)
+        all_scenes.extend([seg_idx] * len(toks))
+        per_scene_tokens.append((seg_idx, timing, toks))
 
     if not all_tokens:
         return []
+
+    # 1. Ưu tiên Whisper word-timestamps thật trên `core_voice_full.wav` + cache `timing.json`
+    if voice_full_wav is not None and voice_full_wav.is_file() and whisper_cfg is not None:
+        timing_file = (cache_dir / "timing.json") if cache_dir is not None else None
+        script_sig = "|".join(s.text or "" for s in segments)
+        cache_key = cache.digest("core_whisper_v1", voice_full_wav, script_sig, whisper_cfg.model)
+        if timing_file is not None and cache.is_fresh(timing_file, cache_key):
+            try:
+                cached = json.loads(timing_file.read_text(encoding="utf-8"))
+                raw_times = cached.get("times") if isinstance(cached, dict) else None
+                if isinstance(raw_times, list) and len(raw_times) == len(all_tokens):
+                    times_loaded = [(float(a), float(b)) for a, b in raw_times]
+                    return captions.build_phrases(all_tokens, times_loaded, all_scenes)
+            except Exception:
+                pass
+        try:
+            aligned = whisper_alignment(
+                all_tokens,
+                all_scenes,
+                voice_full_wav,
+                whisper_cfg,
+                log or (lambda _m: None),
+            )
+            if len(aligned.times) == len(all_tokens):
+                if timing_file is not None:
+                    timing_file.parent.mkdir(parents=True, exist_ok=True)
+                    timing_file.write_text(
+                        json.dumps(
+                            {
+                                "aligner": aligned.aligner,
+                                "info": aligned.info,
+                                "times": [[round(a, 4), round(b, 4)] for a, b in aligned.times],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                    cache.mark(timing_file, cache_key)
+                return captions.build_phrases(all_tokens, aligned.times, all_scenes)
+        except (WhisperFailed, RuntimeError, ImportError, OSError) as exc:
+            logger.info("Whisper chưa chạy được cho HBT Core (%s), dùng fallback RMS+âm tiết", exc)
+
+    # 2. Fallback: cắt khoảng lặng đầu/cuối thực tế của từng .wav + trọng số âm tiết số/viết tắt
+    lead_pad_s = LEAD_PAD_US / 1_000_000
+    all_times: list[tuple[float, float]] = []
+    for seg_idx, timing, toks in per_scene_tokens:
+        if scene_starts is not None and seg_idx < len(scene_starts):
+            base_start = float(scene_starts[seg_idx]) + (lead_pad_s if seg_idx == 0 else 0.0)
+        else:
+            base_start = float(timing.start_s)
+
+        wav_p = Path(timing.wav_path) if timing.wav_path else None
+        if wav_p is not None and wav_p.is_file():
+            speech_lo, speech_hi = trim_wav_speech_bounds(wav_p)
+            start_s = base_start + speech_lo
+            end_s = max(start_s + 0.2, base_start + speech_hi)
+        else:
+            start_s = base_start
+            end_s = max(start_s + 0.2, base_start + float(timing.duration_s))
+
+        span = end_s - start_s
+        weights = [token_spoken_weight(tok) for tok in toks]
+        total_w = sum(weights) or 1.0
+        cursor = start_s
+        for w in weights:
+            dur = span * (w / total_w)
+            t_hi = min(end_s, cursor + dur)
+            all_times.append((round(cursor, 4), round(max(cursor + 0.02, t_hi), 4)))
+            cursor = t_hi
+
     return captions.build_phrases(all_tokens, all_times, all_scenes)
 
 
@@ -945,8 +1165,22 @@ def _render_hbt_core_auto_impl(
         )
 
     xfade_d = XFADE_DURATION_S if total_segs > 1 else 0.0
-    segment_durations: list[float] = []
-    for idx, (seg, timing) in enumerate(zip(script.segments, timings, strict=False), start=1):
+    scene_starts, segment_durations, total_body_dur = compute_scene_timeline(
+        timings,
+        total_duration_s,
+        transition_s=xfade_d,
+    )
+    # Ghép lại trục giọng chuẩn khớp từng mili-giây với `scene_starts` sau khi trừ xfade
+    voice_full_wav = build_core_voice_full_wav(
+        timings,
+        scene_starts,
+        total_body_dur,
+        build_dir / "core_voice_full.wav",
+    )
+
+    for idx, (seg, seg_dur_s) in enumerate(
+        zip(script.segments, segment_durations, strict=False), start=1
+    ):
         cancel.check_current()
         seg_pct = round(50.0 + (idx / max(1, total_segs)) * 28.0, 1)
         emit(
@@ -999,12 +1233,6 @@ def _render_hbt_core_auto_impl(
             watermark_png=wm_png,
         )
 
-        # Thời lượng clip phân đoạn khớp chính xác mốc giọng + bù chồng xfade để không cắt cụt cuối
-        slot_start = 0.0 if idx == 1 else float(timing.start_s)
-        slot_end = float(timings[idx].start_s) if idx < len(timings) else float(total_duration_s)
-        seg_dur_s = max(
-            0.8, round((slot_end - slot_start) + (xfade_d if idx < total_segs else 0.0), 3)
-        )
         clip_path = build_dir / f"seg_clip_{idx:02d}.mp4"
         render_core_segment_clip(
             base_png,
@@ -1019,7 +1247,6 @@ def _render_hbt_core_auto_impl(
             aspect_mode=aspect_mode,
         )
         segment_clips.append(clip_path)
-        segment_durations.append(seg_dur_s)
         gc.collect()
 
     # Lưu lại project.json đã đồng bộ đầy đủ ảnh, giọng, nhạc
@@ -1028,9 +1255,26 @@ def _render_hbt_core_auto_impl(
         encoding="utf-8",
     )
 
-    # 5b. Vẽ phụ đề Karaoke từng cụm ngắn 4-7 từ (tối đa 2 dòng, vùng an toàn TikTok)
-    emit(80.0, "captions", "Tạo phụ đề Karaoke từng cụm 2 dòng")
-    phrases = build_core_karaoke_phrases(script.segments, timings)
+    # 5b. Căn chữ Karaoke trên `core_voice_full.wav` (ưu tiên Whisper thật + cache timing.json)
+    emit(80.0, "captions", "Căn phụ đề Karaoke theo giọng đọc (Whisper / RMS)")
+    whisper_cfg: WhisperConfig | None = None
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        app_cfg = AppSettingsStore(settings.workspace_dir, settings.default_fps).load()
+        whisper_cfg = WhisperConfig(
+            model=_whisper.effective_model(app_cfg.whisper_model, settings.whisper_model),
+            device=settings.whisper_device,
+            timeout=app_cfg.whisper_timeout_seconds or _whisper.DEFAULT_TIMEOUT,
+            models_dir=settings.models_dir,
+        )
+    phrases = build_core_karaoke_phrases(
+        script.segments,
+        timings,
+        voice_full_wav=voice_full_wav,
+        scene_starts=scene_starts,
+        cache_dir=build_dir,
+        whisper_cfg=whisper_cfg,
+        log=lambda m: emit(81.0, "captions", m),
+    )
     cap_concat: Path | None = None
     if phrases:
         cap_dir = build_dir / "captions"
@@ -1040,16 +1284,16 @@ def _render_hbt_core_auto_impl(
             phrases,
             [captions.DEFAULT_Y] * max(1, total_segs),
             cap_dir,
-            total_duration_s,
+            total_body_dur,
         )
         cap_concat = build_dir / "captions.ffconcat"
         captions.write_ffconcat(cap_timeline, cap_concat)
         captions.write_srt(phrases, job_dir / "captions.srt")
 
-    # 6. Trộn âm thanh tổng (Giọng VieNeu -14 LUFS + BGM -27 LUFS ducking + SFX)
+    # 6. Trộn âm thanh tổng trên đúng trục `core_voice_full.wav` (-14 LUFS + ducking BGM + SFX)
     emit(84.0, "mix", "Trộn âm thanh (-14 LUFS, ducking BGM + SFX)")
     mixed_wav = build_dir / "final_mix.wav"
-    mix_core_audio_track(voice_wav, bgm_wav, sfx_events, total_duration_s, mixed_wav)
+    mix_core_audio_track(voice_full_wav, bgm_wav, sfx_events, total_body_dur, mixed_wav)
 
     # 6b. Ghép Outro 4s chuẩn thương hiệu (nếu bật và không phải preview)
     active_brand_dir = Path(brand_dir or BRAND_DIR).resolve()

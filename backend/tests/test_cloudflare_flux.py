@@ -91,6 +91,7 @@ def test_flux_2_klein_multipart_with_reference_and_upscale(tmp_path: Path):
             model=FLUX_2_KLEIN,
             seed=4242,
             reference_image=ref_path,
+            use_style_ref=True,
             client=client,
         )
     finally:
@@ -109,6 +110,32 @@ def test_flux_2_klein_multipart_with_reference_and_upscale(tmp_path: Path):
 
     with Image.open(dest) as img:
         assert img.size == (1080, 1920)
+
+    # Mặc định use_style_ref=False: không gửi input_image_0 để tránh lặp vật thể giữa các cảnh
+    captured_default: dict[str, object] = {}
+
+    def handler_default(request: httpx.Request) -> httpx.Response:
+        captured_default["body"] = request.content
+        return httpx.Response(
+            200, content=_png_bytes((768, 1344)), headers={"content-type": "image/png"}
+        )
+
+    client_def = httpx.Client(transport=httpx.MockTransport(handler_default))
+    try:
+        generate_scene_image(
+            "calm ocean map",
+            tmp_path / "no_ref.png",
+            account_id="acc-123",
+            api_token="secret-tok",
+            model=FLUX_2_KLEIN,
+            seed=4242,
+            reference_image=ref_path,
+            client=client_def,
+        )
+    finally:
+        client_def.close()
+    assert b'name="input_image_0"' not in captured_default["body"]
+    assert b'name="seed"' in captured_default["body"]
 
 
 def test_flux_1_schnell_economy_and_fallback_plus_5xx_retry(tmp_path: Path):

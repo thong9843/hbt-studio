@@ -235,13 +235,18 @@ def generate_scene_image(
     model: str = FLUX_2_KLEIN,
     seed: int | None = None,
     reference_image: Path | None = None,
+    use_style_ref: bool = False,
     economy_mode: bool = False,
     steps: int = DEFAULT_STEPS,
     timeout: float = REQUEST_TIMEOUT,
     fallback_context: str = "",
     client: httpx.Client | None = None,
 ) -> Path:
-    """Sinh 1 ảnh 2D 9:16 qua Cloudflare Workers AI, phóng nét 1080x1920 và lưu vào `dest_path`."""
+    """Sinh 1 ảnh 2D 9:16 qua Cloudflare Workers AI, phóng nét 1080x1920 và lưu vào `dest_path`.
+
+    Mặc định `use_style_ref=False` (chỉ giữ `STYLE_ANCHOR` + `seed` theo dự án) để đồng nhất nét vẽ
+    nhưng không ép lặp cùng một vật thể từ Cảnh 1 sang các cảnh khác bối cảnh.
+    """
     clean_account = (account_id or "").strip()
     clean_token = (api_token or "").strip()
     if not clean_account or not clean_token:
@@ -253,6 +258,7 @@ def generate_scene_image(
 
     styled_prompt = build_styled_prompt(prompt, fallback_context=fallback_context)
     effective_model = FLUX_1_SCHNELL if economy_mode else (model or FLUX_2_KLEIN)
+    effective_ref = reference_image if use_style_ref else None
     headers = {"Authorization": f"Bearer {clean_token}"}
 
     own_client = client is None
@@ -266,7 +272,7 @@ def generate_scene_image(
                 styled_prompt,
                 seed=seed,
                 steps=steps,
-                reference_image=reference_image,
+                reference_image=effective_ref,
             )
             if resp.status_code in (400, 422):
                 logger.warning(

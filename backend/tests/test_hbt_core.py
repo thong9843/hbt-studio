@@ -861,3 +861,96 @@ def test_core_prepare_3_phase_endpoint_without_and_with_cloudflare(
     assert job2.output is not None
     assert job2.output["missing_cloudflare_key"] is False
     assert job2.output["generated_images"] == 2
+
+
+def test_core_whisper_timeline_xfade_sync_number_weights_and_cream_card_bounds(
+    tmp_path: Path,
+) -> None:
+    from PIL import Image, ImageDraw
+
+    from hbt.core.models import HbtCoreSegment
+    from hbt.core.render import (
+        XFADE_DURATION_S,
+        build_core_karaoke_phrases,
+        compute_scene_timeline,
+        layout_cream_card_lines,
+        token_spoken_weight,
+    )
+    from hbt.core.voice import (
+        LEAD_PAD_US,
+        build_core_voice_full_wav,
+        synthesize_core_segments,
+    )
+    from hbt.pipeline.text import parse_voice
+    from hbt.pipeline.visual import font
+
+    # 1. Trọng số âm tiết cho số và từ viết tắt (2014, Boeing 777, ACARS, MH370)
+    toks = parse_voice("Năm 2014 chiếc Boeing 777 mang số hiệu MH370 tắt hệ thống ACARS.")
+    w_by_disp = {str(t["disp"]).rstrip("."): token_spoken_weight(t) for t in toks}
+    assert w_by_disp["2014"] >= 4.0
+    assert w_by_disp["777"] >= 3.0
+    assert w_by_disp["MH370"] >= 4.5
+    assert w_by_disp["ACARS"] >= 4.5
+    assert w_by_disp["Năm"] < w_by_disp["2014"]
+
+    # 2. Mốc Karaoke khớp đúng timeline đã trừ xfade (0.45s) & ghép core_voice_full.wav
+    segs = [
+        HbtCoreSegment(
+            order=1,
+            title="CHUYẾN BAY MH370 NĂM 2014",
+            text="Năm 2014 chuyến bay MH370 biến mất khỏi radar không để lại dấu vết.",
+            image="scene-01.png",
+            sfx="whoosh",
+        ),
+        HbtCoreSegment(
+            order=2,
+            title="HỆ THỐNG ACARS BỊ TẮT",
+            text="Hệ thống ACARS trên chiếc Boeing 777 ngừng phát tín hiệu giữa biển Đông.",
+            image="scene-02.png",
+            sfx="pop",
+        ),
+    ]
+    _, timings = synthesize_core_segments(segs, tmp_path, voice_provider=None)
+    total_dur = timings[-1].end_s + 1.0
+    scene_starts, clip_durs, body_dur = compute_scene_timeline(
+        timings, total_dur, transition_s=XFADE_DURATION_S
+    )
+    assert scene_starts[0] == 0.0
+    assert abs(scene_starts[1] - timings[1].start_s) < 0.01
+    assert abs(body_dur - total_dur) < 0.02
+    assert len(clip_durs) == 2
+
+    voice_full = build_core_voice_full_wav(
+        timings, scene_starts, body_dur, tmp_path / "core_voice_full.wav"
+    )
+    assert voice_full.is_file()
+    phrases = build_core_karaoke_phrases(
+        segs,
+        timings,
+        voice_full_wav=voice_full,
+        scene_starts=scene_starts,
+    )
+    assert phrases
+    # Cụm đầu bắt đầu sau đệm đầu (0.15s) + khoảng lặng đầu của wav, cụm cảnh 2 khớp scene_starts[1]
+    assert phrases[0].start >= (LEAD_PAD_US / 1_000_000) - 0.02
+    scene2_phrases = [p for p in phrases if p.scene == 1]
+    assert scene2_phrases
+    assert scene2_phrases[0].start >= scene_starts[1] - 0.02
+    assert all(1 <= len(p.words) <= 7 for p in phrases)
+
+    # 3. Thẻ kem tự động hạ cỡ chữ và không tràn biên max_text_width=888 kể cả tiêu đề rất dài
+    long_title = (
+        "BÍ ẨN CHUYẾN BAY MH370 BOEING 777 NĂM 2014 TẮT HỆ THỐNG ACARS "
+        "VÀ BIẾN MẤT KHÔNG DẤU VẾT TRÊN ẤN ĐỘ DƯƠNG"
+    )
+    lines, eff_sz = layout_cream_card_lines(long_title, max_text_width=888, start_size=62)
+    assert 1 <= len(lines) <= 3
+    assert 36 <= eff_sz <= 62
+    scratch = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    try:
+        draw = ImageDraw.Draw(scratch)
+        fnt = font("ExtraBold" if eff_sz >= 70 else "Bold", eff_sz)
+        for ln in lines:
+            assert draw.textlength(ln, font=fnt) <= 888
+    finally:
+        scratch.close()
