@@ -375,7 +375,7 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
     )
 
     assert SEG_CACHE_VERSION == "v3_expressive"
-    assert len(POSE_PRESETS) == 18
+    assert len(POSE_PRESETS) == 24
     assert len(VALID_EMOTIONS) == 10
     assert normalize_stickv_pose("explain") == "present_board"
     assert normalize_stickv_pose("wave") == "wave_hello"
@@ -456,3 +456,82 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
             f.close()
         finally:
             rig.close()
+
+
+def test_gd4_expressive_guiding_poses_joint_lag_weight_shift_and_4level_lipsync(
+    tmp_path: Path,
+) -> None:
+    from hbt.stickv.puppet import (
+        POSE_PRESETS,
+        VALID_FACE_MOODS,
+        evaluate_pose_preset,
+        resolve_stickv_emotion,
+    )
+
+    # 1. Đủ 6 cử chỉ hướng dẫn mới + 6 face_mood
+    new_guiding = (
+        "guide_sweep_board",
+        "guide_two_sides",
+        "guide_step_count",
+        "guide_zoom_focus",
+        "welcome_open",
+        "lean_curious",
+    )
+    for p in new_guiding:
+        assert p in POSE_PRESETS
+        st = evaluate_pose_preset(p, 0.45, 0.7)
+        assert st.torso_dy == 0.0  # Chân bám chặt mặt đất
+        assert abs(st.torso_dx) <= 7.0
+        assert abs(st.torso_angle) <= 3.51
+
+    assert len(VALID_FACE_MOODS) == 6
+    assert resolve_stickv_emotion("auto", "present_board", "", face_mood="warm_cta") == "happy"
+    assert resolve_stickv_emotion("auto", "present_board", "", face_mood="shocked") == "shock"
+
+    # 2. Lip-Sync 4 mức: closed (<0.12) -> narrow (0.12-0.32) -> medium (0.32-0.60) -> wide (>0.60)
+    s0, _, y0 = compute_mouth_transform(0.05)
+    s1, _, y1 = compute_mouth_transform(0.20)
+    s2, _, y2 = compute_mouth_transform(0.46)
+    s3, x3, y3 = compute_mouth_transform(0.82)
+    assert s0 == "mouth_closed" and y0 == 1.0
+    assert s1 == "mouth_open" and 0.50 <= y1 <= 0.68
+    assert s2 == "mouth_open" and 0.72 <= y2 <= 0.98
+    assert s3 == "mouth_open" and y3 > 1.05 and x3 < 1.0
+
+    # 3. Prosody Micro-Brows (env > 0.65), Gaze Target (+5px -> 0px cuối câu) & chớp mắt 2.4-4.2s
+    ec = EyeController(pose="guide_sweep_board", face_mood="explaining", beat_id="b007", fps=30)
+    assert all(2.4 <= iv <= 4.2 for iv in ec.blink_intervals_s)
+    assert len(set(ec.blink_intervals_s[:6])) > 1  # Không lặp đều máy móc
+    _, sy_norm, ox_mid, oy_norm = ec.state_at(10, env_val=0.3, progress=0.4)
+    _, sy_peak, _, oy_peak = ec.state_at(10, env_val=0.82, progress=0.4)
+    _, _, ox_end, _ = ec.state_at(10, env_val=0.3, progress=0.98)
+    assert ox_mid == 5.0
+    assert ox_end == 0.0
+    assert sy_peak > sy_norm
+    assert oy_peak < oy_norm  # Nhướng lên trên (oy giảm 2.5px)
+
+    # 4. Joint lag phân tầng: Torso dẫn -> Shoulder trễ (+2f) -> Elbow trễ (+4f)
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    rig = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="guide_sweep_board",
+        face_mood="explaining",
+        fps=30,
+        rms_env=[0.7] * 30,
+        prev_pose_state=PuppetPoseState(),
+    )
+    try:
+        states = []
+        for idx in range(12):
+            f = rig.render_frame(idx, idx / 30.0)
+            states.append(rig.last_pose_state)
+            f.close()
+        # Ở các frame đầu, torso phản ứng nhanh hơn trong khi khuỷu tay trễ 4 frame rồi mới vung
+        assert abs(states[1].torso_angle) > 0.0
+        assert abs(states[8].elbow_r_angle) > abs(states[2].elbow_r_angle)
+    finally:
+        rig.close()

@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 from hbt.api.deps import State
 from hbt.shared.llm import AVAILABLE_GEMINI_MODELS, GEMINI_MODEL, GeminiClientError
 from hbt.shared.online_sources.iconify_props import search_iconify_icons
+from hbt.shared.online_sources.reference_images import (
+    download_reference_image_url,
+    search_reference_images,
+)
 from hbt.stickv.animator import list_available_animations
 from hbt.stickv.llm import (
     build_director_prompt,
@@ -165,6 +169,69 @@ def preview_stickv_puppet(
 def search_stickv_iconify(q: str = Query(default="")) -> dict[str, Any]:
     """Tìm nhanh icon PNG trên Iconify API để xem trước trên StickvPage."""
     return {"items": search_iconify_icons(q, limit=6)}
+
+
+class StickvReferenceImageApplyBody(BaseModel):
+    url: str = Field(min_length=4, max_length=1200)
+    query: str = ""
+    caption: str = ""
+
+
+@router.get("/stickv/reference-images/search")
+def search_stickv_reference_images(
+    state: State,
+    q: str = Query(default=""),
+    limit: int = Query(default=6, ge=1, le=12),
+) -> dict[str, Any]:
+    """Tìm ảnh tư liệu cho thẻ Polaroid (Wikimedia Commons -> Pixabay)."""
+    items = search_reference_images(q, limit=limit, workspace_dir=state.settings.workspace_dir)
+    return {"items": items}
+
+
+@router.post("/stickv/{slug}/beats/{beat_id}/reference-image")
+def apply_beat_reference_image(
+    slug: str,
+    beat_id: str,
+    body: StickvReferenceImageApplyBody,
+    state: State,
+) -> dict[str, Any]:
+    """Tải và gán nhanh ảnh tư liệu Polaroid cho beat StickV."""
+    proj = load_stickv_project(state.settings.workspace_dir, slug)
+    if not any(b.id == beat_id for b in proj.beats):
+        raise NotFound(f"Không tìm thấy beat '{beat_id}'")
+    pdir = stickv_project_dir(state.settings.workspace_dir, slug)
+    try:
+        saved_path = download_reference_image_url(
+            body.url,
+            pdir / "media",
+            slug_hint=f"{beat_id}_{body.query or 'photo'}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise Unprocessable(f"Không tải được ảnh tư liệu: {exc}") from exc
+
+    rel_path = f"media/{saved_path.name}"
+    updated_beats: list[StickvBeat] = []
+    for b in proj.beats:
+        if b.id == beat_id:
+            bdata = dict(b.board_data or {})
+            if body.caption.strip():
+                bdata["caption"] = body.caption.strip()[:80]
+            updated_beats.append(
+                b.model_copy(
+                    update={
+                        "media_path": rel_path,
+                        "board_type": "pinned_photo",
+                        "prop_query": body.query.strip()[:120] or b.prop_query,
+                        "board_data": bdata,
+                    }
+                )
+            )
+        else:
+            updated_beats.append(b)
+    saved = save_stickv_project(
+        state.settings.workspace_dir, proj.model_copy(update={"beats": updated_beats})
+    )
+    return {"ok": True, "media_path": rel_path, "project": saved.model_dump(mode="json")}
 
 
 @router.post("/stickv", status_code=201)

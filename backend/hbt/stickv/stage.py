@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
@@ -45,6 +45,7 @@ BOARD_BADGES: dict[str, str] = {
     "location_map": "ĐỊA DANH",
     "myth_vs_fact": "GIẢI MÃ",
     "recap_card": "TÓM TẮT",
+    "pinned_photo": "ẢNH TƯ LIỆU",
     "none": "PHÂN TÍCH",
 }
 
@@ -508,6 +509,147 @@ def _ease_in_cubic(t: float) -> float:
     return u * u * u
 
 
+def _draw_pinned_photo_card(
+    canvas: Image.Image,
+    beat: StickvBeat,
+    box: tuple[int, int, int, int],
+    pal: dict[str, tuple[int, int, int, int]],
+    *,
+    photo_img: Image.Image | None = None,
+    content_alpha: float = 1.0,
+) -> tuple[int, int, int, int]:
+    """Vẽ thẻ Polaroid trắng `#FFFFFF`, ghim đỏ `#D9232E` hoặc băng dính mờ, xoay nghiêng ±2.2°."""
+    x0, y0, x1, y1 = box
+    bw = max(240, x1 - x0)
+    bh = max(260, y1 - y0)
+
+    # Kích thước khung Polaroid gọn trong vùng bảng (tuyệt đối không phủ kín phông nền)
+    card_w = min(bw - 36, int(round(bh * 0.92)))
+    card_h = min(bh - 28, int(round(card_w * 0.94)))
+    card_w = max(220, card_w)
+    card_h = max(240, card_h)
+
+    vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
+    data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
+    pin_style = str(data.get("pin_style") or "pin").strip().lower()
+    raw_caption = (
+        str(data.get("caption") or "").strip()
+        or strip_rich_markup(beat.board_title or "").strip()
+        or _extract_highlight_keyword(beat.narration)
+    )
+    cap_words = raw_caption.split()[:6]
+    caption = " ".join(cap_words) if cap_words else "Ảnh tư liệu minh họa"
+
+    # Tạo lớp Polaroid có viền đệm đủ cho bóng đổ + đinh ghim + xoay nghiêng ±2.2°
+    pad = 44
+    pw = card_w + pad * 2
+    ph = card_h + pad * 2
+    polaroid = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+    try:
+        d = ImageDraw.Draw(polaroid)
+        cx0, cy0 = pad, pad
+        cx1, cy1 = pad + card_w, pad + card_h
+
+        # Bóng đổ mềm nhiều lớp
+        d.rounded_rectangle(
+            (cx0 + 10, cy0 + 14, cx1 + 10, cy1 + 14),
+            radius=10,
+            fill=(15, 23, 42, 46),
+        )
+        d.rounded_rectangle(
+            (cx0 + 5, cy0 + 8, cx1 + 5, cy1 + 8),
+            radius=10,
+            fill=(15, 23, 42, 28),
+        )
+
+        # Khung Polaroid trắng tinh #FFFFFF
+        d.rounded_rectangle(
+            (cx0, cy0, cx1, cy1),
+            radius=8,
+            fill=(255, 255, 255, 255),
+            outline=(226, 232, 240, 255),
+            width=3,
+        )
+
+        # Vùng ảnh bên trong (lề trên/trái/phải 20px, lề dưới 74px cho chú thích)
+        inset = 20
+        footer_h = 74
+        ix0, iy0 = cx0 + inset, cy0 + inset
+        ix1, iy1 = cx1 - inset, cy1 - footer_h
+        iw = max(80, ix1 - ix0)
+        ih = max(80, iy1 - iy0)
+
+        if photo_img is not None:
+            fitted = ImageOps.fit(
+                photo_img.convert("RGBA"),
+                (iw, ih),
+                method=Image.Resampling.LANCZOS,
+                centering=(0.5, 0.5),
+            )
+            try:
+                polaroid.alpha_composite(fitted, (ix0, iy0))
+            finally:
+                fitted.close()
+        else:
+            d.rectangle((ix0, iy0, ix1, iy1), fill=pal["takeaway_bg"])
+            _draw_topic_circle_badge(polaroid, ((ix0 + ix1) // 2, (iy0 + iy1) // 2), 84, pal, None)
+
+        d.rectangle((ix0, iy0, ix1, iy1), outline=(203, 213, 225, 255), width=2)
+
+        # Chú thích ngắn 3-6 từ căn giữa ở mép dưới Polaroid
+        f_cap = _load_font(FONT_BOLD, 28)
+        cbb = d.textbbox((0, 0), caption, font=f_cap)
+        tw = cbb[2] - cbb[0]
+        th = cbb[3] - cbb[1]
+        if tw > iw:
+            f_cap = _load_font(FONT_BOLD, 22)
+            cbb = d.textbbox((0, 0), caption, font=f_cap)
+            tw = cbb[2] - cbb[0]
+            th = cbb[3] - cbb[1]
+        tx = cx0 + (card_w - tw) // 2
+        ty = iy1 + (footer_h - th) // 2 - cbb[1]
+        d.text((tx, ty), caption, font=f_cap, fill=(30, 41, 59, 255))
+
+        # Đinh ghim đỏ #D9232E hoặc miếng băng dính mờ trên đỉnh
+        pin_cx = (cx0 + cx1) // 2
+        pin_cy = cy0 + 8
+        if pin_style == "tape":
+            d.rounded_rectangle(
+                (pin_cx - 56, cy0 - 14, pin_cx + 56, cy0 + 18),
+                radius=4,
+                fill=(254, 243, 199, 175),
+                outline=(217, 119, 6, 90),
+                width=1,
+            )
+        else:
+            d.ellipse((pin_cx - 15, pin_cy - 11, pin_cx + 17, pin_cy + 21), fill=(15, 23, 42, 60))
+            d.ellipse(
+                (pin_cx - 15, pin_cy - 15, pin_cx + 15, pin_cy + 15),
+                fill=(217, 35, 46, 255),
+                outline=(153, 27, 27, 255),
+                width=2,
+            )
+            d.ellipse((pin_cx - 7, pin_cy - 9, pin_cx - 1, pin_cy - 3), fill=(255, 255, 255, 190))
+
+        # Xoay nghiêng nhẹ ±2.2° theo beat id để tự nhiên như ghim tay
+        sign = 1.0 if (sum(ord(c) for c in (beat.id or "b1")) % 2 == 0) else -1.0
+        tilted = polaroid.rotate(sign * 2.2, resample=Image.Resampling.BICUBIC, expand=True)
+        try:
+            if content_alpha < 0.995:
+                a_band = tilted.getchannel("A").point(
+                    lambda p: int(round(p * max(0.0, min(1.0, content_alpha))))
+                )
+                tilted.putalpha(a_band)
+            dest_x = x0 + (bw - tilted.width) // 2
+            dest_y = y0 + (bh - tilted.height) // 2
+            canvas.alpha_composite(tilted, (dest_x, dest_y))
+            return dest_x, dest_y, dest_x + tilted.width, dest_y + tilted.height
+        finally:
+            tilted.close()
+    finally:
+        polaroid.close()
+
+
 def _draw_smart_board_content(
     canvas: Image.Image,
     beat: StickvBeat,
@@ -520,7 +662,11 @@ def _draw_smart_board_content(
     draw_shell: bool = True,
     content_alpha: float = 1.0,
 ) -> tuple[int, int, int, int]:
-    """Vẽ bảng minh họa 100% beat (kể cả thẻ tự động khi `board_type='none'` & 3 mẫu lịch sử)."""
+    """Vẽ bảng minh họa 100% beat (gồm thẻ tự động `none` & thẻ Polaroid `pinned_photo`)."""
+    if beat.board_type == "pinned_photo":
+        return _draw_pinned_photo_card(
+            canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
+        )
     prog = max(0.0, min(1.0, float(progress)))
     x0, y0, x1, max_y1 = box
     bw = x1 - x0
@@ -1295,8 +1441,8 @@ def _composite_transitioned_board(
         )
         return
 
-    enter_t = 0.30
-    exit_t = 0.22
+    enter_t = 0.35 if beat.board_type == "pinned_photo" else 0.30
+    exit_t = 0.35 if beat.board_type == "pinned_photo" else 0.22
     scale = float(cam_board_scale)
     dy_px = 0.0
     alpha = float(cam_board_alpha)

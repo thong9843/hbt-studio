@@ -11,6 +11,7 @@ import type {
   StickvCameraShot,
   StickvDomain,
   StickvEmotion,
+  StickvFaceMood,
   StickvInteraction,
   StickvMotion,
   StickvProject,
@@ -65,6 +66,12 @@ const DEFAULT_POSE_OPTIONS = [
   { id: 'facepalm_light', label: 'Vỗ trán ngán ngẩm' },
   { id: 'nod_yes', label: 'Gật đầu đồng tình' },
   { id: 'shake_no', label: 'Lắc đầu bác bỏ' },
+  { id: 'guide_sweep_board', label: 'Quét tay giới thiệu bảng' },
+  { id: 'guide_two_sides', label: 'Mở hai tay so sánh' },
+  { id: 'guide_step_count', label: 'Đánh nhịp đếm từng ý' },
+  { id: 'guide_zoom_focus', label: 'Tạo khung nhấn mạnh' },
+  { id: 'welcome_open', label: 'Mở tay chào thân thiện' },
+  { id: 'lean_curious', label: 'Nghiêng người tò mò' },
 ];
 
 const EXTRA_POSE_LABELS: Record<string, string> = {
@@ -128,6 +135,7 @@ const BOARD_TYPES: { id: StickvBoardType; label: string }[] = [
   { id: 'quote', label: 'Trích dẫn' },
   { id: 'list', label: 'Danh sách' },
   { id: 'recap_card', label: 'Tóm tắt 3 ý (CTA)' },
+  { id: 'pinned_photo', label: 'Ảnh tư liệu (Polaroid)' },
   { id: 'none', label: 'Thẻ tự động (Icon)' },
 ];
 
@@ -207,6 +215,10 @@ export function StickvPage() {
   const [activeTab, setActiveTab] = useState<'script' | 'visual' | 'audio' | 'inspect'>('script');
   const [safeZone, setSafeZone] = useState<SafeZonePlatform>('none');
   const [propPreviewMap, setPropPreviewMap] = useState<Record<string, string>>({});
+  const [refPhotoResults, setRefPhotoResults] = useState<
+    Array<{ id: string; title: string; url: string; thumb_url: string; source: string }>
+  >([]);
+  const [refPhotoSearching, setRefPhotoSearching] = useState(false);
 
   // Trạng thái đóng/mở Accordion tạo kịch bản AI: tự động thu gọn khi dự án đã có >= 1 beat
   const [creatorManualOpen, setCreatorManualOpen] = useState<boolean | null>(null);
@@ -767,6 +779,26 @@ export function StickvPage() {
           />
 
           <StudioSelect
+            aria-label={vi.stickvJob.faceMoodLabel}
+            variant="compact"
+            value={activeBeat.face_mood ?? ''}
+            onChange={(val) =>
+              updateBeat(activeBeat.id, {
+                face_mood: (val || null) as StickvFaceMood | null,
+              })
+            }
+            options={[
+              { value: '', label: `Sắc thái: ${vi.stickvJob.faceMoods.auto}` },
+              { value: 'explaining', label: `Sắc thái: ${vi.stickvJob.faceMoods.explaining}` },
+              { value: 'curious', label: `Sắc thái: ${vi.stickvJob.faceMoods.curious}` },
+              { value: 'excited', label: `Sắc thái: ${vi.stickvJob.faceMoods.excited}` },
+              { value: 'skeptical', label: `Sắc thái: ${vi.stickvJob.faceMoods.skeptical}` },
+              { value: 'shocked', label: `Sắc thái: ${vi.stickvJob.faceMoods.shocked}` },
+              { value: 'warm_cta', label: `Sắc thái: ${vi.stickvJob.faceMoods.warm_cta}` },
+            ]}
+          />
+
+          <StudioSelect
             aria-label="Chuyển động"
             variant="compact"
             value={activeBeat.motion}
@@ -819,6 +851,29 @@ export function StickvPage() {
           >
             Tìm Icon
           </Button>
+          <Button
+            size="sm"
+            tone="soft"
+            busy={refPhotoSearching}
+            onClick={async () => {
+              const q = (activeBeat.prop_query || activeBeat.board_title || '').trim();
+              if (!q) return;
+              setRefPhotoSearching(true);
+              try {
+                const res = await stickvApi.searchReferenceImages(q, 6);
+                setRefPhotoResults(res.items);
+                if (res.items.length === 0) {
+                  toast.info(vi.stickvJob.photoNotFoundToast);
+                }
+              } catch (err) {
+                toast.error(err);
+              } finally {
+                setRefPhotoSearching(false);
+              }
+            }}
+          >
+            {refPhotoSearching ? vi.stickvJob.swappingPhotoBtn : vi.stickvJob.swapPhotoBtn}
+          </Button>
           {propPreviewMap[activeBeat.id] && (
             <img
               src={propPreviewMap[activeBeat.id]}
@@ -827,6 +882,37 @@ export function StickvPage() {
             />
           )}
         </div>
+        {refPhotoResults.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            {refPhotoResults.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                title={item.title}
+                onClick={async () => {
+                  try {
+                    const res = await stickvApi.applyReferenceImage(draft.slug, activeBeat.id, {
+                      url: item.url,
+                      query: activeBeat.prop_query ?? '',
+                      caption: activeBeat.board_title ?? '',
+                    });
+                    setDraft(res.project);
+                    setRefPhotoResults([]);
+                    toast.info(vi.stickvJob.photoPickedToast);
+                  } catch (err) {
+                    toast.error(err);
+                  }
+                }}
+                className="group overflow-hidden rounded-lg border border-line bg-soft text-left transition hover:border-brand"
+              >
+                <img src={item.thumb_url} alt={item.title} className="h-16 w-full object-cover" />
+                <span className="block truncate px-1.5 py-0.5 text-[10px] text-muted">
+                  {item.source === 'wikimedia' ? 'Wikimedia' : 'Pixabay'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
     );
   };

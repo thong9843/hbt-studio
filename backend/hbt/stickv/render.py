@@ -22,6 +22,7 @@ from hbt.shared.ffmpeg_utils import (
     measure_audio_duration,
 )
 from hbt.shared.online_sources.iconify_props import resolve_prop_png
+from hbt.shared.online_sources.reference_images import resolve_reference_image
 from hbt.shared.pipeline.watermark import (
     WatermarkSettings,
     build_watermark_overlay_filter,
@@ -186,6 +187,9 @@ def _stream_beat_frames_to_ffmpeg(
         target_height=target_char_h,
         char_img_fallback=char_img,
         interaction=interaction,
+        emotion=getattr(beat, "emotion", "auto"),
+        face_mood=getattr(beat, "face_mood", None),
+        narration=beat.narration,
         beat_id=beat.id,
         animation_mode=animation_mode,
         wav_path=wav_path,
@@ -195,7 +199,20 @@ def _stream_beat_frames_to_ffmpeg(
 
     prop_img: Image.Image | None = None
     prop_query = (getattr(beat, "prop_query", None) or "").strip()
-    if interaction == "hold_prop" and prop_query:
+    if beat.board_type == "pinned_photo":
+        photo_path: Path | None = None
+        if beat.media_path:
+            cand_m = out_mp4.parents[2] / beat.media_path
+            if cand_m.is_file():
+                photo_path = cand_m
+        if photo_path is None:
+            ref_q = prop_query or beat.board_title or infer_auto_prop_query(beat.narration)
+            accent = DOMAIN_PALETTES[norm_domain]["accent"]
+            photo_path, _ = resolve_reference_image(ref_q, library_dir, accent_color=accent)
+        if photo_path is not None and photo_path.is_file():
+            with Image.open(photo_path) as raw_photo:
+                prop_img = raw_photo.convert("RGBA")
+    elif interaction == "hold_prop" and prop_query:
         accent = DOMAIN_PALETTES[norm_domain]["accent"]
         prop_path = resolve_prop_png(prop_query, library_dir, accent_color=accent)
         if prop_path.is_file():

@@ -890,3 +890,72 @@ def test_phase9_karaoke_highlight_box_clearance_and_closeup_quote_banner() -> No
     finally:
         bg.close()
         char.close()
+
+
+def test_pinned_photo_polaroid_board_on_dynamic_backdrop() -> None:
+    """Thẻ Polaroid `pinned_photo` có viền trắng #FFFFFF, ghim đỏ #D9232E, không phủ kín nền."""
+    import numpy as np
+
+    bg_color = (22, 34, 54)
+    bg = Image.new("RGB", (1080, 1920), bg_color)
+    char = Image.new("RGBA", (240, 480), (11, 14, 20, 255))
+    photo = Image.new("RGBA", (600, 400), (70, 130, 180, 255))
+    try:
+        beat = StickvBeat(
+            id="b_polaroid",
+            narration="Tượng đá Moai cổ đại trên đảo Phục Sinh.",
+            board_type="pinned_photo",
+            board_title="Tượng đá Moai cổ đại",
+            board_data={"caption": "Tượng đá Moai cổ đại", "pin_style": "pin"},
+        )
+        frame = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=beat,
+            aspect="9:16",
+            t_sec=0.50,
+            mouth_open=0.3,
+            word_timings=[],
+            prop_img=photo,
+            draw_board=True,
+            domain="physics_science",
+            duration_sec=2.5,
+        )
+        arr = np.array(frame)
+        # 1. Không phủ kín nền: góc trên trái & mép trên vẫn giữ đúng màu nền động
+        assert frame.getpixel((20, 20)) == bg_color
+        assert frame.getpixel((1060, 20)) == bg_color
+        # 2. Vùng bảng chứa khung Polaroid trắng #FFFFFF và đinh ghim đỏ #D9232E
+        top_zone = arr[100:950, 80:1000]
+        white_mask = (
+            (top_zone[:, :, 0] > 248) & (top_zone[:, :, 1] > 248) & (top_zone[:, :, 2] > 248)
+        )
+        red_pin_mask = (
+            (top_zone[:, :, 0] > 190) & (top_zone[:, :, 1] < 65) & (top_zone[:, :, 2] < 75)
+        )
+        assert int(white_mask.sum()) > 5000
+        assert int(red_pin_mask.sum()) > 100
+        frame.close()
+
+        # 3. Kiểu băng dính (pin_style='tape') + pha vào mượt 0.35s không lỗi
+        beat_tape = beat.model_copy(
+            update={"board_data": {"caption": "Băng dính mờ", "pin_style": "tape"}}
+        )
+        f_enter = render_animated_beat_frame(
+            bg_img=bg,
+            char_img=char,
+            beat=beat_tape,
+            aspect="9:16",
+            t_sec=0.12,
+            mouth_open=0.2,
+            word_timings=[],
+            prop_img=photo,
+            draw_board=True,
+            duration_sec=2.5,
+        )
+        assert f_enter.size == (1080, 1920)
+        f_enter.close()
+    finally:
+        bg.close()
+        char.close()
+        photo.close()
