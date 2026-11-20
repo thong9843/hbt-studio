@@ -620,15 +620,17 @@ def rotate_around_pivot(
     return rotated, (ox, oy)
 
 
-def smooth_rms_envelope(raw_rms: list[float]) -> list[float]:
-    """Áp dụng bộ lọc mượt EMA `env[i] = 0.55 * rms_norm[i] + 0.45 * env[i-1]`."""
+def smooth_rms_envelope(raw_rms: list[float], fps: int = 30) -> list[float]:
+    """Áp dụng bộ lọc mượt EMA chuẩn hóa theo `fps` (tương đương 0.55/0.45 ở 30fps)."""
     if not raw_rms:
         return []
+    decay = 0.45 ** (30.0 / max(15, int(fps)))
+    alpha = 1.0 - decay
     out: list[float] = []
     prev = 0.0
     for val in raw_rms:
         clamped = max(0.0, min(1.0, float(val)))
-        cur = 0.55 * clamped + 0.45 * prev
+        cur = alpha * clamped + decay * prev
         out.append(round(cur, 4))
         prev = cur
     return out
@@ -664,7 +666,7 @@ def compute_smoothed_rms(wav_path: Path, fps: int, duration_sec: float) -> list[
         p92 = float(np.percentile(frame_rms, 92)) if frame_rms else 0.1
         peak_ref = max(0.02, p92)
         rms_norm = [min(1.0, r / peak_ref) for r in frame_rms]
-        return smooth_rms_envelope(rms_norm)
+        return smooth_rms_envelope(rms_norm, fps=fps)
     except Exception:
         return [0.0] * n_frames
 
@@ -1153,13 +1155,15 @@ class EyeController:
         return "eyes_neutral"
 
     def _blink_phase(self, frame_idx: int) -> int | None:
-        """Trả về pha chớp mắt (0, 1, 2) tại `frame_idx`, hoặc None nếu mắt mở bình thường."""
+        """Trả về pha chớp mắt (0, 1, 2) kéo dài ~0.10s theo `fps`, hoặc None nếu mắt mở."""
         if frame_idx < 0:
             return None
+        phase_frames = max(1, int(round(self.fps / 30.0)))
+        blink_len = 3 * phase_frames
         for start in self._blink_starts:
             diff = frame_idx - start
-            if 0 <= diff <= 2:
-                return diff
+            if 0 <= diff < blink_len:
+                return diff // phase_frames
             if start > frame_idx:
                 break
         return None
@@ -1554,7 +1558,7 @@ class PuppetRig:
         self.fps = max(15, int(fps))
         self.speech_start = max(0.0, float(speech_start))
         self.speech_end = max(self.speech_start, float(speech_end))
-        self.env = smooth_rms_envelope(rms_env or [])
+        self.env = smooth_rms_envelope(rms_env or [], fps=self.fps)
         self.prev_pose_state = prev_pose_state
         self.global_t_offset = max(0.0, float(global_t_offset))
         self.tween_dur = 0.45 if prev_pose_state is not None else 0.0
@@ -1571,7 +1575,12 @@ class PuppetRig:
             "torso_dy": _SpringChannel(init_st.torso_dy),
             "torso_scale_y": _SpringChannel(init_st.torso_scale_y),
         }
-        self._follow_history: list[PuppetPoseState] = [init_st] * 6
+        self._head_lag_frames = max(1, int(round(self.fps / 30.0)))
+        self._shoulder_lag_frames = max(2, int(round(2.0 * self.fps / 30.0)))
+        self._elbow_lag_frames = max(4, int(round(4.0 * self.fps / 30.0)))
+        self._follow_hist_len = self._elbow_lag_frames + 2
+        self._follow_history: list[PuppetPoseState] = [init_st] * self._follow_hist_len
+        self._mouth_ema_decay: float = 0.40 ** (30.0 / self.fps)
         self._mouth_sy_smooth: float = 1.0
         self.last_pose_state: PuppetPoseState = init_st
 
@@ -1706,15 +1715,13 @@ class PuppetRig:
     def _pose_state_at(self, t_sec: float, env_val: float) -> PuppetPoseState:
         raw_target = self._raw_pose_state_at(t_sec, env_val)
         dt = 1.0 / self.fps
-        # Follow-through phân tầng: Torso (lead) -> Head (+1-2f) -> Shoulder (+2f) -> Elbow (+4f)
+        # Follow-through phân tầng giữ nguyên độ trễ theo giây (33ms / 67ms / 133ms ở mọi fps)
         self._follow_history.append(raw_target)
-        if len(self._follow_history) > 6:
+        if len(self._follow_history) > self._follow_hist_len:
             self._follow_history.pop(0)
-        head_lag = self._follow_history[-2]
-        shoulder_lag = self._follow_history[-3]
-        elbow_lag = (
-            self._follow_history[-5] if len(self._follow_history) >= 5 else self._follow_history[0]
-        )
+        head_lag = self._follow_history[-1 - self._head_lag_frames]
+        shoulder_lag = self._follow_history[-1 - self._shoulder_lag_frames]
+        elbow_lag = self._follow_history[-1 - self._elbow_lag_frames]
 
         smoothed = PuppetPoseState(
             head_angle=self._springs["head_angle"].step(
@@ -1925,7 +1932,9 @@ class PuppetRig:
         if self.emotion in ("shock", "excited"):
             msy_target *= 1.18
             mslot = "mouth_open" if env_val >= 0.08 or self.emotion == "shock" else mslot
-        self._mouth_sy_smooth = 0.60 * msy_target + 0.40 * self._mouth_sy_smooth
+        self._mouth_sy_smooth = (
+            1.0 - self._mouth_ema_decay
+        ) * msy_target + self._mouth_ema_decay * self._mouth_sy_smooth
         msy = self._mouth_sy_smooth if mslot == "mouth_open" else 1.0
         mouth_src = self.mouths.get(mslot) or self.mouths.get("mouth_closed")
         if mouth_src is not None:

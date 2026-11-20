@@ -159,7 +159,7 @@ class StickvProject(BaseModel):
     animation_mode: StickvAnimationMode = "auto"
     aspect: StickvAspect = "9:16"
     theme: StickvTheme = "cream"
-    fps: int = Field(default=30, ge=15, le=60)
+    fps: int = Field(default=60, ge=15, le=60)
     voice_id: str = Field(default="Thanh Bình", max_length=120)
     music_mood: str = Field(default="curious_science", max_length=60)
     pause_scale: float = Field(default=1.0, ge=0.5, le=2.0)

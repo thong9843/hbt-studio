@@ -336,7 +336,7 @@ def test_append_outro_both_aspects_and_dynamic_pose_discovery(tmp_path: Path) ->
             out_mp4=tmp_path / "out_169.mp4",
             w=1920,
             h=1080,
-            fps=30,
+            fps=60,
             aspect="16:9",
             brand_dir=brand,
             library_dir=lib,
@@ -345,6 +345,24 @@ def test_append_outro_both_aspects_and_dynamic_pose_discovery(tmp_path: Path) ->
         fc_169 = cmds[-1][cmds[-1].index("-filter_complex") + 1]
         assert "#B22228" in fc_169
         assert "xfade=transition=fade:duration=0.5" in fc_169
+        assert ",fps=60[vout]" in fc_169
+
+        (brand / "outro" / "outro_4s_60fps.mp4").write_bytes(b"outro60")
+        _append_outro(
+            main_mp4=main_mp4,
+            main_wav=main_wav,
+            out_mp4=tmp_path / "out_916_60.mp4",
+            w=1080,
+            h=1920,
+            fps=60,
+            aspect="9:16",
+            brand_dir=brand,
+            library_dir=lib,
+            chunks_dir=chunks,
+        )
+        assert any("outro_4s_60fps.mp4" in arg for arg in cmds[-1])
+        fc_60 = cmds[-1][cmds[-1].index("-filter_complex") + 1]
+        assert ",fps=60[vout]" in fc_60
 
 
 def test_natural_speech_pauses_and_locked_karaoke(tmp_path: Path) -> None:

@@ -858,7 +858,7 @@ def _append_outro(
     fc = (
         f"[0:v]fps={fps},format=yuv420p,settb=AVTB[v0];"
         f"{outro_vf}"
-        f"[v0][v1]xfade=transition=fade:duration=0.5:offset={offset:.3f}[vout];"
+        f"[v0][v1]xfade=transition=fade:duration=0.5:offset={offset:.3f},fps={fps}[vout];"
         "[2:a][3:a]acrossfade=d=0.5:c1=tri:c2=tri[aout]"
     )
 
@@ -913,7 +913,7 @@ def render_stickv(
             cancel.check()
 
     beats = project.beats[:3] if preview else project.beats
-    fps = 24 if preview else min(30, project.fps)
+    fps = 30 if preview else 60
     w, h = STICKV_ASPECT_SIZES[project.aspect]
 
     audio_dir = project_dir / "audio"

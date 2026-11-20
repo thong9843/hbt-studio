@@ -535,3 +535,48 @@ def test_gd4_expressive_guiding_poses_joint_lag_weight_shift_and_4level_lipsync(
         assert abs(states[8].elbow_r_angle) > abs(states[2].elbow_r_angle)
     finally:
         rig.close()
+
+
+def test_stickv_60fps_matches_30fps_realtime_motion_and_blink(tmp_path: Path) -> None:
+    """Chuyển động 60fps phải khớp tốc độ thời gian thực 30fps (không chạy nhanh gấp đôi)."""
+    ec30 = EyeController(pose="present_board", beat_id="b010", fps=30)
+    ec60 = EyeController(pose="present_board", beat_id="b010", fps=60)
+    assert [ec30.state_at(i)[1] for i in range(4)] == [0.45, 0.12, 0.50, 1.0]
+    assert [ec60.state_at(i)[1] for i in range(7)] == [0.45, 0.45, 0.12, 0.12, 0.50, 0.50, 1.0]
+
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    rig30 = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="guide_sweep_board",
+        fps=30,
+        rms_env=[0.7] * 30,
+        prev_pose_state=PuppetPoseState(),
+    )
+    rig60 = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="guide_sweep_board",
+        fps=60,
+        rms_env=[0.7] * 60,
+        prev_pose_state=PuppetPoseState(),
+    )
+    try:
+        for i in range(16):  # t = 0.00s .. 0.50s
+            rig30._pose_state_at(i / 30.0, 0.7)
+        for i in range(31):  # t = 0.00s .. 0.50s
+            rig60._pose_state_at(i / 60.0, 0.7)
+        st30 = rig30.last_pose_state
+        st60 = rig60.last_pose_state
+        assert abs(st60.torso_angle - st30.torso_angle) < 1.5
+        assert abs(st60.torso_dx - st30.torso_dx) < 1.5
+        assert abs(st60.arm_r_angle - st30.arm_r_angle) < 4.5
+        assert abs(st60.elbow_r_angle - st30.elbow_r_angle) < 4.5
+        assert abs(st60.head_angle - st30.head_angle) < 1.5
+    finally:
+        rig30.close()
+        rig60.close()

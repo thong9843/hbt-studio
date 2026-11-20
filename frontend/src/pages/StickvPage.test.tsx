@@ -244,9 +244,9 @@ describe('StickvPage', () => {
 
     expect(await screen.findByDisplayValue('Đây là beat mở đầu.')).toBeInTheDocument();
 
-    // Mở Popover Xuất video trên Topbar rồi bấm Xuất bản đẹp (MP4)
+    // Mở Popover Xuất video trên Topbar rồi bấm Xuất bản đẹp 60fps (MP4)
     fireEvent.click(screen.getByRole('button', { name: 'Xuất video' }));
-    const exportFinalBtn = screen.getByRole('button', { name: /Xuất bản đẹp \(MP4\)/i });
+    const exportFinalBtn = screen.getByRole('button', { name: /Xuất bản đẹp 60fps \(MP4\)/i });
     await waitFor(() => expect(exportFinalBtn).toBeEnabled());
     fireEvent.click(exportFinalBtn);
 

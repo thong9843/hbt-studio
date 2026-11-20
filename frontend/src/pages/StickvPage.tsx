@@ -969,6 +969,8 @@ export function StickvPage() {
           showWatermarkControl: true,
           onExportPreview: () => renderMutation.mutate(true),
           onExportFinal: () => renderMutation.mutate(false),
+          previewLabel: vi.stickvJob.exportPreviewBtn,
+          finalLabel: vi.stickvJob.exportFinalBtn,
           disabled: !draft || draft.beats.length === 0,
           isSubmitting: renderMutation.isPending,
           isRendering: isStickvJobRunning,

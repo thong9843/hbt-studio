@@ -85,6 +85,7 @@ def test_stickv_real_final_render_produces_valid_mp4_and_sse_progress(tmp_path: 
     )
     assert create_res.status_code == 201
     proj = create_res.json()["project"]
+    assert proj["fps"] == 60
     slug = proj["slug"]
 
     # Tắt outro để test tập trung vào luồng stream RGB24 + mix 48kHz + mux MP4 thật
@@ -97,9 +98,9 @@ def test_stickv_real_final_render_produces_valid_mp4_and_sse_progress(tmp_path: 
     job_id = render_res.json()["job_id"]
     assert job_id
 
-    # Chờ worker hoàn tất (tối đa 45s)
+    # Chờ worker hoàn tất (60fps gấp đôi khung hình so với 30fps -> tối đa 120s cho CI CPU)
     job = app.state.hbt.jobs.get(job_id)
-    assert job.wait(timeout=45.0), "Job dựng StickV thật bị quá thời gian 45s"
+    assert job.wait(timeout=120.0), "Job dựng StickV thật bị quá thời gian 120s"
 
     status_res = client.get(f"/api/jobs/{job_id}")
     assert status_res.status_code == 200
@@ -139,7 +140,7 @@ def test_stickv_real_final_render_produces_valid_mp4_and_sse_progress(tmp_path: 
             "-v",
             "error",
             "-show_entries",
-            "stream=codec_type,codec_name,pix_fmt,sample_rate,width,height",
+            "stream=codec_type,codec_name,pix_fmt,r_frame_rate,sample_rate,width,height",
             "-of",
             "json",
             str(mp4_path),
@@ -154,6 +155,7 @@ def test_stickv_real_final_render_produces_valid_mp4_and_sse_progress(tmp_path: 
     assert v_stream is not None
     assert v_stream.get("codec_name") == "h264"
     assert v_stream.get("pix_fmt") == "yuv420p"
+    assert v_stream.get("r_frame_rate") == "60/1"
     assert int(v_stream.get("width", 0)) == 1080
     assert int(v_stream.get("height", 0)) == 1920
     assert a_stream is not None
