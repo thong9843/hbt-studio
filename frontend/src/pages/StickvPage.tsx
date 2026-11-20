@@ -354,11 +354,11 @@ export function StickvPage() {
       if (found.music_mood) setMusicMood(found.music_mood);
       if (found.animation_mode) setAnimationMode(found.animation_mode);
       setTheme(found.theme);
-      if (found.beats.length > 0 && !found.beats.some((b) => b.id === selectedBeatId)) {
-        setSelectedBeatId(found.beats[0].id);
-      }
+      setSelectedBeatId((prev) =>
+        found.beats.some((b) => b.id === prev) ? prev : (found.beats[0]?.id ?? ''),
+      );
     }
-  }, [selectedSlug, projects, selectedBeatId]);
+  }, [selectedSlug, projects]);
 
   const hasBeats = Boolean(draft && draft.beats.length > 0);
   const isCreatorOpen = creatorManualOpen ?? !hasBeats;

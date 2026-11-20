@@ -50,12 +50,12 @@ export function StageCanvas({
         {headerRight && <div className="flex items-center gap-2">{headerRight}</div>}
       </div>
 
-      <div className="flex w-full flex-1 items-center justify-center">
+      <div className="flex min-h-0 w-full flex-1 items-center justify-center">
         <div
           className={cx(
-            'relative overflow-hidden rounded-preview border border-line bg-card shadow-card',
+            'relative max-h-full overflow-hidden rounded-preview border border-line bg-card shadow-card',
             aspect === '9:16'
-              ? 'aspect-[9/16] w-full max-w-[310px]'
+              ? 'aspect-[9/16] h-full max-w-[310px]'
               : 'aspect-video w-full max-w-[620px]',
           )}
         >

@@ -114,6 +114,11 @@ describe('AppShell, wide (>= 1280 px)', () => {
 
     expect(side).toHaveClass('w-[224px]');
     expect(localStorage.getItem('hbt_sidebar_collapsed')).toBe('false');
+
+    // Icon Sáng/Tối ở đáy Sidebar là Mặt trời / Mặt trăng (tách biệt hẳn icon Cài đặt)
+    expect(
+      within(side).queryByTestId('theme-icon-sun') ?? within(side).queryByTestId('theme-icon-moon'),
+    ).not.toBeNull();
   });
 
   it('hides the open-project block outside a project', () => {

@@ -1,29 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
-import type { ActiveJob } from '../../api/types';
-import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
+import { isOnActiveJobPage, useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { useRemainingText } from '../../hooks/useRemaining';
 import { vi } from '../../i18n/vi';
 import { StopIcon } from '../icons';
 import { Button } from '../ui/Button';
 import { Progress } from '../ui/Progress';
-
-function isOnActiveJobPage(
-  pathname: string,
-  kind: ActiveJob['kind'] | null,
-  slug: string | null,
-): boolean {
-  if (kind === 'stickv' && pathname.startsWith('/stickv')) {
-    return true;
-  }
-  if (
-    (kind === 'preview' || kind === 'final') &&
-    slug &&
-    pathname.startsWith(`/p/${slug}/export`)
-  ) {
-    return true;
-  }
-  return false;
-}
 
 /**
  * Thanh Tiến trình Dựng Toàn cục (Global SSE Job Dock):
