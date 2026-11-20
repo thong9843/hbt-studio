@@ -41,6 +41,7 @@ def test_summary_keys_keep_their_order_and_new_ones_come_last(client):  # noqa: 
         "error",
         "cover",
         "last_final",
+        "kind",
     ]
 
 

@@ -9,6 +9,10 @@ from hbt.app_settings import AppSettingsStore
 from hbt.config import Settings
 from hbt.jobs import JobManager
 from hbt.library import MusicLibrary
+from hbt.postv.backgrounds import BackgroundLibrary
+from hbt.postv.censor import CensorStore
+from hbt.postv.memes import MemeLibrary
+from hbt.postv.voice import VoiceProvider
 from hbt.sensitive import SensitiveStore
 from hbt.storage import Storage
 
@@ -22,3 +26,7 @@ class AppState:
     sensitive: SensitiveStore
     app_settings: AppSettingsStore
     brand_dir: Path
+    postv_words: CensorStore
+    backgrounds: BackgroundLibrary
+    voice: VoiceProvider
+    memes: MemeLibrary

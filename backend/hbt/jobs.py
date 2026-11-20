@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import re
 import shutil
 import threading
 import time
@@ -20,12 +22,30 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
+from hbt.core.hbt_voice import build_hbt_plan, spoken_chunks, synthesize_hbt
+from hbt.library import MusicLibrary
+from hbt.models import Music, Project, Voice
+from hbt.pipeline import cancel
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.cancel import CancelToken, RenderCancelled
 from hbt.pipeline.ffutil import INSTALL_HINT
 from hbt.pipeline.lint import describe_issue, lint_project
 from hbt.pipeline.render import MAX_PREVIEW_SECONDS, RenderOptions, render_project
+from hbt.postv.auto_script import build_auto_script, load_script_styles
+from hbt.postv.backgrounds import BackgroundLibrary, background_problems
+from hbt.postv.censor import CensorStore
+from hbt.postv.models import PostvProject
+from hbt.postv.render import render_postv
+from hbt.postv.voice import (
+    VoiceError,
+    VoiceProvider,
+    VoiceUnavailable,
+    build_plan,
+    resolve_cast,
+    synthesize_plan,
+)
 from hbt.sensitive import SensitiveStore
+from hbt.shared.sse_manager import format_sse_progress
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
 log = logging.getLogger(__name__)
@@ -33,9 +53,20 @@ log = logging.getLogger(__name__)
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
 LOG_TAIL = 20
 CANCEL_WAIT = 5.0  # giây chờ job đang chạy dừng hẳn sau khi huỷ
+STALE_LOCK_SECONDS = 120.0  # quá hạn không heartbeat + không còn tiến trình con → tự mở khoá
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
 FINISHED = (DONE, FAILED, CANCELLED)
+
+
+def _has_alive_subprocess(job: Job) -> bool:
+    """Kiểm tra có tiến trình con (TTS/FFmpeg) nào của job đang thực sự sống không."""
+    token = getattr(job, "token", None)
+    if token is None:
+        return False
+    with token._lock:
+        procs = list(token._procs)
+    return any(p.poll() is None for p in procs)
 
 
 @dataclass
@@ -47,6 +78,7 @@ class Job:
     outro: bool | None
     allow_long_trim: bool
     preview_seconds: float | None = None
+    aspect_mode: str | None = None
     status: str = QUEUED
     progress: float = 0.0
     step: str = ""
@@ -57,11 +89,17 @@ class Job:
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
+    last_heartbeat: float = field(default_factory=time.time)
     token: CancelToken = field(default_factory=CancelToken)
     _log: deque = field(default_factory=lambda: deque(maxlen=200))
     _events: list = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _done: threading.Event = field(default_factory=threading.Event)
+    kind: str = "render"  # "render" | "voice" | "stickv" | ...
+    mode: str = ""  # "preview" | "final"
+    stage: str = ""
+    current_beat: int | None = None
+    total_beats: int | None = None
 
     @property
     def finished(self) -> bool:
@@ -80,16 +118,25 @@ class Job:
 
     def _emit(self, kind: str, data: dict) -> None:
         with self._lock:
+            self.last_heartbeat = time.time()
             self._events.append((kind, data))
 
-    def _progress(self, pct: float, step: str, message: str) -> None:
+    def _progress(self, pct: float, step: str, message: str, **extra: Any) -> None:
         with self._lock:
+            self.last_heartbeat = time.time()
             self.progress, self.step = pct, step
+            if "stage" in extra and isinstance(extra["stage"], str):
+                self.stage = extra["stage"]
+            elif step:
+                self.stage = step
+            if "current_beat" in extra:
+                self.current_beat = extra["current_beat"]
+            if "total_beats" in extra:
+                self.total_beats = extra["total_beats"]
             if message:
                 self._log.append(message)
-            self._events.append(
-                ("progress", {"progress": round(pct, 1), "step": step, "message": message})
-            )
+            payload = format_sse_progress(pct, step, message, **extra)
+            self._events.append(("progress", payload))
 
     def _finish_locked(self, status: str, **extra: Any) -> None:
         if self.status in FINISHED:  # chỉ kết thúc một lần
@@ -167,17 +214,28 @@ class JobManager:
         tool_check=check_render_tools,
         sensitive: SensitiveStore | None = None,
         app_settings: AppSettingsStore | None = None,
+        voice: VoiceProvider | None = None,
+        postv_render_fn=render_postv,
+        postv_words: CensorStore | None = None,
+        stale_timeout: float = STALE_LOCK_SECONDS,
     ):
         self.storage = storage
         self.library_dir = library_dir
         self.brand_dir = brand_dir
         self._render = render_fn
+        self._render_postv = postv_render_fn
+        self.postv_words = postv_words
         self._tool_check = tool_check
         self.sensitive = sensitive
         self.app_settings = app_settings
+        self.voice = voice
+        self.stale_timeout = stale_timeout
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._active_workers: set[str] = set()
+        self.is_generating_voice: dict[str, bool] = {}
+        self.is_rendering: dict[str, bool] = {}
 
     # ---------------------------------------------------------------- tra cứu
     def get(self, job_id: str) -> Job:
@@ -187,15 +245,102 @@ class JobManager:
             raise NotFound(f"Không có job '{job_id}'")
         return job
 
-    def is_busy(self, slug: str) -> bool:
+    def cleanup_stale_locks(self, slug: str | None = None) -> list[str]:
+        """Kiểm tra heartbeat & tiến trình sống; tự mở khoá job treo không có TTS/FFmpeg thật."""
+        now = time.time()
+        stale_jobs: list[Job] = []
         with self._lock:
-            return any(j.slug == slug and not j.finished for j in self._jobs.values())
+            for j in self._jobs.values():
+                if slug is not None and j.slug != slug:
+                    continue
+                if j.finished or j.status != RUNNING:
+                    continue
+                if getattr(j, "status", None) == "waiting_pick":
+                    continue
+                has_proc = _has_alive_subprocess(j)
+                worker_dead = j.id not in self._active_workers
+                timed_out = (now - j.last_heartbeat) > self.stale_timeout
+                if not has_proc and (worker_dead or timed_out):
+                    stale_jobs.append(j)
+            if not stale_jobs:
+                # Đồng bộ cờ khoá nếu mọi job của slug đã kết thúc
+                target_slugs = (
+                    [slug]
+                    if slug is not None
+                    else list(set(self.is_generating_voice) | set(self.is_rendering))
+                )
+                for s in target_slugs:
+                    has_active = any(j.slug == s and not j.finished for j in self._jobs.values())
+                    if not has_active:
+                        self.is_generating_voice[s] = False
+                        self.is_rendering[s] = False
+
+        released: list[str] = []
+        for j in stale_jobs:
+            log.warning("[%s] Tự động mở khoá job treo cho dự án '%s'", j.id, j.slug)
+            j.token.cancel()
+            j._finish(
+                FAILED,
+                error=(
+                    "Tác vụ trước bị kẹt (không còn tiến trình TTS/FFmpeg hoạt động), "
+                    "đã tự mở khoá."
+                ),
+            )
+            released.append(j.id)
+        if stale_jobs:
+            with self._lock:
+                for j in stale_jobs:
+                    self._active_workers.discard(j.id)
+                    if not any(
+                        other.slug == j.slug and not other.finished for other in self._jobs.values()
+                    ):
+                        self.is_generating_voice[j.slug] = False
+                        self.is_rendering[j.slug] = False
+        return released
+
+    def is_busy(self, slug: str) -> bool:
+        self.cleanup_stale_locks(slug)
+        with self._lock:
+            has_job = any(j.slug == slug and not j.finished for j in self._jobs.values())
+            voice_lock = self.is_generating_voice.get(slug, False)
+            render_lock = self.is_rendering.get(slug, False)
+            return has_job or voice_lock or render_lock
+
+    def unlock_project(self, slug: str) -> dict[str, Any]:
+        """Huỷ mọi tác vụ đang chạy/kẹt và ép giải phóng toàn bộ cờ khoá của dự án."""
+        with self._lock:
+            targets = [j for j in self._jobs.values() if j.slug == slug and not j.finished]
+        for j in targets:
+            j.token.cancel()
+            if hasattr(j, "_pick_event"):
+                j._pick_event.set()
+            j._finish(CANCELLED, error="Đã huỷ tác vụ bị kẹt và mở khoá dự án.")
+        with self._lock:
+            for j in targets:
+                self._active_workers.discard(j.id)
+            self.is_generating_voice[slug] = False
+            self.is_rendering[slug] = False
+        return {"ok": True, "slug": slug, "unlocked": len(targets)}
 
     def active(self) -> list[Job]:
         """Job đang chạy hoặc đang chờ, cũ nhất trước (chỉ đọc)."""
         with self._lock:
             jobs = [j for j in self._jobs.values() if not j.finished]
         return sorted(jobs, key=lambda j: j.created_at)
+
+    def recent(self, limit: int = 15) -> list[Job]:
+        """Trả job đang chạy/chờ (cũ nhất trước) kèm tối đa `limit` job vừa hoàn tất gần nhất."""
+        with self._lock:
+            active_jobs = sorted(
+                (j for j in self._jobs.values() if not j.finished),
+                key=lambda j: j.created_at,
+            )
+            done_jobs = sorted(
+                (j for j in self._jobs.values() if j.finished),
+                key=lambda j: j.finished_at or j.created_at,
+                reverse=True,
+            )[: max(0, int(limit))]
+        return [*active_jobs, *done_jobs]
 
     # ---------------------------------------------------------------- tạo / huỷ
     def submit(
@@ -207,8 +352,9 @@ class JobManager:
         outro: bool | None = None,
         allow_long_trim: bool = False,
         preview_seconds: float | None = None,
+        aspect_mode: str | None = None,
     ) -> Job:
-        project = self.storage.load(slug)  # NotFound / BadRequest nếu project hỏng
+        project = self.storage.load_any(slug)  # NotFound / BadRequest nếu project hỏng
         if fps is not None and fps not in ALLOWED_FPS:
             raise Unprocessable(f"fps phải là một trong {ALLOWED_FPS}")
         if preview_seconds is not None:
@@ -217,9 +363,13 @@ class JobManager:
             if not 0 < preview_seconds <= MAX_PREVIEW_SECONDS:
                 raise Unprocessable(f"preview_seconds phải trong (0, {MAX_PREVIEW_SECONDS}] giây")
         problems = project.render_problems()
+        if isinstance(project, PostvProject):  # PostV: thêm kiểm tra nền; từ nhạy cảm không chặn
+            problems += background_problems(
+                project.background.clip_ids, BackgroundLibrary(self.library_dir)
+            )
         if problems:
             raise Unprocessable("Project chưa đủ để dựng: " + "; ".join(problems))
-        if self.sensitive is not None:  # từ mức `block` chặn xuất, không tạo job (mục 7)
+        if self.sensitive is not None and isinstance(project, Project):  # `block` chặn xuất (mục 7)
             blocked = [
                 describe_issue(i)
                 for i in lint_project(project, self.sensitive.load())
@@ -230,8 +380,118 @@ class JobManager:
         if self._tool_check is not None:
             self._tool_check()
         job = Job(
-            uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim, preview_seconds
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            outro,
+            allow_long_trim,
+            preview_seconds,
+            aspect_mode=aspect_mode,
         )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_voice(self, slug: str) -> Job:
+        """Job sinh giọng VieNeu cho dự án PostV (chung hàng đợi một luồng với job dựng)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới sinh giọng bằng VieNeu")
+        if self.voice is None:
+            raise ServiceUnavailable("Chưa cấu hình bộ sinh giọng")
+        status = self.voice.status()
+        if not status.ok:
+            raise ServiceUnavailable(status.note)
+        if not any(s.voice.strip() for s in project.segments):
+            raise Unprocessable("Chưa có đoạn nào có lời đọc để sinh giọng")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_hbt_voice(self, slug: str, voice_id: str) -> Job:
+        """Job sinh giọng VieNeu cho dự án HBT (GĐ2 G3); cùng `kind="voice"`, chung hàng đợi."""
+        project = self.storage.load_any(slug)
+        if isinstance(project, PostvProject):
+            raise Unprocessable("Dự án PostV sinh giọng ở bước Kịch bản và giọng")
+        if self.voice is None:
+            raise ServiceUnavailable("Chưa cấu hình bộ sinh giọng")
+        status = self.voice.status()
+        if not status.ok:
+            raise ServiceUnavailable(status.note)
+        try:
+            known = {v.id for v in self.voice.list_voices()}
+        except VoiceError as e:
+            raise ServiceUnavailable(str(e)) from e
+        if voice_id not in known:
+            raise Unprocessable("Giọng đã chọn không có trong danh sách giọng VieNeu")
+        if not any(spoken_chunks(s.voice) for s in project.scenes):
+            raise Unprocessable("Chưa có cảnh nào có lời đọc để sinh giọng")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        job.hbt_voice_id = voice_id  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_postv_auto(
+        self,
+        slug: str,
+        *,
+        style: str = "ke-chuyen",
+        comments: int = 3,
+        voices: str = "random",
+        seed: int | None = None,
+    ) -> Job:
+        """Job chạy chuỗi 7 pha tự động cho dự án PostV (PVA)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới hỗ trợ tạo tự động")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        if seed is None:
+            seed = random.randint(1, 999999)
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_auto")
+        job.auto_options = {  # type: ignore[attr-defined]
+            "style": style,
+            "comments": comments,
+            "voices": voices,
+            "seed": seed,
+        }
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_postv_quick(
+        self,
+        slug: str,
+        input_text: str,
+        options: dict[str, Any] | None = None,
+        start_stage: str = "fetch",
+    ) -> Job:
+        """Job tự động hoá PostV 6 bước từ link/chữ đến video hoàn chỉnh (PV9)."""
+        project = self.storage.load_any(slug)
+        if not isinstance(project, PostvProject):
+            raise Unprocessable("Chỉ dự án PostV mới hỗ trợ chuỗi tự động")
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_quick")
+        job.auto_input = input_text  # type: ignore[attr-defined]
+        job.auto_options = options or {}  # type: ignore[attr-defined]
+        job.start_stage = start_stage  # type: ignore[attr-defined]
+        job.last_stage = None  # type: ignore[attr-defined]
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -243,8 +503,12 @@ class JobManager:
         if job.finished:
             raise Conflict(f"Job đã kết thúc ({job.status})")
         job.token.cancel()
+        if hasattr(job, "_pick_event"):
+            job._pick_event.set()
         if not job._cancel_if_queued():
             job.wait(CANCEL_WAIT)  # đang chạy: chờ luồng dựng dừng hẳn
+            if not job.finished:
+                job._finish(CANCELLED)
         return job
 
     def shutdown(self) -> None:
@@ -252,6 +516,8 @@ class JobManager:
             jobs = [j for j in self._jobs.values() if not j.finished]
         for j in jobs:
             j.token.cancel()
+            if hasattr(j, "_pick_event"):
+                j._pick_event.set()
         self._pool.shutdown(wait=True, cancel_futures=True)
 
     # ---------------------------------------------------------------- chạy
@@ -268,56 +534,850 @@ class JobManager:
                 return
             job.status = RUNNING
             job.started_at = time.time()
-        folder = self.storage.project_dir(job.slug)
-        cfg = self.app_settings.load() if self.app_settings is not None else None
-        opts = RenderOptions(
-            preview=job.preview,
-            fps=job.fps,
-            outro=job.outro,
-            allow_long_trim=job.allow_long_trim,
-            preview_seconds=job.preview_seconds,
-            sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
-            library_dir=self.library_dir,
-            brand_dir=self.brand_dir,
-            whisper_model=cfg.whisper_model if cfg else None,
-            whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
-            job_id=job.id,
-        )
-        timing_before = _timing_mtime(folder)
+            job.last_heartbeat = time.time()
+        with self._lock:
+            self._active_workers.add(job.id)
+            if job.kind == "voice":
+                self.is_generating_voice[job.slug] = True
+            else:
+                self.is_rendering[job.slug] = True
         try:
-            result = self._render(folder, opts, progress=job._progress, cancel_token=job.token)
+            if job.kind == "voice":
+                if getattr(job, "hbt_voice_id", None):
+                    self._run_hbt_voice(job)
+                else:
+                    self._run_voice(job)
+                return
+            if job.kind == "postv_auto":
+                self._run_postv_auto(job)
+                return
+            if job.kind == "postv_quick":
+                self._run_postv_quick(job)
+                return
+            if job.kind == "chatting_auto":
+                self._run_chatting_auto(job)
+                return
+            if job.kind == "chatting_render":
+                self._run_chatting_render(job)
+                return
+            if job.kind == "hbt_core_auto":
+                self._run_hbt_core_auto(job)
+                return
+            if job.kind in ("stickv", "stickv_render"):
+                self._run_stickv_render(job)
+                return
+            folder = self.storage.project_dir(job.slug)
+            cfg = self.app_settings.load() if self.app_settings is not None else None
+            opts = RenderOptions(
+                preview=job.preview,
+                fps=job.fps,
+                outro=job.outro,
+                allow_long_trim=job.allow_long_trim,
+                preview_seconds=job.preview_seconds,
+                sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
+                library_dir=self.library_dir,
+                brand_dir=self.brand_dir,
+                whisper_model=cfg.whisper_model if cfg else None,
+                whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
+                job_id=job.id,
+                aspect_mode=job.aspect_mode,
+            )
+            timing_before = _timing_mtime(folder)
+            try:
+                if self.storage.kind_of(job.slug) == "postv":
+                    words = self.postv_words.load() if self.postv_words is not None else None
+                    result = self._render_postv(
+                        folder, opts, progress=job._progress, cancel_token=job.token,
+                        censor_words=words,
+                    )  # fmt: skip
+                else:
+                    result = self._render(
+                        folder, opts, progress=job._progress, cancel_token=job.token
+                    )
+            except RenderCancelled:
+                job._finish(CANCELLED)
+            except TailTrimNeedsConfirmation as e:
+                cut = self.storage.rel(e.cut_file) if e.cut_file else None
+                job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
+            except BaseException as e:  # noqa: BLE001
+                log.exception("Lỗi job dựng '%s': %s", job.slug, e)
+                job._finish(FAILED, error=str(e) or e.__class__.__name__)
+            else:
+                rel = self.storage.rel
+                output = {
+                    "video": rel(result.video),
+                    "publish": rel(result.publish),
+                    "log": rel(result.log),
+                    "srt": rel(result.srt) if result.srt else None,
+                    "cover": rel(result.cover) if result.cover else None,
+                    "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
+                    "fps": result.fps,
+                    "width": result.width,
+                    "height": result.height,
+                    "duration": round(result.duration, 3),
+                    "lufs": round(result.lufs, 2) if result.lufs is not None else None,
+                    "preview_seconds": result.preview_seconds,
+                    "aligner": result.aligner,
+                    "aligner_info": result.aligner_info,
+                    "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
+                    "trimmed_tail_seconds": (
+                        round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
+                    ),
+                    "seconds": round(result.seconds, 1),
+                    "warnings": result.warnings,
+                }
+                # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
+                align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
+                write_run_stats(result.job_dir, result.seconds, align_cached)
+                eng = "postv" if self.storage.kind_of(job.slug) == "postv" else "core"
+                try:
+                    proj_title = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    proj_title = job.slug
+                self._upsert_render_index(
+                    engine=eng,
+                    slug=job.slug,
+                    title=proj_title,
+                    video_path=result.video,
+                    cover_path=result.cover or "",
+                    duration_sec=result.duration,
+                    publish_path=result.publish,
+                )
+                job._finish(DONE, output=output)
+        finally:
+            if not job.finished:
+                job._finish(FAILED, error="Tác vụ dừng đột ngột, đã tự động mở khoá dự án.")
+            with self._lock:
+                self._active_workers.discard(job.id)
+                self.is_generating_voice[job.slug] = False
+                self.is_rendering[job.slug] = False
+
+    def _run_voice(self, job: Job) -> None:
+        """Sinh giọng từng đoạn (tiến trình con VieNeu), nối thành `voice.wav`, ghi vào project."""
+        with self._lock:
+            self.is_generating_voice[job.slug] = True
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load_any(job.slug)
+                job._progress(1, "voice", "Đang nạp danh sách giọng")
+                plan, cast = build_plan(project, self.voice.list_voices())
+
+                def on_detail(detail: dict[str, Any]) -> None:
+                    job._progress(
+                        float(detail.get("percent", 0)),
+                        "voice",
+                        str(detail.get("message", "")),
+                        current=detail.get("current", 0),
+                        total=detail.get("total", 0),
+                        percent=detail.get("percent", 0),
+                    )
+
+                from hbt.postv.timeline import estimate_meme_pause_slots
+
+                post_gaps = estimate_meme_pause_slots(
+                    [s for s in project.segments if s.voice.strip()],
+                    self.library_dir,
+                )
+                result = synthesize_plan(
+                    plan,
+                    self.storage.project_dir(job.slug),
+                    self.voice,
+                    cast,
+                    job._progress,
+                    post_gaps=post_gaps,
+                    on_detail=on_detail,
+                )
+            latest = self.storage.load_any(
+                job.slug
+            )  # người dùng có thể đã sửa project trong lúc đọc
+            latest.voice = latest.voice.model_copy(
+                update={"engine": "vieneu", "file": "voice.wav", "trim_end": None}
+            )
+            self.storage.save_any(job.slug, latest)
+            job._progress(
+                100,
+                "voice",
+                "Đã sinh xong giọng",
+                current=result.segments,
+                total=result.segments,
+                percent=100,
+            )
+            job._finish(
+                DONE,
+                output={
+                    "voice": self.storage.rel(result.file),
+                    "seconds": round(result.seconds, 2),
+                    "segments": result.segments,
+                    "cast": result.cast,
+                    "generated": result.generated,
+                    "cached": result.cached,
+                },
+            )
         except RenderCancelled:
             job._finish(CANCELLED)
-        except TailTrimNeedsConfirmation as e:
-            cut = self.storage.rel(e.cut_file) if e.cut_file else None
-            job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
+        except VoiceError as e:
+            job._finish(FAILED, error=str(e))
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
-        else:
+        finally:
+            with self._lock:
+                self.is_generating_voice[job.slug] = False
+
+    def _run_hbt_voice(self, job: Job) -> None:
+        """Sinh giọng HBT theo cảnh (đã xử lý {} và |), nối thành voice.wav."""
+        voice_id: str = job.hbt_voice_id  # type: ignore[attr-defined]
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load(job.slug)
+                job._progress(1, "voice", "Đang đọc lời các cảnh")
+                plan = build_hbt_plan(project, voice_id)
+                result = synthesize_hbt(
+                    plan, self.storage.project_dir(job.slug), self.voice, job._progress
+                )
+            latest = self.storage.load(job.slug)  # người dùng có thể đã sửa project lúc đọc
+            latest.voice = Voice(file="voice.wav")
+            self.storage.save(job.slug, latest)
+            job._progress(100, "voice", "Đã sinh xong giọng")
+            job._finish(
+                DONE,
+                output={
+                    "voice": self.storage.rel(result.file),
+                    "seconds": round(result.seconds, 2),
+                    "scenes": result.scenes,
+                    "voice_id": voice_id,
+                    "generated": result.generated,
+                    "cached": result.cached,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except VoiceError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_postv_auto(self, job: Job) -> None:
+        """Thực thi chuỗi 7 pha tự động cho PostV (PVA)."""
+        pdir = self.storage.project_dir(job.slug)
+        try:
+            with cancel.use_token(job.token):
+                project = self.storage.load_any(job.slug)
+                if not isinstance(project, PostvProject):
+                    raise Unprocessable("Chỉ dự án PostV mới hỗ trợ tạo tự động")
+
+                opts = getattr(job, "auto_options", {})
+                style_id = opts.get("style", "ke-chuyen")
+                comments_count = opts.get("comments", 3)
+                voices_mode = opts.get("voices", "random")
+                seed = opts.get("seed", 1)
+
+                # Pha 1: Kiểm tra nội dung bài gốc
+                job._progress(5, "parse", "Pha 1/7: Kiểm tra bài và bình luận")
+                if not project.post.text.strip():
+                    raise Unprocessable("Chưa có chữ bài gốc để tạo tự động")
+
+                # Pha 2 & 3: Soạn kịch bản theo phong cách
+                job._progress(15, "script", f"Pha 2–3/7: Soạn kịch bản phong cách '{style_id}'")
+                settings_dir = (
+                    self.storage.workspace_dir / "settings" if self.storage.workspace_dir else None
+                )
+                styles = load_script_styles(settings_dir)
+                project = build_auto_script(
+                    project,
+                    style_id=style_id,
+                    comments_count=comments_count,
+                    voices_mode=voices_mode,
+                    seed=seed,
+                    styles=styles,
+                )
+                project.auto.style = style_id
+                project.auto.comments = comments_count
+                project.auto.voices = voices_mode
+                project.auto.seed = seed
+                self.storage.save_any(job.slug, project)
+
+                # Pha 4: Gán giọng
+                job._progress(25, "cast", "Pha 4/7: Phân chia giọng đọc từng người")
+                if self.voice is not None:
+                    try:
+                        voices = self.voice.list_voices()
+                        speakers = [s.speaker or "narrator" for s in project.segments]
+                        unique_speakers = list(dict.fromkeys(speakers))
+                        manual_cast = {} if voices_mode == "random" else project.voice.cast
+                        cast = resolve_cast(unique_speakers, manual_cast, seed, voices)
+                        project.voice.cast = cast
+                        self.storage.save_any(job.slug, project)
+                    except Exception as e:
+                        log.warning("Không nạp được danh sách giọng: %s", e)
+
+                # Pha 5: Chọn nền & nhạc
+                job._progress(35, "assets", "Pha 5/7: Chọn clip nền và nhạc từ thư viện")
+                bg_lib = BackgroundLibrary(self.library_dir)
+                bg_entries = bg_lib.list()
+                if bg_entries and not project.background.clip_ids:
+                    rng = random.Random(seed)
+                    all_ids = [e.id for e in bg_entries]
+                    rng.shuffle(all_ids)
+                    project.background.clip_ids = all_ids[: min(3, len(all_ids))]
+                    project.background.seed = seed
+                music_lib = MusicLibrary(self.library_dir)
+                musics = music_lib.list()
+                if musics and project.music is None:
+                    rng = random.Random(seed)
+                    picked = rng.choice(musics)
+                    project.music = Music(id=picked.id, file=picked.file, title=picked.title)
+                self.storage.save_any(job.slug, project)
+
+                # Pha 6: Sinh giọng VieNeu
+                job._progress(45, "voice", "Pha 6/7: Sinh giọng đọc VieNeu")
+                # Yêu cầu số 1: DỪNG ở pha 6 nếu thiếu VieNeu, giữ kết quả pha 1–5, KHÔNG giả lập
+                if self.voice is None:
+                    raise VoiceUnavailable(
+                        "Chưa cấu hình bộ sinh giọng VieNeu. Kịch bản các pha 1–5 đã được lưu."
+                    )
+                st = self.voice.status()
+                if not st.ok:
+                    raise VoiceUnavailable(
+                        f"Thiếu VieNeu hoặc trọng số: {st.note}. Kịch bản các pha 1–5 đã được lưu."
+                    )
+
+                plan, cast = build_plan(project, self.voice.list_voices())
+                synthesize_plan(
+                    plan,
+                    pdir,
+                    self.voice,
+                    cast,
+                    job._progress,
+                )
+                latest = self.storage.load_any(job.slug)
+                latest.voice = latest.voice.model_copy(
+                    update={"engine": "vieneu", "file": "voice.wav", "trim_end": None}
+                )
+                self.storage.save_any(job.slug, latest)
+
+                # Pha 7: Dựng Xem nhanh 10 s
+                job._progress(80, "render", "Pha 7/7: Căn chữ và dựng Xem nhanh 10 s đầu")
+                cfg = self.app_settings.load() if self.app_settings is not None else None
+                opts = RenderOptions(
+                    preview=True,
+                    preview_seconds=10.0,
+                    library_dir=self.library_dir,
+                    brand_dir=self.brand_dir,
+                    whisper_model=cfg.whisper_model if cfg else None,
+                    whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
+                    job_id=job.id,
+                )
+                words = self.postv_words.load() if self.postv_words is not None else None
+                render_res = self._render_postv(
+                    pdir,
+                    opts,
+                    progress=lambda pct, step, msg: job._progress(
+                        80.0 + pct * 0.19, step, f"Pha 7/7: {msg}"
+                    ),
+                    cancel_token=job.token,
+                    censor_words=words,
+                )
+
+                rel = self.storage.rel
+                loaded_proj = self.storage.load_any(job.slug)
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=loaded_proj.title,
+                    video_path=render_res.video,
+                    cover_path=getattr(render_res, "cover", None) or "",
+                    duration_sec=float(getattr(render_res, "duration", 0.0) or 0.0),
+                    publish_path=render_res.publish,
+                )
+                output = {
+                    "video": rel(render_res.video),
+                    "publish": rel(render_res.publish),
+                    "preview_seconds": 10.0,
+                    "project": loaded_proj.model_dump(mode="json"),
+                }
+                job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except (VoiceError, Unprocessable) as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _upsert_render_index(
+        self,
+        *,
+        engine: str,
+        slug: str,
+        title: str,
+        video_path: Path,
+        cover_path: Path | str | None = "",
+        duration_sec: float = 0.0,
+        publish_path: Path | None = None,
+        source_credit: str = "",
+    ) -> None:
+        """Ghi nhận thành phẩm vừa xuất vào workspace/studio.db."""
+        try:
+            from hbt.shared.db.media_index import upsert_render
+
+            ws = self.storage.workspace_dir
+            pub_text = source_credit
+            if not pub_text and publish_path is not None and publish_path.is_file():
+                pub_text = publish_path.read_text(encoding="utf-8", errors="ignore").strip()
+            render_id = f"{engine}:{slug}:{video_path.parent.name}:{video_path.name}"
+            upsert_render(
+                render_id=render_id,
+                slug=slug,
+                title=title or slug,
+                engine=engine,
+                file_path=video_path,
+                cover_path=cover_path or "",
+                duration_sec=float(duration_sec or 0.0),
+                source_credit=pub_text,
+                db_path=ws / "studio.db",
+                base_dir=ws.parent,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không thể ghi studio.db cho %s/%s: %s", engine, slug, exc)
+
+    def _run_postv_quick(self, job: Job) -> None:
+        """Chạy chuỗi tự động 6 bước của PostV (PV9)."""
+        from hbt.postv.auto import run_auto_job
+
+        run_auto_job(self, job)
+        if job.status == DONE and isinstance(job.output, dict) and job.output.get("video"):
+            vrel = str(job.output["video"]).lstrip("/")
+            vpath = self.storage.workspace_dir / vrel
+            if not vpath.is_file():
+                vpath = self.storage.project_dir(job.slug) / vrel
+            if vpath.is_file():
+                try:
+                    ptitle = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    ptitle = job.slug
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=ptitle,
+                    video_path=vpath,
+                    duration_sec=float(job.output.get("duration") or 0.0),
+                )
+
+    def submit_chatting_auto(
+        self,
+        raw_input: str,
+        platform: str = "messenger",
+        background_name: str = "minecraft4-1080p60",
+        slug: str | None = None,
+        direct_script: bool = False,
+        target_duration_s: float | None = None,
+    ) -> Job:
+        """Job tự động hoá Chatting 4 pha: Lấy bài -> Viết chat -> Giọng -> Xem nhanh."""
+        job_slug = slug or f"chat-{uuid.uuid4().hex[:6]}"
+        job = Job(uuid.uuid4().hex[:12], job_slug, False, None, None, False, kind="chatting_auto")
+        job.chatting_input = raw_input  # type: ignore[attr-defined]
+        job.chatting_platform = platform  # type: ignore[attr-defined]
+        job.chatting_background = background_name  # type: ignore[attr-defined]
+        job.chatting_direct_script = direct_script  # type: ignore[attr-defined]
+        job.chatting_target_duration_s = target_duration_s  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def submit_chatting_render(
+        self,
+        slug: str,
+        preview: bool = False,
+        aspect_mode: str | None = None,
+    ) -> Job:
+        """Job dựng video Chatting (preview hoặc full)."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng), hãy đợi xong hoặc huỷ")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="chatting_render",
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_chatting_auto(self, job: Job) -> None:
+        """Thực thi job chatting_auto 4 pha."""
+        from hbt.chatting.service import run_chatting_auto_job
+
+        def on_event(event_type: str, data: dict[str, Any]) -> None:
+            pct = data.get("percent", 0)
+            phase = data.get("phase", "")
+            msg = data.get("text", "")
+            job._emit(event_type, data)
+            if event_type == "progress":
+                job._progress(pct, phase, msg)
+
+        try:
+            workspace_dir = self.storage.workspace_dir
+            library_dir = self.library_dir
+            brand_dir = self.brand_dir
+            voice_provider = self.voice
+            chatting_model = os.environ.get("CHATTING_MODEL", "gemini-3.8-flash")
+
+            direct_script = getattr(job, "chatting_direct_script", False)
+            target_duration_s = getattr(job, "chatting_target_duration_s", None)
+            slug, video_path = run_chatting_auto_job(
+                workspace_dir=workspace_dir,
+                library_dir=library_dir,
+                brand_dir=brand_dir,
+                voice_provider=voice_provider,
+                chatting_model=chatting_model,
+                raw_input=job.chatting_input,
+                platform=job.chatting_platform,
+                background_name=job.chatting_background,
+                slug_override=job.slug,
+                direct_script=direct_script,
+                target_duration_s=target_duration_s,
+                emit_event=on_event,
+            )
+
+            job.slug = slug
+            output = {
+                "slug": slug,
+                "video": f"/api/chatting/{slug}/renders/{video_path.name}",
+            }
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job chatting_auto: %s", e)
+            from hbt.chatting.store import save_job
+
+            save_job(
+                workspace_dir,
+                job.slug,
+                {
+                    "slug": job.slug,
+                    "status": "failed",
+                    "percent": 0,
+                    "error": str(e) or e.__class__.__name__,
+                    "updated_at": time.time(),
+                },
+            )
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def _run_chatting_render(self, job: Job) -> None:
+        """Thực thi job chatting_render."""
+        from hbt.chatting.render import render_chat_video
+        from hbt.chatting.store import load_chat
+
+        def on_progress(pct: int, msg: str) -> None:
+            job._progress(pct, "render", msg)
+            job._emit("progress", {"percent": pct, "text": msg})
+
+        try:
+            workspace_dir = self.storage.workspace_dir
+            library_dir = self.library_dir
+            brand_dir = self.brand_dir
+            voice_provider = self.voice
+
+            doc = load_chat(workspace_dir, job.slug)
+            video_path = render_chat_video(
+                workspace_dir=workspace_dir,
+                slug=job.slug,
+                doc=doc,
+                voice_provider=voice_provider,
+                library_dir=library_dir,
+                brand_dir=brand_dir,
+                preview=job.preview,
+                progress=on_progress,
+                aspect_mode=getattr(job, "aspect_mode", None),
+            )
+
+            chat_title = getattr(doc, "title", None) or job.slug
+            self._upsert_render_index(
+                engine="chatting",
+                slug=job.slug,
+                title=chat_title,
+                video_path=video_path,
+                source_credit=f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+            )
+            output = {
+                "slug": job.slug,
+                "video": f"/api/chatting/{job.slug}/renders/{video_path.name}",
+                "preview": job.preview,
+            }
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job chatting_render: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_auto(
+        self,
+        slug: str,
+        script: Any,
+        *,
+        voice_id: str | None = None,
+        fps: int = 30,
+        preview: bool = False,
+        aspect_mode: str = "fill",
+    ) -> Job:
+        """Job chạy chuỗi tự động HBT Core (V1 Bán tự động / V2 1-Click Prompt)."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="hbt_core_auto",
+        )
+        job.core_script = script  # type: ignore[attr-defined]
+        job.core_voice_id = voice_id  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_auto(self, job: Job) -> None:
+        """Thực thi chuỗi tự động HBT Core: VieNeu-TTS -> BGM acrossfade -> SFX -> Render FFmpeg."""
+        from hbt.core.render import render_hbt_core_auto
+
+        folder = self.storage.project_dir(job.slug)
+        script = getattr(job, "core_script", None)
+        voice_id = getattr(job, "core_voice_id", None)
+
+        try:
+            result = render_hbt_core_auto(
+                project_dir=folder,
+                script=script,
+                voice_provider=self.voice,
+                voice_id=voice_id,
+                library_dir=self.library_dir,
+                brand_dir=self.brand_dir,
+                fps=job.fps or 30,
+                preview=job.preview,
+                aspect_mode=getattr(job, "aspect_mode", None) or "fill",
+                job_id=job.id,
+                progress=job._progress,
+                cancel_token=job.token,
+            )
             rel = self.storage.rel
             output = {
                 "video": rel(result.video),
                 "publish": rel(result.publish),
                 "log": rel(result.log),
-                "srt": rel(result.srt) if result.srt else None,
-                "cover": rel(result.cover) if result.cover else None,
-                "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
+                "srt": None,
+                "cover": None,
+                "youtube_cover": None,
                 "fps": result.fps,
                 "width": result.width,
                 "height": result.height,
                 "duration": round(result.duration, 3),
-                "lufs": round(result.lufs, 2) if result.lufs is not None else None,
-                "preview_seconds": result.preview_seconds,
-                "aligner": result.aligner,
-                "aligner_info": result.aligner_info,
-                "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
-                "trimmed_tail_seconds": (
-                    round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
-                ),
+                "lufs": -14.0,
+                "preview_seconds": None,
+                "aligner": "vieneu_microsecond",
                 "seconds": round(result.seconds, 1),
                 "warnings": result.warnings,
+                "bgm_tracks": result.bgm_tracks,
+                "sfx_used": result.sfx_used,
+                "timings": [t.model_dump(mode="json") for t in result.timings],
             }
-            # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
-            align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
-            write_run_stats(result.job_dir, result.seconds, align_cached)
+            write_run_stats(result.job_dir, result.seconds, False)
+            self._upsert_render_index(
+                engine="core",
+                slug=job.slug,
+                title=getattr(script, "title", None) or job.slug,
+                video_path=result.video,
+                duration_sec=result.duration,
+                publish_path=result.publish,
+            )
             job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_auto: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    @staticmethod
+    def _resolve_stickv_stage(
+        pct: float,
+        msg: str,
+        *,
+        total_beats: int | None = None,
+    ) -> tuple[str, int | None, int | None]:
+        """Chuẩn hóa pha tiến độ StickV tiếng Việt và trích chỉ số beat/cụm."""
+        low = (msg or "").lower()
+        cur_b: int | None = None
+        tot_b: int | None = total_beats
+        m = re.search(r"(?:beat|cụm|cảnh)\s+(\d+)\s*/\s*(\d+)", low)
+        if m:
+            cur_b = int(m.group(1))
+            tot_b = int(m.group(2))
+
+        if "giọng" in low or "vieneu" in low or pct < 20.0:
+            return "Sinh giọng VieNeu-TTS", cur_b, tot_b
+        if "căn chỉnh" in low or "kiểm định" in low or "preflight" in low:
+            return "Căn chỉnh & Kiểm định", cur_b, tot_b
+        if "trộn" in low or "lufs" in low or "sfx" in low or pct < 34.0:
+            return "Trộn âm thanh -14 LUFS", cur_b, tot_b
+        if "outro" in low or "watermark" in low or "nối" in low or "hoàn tất" in low or pct >= 85.0:
+            return "Ghép Outro & Hoàn tất", cur_b, tot_b
+        return "Dựng khung hình", cur_b, tot_b
+
+    def submit_stickv_render(self, slug: str, *, preview: bool = False) -> Job:
+        """Đưa job dựng video StickV vào hàng đợi 1 luồng chung kèm đầy đủ metadata."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án StickV đang bận, hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        total_beats: int | None = None
+        try:
+            from hbt.stickv.storage import load_stickv_project
+
+            proj = load_stickv_project(self.storage.workspace_dir, slug)
+            total_beats = len(proj.beats[:3] if preview else proj.beats)
+        except Exception:
+            total_beats = None
+
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            kind="stickv",
+            mode="preview" if preview else "final",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
+        )
+        job._progress(
+            2.0,
+            "Sinh giọng VieNeu-TTS",
+            "Đã đưa vào hàng đợi dựng StickV...",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
+            percent=2.0,
+            text="Đã đưa vào hàng đợi dựng StickV...",
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_stickv_render(self, job: Job) -> None:
+        """Thực thi job stickv và ghi chỉ mục vào workspace/studio.db."""
+        from hbt.stickv.render import render_stickv
+        from hbt.stickv.storage import (
+            load_stickv_project,
+            save_stickv_project,
+            stickv_project_dir,
+        )
+
+        def on_progress(pct: float, msg: str) -> None:
+            stage_lbl, cur_b, tot_b = self._resolve_stickv_stage(
+                pct, msg, total_beats=job.total_beats
+            )
+            job._progress(
+                pct,
+                stage_lbl,
+                msg,
+                stage=stage_lbl,
+                current_beat=cur_b,
+                total_beats=tot_b,
+                percent=round(float(pct), 1),
+                text=msg,
+            )
+
+        try:
+            ws = self.storage.workspace_dir
+            assets_dir = ws.parent / "assets"
+            proj = load_stickv_project(ws, job.slug)
+            job.total_beats = len(proj.beats[:3] if job.preview else proj.beats)
+            pdir = stickv_project_dir(ws, job.slug)
+            wm = self.app_settings.load().watermark if self.app_settings is not None else None
+
+            active_voice = self.voice
+            if active_voice is not None:
+                try:
+                    v_status = active_voice.status()
+                    if not getattr(v_status, "ok", False):
+                        log.warning(
+                            "VieNeu-TTS chưa sẵn sàng (%s) -> dùng âm thanh dự phòng cho '%s'",
+                            getattr(v_status, "note", ""),
+                            job.slug,
+                        )
+                        active_voice = None
+                except Exception:
+                    active_voice = None
+
+            res = render_stickv(
+                proj,
+                pdir,
+                library_dir=self.library_dir,
+                assets_dir=assets_dir,
+                brand_dir=self.brand_dir,
+                voice_provider=active_voice,
+                watermark=wm,
+                preview=job.preview,
+                cancel=job.token,
+                on_progress=on_progress,
+            )
+
+            out_path = Path(res["file_path"])
+            video_url = f"/api/stickv/{job.slug}/renders/{out_path.name}"
+            proj = proj.model_copy(
+                update={
+                    "last_render": {
+                        "video_url": video_url,
+                        "duration_sec": res["duration_sec"],
+                        "size_mb": res["size_mb"],
+                        "aspect": res["aspect"],
+                        "preview": job.preview,
+                    }
+                }
+            )
+            save_stickv_project(ws, proj)
+
+            self._upsert_render_index(
+                engine="stickv",
+                slug=job.slug,
+                title=proj.title,
+                video_path=out_path,
+                duration_sec=float(res["duration_sec"] or 0.0),
+            )
+
+            job.stage = "Ghép Outro & Hoàn tất"
+            job.progress = 100.0
+            job._finish(
+                DONE,
+                output={
+                    "slug": job.slug,
+                    "video": video_url,
+                    "duration": res["duration_sec"],
+                    "aspect": res["aspect"],
+                    "preview": job.preview,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except BaseException as e:  # noqa: BLE001
+            log.exception("Lỗi job stickv: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)

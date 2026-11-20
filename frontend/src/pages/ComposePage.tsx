@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
-import type { Project } from '../api/types';
+import { isPostv, type Project } from '../api/types';
 import { PublishDrawer } from '../components/compose/PublishDrawer';
+import { HbtCoreStudioDialog } from '../components/core/HbtCoreStudioDialog';
 import { BackupsDialog } from '../components/script/BackupsDialog';
 import { PasteJsonDialog } from '../components/script/PasteJsonDialog';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -14,7 +15,7 @@ import { Button } from '../components/ui/Button';
 import { Menu } from '../components/ui/Menu';
 import { Input } from '../components/ui/Field';
 import { ProjectEditorContext, type ProjectEditor } from '../hooks/projectEditor';
-import { useRenderJob } from '../hooks/renderJob';
+import { useRenderJobStatus } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useAutosave } from '../hooks/useAutosave';
 import { vi } from '../i18n/vi';
@@ -154,11 +155,12 @@ function EditorProvider({ initial }: { initial: Project }) {
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [coreStudioOpen, setCoreStudioOpen] = useState(false);
   const [backupsOpen, setBackupsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const job = useRenderJob();
+  const job = useRenderJobStatus();
   const rendering = job.running && job.slug === slug;
   const removeProject = useMutation({
     mutationFn: async () => {
@@ -197,7 +199,16 @@ function EditorProvider({ initial }: { initial: Project }) {
             />
           </div>
           <SaveIndicator status={status} error={error} />
-          <Button tone="soft" size="sm" className="ml-auto" onClick={() => setPasteOpen(true)}>
+          <Button
+            tone="soft"
+            size="sm"
+            className="ml-auto"
+            title={vi.hbtCore.openBtnTitle}
+            onClick={() => setCoreStudioOpen(true)}
+          >
+            {vi.hbtCore.openBtn}
+          </Button>
+          <Button tone="soft" size="sm" onClick={() => setPasteOpen(true)}>
             {vi.script.open}
           </Button>
           <Button tone="soft" size="sm" onClick={() => setPublishOpen(true)}>
@@ -228,6 +239,11 @@ function EditorProvider({ initial }: { initial: Project }) {
         </div>
         <PublishDrawer open={publishOpen} onClose={() => setPublishOpen(false)} />
         <PasteJsonDialog open={pasteOpen} onClose={() => setPasteOpen(false)} />
+        <HbtCoreStudioDialog
+          open={coreStudioOpen}
+          onClose={() => setCoreStudioOpen(false)}
+          slug={slug}
+        />
         <BackupsDialog open={backupsOpen} onClose={() => setBackupsOpen(false)} />
         {confirmDelete && (
           <ConfirmDialog
@@ -249,7 +265,7 @@ export function ComposePage() {
   const { slug = '' } = useParams();
   const { data, isPending, error } = useQuery({
     queryKey: ['project', slug],
-    queryFn: () => api.getProject(slug),
+    queryFn: () => api.getAnyProject(slug),
     staleTime: Infinity,
     gcTime: 0,
     refetchOnWindowFocus: false,
@@ -273,5 +289,6 @@ export function ComposePage() {
       </main>
     );
   }
+  if (isPostv(data)) return <Navigate to={`/postv/${slug}`} replace />; // dự án PostV có màn riêng
   return <EditorProvider key={slug} initial={data} />;
 }

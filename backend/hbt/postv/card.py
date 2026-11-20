@@ -1,0 +1,642 @@
+"""Vẽ thẻ bài của PostV bằng Pillow (IMPLEMENT-POSTV.md mục 6).
+
+Chữ trên video luôn vẽ bằng Pillow với font trong `backend/hbt/fonts/` để đúng dấu tiếng Việt
+(CLAUDE.md). Thẻ là tấm trắng bo góc kiểu mạng xã hội chung chung: avatar hình người xám trơn,
+không logo hay giao diện của nền tảng nào. Mọi số đo nằm ở `templates/story_cards.json`.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+from hbt.postv.censor import CensorMatcher, find_censor_hits
+from hbt.postv.counts import format_count
+
+FONT_DIR = Path(__file__).resolve().parent.parent / "fonts"
+TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+CardKind = Literal["hook", "post", "comment"]
+CensorMode = Literal["blur", "stars"]
+VIEWS_LABEL = "lượt xem"
+
+
+TEMPLATES = ("story_cards", "fixed_card")
+
+
+def load_template(name: str = "story_cards") -> dict:
+    if name not in TEMPLATES:
+        raise ValueError(f"Không có mẫu thẻ '{name}'")
+    return json.loads((TEMPLATE_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(FONT_DIR / name), size)
+
+
+@dataclass
+class Word:
+    text: str
+    start: int  # vị trí trong chữ gốc (đã chuẩn hoá NFC)
+    end: int
+    width: float = 0.0
+    censored: bool = False
+    accent: bool = False
+
+
+def _words(text: str) -> list[Word]:
+    return [Word(m.group(), m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+
+
+def _mark(words: list[Word], spans: list[tuple[int, int]], attr: str) -> None:
+    for w in words:
+        if any(w.start < e and s < w.end for s, e in spans):
+            setattr(w, attr, True)
+
+
+def _wrap(words: list[Word], font: ImageFont.FreeTypeFont, max_width: float) -> list[list[Word]]:
+    space = font.getlength(" ")
+    lines: list[list[Word]] = [[]]
+    used = 0.0
+    for w in words:
+        w.width = font.getlength(w.text)
+        extra = (space if lines[-1] else 0) + w.width
+        if lines[-1] and used + extra > max_width:
+            lines.append([])
+            used, extra = 0.0, w.width
+        lines[-1].append(w)
+        used += extra
+    return [ln for ln in lines if ln]
+
+
+def _ellipsize(
+    lines: list[list[Word]], max_lines: int, font: ImageFont.FreeTypeFont, max_width: float
+) -> list[list[Word]]:
+    """Quá `max_lines` thì cắt và thêm `…` vào cuối dòng cuối (vừa khít chiều rộng)."""
+    if len(lines) <= max_lines:
+        return lines
+    kept = lines[:max_lines]
+    last = kept[-1]
+    space = font.getlength(" ")
+    dots = Word("…", -1, -1, width=font.getlength("…"))
+    while last and sum(w.width for w in last) + space * len(last) + dots.width > max_width:
+        last.pop()
+    last.append(dots)
+    return kept
+
+
+def _normalise(text: str) -> str:
+    return re.sub(r"[ \t]+", " ", unicodedata.normalize("NFC", text or "")).strip()
+
+
+def _censor_spans(text: str, censor: list[CensorMatcher] | None) -> list[tuple[int, int]]:
+    # vị trí chỉ dùng được khi chữ thường hoá giữ nguyên độ dài (đúng với tiếng Việt)
+    if not censor or len(text.casefold()) != len(text):
+        return []
+    return [(h.start, h.end) for h in find_censor_hits(text, censor)]
+
+
+def _draw_word(
+    img: Image.Image, xy: tuple[float, float], word: Word, font, fill, mode: CensorMode, tpl: dict
+) -> None:
+    if not word.censored:
+        ImageDraw.Draw(img).text(xy, word.text, font=font, fill=fill)
+        return
+    cfg = tpl["censor"]
+    if mode == "stars":
+        ImageDraw.Draw(img).text(xy, cfg["stars"], font=font, fill=fill)
+        return
+    pad = int(cfg["blur_radius"] * 3)
+    box = (
+        int(xy[0]) - pad,
+        int(xy[1]) - pad,
+        int(xy[0] + word.width) + pad,
+        int(xy[1] + font.size * 1.5) + pad,
+    )
+    patch = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (0, 0, 0, 0))
+    ImageDraw.Draw(patch).text((xy[0] - box[0], xy[1] - box[1]), word.text, font=font, fill=fill)
+    patch = patch.filter(ImageFilter.GaussianBlur(cfg["blur_radius"]))
+    img.alpha_composite(patch, (max(box[0], 0), max(box[1], 0)))
+
+
+def _avatar(size: int, bg: str, fg: str) -> Image.Image:
+    """Hình người xám trơn trong vòng tròn (không ảnh đại diện thật, không biểu tượng nền tảng)."""
+    s = size * 4  # vẽ lớn rồi thu nhỏ cho mịn
+    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.ellipse((0, 0, s - 1, s - 1), fill=_rgb(bg))
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, s - 1, s - 1), fill=255)
+    person = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    p = ImageDraw.Draw(person)
+    p.ellipse((s * 0.34, s * 0.2, s * 0.66, s * 0.52), fill=_rgb(fg))
+    p.ellipse((s * 0.16, s * 0.6, s * 0.84, s * 1.25), fill=_rgb(fg))
+    im.paste(
+        person, (0, 0), Image.composite(person.getchannel("A"), Image.new("L", (s, s), 0), mask)
+    )
+    return im.resize((size, size), Image.LANCZOS)
+
+
+def _icon(kind: str, size: int, color: tuple[int, int, int]) -> Image.Image:
+    s = size * 4
+    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    w = max(int(s * 0.09), 2)
+    if kind == "like":  # trái tim
+        heart = [(0.5, 0.88), (0.1, 0.46), (0.1, 0.3), (0.5, 0.55), (0.9, 0.3), (0.9, 0.46)]
+        d.polygon([(s * x, s * y) for x, y in heart], outline=color, width=w)
+        d.arc((s * 0.1, s * 0.12, s * 0.5, s * 0.52), 180, 360, fill=color, width=w)
+        d.arc((s * 0.5, s * 0.12, s * 0.9, s * 0.52), 180, 360, fill=color, width=w)
+    elif kind == "reply":  # khung chat
+        d.rounded_rectangle(
+            (s * 0.1, s * 0.12, s * 0.9, s * 0.7), radius=int(s * 0.18), outline=color, width=w
+        )
+        d.polygon(
+            [(s * 0.3, s * 0.68), (s * 0.3, s * 0.9), (s * 0.5, s * 0.7)], outline=color, width=w
+        )
+    elif kind == "repost":  # hai mũi tên vòng
+        d.line([(s * 0.2, s * 0.4), (s * 0.2, s * 0.3), (s * 0.8, s * 0.3)], fill=color, width=w)
+        d.line(
+            [(s * 0.65, s * 0.15), (s * 0.82, s * 0.3), (s * 0.65, s * 0.45)], fill=color, width=w
+        )
+        d.line([(s * 0.8, s * 0.6), (s * 0.8, s * 0.7), (s * 0.2, s * 0.7)], fill=color, width=w)
+        d.line(
+            [(s * 0.35, s * 0.55), (s * 0.18, s * 0.7), (s * 0.35, s * 0.85)], fill=color, width=w
+        )
+    else:  # chia sẻ: máy bay giấy
+        plane = [(0.1, 0.5), (0.9, 0.12), (0.62, 0.88), (0.48, 0.58)]
+        d.polygon([(s * x, s * y) for x, y in plane], outline=color, width=w)
+        d.line([(s * 0.48, s * 0.58), (s * 0.9, s * 0.12)], fill=color, width=w)
+    return im.resize((size, size), Image.LANCZOS)
+
+
+def _round_rect(size: tuple[int, int], radius: int, fill: tuple[int, int, int]) -> Image.Image:
+    s = 4
+    big = Image.new("RGBA", (size[0] * s, size[1] * s), (0, 0, 0, 0))
+    ImageDraw.Draw(big).rounded_rectangle(
+        (0, 0, size[0] * s - 1, size[1] * s - 1), radius=radius * s, fill=fill
+    )
+    return big.resize(size, Image.LANCZOS)
+
+
+def _round_image(im: Image.Image, size: tuple[int, int], radius: int) -> Image.Image:
+    """Bo góc ảnh sắc nét bằng mask alpha độ phân giải 4x."""
+    w, h = max(size[0], 2), max(size[1], 2)
+    s = 4
+    big_mask = Image.new("L", (w * s, h * s), 0)
+    ImageDraw.Draw(big_mask).rounded_rectangle(
+        (0, 0, w * s - 1, h * s - 1), radius=radius * s, fill=255
+    )
+    mask = big_mask.resize((w, h), Image.LANCZOS)
+    big_mask.close()
+    rgba = im.convert("RGBA")
+    rgba.putalpha(mask)
+    mask.close()
+    return rgba
+
+
+def _load_media_images(paths: Sequence[Path | str] | None, limit: int = 4) -> list[Image.Image]:
+    loaded: list[Image.Image] = []
+    if not paths:
+        return loaded
+    for item in paths:
+        p = Path(item)
+        if not p.is_file():
+            continue
+        try:
+            with Image.open(p) as raw:
+                img = ImageOps.exif_transpose(raw).convert("RGB")
+            loaded.append(img)
+            if len(loaded) >= limit:
+                break
+        except Exception:
+            continue
+    return loaded
+
+
+def _build_media_block(images: list[Image.Image], max_w: int, max_h: int) -> Image.Image | None:
+    """Tạo khối ảnh đính kèm (căn giữa, bo góc 16px, max 840x550, giữ nguyên aspect ratio)."""
+    if not images:
+        return None
+    max_w = min(max_w, 840)
+    max_h = min(max_h, 550)
+    if max_w < 80 or max_h < 80:
+        return None
+    if len(images) == 1:
+        im = images[0]
+        scale = min(max_w / max(im.width, 1), max_h / max(im.height, 1))
+        tw = max(int(round(im.width * scale)), 2)
+        th = max(int(round(im.height * scale)), 2)
+        resized = im.resize((tw, th), Image.LANCZOS)
+        return _round_image(resized, (tw, th), radius=16)
+
+    gap = 12
+    cols = 2
+    rows = (len(images) + 1) // 2
+    tile_w = (max_w - gap) // cols
+    tile_h = min(int(tile_w * 0.85), max((max_h - gap * (rows - 1)) // rows, 90))
+    total_w = tile_w * cols + gap
+    total_h = tile_h * rows + gap * (rows - 1)
+    block = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
+    for idx, im in enumerate(images[:4]):
+        r, col = divmod(idx, cols)
+        fitted = ImageOps.fit(im, (tile_w, tile_h), method=Image.LANCZOS)
+        tile = _round_image(fitted, (tile_w, tile_h), radius=16)
+        fitted.close()
+        block.alpha_composite(tile, (col * (tile_w + gap), r * (tile_h + gap)))
+        tile.close()
+    return block
+
+
+def _canvas(tpl: dict) -> Image.Image:
+    return Image.new("RGBA", (tpl["canvas"]["w"], tpl["canvas"]["h"]), (0, 0, 0, 0))
+
+
+def render_hook(
+    text: str,
+    accent: str = "",
+    tpl: dict | None = None,
+    censor: list[CensorMatcher] | None = None,
+    censor_mode: CensorMode = "blur",
+) -> tuple[Image.Image, int]:
+    """Thẻ tiêu đề: chữ đen to căn giữa, cụm nhấn có ô màu bo góc. Trả về (lớp RGBA, đáy thẻ)."""
+    tpl = tpl or load_template()
+    c, h = tpl["card"], tpl["hook"]
+    text = _normalise(text)
+    font = _font(h["font"], h["size"])
+    inner = c["w"] - 2 * h["pad"]
+    words = _words(text)
+    if accent.strip():
+        needle = _normalise(accent).casefold()
+        low = text.casefold()
+        spans = (
+            [(m.start(), m.end()) for m in re.finditer(re.escape(needle), low)]
+            if len(low) == len(text)
+            else []
+        )
+        _mark(words, spans, "accent")
+    _mark(words, _censor_spans(text, censor), "censored")
+    lines = _ellipsize(_wrap(words, font, inner), h["max_lines"], font, inner)
+    lh = int(h["size"] * h["line_height"])
+    height = int(2 * h["pad"] * 0.8 + lh * max(len(lines), 1))
+    img = _canvas(tpl)
+    img.alpha_composite(
+        _round_rect((c["w"], height), c["radius"], _rgb(c["bg"])), (c["x"], h["top"])
+    )
+    space = font.getlength(" ")
+    y = h["top"] + int(h["pad"] * 0.8)
+    for line in lines:
+        total = sum(w.width for w in line) + space * (len(line) - 1)
+        x = c["x"] + (c["w"] - total) / 2
+        i = 0
+        while i < len(line):
+            w = line[i]
+            if w.accent:  # gom các từ nhấn liền nhau vào một ô
+                j = i
+                while j + 1 < len(line) and line[j + 1].accent:
+                    j += 1
+                run = line[i : j + 1]
+                run_w = sum(r.width for r in run) + space * (len(run) - 1)
+                pad = h["accent_pad"]
+                box_w, box_h = int(run_w + 2 * pad), int(lh * 0.98)
+                img.alpha_composite(
+                    _round_rect((box_w, box_h), h["accent_radius"], _rgb(h["accent_bg"])),
+                    (int(x - pad), int(y + lh * 0.02)),
+                )
+                for r in run:
+                    _draw_word(img, (x, y), r, font, _rgb(h["accent_fg"]), censor_mode, tpl)
+                    x += r.width + space
+                i = j + 1
+                continue
+            _draw_word(img, (x, y), w, font, _rgb(h["color"]), censor_mode, tpl)
+            x += w.width + space
+            i += 1
+        y += lh
+    return img, h["top"] + height
+
+
+def render_card(
+    handle: str,
+    age: str,
+    text: str,
+    *,
+    likes: int | None = None,
+    replies: int | None = None,
+    reposts: int | None = None,
+    shares: int | None = None,
+    views: int | None = None,
+    tpl: dict | None = None,
+    censor: list[CensorMatcher] | None = None,
+    censor_mode: CensorMode = "blur",
+    top: int | None = None,
+    reply: bool = False,
+    media_paths: Sequence[Path | str] | None = None,
+    max_lines: int | None = None,
+    fit_full_post: bool = False,
+    font_size_override: int | None = None,
+    canvas: Image.Image | None = None,
+    indent_override: int | None = None,
+    draw_reply_bar: bool = True,
+) -> tuple[Image.Image, int]:
+    """Thẻ bài gốc hoặc bình luận: avatar, tên, chữ, ảnh đính kèm, số liệu. Trả (ảnh, đáy).
+    `reply`: bình luận trả lời lồng, thẻ lùi vào và có đường kẻ dọc bên trái (`tpl["reply"]`)."""
+    tpl = tpl or load_template()
+    c, hd, b, st = tpl["card"], tpl["header"], tpl["body"], tpl["stats"]
+    top = c["top"] if top is None else top
+    text = _normalise(text)
+    rp = tpl["reply"] if reply else None
+    indent = indent_override if indent_override is not None else (rp["indent"] if rp else 0)
+    cx, cw = c["x"] + indent, c["w"] - indent
+    inner = cw - 2 * c["pad"]
+    censor_spans = _censor_spans(text, censor)
+
+    stat_items = [
+        (k, v)
+        for k, v in (("like", likes), ("reply", replies), ("repost", reposts), ("share", shares))
+        if v is not None
+    ]
+    stats_h = (st["icon"] if stat_items else 0) + (
+        int(st["size"] * 1.4) if views is not None else 0
+    )
+    safe_bottom = 1480 if not fit_full_post else 1380  # chừa khoảng an toàn trên dải phụ đề karaoke
+    media_images = _load_media_images(media_paths)
+
+    body_size = font_size_override if font_size_override is not None else b["size"]
+    while True:
+        font = _font(b["font"], body_size)
+        words = _words(text)
+        _mark(words, censor_spans, "censored")
+        wrapped = _wrap(words, font, inner)
+        # Chỉ cắt khi caller truyền max_lines tường minh; mặc định hiển thị 100% nội dung
+        lines = _ellipsize(wrapped, max_lines, font, inner) if max_lines is not None else wrapped
+        lh = int(body_size * b["line_height"])
+        gaps = (b["gap"] if lines else 0) + (st["top_gap"] if stats_h else 0)
+        base_h = c["pad"] * 2 + hd["avatar"] + gaps + lh * len(lines) + stats_h
+        min_needed_media = 200 if media_images else 0
+        if (
+            font_size_override is not None
+            or body_size <= 26
+            or (top + base_h + min_needed_media) <= safe_bottom
+        ):
+            break
+        body_size -= 2
+
+    media_block: Image.Image | None = None
+    media_gap = 20
+    if media_images:
+        avail_media_h = max(200, min(550, safe_bottom - (top + base_h + media_gap)))
+        media_block = _build_media_block(media_images, min(inner, 840), avail_media_h)
+        for m_im in media_images:
+            m_im.close()
+
+    media_extra = (media_gap + media_block.height) if media_block is not None else 0
+    height = base_h + media_extra
+
+    img = canvas if canvas is not None else _canvas(tpl)
+    rect = _round_rect((cw, height), c["radius"], _rgb(c["bg"]))
+    img.alpha_composite(rect, (cx, top))
+    rect.close()
+    if rp and draw_reply_bar:  # đường kẻ dọc nối với bình luận mẹ, cao bằng thẻ
+        rbar = _round_rect((rp["line_w"], height), rp["line_w"] // 2, _rgb(rp["line_color"]))
+        img.alpha_composite(rbar, (c["x"] + rp["line_x"], top))
+        rbar.close()
+    x0, y0 = cx + c["pad"], top + c["pad"]
+    av = _avatar(hd["avatar"], hd["avatar_bg"], hd["avatar_fg"])
+    img.alpha_composite(av, (x0, y0))
+    av.close()
+    tx = x0 + hd["avatar"] + hd["gap"]
+    d = ImageDraw.Draw(img)
+    name_font, age_font = (
+        _font(hd["handle_font"], hd["handle_size"]),
+        _font(hd["age_font"], hd["age_size"]),
+    )
+    d.text((tx, y0 - 2), handle or "—", font=name_font, fill=_rgb(hd["handle_color"]))
+    if age:
+        d.text((tx, y0 + hd["handle_size"] + 2), age, font=age_font, fill=_rgb(hd["age_color"]))
+
+    y = y0 + hd["avatar"] + (b["gap"] if lines else 0)
+    for line in lines:
+        x = float(x0)
+        space = font.getlength(" ")
+        for w in line:
+            _draw_word(img, (x, y), w, font, _rgb(b["color"]), censor_mode, tpl)
+            x += w.width + space
+        y += lh
+    if media_block is not None:
+        y += media_gap
+        mx = cx + (cw - media_block.width) // 2
+        img.alpha_composite(media_block, (mx, int(y)))
+        y += media_block.height
+        media_block.close()
+    y += st["top_gap"] if stats_h else 0
+    if stat_items:
+        sfont = _font(st["font"], st["size"])
+        x = float(x0)
+        color = _rgb(st["color"])
+        for kind, value in stat_items:
+            icon_im = _icon(kind, st["icon"], color)
+            img.alpha_composite(icon_im, (int(x), int(y)))
+            icon_im.close()
+            label = format_count(value)
+            d.text(
+                (x + st["icon"] + 10, y + (st["icon"] - st["size"]) / 2 - 2),
+                label,
+                font=sfont,
+                fill=color,
+            )
+            x += st["icon"] + 10 + sfont.getlength(label) + st["gap"]
+        y += st["icon"]
+    if views is not None:
+        sfont = _font(st["font"], int(st["size"] * 0.95))
+        d.text(
+            (x0, y + 8),
+            f"{format_count(views)} {VIEWS_LABEL}",
+            font=sfont,
+            fill=_rgb(st["views_color"]),
+        )
+    return img, top + height
+
+
+def _scaled(value: int | None, k: float) -> int | None:
+    return None if value is None else int(round(value * k))
+
+
+def _resolve_media_paths(src, project_dir: Path | None) -> list[Path] | None:
+    raw_media = getattr(src, "media", None) or []
+    if not raw_media:
+        return None
+    return [
+        (project_dir / m if project_dir and not Path(m).is_absolute() else Path(m))
+        for m in raw_media
+    ]
+
+
+def render_thread_card(
+    parent,
+    reply_comment,
+    *,
+    tpl: dict | None = None,
+    censor: list[CensorMatcher] | None = None,
+    censor_mode: CensorMode = "blur",
+    count_scale: float = 1.0,
+    project_dir: Path | None = None,
+) -> tuple[Image.Image, int]:
+    """Vẽ cây Thread (bình luận gốc ở trên + đường kẻ nối nhánh + thẻ reply sổ xuống dưới).
+    Hiển thị đầy đủ 100% chữ cả cha và con, tự co cỡ chữ đồng bộ nếu cụm thread quá cao."""
+    tpl = tpl or load_template()
+    c, rp, b = tpl["card"], tpl["reply"], tpl["body"]
+    thread_gap = 24
+    max_bottom = 1520
+    media_paths = _resolve_media_paths(reply_comment, project_dir)
+
+    font_size = b["size"]
+    thread_top = c["top"]
+    # Dựng nháp để đo tổng chiều cao; nếu tràn vùng phụ đề thì co cỡ chữ rồi đẩy top lên
+    while True:
+        probe = _canvas(tpl)
+        _, probe_parent_bottom = render_card(
+            parent.handle,
+            parent.age,
+            parent.text,
+            likes=parent.likes,
+            replies=parent.replies,
+            reposts=parent.reposts,
+            shares=parent.shares,
+            views=parent.views,
+            tpl=tpl,
+            censor=censor,
+            censor_mode=censor_mode,
+            top=thread_top,
+            font_size_override=font_size,
+            canvas=probe,
+        )
+        _, probe_reply_bottom = render_card(
+            reply_comment.handle,
+            reply_comment.age,
+            reply_comment.text,
+            likes=_scaled(reply_comment.likes, count_scale),
+            replies=_scaled(reply_comment.replies, count_scale),
+            reposts=_scaled(reply_comment.reposts, count_scale),
+            shares=_scaled(reply_comment.shares, count_scale),
+            views=reply_comment.views,
+            tpl=tpl,
+            censor=censor,
+            censor_mode=censor_mode,
+            top=probe_parent_bottom + thread_gap,
+            reply=True,
+            media_paths=media_paths,
+            font_size_override=font_size,
+            canvas=probe,
+            draw_reply_bar=False,
+        )
+        if probe_reply_bottom <= max_bottom:
+            img, parent_bottom, reply_bottom = probe, probe_parent_bottom, probe_reply_bottom
+            break
+        if font_size > 26:
+            font_size -= 2
+        elif thread_top > 120:
+            thread_top = max(120, thread_top - (probe_reply_bottom - max_bottom))
+        else:
+            img, parent_bottom, reply_bottom = probe, probe_parent_bottom, probe_reply_bottom
+            break
+
+    reply_top = parent_bottom + thread_gap
+    # 3. Đường kẻ chỉ nhánh nối từ thẻ bình luận cha xuống thẻ reply
+    line_color = _rgb(rp["line_color"])
+    line_w = rp["line_w"]
+    stem_x = c["x"] + rp["line_x"]
+    elbow_y = reply_top + c["radius"] + 28
+    d = ImageDraw.Draw(img)
+    d.line([(stem_x, parent_bottom + 4), (stem_x, elbow_y)], fill=line_color, width=line_w)
+    d.line([(stem_x, elbow_y), (c["x"] + rp["indent"] - 2, elbow_y)], fill=line_color, width=line_w)
+    return img, reply_bottom
+
+
+def render_project_card(
+    project,
+    kind: CardKind,
+    ref: str | None,
+    tpl: dict,
+    censor: list[CensorMatcher] | None,
+    censor_mode: CensorMode,
+    count_scale: float = 1.0,
+    project_dir: Path | None = None,
+) -> Image.Image:
+    """Lớp thẻ RGBA 1080×1920 của dự án PostV. `count_scale` ∈ [0, 1] thu nhỏ bốn số like,
+    bình luận, đăng lại, chia sẻ (hiệu ứng số chạy tăng); lượt xem giữ nguyên.
+    `ref` không có trong dự án thì ném `LookupError`."""
+    reply = False
+    if kind == "hook":
+        text = project.hook.text.strip() or hook_text_from_post(project.post.text)
+        return render_hook(text, project.hook.accent, tpl, censor, censor_mode)[0]
+    if kind == "post":
+        src, text = project.post, project.post.card_text or project.post.text
+        media_paths = _resolve_media_paths(src, project_dir)
+    else:
+        src = next((c for c in project.comments if c.id == ref), None)
+        if src is None:
+            raise LookupError(ref)
+        text = src.text
+        reply = src.parent is not None
+        media_paths = _resolve_media_paths(src, project_dir)
+        if reply:
+            parent_comment = next((c for c in project.comments if c.id == src.parent), None)
+            if parent_comment is not None:
+                return render_thread_card(
+                    parent_comment,
+                    src,
+                    tpl=tpl,
+                    censor=censor,
+                    censor_mode=censor_mode,
+                    count_scale=count_scale,
+                    project_dir=project_dir,
+                )[0]
+    image, _ = render_card(
+        src.handle, src.age, text, likes=_scaled(src.likes, count_scale),
+        replies=_scaled(src.replies, count_scale), reposts=_scaled(src.reposts, count_scale),
+        shares=_scaled(src.shares, count_scale), views=src.views, tpl=tpl, censor=censor,
+        censor_mode=censor_mode, reply=reply, media_paths=media_paths,
+        fit_full_post=(kind == "post"),
+    )  # fmt: skip
+    return image
+
+
+def hook_text_from_post(text: str, limit: int = 60) -> str:
+    """Chữ thẻ tiêu đề khi chưa nhập: câu đầu của bài, cắt ở từ nếu dài quá `limit`."""
+    s = _normalise(text).replace(chr(10), " ")
+    first = re.split(r"(?<=[.!?…])\s", s, maxsplit=1)[0]
+    if len(first) <= limit:
+        return first
+    cut = first[:limit]
+    return cut[: cut.rfind(" ")].rstrip(",;:") + "…" if " " in cut else cut + "…"
+
+
+def composite_preview(
+    layer: Image.Image, background: Image.Image | None, flat: str = "#6DB33F"
+) -> Image.Image:
+    """Lớp thẻ đặt trên khung nền (ảnh clip) hoặc một màu phẳng, để xem trước trên giao diện."""
+    if background is not None:
+        bg = background.convert("RGB")
+        scale = max(layer.width / bg.width, layer.height / bg.height)
+        bg_scaled = bg.resize((round(bg.width * scale), round(bg.height * scale)), Image.LANCZOS)
+        bg.close()
+        left, top = (bg_scaled.width - layer.width) // 2, (bg_scaled.height - layer.height) // 2
+        base = bg_scaled.crop((left, top, left + layer.width, top + layer.height)).convert("RGBA")
+        bg_scaled.close()
+    else:
+        base = Image.new("RGBA", layer.size, _rgb(flat) + (255,))
+    base.alpha_composite(layer)
+    result = base.convert("RGB")
+    base.close()
+    return result

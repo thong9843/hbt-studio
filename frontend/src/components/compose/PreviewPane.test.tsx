@@ -14,7 +14,9 @@ afterEach(() => vi.unstubAllGlobals());
 /** `rerender` giữ nguyên lớp bọc nên PreviewPane không bị dựng lại từ đầu. */
 const Providers = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>
-    <MemoryRouter>{children}</MemoryRouter>
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      {children}
+    </MemoryRouter>
   </QueryClientProvider>
 );
 const renderPane = (ui: ReactNode) => render(ui, { wrapper: Providers });

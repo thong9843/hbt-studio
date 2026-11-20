@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from typing import Literal
 
 from fastapi import APIRouter, Query, Response
 from PIL import Image
@@ -11,7 +12,8 @@ from pydantic import BaseModel, Field
 from hbt.api.deps import State, file_url
 from hbt.models import MAX_SCENES, MIN_SCENES, Project, Scene, Theme, Thumbnail
 from hbt.pipeline.preview import resize_png, scene_preview_for, scene_preview_png
-from hbt.pipeline.thumbnail import LOGO_FILE, render_cover
+from hbt.pipeline.thumbnail import LOGO_FILE, cover_background, render_cover
+from hbt.postv.models import AnyProject
 from hbt.storage import BadRequest, Conflict, NotFound, Unprocessable
 
 router = APIRouter(tags=["projects"])
@@ -20,7 +22,8 @@ router = APIRouter(tags=["projects"])
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1)
     series: str = ""
-    scene_count: int = Field(default=8, ge=MIN_SCENES, le=MAX_SCENES)
+    scene_count: int = Field(default=8, ge=MIN_SCENES, le=MAX_SCENES)  # PostV không dùng
+    kind: Literal["video", "postv"] = "video"  # PostV: dạng video riêng (docs/postv)
 
 
 class ProjectDuplicate(BaseModel):
@@ -36,6 +39,7 @@ class ProjectSummary(BaseModel):
     error: str | None = None
     cover: str | None = None  # URL cover_9x16.jpg của lần dựng gần nhất có bìa
     last_final: dict | None = None  # bản đẹp mới nhất (cùng dạng last_render), không có → None
+    kind: Literal["video", "postv"] = "video"  # PostV là dạng video riêng (docs/postv)
 
 
 @router.get("/projects", response_model=list[ProjectSummary])
@@ -51,20 +55,24 @@ def list_projects(state: State):
     return items
 
 
-@router.post("/projects", response_model=Project, status_code=201)
+@router.post("/projects", response_model=AnyProject, status_code=201)
 def create_project(body: ProjectCreate, state: State):
+    if body.kind == "postv":
+        return state.storage.create_postv(body.title, body.series)
     return state.storage.create(body.title, body.series, body.scene_count)
 
 
-@router.get("/projects/{slug}", response_model=Project)
+@router.get("/projects/{slug}", response_model=AnyProject)
 def get_project(slug: str, state: State):
-    return state.storage.load(slug)
+    return state.storage.load_any(slug)
 
 
-@router.put("/projects/{slug}", response_model=Project)
-def put_project(slug: str, body: Project, state: State):
-    state.storage.load(slug)  # 404 nếu chưa có; PUT không tạo project mới
-    return state.storage.save(slug, body)
+@router.put("/projects/{slug}", response_model=AnyProject)
+def put_project(slug: str, body: AnyProject, state: State):
+    kind = state.storage.kind_of(slug)  # 404 nếu chưa có; PUT không tạo project mới
+    if (kind == "postv") != (not isinstance(body, Project)):
+        raise Unprocessable("Không đổi loại project (video HBT / PostV) khi lưu")
+    return state.storage.save_any(slug, body)
 
 
 @router.delete("/projects/{slug}", status_code=204)
@@ -75,7 +83,7 @@ def delete_project(slug: str, state: State) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/projects/{slug}/duplicate", response_model=Project, status_code=201)
+@router.post("/projects/{slug}/duplicate", response_model=AnyProject, status_code=201)
 def duplicate_project(slug: str, state: State, body: ProjectDuplicate | None = None):
     return state.storage.duplicate(slug, body.title if body else None)
 
@@ -167,14 +175,20 @@ def draft_thumbnail_preview(
         raise Unprocessable("Project chưa có khối thumbnail (ảnh bìa)")
     if thumb.scene > len(project.scenes):
         raise Unprocessable(f"Cảnh nền {thumb.scene} vượt quá số cảnh ({len(project.scenes)})")
-    image = project.scenes[thumb.scene - 1].image
-    bg = state.storage.project_file(slug, image) if image else None
-    if bg is None or not bg.is_file():
-        raise Unprocessable(f"Cảnh {thumb.scene} chưa có ảnh để làm nền bìa")
+    if thumb.image:
+        try:
+            bg, fit = cover_background(thumb, project.scenes, state.storage.project_dir(slug))
+        except FileNotFoundError as e:
+            raise Unprocessable(str(e)) from e
+    else:
+        image = project.scenes[thumb.scene - 1].image
+        bg, fit = (state.storage.project_file(slug, image) if image else None), False
+        if bg is None or not bg.is_file():
+            raise Unprocessable(f"Cảnh {thumb.scene} chưa có ảnh để làm nền bìa")
     try:
         cover = render_cover(
             bg, thumb.lines, thumb.series or project.series, thumb.accent,
-            state.brand_dir / LOGO_FILE,
+            state.brand_dir / LOGO_FILE, fit_background=fit,
         )  # fmt: skip
     except OSError as e:
         raise Unprocessable(f"Không vẽ được ảnh bìa: {e}") from e
@@ -188,7 +202,7 @@ def draft_thumbnail_preview(
 @router.post("/projects/{slug}/build/clean")
 def clean_build(slug: str, state: State):
     """Dọn file tạm trong `build/` (giữ `timing.json`). 409 khi project đang được dựng."""
-    state.storage.load(slug)  # 404 nếu không có project
+    state.storage.load_any(slug)  # 404 nếu không có project
     if state.jobs.is_busy(slug):
         raise Conflict("Project đang được dựng, hãy đợi xong hoặc huỷ job rồi mới dọn file tạm")
     return state.storage.clean_build(slug)
@@ -206,7 +220,7 @@ def delete_render(slug: str, job_id: str, state: State) -> Response:
 @router.get("/projects/{slug}/renders")
 def list_renders(slug: str, state: State):
     """Lịch sử các lần xuất (mới nhất trước); đường dẫn file đã đổi thành URL."""
-    state.storage.load(slug)
+    state.storage.load_any(slug)
     items = state.storage.list_renders(slug)
     for item in items:
         for key in ("video", "srt", "publish", "log", "cover", "youtube_cover"):

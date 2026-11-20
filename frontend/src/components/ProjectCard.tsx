@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ProjectSummary } from '../api/types';
 import { vi } from '../i18n/vi';
 import { formatDate } from '../utils/format';
+import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus, type ProjectStatusKind } from '../utils/projectStatus';
 import { MoreIcon } from './icons';
 import { Badge, type BadgeTone } from './ui/Badge';
@@ -17,8 +18,14 @@ const TONE: Record<ProjectStatusKind, BadgeTone> = {
   broken: 'danger',
 };
 
-/** Ảnh thẻ; ảnh không tải được thì rơi về ô HBT đúng một lần (không thử lại). */
-export function CardImage({ src }: { src: string | null }) {
+/** Ảnh thẻ; ảnh không tải được hoặc chưa có ảnh bìa thì rơi về avatar kênh + nền nhẹ theo động cơ. */
+export function CardImage({
+  src,
+  fallbackKind = 'core',
+}: {
+  src: string | null;
+  fallbackKind?: 'core' | 'postv' | 'chatting';
+}) {
   const [failed, setFailed] = useState<string | null>(null);
   if (src && failed !== src) {
     return (
@@ -32,10 +39,21 @@ export function CardImage({ src }: { src: string | null }) {
       />
     );
   }
+  const bgMap = {
+    core: 'from-engine-core-soft via-card to-amber-50/40 dark:to-rose-950/30',
+    postv: 'from-engine-postv-soft via-card to-indigo-50/40 dark:to-indigo-950/30',
+    chatting: 'from-engine-chatting-soft via-card to-emerald-50/40 dark:to-emerald-950/30',
+  } as const;
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-      <img src="/brand/hbt-logo-mark.png" alt="" className="h-14 w-auto opacity-80" />
-      <span className="text-small font-semibold text-muted">{vi.projects.noImage}</span>
+    <div
+      className={`flex h-full w-full flex-col items-center justify-center gap-2.5 bg-gradient-to-br p-3 ${bgMap[fallbackKind]}`}
+    >
+      <img
+        src="/brand/hay-biet-tuot_avatar.png"
+        alt=""
+        className="h-14 w-14 rounded-full border-2 border-card object-cover shadow-sm"
+      />
+      <span className="text-center text-tiny font-semibold text-muted">{vi.projects.noImage}</span>
     </div>
   );
 }
@@ -53,13 +71,13 @@ interface Props {
 export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }: Props) {
   const status = projectStatus(project);
   const image = projectImage(project);
-  const href = `/p/${project.slug}`;
+  const href = projectHref(project);
   const t = vi.projects;
   return (
-    <Card as="li" padded={false} className="ui-card-link overflow-hidden">
+    <Card as="li" padded={false} className="ui-card-link">
       <Link to={href} aria-label={`${t.open}: ${project.title}`} className="block">
-        <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
-          <CardImage src={image} />
+        <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
+          <CardImage src={image} fallbackKind={project.kind === 'postv' ? 'postv' : 'core'} />
         </div>
       </Link>
       <div className="flex items-start gap-2 p-4">
@@ -70,6 +88,7 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }:
             </Link>
           </h3>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {project.kind === 'postv' && <Badge>{vi.postv.badge}</Badge>}
             <Badge tone={TONE[status.kind]}>{status.label}</Badge>
             <span className="num text-tiny text-muted">{formatDate(project.updated_at)}</span>
           </div>

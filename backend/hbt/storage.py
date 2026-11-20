@@ -34,9 +34,11 @@ from hbt.models import (
 )
 from hbt.pipeline.cache import sha256_file
 from hbt.pipeline.ffutil import FFmpegError, FFmpegNotFound, probe
+from hbt.postv.models import PostvProject, project_kind
 
 log = logging.getLogger(__name__)
 IMAGE_FORMATS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
+COVER_MIN_SIDE = 540  # px; ảnh bìa tải lên có cạnh ngắn hơn thì từ chối
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}
 DELETE_ATTEMPTS = 5  # xoá project: số lần thử khi Windows còn giữ file
 DELETE_RETRY_SECONDS = 0.1
@@ -143,7 +145,14 @@ def _now_iso(ts: float) -> str:
 def _write_json_atomic(path: Path, data: object) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError:
+            if attempt == 9:
+                raise
+            time.sleep(0.05)
 
 
 class Storage:
@@ -247,8 +256,14 @@ class Storage:
         if not path.is_file():
             raise NotFound(f"Không có project '{slug}'")
         try:
-            project = Project.model_validate(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, ValidationError) as e:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+        if project_kind(raw) == "postv":
+            raise BadRequest(f"'{slug}' là dự án PostV, không dùng được ở chức năng video HBT")
+        try:
+            project = Project.model_validate(raw)
+        except ValidationError as e:
             raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
 
         # Tự chuyển project cũ dạng scene-01.png hoặc ảnh chưa chuẩn hash sang
@@ -277,6 +292,81 @@ class Storage:
             self.save(slug, project)
         return project
 
+    def kind_of(self, slug: str) -> str:
+        """`video` hoặc `postv`; NotFound nếu chưa có project, BadRequest nếu JSON hỏng."""
+        path = self.project_dir(slug) / "project.json"
+        if not path.is_file():
+            raise NotFound(f"Không có project '{slug}'")
+        try:
+            return project_kind(json.loads(path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+
+    def load_any(self, slug: str) -> Project | PostvProject:
+        """Đọc project của cả hai loại (video HBT qua `load`, PostV qua `PostvProject`)."""
+        if self.kind_of(slug) == "video":
+            return self.load(slug)
+        path = self.project_dir(slug) / "project.json"
+        try:
+            return PostvProject.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, ValidationError) as e:
+            raise BadRequest(f"project.json của '{slug}' không hợp lệ: {e}") from e
+
+    def save_any(self, slug: str, project: Project | PostvProject) -> Project | PostvProject:
+        if isinstance(project, PostvProject):
+            return self._save_postv(slug, project)
+        return self.save(slug, project)
+
+    def _save_postv(self, slug: str, project: PostvProject) -> PostvProject:
+        if project.slug != slug:
+            raise BadRequest(f"slug trong nội dung ('{project.slug}') khác đường dẫn ('{slug}')")
+        folder = self.project_dir(slug)
+        folder.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(folder / "project.json", project.model_dump(mode="json"))
+        return project
+
+    def create_postv(self, title: str, series: str = "") -> PostvProject:
+        """Dự án PostV rỗng: chưa có nguồn, đoạn, giọng, nền (bản nháp)."""
+        if not title.strip():
+            raise BadRequest("Tiêu đề không được để trống")
+        slug = self.unique_slug(slugify(title))
+        defaults = self.app_settings.load() if self.app_settings else None
+        project = PostvProject(
+            slug=slug,
+            title=title.strip(),
+            series=series.strip(),
+            theme=Theme(**defaults.theme.model_dump()) if defaults else Theme(),
+        )
+        (self.projects_dir / slug / "images").mkdir(parents=True)
+        (self.projects_dir / slug / "media").mkdir(parents=True, exist_ok=True)
+        return self._save_postv(slug, project)
+
+    def media_dir(self, slug: str) -> Path:
+        """Thư mục lưu ảnh đính kèm bài gốc và bình luận: `workspace/projects/<slug>/media/`."""
+        folder = self.project_dir(slug) / "media"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def save_postv_media(self, slug: str, filename: str, raw: bytes) -> str:
+        """Xác thực ảnh bằng Pillow, ghi xuống `media/<filename>` và trả đường dẫn tương đối."""
+        import io
+
+        if not raw:
+            raise BadRequest("File ảnh rỗng")
+        safe_name = Path(filename).name
+        if not safe_name or safe_name.startswith("."):
+            raise BadRequest("Tên file ảnh không hợp lệ")
+        try:
+            with Image.open(io.BytesIO(raw)) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise Unprocessable(f"File ảnh không hợp lệ: {exc}") from exc
+        target = self.media_dir(slug) / safe_name
+        tmp = target.with_name(f".{safe_name}.tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, target)
+        return f"media/{safe_name}"
+
     def save(self, slug: str, project: Project) -> Project:
         if project.slug != slug:
             raise BadRequest(f"slug trong nội dung ('{project.slug}') khác đường dẫn ('{slug}')")
@@ -288,7 +378,7 @@ class Storage:
 
     def delete(self, slug: str) -> None:
         folder = self.project_dir(slug)
-        if not (folder / "project.json").is_file():
+        if not (folder / "project.json").is_file() and not folder.exists():
             raise NotFound(f"Không có project '{slug}'")
         # Windows: file vừa ghi/đang đọc (vd ảnh xem trước) làm rmtree lỗi trong chốc lát.
         for attempt in range(DELETE_ATTEMPTS):
@@ -324,7 +414,7 @@ class Storage:
         return self.save(slug, project)
 
     def duplicate(self, slug: str, title: str | None = None) -> Project:
-        source = self.load(slug)
+        source = self.load_any(slug)
         new_title = (title or f"{source.title} (bản sao)").strip()
         new_slug = self.unique_slug(slugify(new_title))
         shutil.copytree(
@@ -333,7 +423,7 @@ class Storage:
             ignore=shutil.ignore_patterns(*COPY_EXCLUDE),
         )
         copy = source.model_copy(update={"slug": new_slug, "title": new_title})
-        return self.save(new_slug, copy)
+        return self.save_any(new_slug, copy)
 
     # ---------------------------------------------------------------- thứ tự cảnh
     def reorder_scenes(self, slug: str, order: list[int]) -> Project:
@@ -400,19 +490,19 @@ class Storage:
 
     def attach_music(self, slug: str, src: Path, credit: str) -> tuple[str, Project]:
         """Chép một file nhạc có sẵn (từ thư viện) vào project và đặt ghi công."""
-        project = self.load(slug)
+        project = self.load_any(slug)
         folder = self.project_dir(slug)
         rel = f"music{src.suffix.lower()}"
         _remove_siblings(folder, "music")
         shutil.copyfile(src, folder / rel)
         project.music = Music(file=rel, credit=credit)
-        self.save(slug, project)
+        self.save_any(slug, project)
         return rel, project
 
     # ---------------------------------------------------------------- danh sách
     def _music_sha256(self, slug: str) -> str | None:
         """SHA-256 của file nhạc hiện tại trong project; None nếu không có nhạc."""
-        music = self.load(slug).music
+        music = self.load_any(slug).music
         path = self.project_dir(slug) / music.file if music and music.file else None
         return sha256_file(path) if path is not None and path.is_file() else None
 
@@ -502,16 +592,20 @@ class Storage:
             item = {
                 "slug": d.name,
                 "title": d.name,
+                "kind": "video",
                 "updated_at": _now_iso(pj.stat().st_mtime),
                 "thumb": None,
                 **self.render_summary(d.name),
             }
             try:
-                project = self.load(d.name)
+                project = self.load_any(d.name)
                 item["title"] = project.title
-                first = project.scenes[0].image
-                if first and (d / first).is_file():
-                    item["thumb"] = self.rel(d / first)
+                if isinstance(project, PostvProject):
+                    item["kind"] = "postv"
+                else:
+                    first = project.scenes[0].image
+                    if first and (d / first).is_file():
+                        item["thumb"] = self.rel(d / first)
             except StorageError as e:
                 item["error"] = e.message
             out.append(item)
@@ -522,9 +616,12 @@ class Storage:
         self, slug: str, kind: str, src: Path, filename: str, scene_index: int | None = None
     ) -> tuple[str, Project]:
         """Nhận file tải lên (`src` là file tạm), kiểm tra, đặt vào project và lưu project.json."""
-        project = self.load(slug)
+        project = self.load_any(slug)
+        postv = isinstance(project, PostvProject)
         folder = self.project_dir(slug)
         if kind == "image":
+            if postv:
+                raise BadRequest("Dự án PostV không có ảnh cảnh (chỉ nhận cover, voice, music)")
             if scene_index is None or not 0 <= scene_index < len(project.scenes):
                 raise BadRequest(f"Cần `scene_index` từ 0 đến {len(project.scenes) - 1} cho ảnh")
             ext = _image_extension(src)
@@ -538,18 +635,36 @@ class Storage:
             else:
                 src.unlink(missing_ok=True)
             project.scenes[scene_index].image = rel
+        elif kind == "cover":
+            if project.thumbnail is None:
+                raise Unprocessable("Hãy bật ảnh bìa (thêm khối thumbnail) trước khi tải ảnh bìa")
+            ext = _image_extension(src)
+            _check_cover_size(src)
+            rel = f"images/cover.{ext}"
+            (folder / "images").mkdir(exist_ok=True)
+            os.replace(src, folder / rel)  # ghi đè bản cũ cùng đuôi
+            for old in (folder / "images").glob("cover.*"):  # bản cũ khác đuôi
+                if old.name != f"cover.{ext}" and old.is_file():
+                    old.unlink()
+            project.thumbnail.image = rel
         elif kind in ("voice", "music"):
             ext = _audio_extension(src, filename)
             rel = f"{kind}.{ext}"
             _remove_siblings(folder, kind)
             shutil.move(src, folder / rel)
             if kind == "voice":
-                project.voice = Voice(file=rel)  # điểm cắt cũ không còn đúng với file mới
+                # điểm cắt cũ không còn đúng với file mới; PostV: giọng nhập vào là engine `file`
+                if postv:  # giữ giọng đã chọn từng người (cast, seed) khi đổi sang file nhập vào
+                    project.voice = project.voice.model_copy(
+                        update={"engine": "file", "file": rel, "trim_end": None}
+                    )
+                else:
+                    project.voice = Voice(file=rel)
             else:
                 project.music = Music(file=rel)
         else:
-            raise BadRequest("`kind` phải là image, voice hoặc music")
-        self.save(slug, project)
+            raise BadRequest("`kind` phải là image, cover, voice hoặc music")
+        self.save_any(slug, project)
         return rel, project
 
 
@@ -598,6 +713,16 @@ def _image_extension(path: Path) -> str:
     if fmt not in IMAGE_FORMATS:
         raise BadRequest("Ảnh phải là PNG, JPG hoặc WEBP")
     return IMAGE_FORMATS[fmt]
+
+
+def _check_cover_size(path: Path) -> None:
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+    except (Image.DecompressionBombError, OSError) as e:
+        raise BadRequest("File không phải ảnh hợp lệ") from e
+    if min(w, h) < COVER_MIN_SIDE:
+        raise BadRequest(f"Ảnh bìa quá nhỏ ({w}×{h}); cạnh ngắn cần từ {COVER_MIN_SIDE} px trở lên")
 
 
 def _audio_extension(path: Path, filename: str) -> str:

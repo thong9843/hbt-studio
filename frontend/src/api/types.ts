@@ -78,6 +78,8 @@ export interface Thumbnail {
   lines: string[];
   series: string;
   accent: string;
+  /** Ảnh bìa riêng đã tải lên (`images/cover.<ext>`); trống = dùng ảnh của cảnh `scene`. */
+  image?: string | null;
 }
 
 export interface BuildClean {
@@ -87,6 +89,9 @@ export interface BuildClean {
   kept: string[];
   failed: number;
 }
+
+/** Loại dự án: video HBT (ảnh + giọng) hoặc PostV (bài mạng xã hội trên nền gameplay). */
+export type ProjectKind = 'video' | 'postv';
 
 export interface Project {
   version: 1;
@@ -127,6 +132,7 @@ export interface ProjectSummary {
   /** Bìa 9:16 của lần dựng gần nhất có bìa. */
   cover: string | null;
   error: string | null;
+  kind: ProjectKind;
 }
 
 export interface RenderRecord extends RenderSummary {
@@ -179,7 +185,7 @@ export interface MusicEntry {
   bpm: number | null;
 }
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'running' | 'waiting_pick' | 'done' | 'failed' | 'cancelled';
 
 export interface JobOutput {
   video: string;
@@ -206,9 +212,17 @@ export interface JobOutput {
 export interface Job {
   id: string;
   project: string;
+  slug?: string;
+  kind?: string;
+  mode?: 'preview' | 'final';
   status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
   log_tail: string[];
   output: JobOutput | null;
   error: string | null;
@@ -219,15 +233,25 @@ export interface Job {
   preview_seconds: number | null;
 }
 
-/** Một dòng của `GET /jobs`: job đang chạy hoặc đang chờ. */
+/** Một dòng của `GET /jobs`: job đang chạy/chờ (hoặc vừa hoàn tất khi `include_recent=true`). */
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final';
-  status: 'queued' | 'running';
+  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto' | 'stickv';
+  mode?: 'preview' | 'final';
+  status: JobStatus;
   progress: number;
   step: string;
+  stage?: string;
+  current_beat?: number | null;
+  total_beats?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  output?: Record<string, unknown> | null;
+  error?: string | null;
 }
+
+export type AspectMode = 'fill' | 'fit';
 
 export interface RenderOptions {
   preview?: boolean;
@@ -236,6 +260,16 @@ export interface RenderOptions {
   fps?: Fps;
   outro?: boolean;
   allow_long_trim?: boolean;
+  aspect_mode?: AspectMode;
+}
+
+export interface WatermarkSettings {
+  enabled: boolean;
+  mode: 'text' | 'logo' | 'both';
+  text: string;
+  logo_path: string;
+  position: 'bottom-right' | 'bottom-left' | 'top-left' | 'top-right' | 'center-subtle';
+  opacity: number;
 }
 
 export interface AppSettings {
@@ -243,6 +277,12 @@ export interface AppSettings {
   theme: Theme;
   whisper_model: 'auto' | 'small' | 'medium' | 'large-v3';
   whisper_timeout_seconds: number;
+  advanced_mode?: boolean;
+  watermark?: WatermarkSettings;
+  pixabay_api_key?: string;
+  giphy_api_key?: string;
+  freesound_api_key?: string;
+  voicemod_tuna_api_key?: string;
 }
 
 export interface SensitiveCategory {
@@ -259,7 +299,190 @@ export interface SensitiveWords {
 export interface ProjectCreate {
   title: string;
   series: string;
-  scene_count: number;
+  scene_count?: number;
+  /** Bỏ trống = video HBT. */
+  kind?: ProjectKind;
+}
+
+export interface PostvStats {
+  views: number | null;
+  likes: number | null;
+  replies: number | null;
+  reposts: number | null;
+  shares: number | null;
+}
+
+export interface PostvComment extends PostvStats {
+  id: string;
+  handle: string;
+  age: string;
+  text: string;
+  parent: string | null;
+  picked: boolean;
+}
+
+export interface PostvSegment {
+  role: 'hook' | 'post' | 'comment' | 'commentary';
+  card: 'hook' | 'post' | 'comment' | 'none' | null;
+  voice: string;
+  ref: string | null;
+  /** Ai đọc đoạn: "narrator", "post" hoặc id bình luận; null/thiếu = theo vai trò. */
+  speaker?: string | null;
+  meme_id?: string | null;
+  meme_pos?: 'bottom_right' | 'bottom_center' | 'center';
+}
+
+export interface MemeEntry {
+  id: string;
+  title: string;
+  file: string;
+  video_url: string;
+  poster_url: string;
+  duration: number;
+  width: number;
+  height: number;
+  downloaded: boolean;
+  source?: string;
+  license?: string;
+}
+
+/** Dự án PostV (docs/postv/IMPLEMENT-POSTV.md mục 3). Có `kind: "postv"`, không có `scenes`. */
+export interface PostvProject {
+  version: 1;
+  kind: 'postv';
+  slug: string;
+  title: string;
+  series: string;
+  theme: Theme;
+  source: { url: string; note: string; pasted_at: string | null };
+  post: PostvStats & { handle: string; age: string; text: string; card_text: string | null };
+  comments: PostvComment[];
+  segments: PostvSegment[];
+  template: 'story_cards' | 'fixed_card';
+  /** Thẻ tiêu đề ở giây đầu; trống = lấy câu đầu của bài. */
+  hook: { text: string; accent: string };
+  background: {
+    mode: 'auto' | 'manual';
+    clip_ids: string[];
+    seed: number;
+    start_offset: number | null;
+  };
+  style: { caption: { preset: 'hbt' | 'sample'; highlight_color: string | null } };
+  voice: {
+    engine: 'vieneu' | 'file';
+    voice_id: string | null;
+    file: string | null;
+    trim_end: number | null;
+    /** Giọng chọn tay từng người ({speaker: voice_id}); người chưa gán bốc theo `seed`. */
+    cast: Record<string, string>;
+    seed: number;
+  };
+  music: Music | null;
+  settings: {
+    fps: number;
+    captions: boolean;
+    aligner: 'auto' | 'whisper' | 'silence';
+    outro: boolean;
+    card_animation: 'smooth' | 'bounce';
+    censor: { enabled: boolean; sfx: 'bleep'; blur_card: boolean; text: 'blur' | 'stars' };
+  };
+  publish: { hook: string; hashtags: string[] };
+  thumbnail: Thumbnail | null;
+  auto?: PostvAutoOptions | null;
+}
+
+export interface PostvAutoOptions {
+  style: string;
+  comments?: number;
+  comment_count: number;
+}
+
+export interface PostvScriptStyle {
+  id: string;
+  label: string;
+  description: string;
+  tone: string;
+  voice_style: string;
+}
+
+export interface ScriptJsonCheckResult {
+  ok: boolean;
+  issues?: string[];
+  errors?: string[];
+  warnings?: string[];
+  segments_count?: number;
+  summary?: {
+    hook: string;
+    segments_count: number;
+    total_chars: number;
+    estimated_seconds: number;
+  };
+}
+
+export interface PostvBackupRecord {
+  id: string;
+  created_at: string;
+  bytes: number;
+}
+
+export type AnyProject = Project | PostvProject;
+
+/** Clip nền gameplay trong thư viện (`GET /backgrounds`). */
+export interface BackgroundEntry {
+  id: string;
+  file: string;
+  title: string;
+  source?: string;
+  license?: string;
+  url?: string;
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  tags: string[];
+}
+
+export interface NewBackgroundInput {
+  file: File;
+  title: string;
+  source?: string;
+  license?: string;
+  url?: string;
+  tags?: string;
+}
+
+/** Kết quả `POST /postv/parse` (hàm thuần, không ghi gì). */
+export interface PostvParseResult {
+  guess: 'threads_text' | 'embed' | 'unknown';
+  source_url: string | null;
+  post: { handle: string; age: string; text: string } | null;
+  comments: {
+    id: string;
+    handle: string;
+    age: string;
+    text: string;
+    same_author: boolean;
+    picked: boolean;
+    /** Id bình luận được trả lời (dòng đầu bắt đầu bằng ">"); tối đa 1 cấp. */
+    parent?: string | null;
+  }[];
+  /** Dòng chỉ gồm số có thể là số liệu; `block` 0 = bài gốc, i ≥ 1 = bình luận thứ i. */
+  hints: { block: number; raw: string; value: number | null }[];
+  warnings: string[];
+}
+
+/** Kết quả `POST /projects/{slug}/postv/script/check`: chỉ nhắc, không chặn. */
+export interface PostvCheck {
+  seconds: number;
+  chars: number;
+  long: boolean;
+  censored: number;
+  segments: { index: number; role: string; chars: number; seconds: number }[];
+  issues: { where: string; level: 'info' | 'warn'; message: string; word: string | null }[];
+}
+
+export function isPostv(p: AnyProject): p is PostvProject {
+  return 'kind' in p && p.kind === 'postv';
 }
 
 export interface NewMusicInput {
@@ -304,6 +527,47 @@ export interface ScriptCheck {
   realign_scenes: number[];
 }
 
+/** Kết quả `POST /gd2/draft/check` (JSON nháp `hbt_draft`). */
+export interface DraftCheck {
+  ok: boolean;
+  errors: ScriptIssue[];
+  warnings: ScriptIssue[];
+  topic: string;
+  series_hint: string;
+  scenes: number;
+  counts: { json: number; project: number; after: number } | null;
+  music_match: { id: string; title: string } | null;
+}
+
+export interface DraftScene {
+  image_prompt: string;
+  image_prompt_ok: boolean;
+  /** Prompt đầy đủ để sao chép (đã nối phần phủ định); rỗng khi cảnh chưa có prompt. */
+  full_prompt: string;
+  /** Từ cấm (K17) có trong prompt. */
+  forbidden: string[];
+  /** Ảnh hiện tại còn khớp dấu ảnh lúc duyệt. */
+  image_approved: boolean;
+}
+
+/** `GET /projects/{slug}/draft`: nháp kèm trạng thái duyệt ảnh tính tại lúc đọc. */
+export interface DraftDoc {
+  draft: 1;
+  topic: string;
+  series_hint: string;
+  music_mood: string;
+  sources: { id: string; claim: string; url: string }[];
+  scenes: DraftScene[];
+  images_approved: boolean;
+}
+
+export interface DraftCreated {
+  slug: string;
+  project: Project;
+  warnings: ScriptIssue[];
+  music_match: { id: string; title: string } | null;
+}
+
 export interface ScriptApplied {
   project: Project;
   backup_id: string;
@@ -314,4 +578,560 @@ export interface BackupEntry {
   id: string;
   created_at: string;
   reason: 'apply' | 'restore' | null;
+}
+
+/** Một giọng VieNeu (`GET /voices`). */
+export interface VoiceEntry {
+  id: string;
+  label: string;
+  gender: string;
+  region: string;
+  style: string;
+}
+
+export interface VoiceList {
+  /** Giọng mặc định của người dẫn (Adam bựa). */
+  default: string;
+  voices: VoiceEntry[];
+}
+
+export interface VoiceSpeaker {
+  speaker: string;
+  voice_id: string;
+  /** true = người dùng đã chọn tay; false = mặc định hoặc bốc theo seed. */
+  manual: boolean;
+}
+
+/** Hiện trạng giọng của một dự án PostV (`GET /projects/{slug}/voice`). */
+export interface ProjectVoice {
+  engine: 'vieneu' | 'file';
+  file: string | null;
+  url: string | null;
+  /** VieNeu đã cài và có trọng số. */
+  available: boolean;
+  note: string | null;
+  seed: number;
+  manual: Record<string, string>;
+  speakers: VoiceSpeaker[];
+  segments:
+    { index: number; speaker: string; voice_id: string; start: number; end: number }[] | null;
+  seconds: number | null;
+  /** Lời hoặc giọng đã đổi sau lần sinh gần nhất; null = chưa biết. */
+  stale: boolean | null;
+  estimated_seconds: number;
+}
+
+/** `GET /projects/{slug}/draft/voice`: giọng VieNeu của dự án HBT (GĐ2, G3). */
+export interface HbtVoiceInfo {
+  available: boolean;
+  note: string | null;
+  /** Giọng đã nhớ từ lần trước. */
+  voice_id: string | null;
+  has_file: boolean;
+  file: string | null;
+  url: string | null;
+  /** File hiện tại là file VieNeu đã sinh (không phải file thả vào). */
+  from_vieneu: boolean;
+  seconds: number | null;
+  used_voice_id: string | null;
+  /** Lời đã đổi sau lần sinh; `null` = không rõ. */
+  stale: boolean | null;
+  scenes: number;
+  estimated_seconds: number;
+}
+
+/** `output` của job sinh giọng HBT (`kind` là voice, dự án HBT). */
+export interface HbtVoiceJobOutput {
+  voice: string;
+  seconds: number;
+  scenes: { scene: number; start: number; end: number }[];
+  voice_id: string;
+  generated: number;
+  cached: number;
+}
+
+/** `output` của job sinh giọng (`Job.output` khi `kind` là voice). */
+export interface VoiceJobOutput {
+  voice: string;
+  seconds: number;
+  generated: number;
+  cached: number;
+  cast: Record<string, string>;
+}
+
+export type PostvStage = 'fetch' | 'pick' | 'script' | 'voice' | 'render' | 'done';
+
+export interface PostvQuickOptions {
+  voice_id?: string | null;
+  fps?: 30 | 50 | 60;
+  outro?: boolean;
+  background?: 'auto' | 'manual';
+  music?: 'auto' | 'none';
+  music_id?: string | null;
+  max_comments?: number;
+  target_seconds?: number;
+  pick_mode?: 'auto' | 'manual';
+  aspect_mode?: AspectMode;
+}
+
+export interface PostvPickComment {
+  id: string;
+  handle: string;
+  age?: string | null;
+  text: string;
+  likes?: number | null;
+  replies?: number | null;
+  parent?: string | null;
+  picked?: boolean;
+  filter_reason?: 'ngắn' | 'trùng' | 'từ nhạy cảm' | 'rác' | null;
+}
+
+export interface PostvPickData {
+  handle: string;
+  post_text: string;
+  snippet?: string;
+  comments: PostvPickComment[];
+  picked_count: number;
+  total_comments: number;
+  target_seconds: number;
+  estimated_seconds: number;
+  low_comments_warning?: string | null;
+}
+
+export interface PostvQuickAutoResponse {
+  project_slug: string;
+  job_id: string | null;
+  existing_slug: string | null;
+}
+
+export interface PostvStageEvent {
+  stage: PostvStage;
+  step?: string;
+  status: 'running' | 'done' | 'failed' | 'waiting_pick';
+  progress: number;
+  current?: number;
+  total?: number;
+  percent?: number;
+  message: string;
+  data?: {
+    handle?: string;
+    snippet?: string;
+    picked_count?: number;
+    total_comments?: number;
+    target_seconds?: number;
+    estimated_seconds?: number;
+    low_comments_warning?: string | null;
+    step?: string;
+    current?: number;
+    total?: number;
+    percent?: number;
+    message?: string;
+    video?: string;
+    cover?: string | null;
+    youtube_cover?: string | null;
+    publish?: string;
+    duration?: number;
+    fps?: number;
+    project_slug?: string;
+    post_text?: string;
+    comments?: PostvPickComment[];
+    log?: string;
+    warning?: string | null;
+    [key: string]: unknown;
+  };
+}
+
+export interface ChatCharacter {
+  id: string;
+  name: string;
+  avatar?: string | null;
+  side: 'left' | 'right';
+  voice_id?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  from: string;
+  text: string;
+  sticker?: string | null;
+  media_type?: 'none' | 'image' | 'video';
+  media_path?: string | null;
+  media_hint?: string | null;
+}
+
+export interface ChatDoc {
+  hbt_chat: number;
+  slug?: string;
+  title: string;
+  platform: 'messenger' | 'instagram' | 'zalo';
+  aspect_mode?: AspectMode;
+  target_duration_s?: number | null;
+  characters: ChatCharacter[];
+  messages: ChatMessage[];
+  warnings?: string[];
+  background?: string;
+  music?: string;
+  settings?: {
+    fps?: number;
+    show_header?: boolean;
+    header_title?: string;
+  };
+}
+
+export interface ChattingJobInfo {
+  job_id?: string;
+  slug: string;
+  status: 'running' | 'done' | 'failed';
+  phase?: string;
+  percent: number;
+  text?: string;
+  error?: string;
+  video?: string;
+  timings?: {
+    llm_s?: number;
+    fetch_s?: number;
+    llm_tokens?: number;
+  };
+}
+
+export interface ChatProjectDetail {
+  slug: string;
+  doc: ChatDoc | null;
+  source: Record<string, unknown> | null;
+  renders: Array<Record<string, unknown>>;
+  preview_url: string | null;
+  job?: ChattingJobInfo | null;
+}
+
+export interface ChatProjectSummary {
+  slug: string;
+  title: string;
+  platform: string;
+  updated_at: string;
+  characters_count: number;
+  messages_count: number;
+  has_render: boolean;
+  timings?: {
+    llm_s?: number;
+    fetch_s?: number;
+    llm_tokens?: number;
+  };
+  job?: ChattingJobInfo | null;
+}
+
+export type HbtCoreTopic = 'history' | 'fun' | 'science' | 'mystery';
+
+export interface HbtCoreSegment {
+  id?: number;
+  order: number;
+  title?: string;
+  text: string;
+  sticker?: string;
+  image_prompt?: string;
+  image: string;
+  sfx: string;
+  card_text?: string | null;
+  punch?: boolean;
+  duration?: number | null;
+  audio_path?: string | null;
+  start_time?: number | null;
+  end_time?: number | null;
+}
+
+export interface HbtCoreScript {
+  title: string;
+  topic: HbtCoreTopic | string;
+  total_segments?: number;
+  segments: HbtCoreSegment[];
+}
+
+export interface HbtCoreGeminiModel {
+  id: string;
+  name: string;
+}
+
+export interface HbtCoreAssetsInfo {
+  topics: string[];
+  sfx: { id: string; name: string; category: string }[];
+  sfx_presets: string[];
+  topic_music: Record<string, string[]>;
+  images: string[];
+  gemini_configured: boolean;
+  gemini_models?: HbtCoreGeminiModel[];
+}
+
+export interface HbtCoreRenderResponse {
+  ok?: boolean;
+  success?: boolean;
+  fallback_v1?: boolean;
+  error?: string;
+  message?: string;
+  detail?: string;
+  reason?: string;
+  mode?: 'v1' | 'v2';
+  slug?: string;
+  job_id?: string | null;
+  script?: HbtCoreScript;
+}
+
+export type AssetHubCategory =
+  'music' | 'backgrounds' | 'stickers' | 'memes' | 'watermarks' | 'stickman';
+
+export interface AssetHubItem {
+  id?: string;
+  name: string;
+  category: AssetHubCategory;
+  kind: 'image' | 'video' | 'audio' | 'other';
+  media_type?: 'image' | 'video';
+  size: number;
+  modified_at: string;
+  url: string;
+  file_url?: string;
+  source?: 'assets' | 'library' | 'brand' | 'chatting';
+  readonly?: boolean;
+  title?: string;
+  artist?: string;
+  moods?: string[];
+  tags?: string[];
+  topic?: string;
+  duration?: number;
+  duration_sec?: number;
+  width?: number;
+  height?: number;
+  thumb_url?: string | null;
+  anim_group?: 'pose' | 'oneshot' | 'loop' | '';
+}
+
+export interface OnlinePixabayItem {
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  tags: string[];
+  preview_url: string;
+  download_url: string;
+  kind: 'music' | 'sfx';
+}
+
+export interface OnlineTunaItem {
+  id: string;
+  title: string;
+  duration_sec: number;
+  preview_url: string;
+  tags: string[];
+}
+
+export interface OnlineGreenMemeItem {
+  id: string;
+  title: string;
+  video_url: string;
+  poster_url: string;
+  source: string;
+}
+
+export interface OnlineGiphyItem {
+  id: string;
+  title: string;
+  preview_url: string;
+  download_url: string;
+  ext: string;
+  source: string;
+}
+
+export interface UnifiedRenderItem {
+  id: string;
+  slug: string;
+  title: string;
+  engine: 'core' | 'postv' | 'chatting' | 'stickv';
+  duration_sec: number;
+  size_mb: number;
+  publish_text: string;
+  created_at: string;
+  video_url: string;
+  cover_url?: string | null;
+}
+
+export type StickvAspect = '9:16' | '16:9';
+export type StickvTheme = 'cream' | 'dark';
+export type StickvDomain =
+  'paper_classic' | 'physics_science' | 'history_geo' | 'psychology_story' | 'cosmos_mystery';
+export type StickvInteraction = 'none' | 'hold_prop' | 'point_chart' | 'versus_split';
+export type StickvAnimationMode = 'auto' | 'static';
+export type PuppetSlotKey =
+  | 'base_character'
+  | 'eyes_neutral'
+  | 'eyes_happy'
+  | 'eyes_shock'
+  | 'eyes_angry'
+  | 'mouth_closed'
+  | 'mouth_open';
+
+export interface PuppetSlotStatus {
+  found: boolean;
+  name: string;
+  source: string;
+  url: string | null;
+}
+
+export interface PuppetStatusResponse {
+  ready: boolean;
+  present_count: number;
+  total: number;
+  slots: Record<PuppetSlotKey, PuppetSlotStatus>;
+}
+export type StickvMotion = 'bounce' | 'slide_left' | 'slide_right' | 'float' | 'static';
+export type StickvCameraShot = 'wide_stage' | 'focus_board' | 'closeup_react';
+export type StickvEmotion =
+  | 'auto'
+  | 'neutral'
+  | 'confident'
+  | 'curious'
+  | 'idea'
+  | 'shock'
+  | 'skeptical'
+  | 'serious'
+  | 'sad'
+  | 'happy'
+  | 'excited';
+export type StickvBoardType =
+  | 'none'
+  | 'bullets'
+  | 'big_number'
+  | 'comparison'
+  | 'flow_steps'
+  | 'card'
+  | 'list'
+  | 'quote'
+  | 'bar_compare'
+  | 'counter_grow'
+  | 'timeline_era'
+  | 'location_map'
+  | 'myth_vs_fact'
+  | 'recap_card';
+export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
+
+export interface StickvBeat {
+  id: string;
+  chapter: number;
+  chapter_title?: string;
+  narration: string;
+  pose: string;
+  emotion?: StickvEmotion;
+  anim_oneshot?: string | null;
+  anim_loop?: string;
+  interaction?: StickvInteraction;
+  camera_shot?: StickvCameraShot;
+  prop_query?: string | null;
+  facing: 'left' | 'right';
+  motion: StickvMotion;
+  sfx_tag: StickvSfxTag;
+  board_type: StickvBoardType;
+  board_title: string;
+  board_items?: string[];
+  takeaway?: string;
+  board_data: Record<string, unknown>;
+  visual_data?: Record<string, unknown>;
+  media_path: string;
+  clip_path?: string;
+  duration_sec: number;
+}
+
+export interface StickvProject {
+  slug: string;
+  title: string;
+  topic: string;
+  domain?: StickvDomain;
+  animation_mode?: StickvAnimationMode;
+  aspect: StickvAspect;
+  theme: StickvTheme;
+  fps: number;
+  voice_id: string;
+  music_mood: string;
+  outro?: boolean;
+  gemini_model: string;
+  target_minutes: number;
+  chapters?: Array<Record<string, unknown>>;
+  beats: StickvBeat[];
+  created_at: string;
+  updated_at: string;
+  last_render?: {
+    video_url: string;
+    duration_sec: number;
+    size_mb: number;
+    aspect: StickvAspect;
+    preview: boolean;
+  } | null;
+}
+
+export type CinemaShotType =
+  'desk_wide' | 'card_hero' | 'split_compare' | 'data_spotlight' | 'puppet_closeup' | 'recap_grid';
+
+export interface CinemaHardwareProfile {
+  mode: 'cpu' | 'gpu' | string;
+  video_encoder: string;
+  gpu_name: string | null;
+  nvenc_probed: boolean;
+  nvenc_probe_error: string | null;
+  layer_cache_mb: number;
+  ffmpeg_threads: number;
+}
+
+export interface CinemaPreflightIssue {
+  beat_id: string | null;
+  beat_index: number | null;
+  code: string;
+  severity: 'error' | 'warn';
+  message: string;
+  auto_fixed: boolean;
+}
+
+export interface CinemaPreflightReport {
+  ok: boolean;
+  errors: CinemaPreflightIssue[];
+  warnings: CinemaPreflightIssue[];
+  fixed_count: number;
+  repaired_spec: {
+    slug: string;
+    title: string;
+    aspect: StickvAspect;
+    fps: number;
+    preflight_passed: boolean;
+    beats: Array<{
+      id: string;
+      shot_type: CinemaShotType;
+      transition_in: string;
+    }>;
+  };
+  stats: {
+    initial_errors?: number;
+    remaining_errors?: number;
+    bbox_reflows?: number;
+    anti_parrot_rewrites?: number;
+    pacing_diversifications?: number;
+    recap_conversions?: number;
+  };
+}
+
+export interface CinemaContactSheetResponse {
+  ok: boolean;
+  filename: string;
+  url: string;
+  preflight_ok: boolean;
+  preflight_fixed: number;
+  width: number;
+  height: number;
+  beats_rendered: number;
+  elapsed_ms: number;
+}
+
+export interface CinemaRenderBeatResponse {
+  ok: boolean;
+  beat_id: string;
+  cache_hit: boolean;
+  cache_key: string;
+  filename: string;
+  url: string;
+  elapsed_ms: number;
+  width: number;
+  height: number;
 }

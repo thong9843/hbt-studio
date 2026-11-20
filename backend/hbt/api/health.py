@@ -2,7 +2,8 @@
 
 Định nghĩa (IMPLEMENT.md mục 9): `ok` = FFmpeg chạy được và đủ mọi encoder/filter trong
 REQUIRED_ENCODERS + REQUIRED_FILTERS; `missing` liệt kê thứ còn thiếu. Whisper và GPU không
-ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2).
+ảnh hưởng `ok` vì đã có đường dự phòng (mục 5.2). `vieneu` (PostV): đã cài gói và có trọng số
+chưa; chưa có thì nhập file giọng như thường, `vieneu_note` nói cách cài.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import shutil
 import subprocess
 
 from fastapi import APIRouter
+
+from hbt.api.deps import State
 
 router = APIRouter()
 
@@ -86,7 +89,8 @@ def check_gpu() -> bool:
 
 
 @router.get("/health")
-def health() -> dict[str, bool | list[str]]:
+def health(state: State) -> dict[str, bool | str | None | list[str]]:
+    vieneu = state.voice.status()
     missing = check_ffmpeg()
     ffmpeg = missing is not None
     if missing is None:
@@ -96,5 +100,7 @@ def health() -> dict[str, bool | list[str]]:
         "ffmpeg": ffmpeg,
         "whisper": check_whisper(),
         "gpu": check_gpu(),
+        "vieneu": vieneu.ok,
+        "vieneu_note": None if vieneu.ok else vieneu.note,
         "missing": missing,
     }

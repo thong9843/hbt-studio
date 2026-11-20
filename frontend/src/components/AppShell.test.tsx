@@ -9,9 +9,21 @@ import { renderWithProviders } from '../test/render';
 import { AppShell } from './AppShell';
 import { RenderCard } from './SideNav';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  localStorage.removeItem('hbt_sidebar_collapsed');
+  localStorage.removeItem('hbt_advanced_mode');
+  vi.unstubAllGlobals();
+});
 
-const health = { ok: true, ffmpeg: true, whisper: false, gpu: false, missing: [] };
+const health = {
+  ok: true,
+  ffmpeg: true,
+  whisper: false,
+  gpu: false,
+  vieneu: true,
+  vieneu_note: null,
+  missing: [],
+};
 const summary = (slug: string, title: string) => ({
   slug,
   title,
@@ -37,8 +49,13 @@ function shell(route = '/', render?: { percent: number; step: string } | null) {
     <Routes>
       <Route element={<AppShell render={render} />}>
         <Route path="/" element={<Where />} />
+        <Route path="/core" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/p/:slug/*" element={<Where />} />
+        <Route path="/postv/:slug/*" element={<Where />} />
+        <Route path="/postv/*" element={<Where />} />
+        <Route path="/chatting/*" element={<Where />} />
+        <Route path="/library" element={<Where />} />
         <Route path="/settings" element={<Where />} />
       </Route>
     </Routes>,
@@ -74,15 +91,34 @@ describe('AppShell, wide (>= 1280 px)', () => {
     const labels = within(nav)
       .getAllByRole('link')
       .map((a) => a.textContent);
-    expect(labels).toEqual(['Trang chủ', 'Dự án', 'Cài đặt']);
+    expect(labels).toEqual(['Trang chủ', 'HBT Core', 'PostV', 'Chatting', 'StickV', 'Thư viện']);
     expect(await screen.findByRole('list', { name: 'Trạng thái môi trường' })).toBeInTheDocument();
   });
 
-  it('is 232 px wide and fixed in place', () => {
+  it('is 224 px wide when expanded and can be toggled to 64 px and back on any page with localStorage persistence', async () => {
     stubFetch(routes());
-    shell();
+    shell('/core');
     const side = screen.getByRole('complementary');
-    expect(side).toHaveClass('w-[232px]', 'sticky', 'h-screen');
+    expect(side).toHaveClass('w-[224px]', 'sticky', 'h-screen');
+
+    const collapseBtn = screen.getByRole('button', { name: 'Thu gọn thanh bên' });
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(collapseBtn);
+
+    expect(side).toHaveClass('w-[64px]');
+    expect(localStorage.getItem('hbt_sidebar_collapsed')).toBe('true');
+
+    const expandBtn = screen.getByRole('button', { name: 'Mở rộng thanh bên' });
+    expect(expandBtn).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(expandBtn);
+
+    expect(side).toHaveClass('w-[224px]');
+    expect(localStorage.getItem('hbt_sidebar_collapsed')).toBe('false');
+
+    // Icon Sáng/Tối ở đáy Sidebar là Mặt trời / Mặt trăng (tách biệt hẳn icon Cài đặt)
+    expect(
+      within(side).queryByTestId('theme-icon-sun') ?? within(side).queryByTestId('theme-icon-moon'),
+    ).not.toBeNull();
   });
 
   it('hides the open-project block outside a project', () => {
@@ -114,6 +150,65 @@ describe('AppShell, wide (>= 1280 px)', () => {
     );
   });
 
+  it('adds the Ảnh step between Soạn video and Âm thanh only for a project with a draft', async () => {
+    stubFetch({ ...routes(), 'GET /api/projects/muoi/draft/exists': { exists: true } });
+    shell('/p/muoi/audio');
+    const group = screen.getByRole('group', { name: 'Dự án đang mở' });
+    await within(group).findByRole('link', { name: 'Ảnh' });
+    expect(
+      within(group)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Soạn video', 'Ảnh', 'Âm thanh', 'Xuất video']);
+    expect(within(group).getByRole('link', { name: 'Ảnh' })).toHaveAttribute(
+      'href',
+      '/p/muoi/images',
+    );
+  });
+
+  it('shows the open postv project with its name and five steps inside /postv/:slug', async () => {
+    stubFetch({
+      'GET /api/health': health,
+      'GET /api/projects': [summary('bai', 'Bài đêm khuya')],
+    });
+    shell('/postv/bai/preview');
+    const group = screen.getByRole('group', { name: 'Dự án đang mở' });
+    expect(await within(group).findByText('Bài đêm khuya')).toBeInTheDocument();
+    const links = within(group).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual([
+      'Nguồn',
+      'Chọn đoạn',
+      'Kịch bản',
+      'Xem trước',
+      'Xuất',
+    ]);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '/postv/bai',
+      '/postv/bai/pick',
+      '/postv/bai/script',
+      '/postv/bai/preview',
+      '/postv/bai/export',
+    ]);
+    expect(within(group).getByRole('link', { name: 'Xem trước' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('shows the postv 5 steps outside a project when advanced mode is on', async () => {
+    localStorage.setItem('hbt_advanced_mode', 'true');
+    stubFetch({
+      'GET /api/health': health,
+      'GET /api/projects': [{ ...summary('bai', 'Bài đêm khuya'), kind: 'postv' }],
+    });
+    shell('/');
+    const group = await screen.findByRole('group', { name: 'Dự án đang mở' });
+    expect(within(group).getByRole('link', { name: 'Nguồn' })).toHaveAttribute(
+      'href',
+      '/postv/bai',
+    );
+  });
+
   it('falls back to the slug until the project list arrives', () => {
     stubFetch(routes());
     shell('/p/muoi');
@@ -122,17 +217,26 @@ describe('AppShell, wide (>= 1280 px)', () => {
     ).toBeInTheDocument();
   });
 
-  it('marks Home as current at "/" and Projects at "/projects"', () => {
+  it('marks Home as current at "/" and Library at "/library"', () => {
     stubFetch(routes());
     const first = shell('/');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: 'Dự án' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).not.toHaveAttribute('aria-current');
     first.unmount();
-    shell('/projects');
-    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Dự án' })).toHaveAttribute('href', '/projects');
+    shell('/library');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).toHaveAttribute('href', '/library');
     expect(screen.getByRole('link', { name: 'Trang chủ' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('has its own PostV item: /postv is current on the PostV screens', async () => {
+    stubFetch(routes());
+    shell('/postv');
+    expect(await screen.findByRole('link', { name: 'PostV' })).toHaveAttribute('href', '/postv');
+    expect(screen.getByRole('link', { name: 'PostV' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Thư viện' })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('group', { name: 'Dự án đang mở' })).toBeNull();
   });
 
   it('opens the new-video dialog from the red button, on any screen', async () => {
@@ -146,14 +250,26 @@ describe('AppShell, wide (>= 1280 px)', () => {
   it('ignores the old /?new=1 query: no dialog opens', async () => {
     stubFetch(routes());
     shell('/?new=1');
-    await screen.findByRole('link', { name: 'Dự án' });
+    await screen.findByRole('link', { name: 'Thư viện' });
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('is reachable by keyboard in reading order', async () => {
     stubFetch(routes());
     shell();
-    const order = ['HBT Studio', 'Tạo video', 'Trang chủ', 'Dự án', 'Cài đặt'];
+    const order = [
+      'HBT Studio',
+      'Thu gọn thanh bên',
+      'Tạo video',
+      'Tạo nhanh',
+      'Trang chủ',
+      'HBT Core',
+      'PostV',
+      'Chatting',
+      'StickV',
+      'Thư viện',
+      'Cài đặt',
+    ];
     for (const name of order) {
       await userEvent.tab();
       expect(document.activeElement).toHaveAccessibleName(name);
@@ -162,17 +278,18 @@ describe('AppShell, wide (>= 1280 px)', () => {
 });
 
 describe('AppShell, narrow (< 1280 px)', () => {
-  it('collapses to 72 px with icons only, still named for screen readers', () => {
+  it('collapses to 64 px with icons only, still named for screen readers, and can be manually expanded', async () => {
     const restore = narrowScreen();
     try {
       stubFetch(routes());
       shell('/p/muoi');
-      expect(screen.getByRole('complementary')).toHaveClass('w-[72px]');
+      const side = screen.getByRole('complementary');
+      expect(side).toHaveClass('w-[64px]');
       expect(screen.queryByText('HBT Studio')).toBeNull();
       // Chữ còn trong DOM dưới dạng sr-only, và có tooltip.
-      const home = screen.getByRole('link', { name: 'Dự án' });
-      expect(home).toHaveAttribute('title', 'Dự án');
-      expect(within(home).getByText('Dự án')).toHaveClass('sr-only');
+      const home = screen.getByRole('link', { name: 'Thư viện' });
+      expect(home).toHaveAttribute('title', 'Thư viện');
+      expect(within(home).getByText('Thư viện')).toHaveClass('sr-only');
       expect(screen.getByRole('button', { name: 'Tạo video' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Xuất video' })).toHaveAttribute(
         'title',
@@ -180,6 +297,10 @@ describe('AppShell, narrow (< 1280 px)', () => {
       );
       // Tên dự án không hiện ở chế độ thu.
       expect(screen.queryByText('muoi')).toBeNull();
+
+      // Người dùng bấm Mở rộng thanh bên ngay cả trên màn hẹp
+      await userEvent.click(screen.getByRole('button', { name: 'Mở rộng thanh bên' }));
+      expect(side).toHaveClass('w-[224px]');
     } finally {
       restore();
     }
@@ -223,7 +344,7 @@ describe('render progress card', () => {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<Starter />} />
-          <Route path="/projects" element={<Where />} />
+          <Route path="/library" element={<Where />} />
         </Route>
       </Routes>,
       '/',
@@ -234,7 +355,7 @@ describe('render progress card', () => {
     act(() =>
       FakeEventSource.instances[0].emit('progress', { progress: 55, step: 'Mã hoá', message: '' }),
     );
-    await userEvent.click(screen.getByRole('link', { name: 'Dự án' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Thư viện' }));
     const card = screen.getByRole('status', { name: 'Đang dựng' });
     expect(card).toHaveTextContent('55%');
     expect(card).toHaveTextContent('Mã hoá');
@@ -319,5 +440,16 @@ describe('environment dots', () => {
     await waitFor(() => expect(list).toHaveTextContent('FFmpeg: có'));
     expect(list).toHaveTextContent('Whisper: thiếu');
     expect(list).toHaveTextContent('GPU: thiếu');
+    expect(list).toHaveTextContent('VieNeu: có'); // K-40
+  });
+
+  it('shows VieNeu as missing when the backend says so', async () => {
+    stubFetch({
+      ...routes(),
+      'GET /api/health': { ...health, vieneu: false, vieneu_note: 'Chưa cài VieNeu' },
+    });
+    shell('/settings');
+    const list = await screen.findByRole('list', { name: 'Trạng thái môi trường' });
+    await waitFor(() => expect(list).toHaveTextContent('VieNeu: thiếu'));
   });
 });

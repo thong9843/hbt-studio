@@ -463,3 +463,37 @@ def test_matches_import_cards_on_dao_phuc_sinh():
     # import_cards.py chỉ báo "tự xuống hàng" ở cảnh 6 (chỉ số 5), và không có dòng nào tràn
     assert [w["scene_index"] for w in res.warnings if w["code"] == "K6b"] == [5]
     assert "K6" not in codes(res.errors)
+
+
+# ------------------------------------------------------------------ thumbnail.image (bìa tải lên)
+def test_thumbnail_image_is_forbidden_in_json_k4():
+    for bad in ("images/cover.png", None, ""):
+        res = run(
+            {"scenes": [{}] * 4, "thumbnail": {"scene": 1, "lines": ["A", "B"], "image": bad}}
+        )
+        assert not res.ok and codes(res.errors) == ["K4"]
+        assert res.errors[0]["field"] == "thumbnail.image"
+        assert "không đổi được" in res.errors[0]["message"]
+
+
+def test_pasting_a_thumbnail_block_keeps_the_uploaded_cover_image():
+    p = make_project(thumbnail={"scene": 1, "lines": ["A", "B"], "image": "images/cover.png"})
+    res = run(
+        {"scenes": [{}] * 4, "thumbnail": {"scene": 2, "lines": ["X", "Y"], "series": "S"}}, p
+    )
+    assert res.ok and res.merged.thumbnail.image == "images/cover.png"
+    assert res.merged.thumbnail.scene == 2 and res.merged.thumbnail.lines == ["X", "Y"]
+    (diff,) = [d for d in res.diff if d["field"] == "thumbnail"]
+    assert diff["before"]["image"] == diff["after"]["image"] == "images/cover.png"
+
+
+def test_same_thumbnail_block_gives_no_diff_when_cover_image_is_set():
+    p = make_project(thumbnail={"scene": 1, "lines": ["A", "B"], "image": "images/cover.png"})
+    res = run({"scenes": [{}] * 4, "thumbnail": {"scene": 1, "lines": ["A", "B"]}}, p)
+    assert res.ok and not [d for d in res.diff if d["field"] == "thumbnail"]
+
+
+def test_thumbnail_block_without_existing_one_has_no_image():
+    p = make_project(thumbnail=None)
+    res = run({"scenes": [{}] * 4, "thumbnail": {"scene": 1, "lines": ["A", "B"]}}, p)
+    assert res.ok and res.merged.thumbnail.image is None

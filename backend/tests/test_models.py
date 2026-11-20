@@ -158,3 +158,39 @@ def test_music_start_accepts_null_and_non_negative(start):
 def test_music_start_rejects_negative_and_non_numbers(start):
     with pytest.raises(ValidationError):
         Music(file="m.mp3", start=start)
+
+
+# --- thumbnail.image (bìa từ ảnh tải lên)
+def thumb(**kw):
+    return {"scene": 1, "lines": ["BẠN CÓ PHẢI", "MUỖI YÊU?"], **kw}
+
+
+def test_thumbnail_image_defaults_to_none_for_old_project_json():
+    p = Project.model_validate(project(thumbnail=thumb()))
+    assert p.thumbnail.image is None
+
+
+@pytest.mark.parametrize("name", ["png", "jpg", "jpeg", "webp"])
+def test_thumbnail_image_accepts_cover_names(name):
+    p = Project.model_validate(project(thumbnail=thumb(image=f"images/cover.{name}")))
+    assert p.thumbnail.image == f"images/cover.{name}"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "images/scene-01.png",
+        "images/../cover.png",
+        "../images/cover.png",
+        "/images/cover.png",
+        "C:/images/cover.png",
+        r"imagesver.png",
+        "images/cover.gif",
+        "images/cover.png/x",
+        "cover.png",
+        "",
+    ],
+)
+def test_thumbnail_image_rejects_other_paths(bad):
+    with pytest.raises(ValidationError):
+        Project.model_validate(project(thumbnail=thumb(image=bad)))

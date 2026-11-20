@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from hbt.config import BRAND_DIR
 
@@ -114,8 +114,29 @@ def title_ink_boxes(lines: list[str], font_dir: Path | None = None) -> list[tupl
     return boxes
 
 
-def _background(bg_path: Path) -> Image.Image:
-    bg = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
+def cover_background(thumb, scenes, project_dir: Path) -> tuple[Path, bool]:
+    """Ảnh nền của bìa: `(đường dẫn, cần cắt giữa)`. Có `thumb.image` (ảnh tải lên) thì dùng ảnh đó
+    và cắt giữa kiểu cover; không thì dùng ảnh của cảnh `thumb.scene` như cũ. Thiếu file ảnh bìa
+    riêng thì ném `FileNotFoundError` (người gọi báo cảnh báo), không quay về ảnh cảnh."""
+    if thumb.image:
+        path = project_dir / thumb.image
+        if not path.is_file():
+            raise FileNotFoundError(f"Thiếu ảnh bìa {thumb.image}")
+        return path, True
+    return project_dir / scenes[thumb.scene - 1].image, False
+
+
+def _background(bg_path: Path, fit: bool = False) -> Image.Image:
+    if fit:  # ảnh tải lên: xoay theo EXIF rồi cắt giữa cho đúng 9:16, không kéo giãn
+        with Image.open(bg_path) as src:
+            bg = ImageOps.fit(
+                ImageOps.exif_transpose(src).convert("RGB"),
+                (W, H),
+                Image.LANCZOS,
+                centering=(0.5, 0.5),
+            )
+    else:
+        bg = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
     bg = ImageEnhance.Brightness(bg).enhance(0.82)
     bg = ImageEnhance.Color(bg).enhance(1.1)
     ys = np.arange(H)[:, None]
@@ -135,11 +156,13 @@ def render_cover(
     accent: str = "#FFD43B",
     logo_path: Path | None = None,
     font_dir: Path | None = None,
+    fit_background: bool = False,
 ) -> Image.Image:
-    """Ảnh bìa 1080×1920 RGB. Thiếu logo hoặc nền hỏng thì ném lỗi (người gọi báo cảnh báo)."""
+    """Ảnh bìa 1080×1920 RGB. Thiếu logo hoặc nền hỏng thì ném lỗi (người gọi báo cảnh báo).
+    `fit_background`: nền là ảnh tải lên (cắt giữa); mặc định kéo ảnh cảnh về 1080×1920 như cũ."""
     logo_path = logo_path or BRAND_DIR / LOGO_FILE
     logo = Image.open(logo_path).convert("RGBA")  # mở trước để lỗi sớm
-    im = _background(bg_path)
+    im = _background(bg_path, fit_background)
     d = ImageDraw.Draw(im)
     accent_rgb = hex2rgb(accent)
     for ln in layout_title(lines, font_dir):

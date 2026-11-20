@@ -1,20 +1,28 @@
 """Dòng lệnh: `python -m cli render <project_dir> [--preview] [--fps 30|50|60]` dựng video;
-`python -m cli bench-align <project_dir> [--models small,medium,large-v3]` đo Whisper."""
+`python -m cli bench-align <project_dir> [--models small,medium,large-v3]` đo Whisper;
+`python -m cli pack-media` / `unpack-media` chuyển media giữa hai máy (zip + sha256)."""
 
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from hbt.config import ALLOWED_FPS, WHISPER_MODELS, load_settings
+from hbt import transfer
+from hbt.config import ALLOWED_FPS, REPO_ROOT, WHISPER_MODELS, load_settings
 from hbt.pipeline.audio import TailTrimNeedsConfirmation
 from hbt.pipeline.bench import bench_align, format_rows
 from hbt.pipeline.ffutil import FFmpegError
 from hbt.pipeline.render import RenderError, RenderOptions, render_project
 from hbt.pipeline.whisper import DEFAULT_TIMEOUT, WhisperConfig
+from hbt.postv.censor import CensorStore
+from hbt.postv.models import project_kind
+from hbt.postv.render import render_postv
 from hbt.sensitive import SensitiveStore
 
 
@@ -61,7 +69,86 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TIMEOUT,
         help=f"giới hạn thời gian mỗi model, giây (mặc định {DEFAULT_TIMEOUT})",
     )
+    groups_help = (
+        f"nhóm media, cách nhau bằng dấu phẩy (mặc định tất cả: {','.join(transfer.GROUPS)})"
+    )
+    pk = sub.add_parser(
+        "pack-media", help="Gói media (nền, nhạc, giọng VieNeu, dự án mẫu) thành zip + manifest"
+    )
+    pk.add_argument("--out", type=Path, default=REPO_ROOT / "workspace" / "transfer")
+    pk.add_argument("--groups", help=groups_help)
+    pk.add_argument("--dry-run", action="store_true", help="chỉ đếm file và dung lượng")
+    up = sub.add_parser(
+        "unpack-media", help="Giải gói vào repo, kiểm sha256, không ghi đè file git theo dõi"
+    )
+    up.add_argument("src", type=Path, nargs="?", default=REPO_ROOT / "workspace" / "transfer")
+    up.add_argument("--groups", help=groups_help)
+    up.add_argument(
+        "--with-index", action="store_true", help="cho phép ghi đè index.json của thư viện"
+    )
+    up.add_argument("--force", action="store_true", help="ghi đè file có sẵn nhưng khác nội dung")
+
+    sub.add_parser("stickers-index", help="Quét library/stickers/ và tạo index.json")
+
+    cb = sub.add_parser("chatting-bench", help="Đo hiệu năng Ollama viết kịch bản Chatting")
+    cb.add_argument("sample_file", type=Path, help="file text mẫu")
+    cb.add_argument("--model", help="tên model Ollama (mặc định theo .env)")
+    cb.add_argument(
+        "--runs", type=int, default=3, help="số lượt chạy để tính trung vị (mặc định 3)"
+    )
     return parser
+
+
+def _git_tracked(root: Path) -> set[str]:
+    """File git đang theo dõi (posix, tương đối). Không chạy được git thì chỉ coi các `index.json`
+    của thư viện là đang theo dõi (an toàn hơn là ghi đè)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True, timeout=60
+        ).stdout
+        return {p for p in out.decode("utf-8").split("\0") if p}
+    except (OSError, subprocess.SubprocessError):
+        return {"library/backgrounds/index.json", "library/music/index.json"}
+
+
+def _split(value: str | None) -> list[str] | None:
+    return [g.strip() for g in value.split(",") if g.strip()] if value else None
+
+
+def _media(args) -> int:
+    def log(m: str) -> None:
+        print(f"  {m}", flush=True)
+
+    try:
+        if args.command == "pack-media":
+            if args.dry_run:
+                for group, files in transfer.plan_pack(REPO_ROOT, _split(args.groups)).items():
+                    size = sum(p.stat().st_size for p in files)
+                    print(f"  {group}: {len(files)} file, {size / 1e6:.1f} MB")
+                return 0
+            transfer.pack(REPO_ROOT, args.out, _split(args.groups), log)
+            print(f"\nĐã ghi vào {args.out}")
+            return 0
+        report = transfer.unpack(
+            REPO_ROOT,
+            args.src,
+            tracked=_git_tracked(REPO_ROOT),
+            with_index=args.with_index,
+            force=args.force,
+            groups=_split(args.groups),
+            log=log,
+        )
+    except (transfer.TransferError, OSError, zipfile.BadZipFile) as e:
+        print(f"\nLỖI: {e}", file=sys.stderr)
+        return 1
+    print(
+        f"\nGhi {len(report.written)} · đã có {len(report.same)} · "
+        f"giữ nguyên file git theo dõi {len(report.protected)} · khác nội dung bỏ qua "
+        f"{len(report.differs)}"
+    )
+    for rel in report.differs:
+        print(f"  KHÁC: {rel} (thêm --force để ghi đè)")
+    return 0
 
 
 def _progress_printer():
@@ -83,6 +170,19 @@ def current_sensitive_words(project_dir: Path):
     parent = project_dir.resolve().parent
     workspace = parent.parent if parent.name == "projects" else parent
     return SensitiveStore(workspace).load()
+
+
+def project_workspace(project_dir: Path) -> Path:
+    parent = project_dir.resolve().parent
+    return parent.parent if parent.name == "projects" else parent
+
+
+def _is_postv(project_dir: Path) -> bool:
+    try:
+        data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False  # để đường dựng HBT báo lỗi đọc project như cũ
+    return project_kind(data) == "postv"
 
 
 def _describe(err: ValidationError) -> str:
@@ -123,6 +223,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "bench-align":
         return _bench_align(args, parser)
+    if args.command in ("pack-media", "unpack-media"):
+        return _media(args)
+    if args.command == "stickers-index":
+        from hbt.chatting.stickers import build_index
+
+        settings = load_settings()
+        idx = build_index(settings.library_dir)
+        total = sum(len(v) for v in idx.values())
+        idx_path = settings.library_dir / "stickers" / "index.json"
+        print(f"Đã lập index cho {len(idx)} tag sticker ({total} file) tại {idx_path}")
+        return 0
+    if args.command == "chatting-bench":
+        from hbt.chatting.bench import run_bench
+
+        res = run_bench(args.sample_file, model=args.model, runs=args.runs)
+        if not res["ok"]:
+            print(f"LỖI: {res['error']}", file=sys.stderr)
+            return 1
+        print(
+            f"\nKết quả Chatting Benchmark ({res['model']}):\n"
+            f"  Số lượt chạy : {res['runs']}\n"
+            f"  Trung vị llm_s: {res['median_llm_s']} s "
+            f"(min {res['min_llm_s']}s, max {res['max_llm_s']}s)\n"
+            f"  Tokens trung bình: {res['avg_tokens']}"
+        )
+        return 0
 
     options = RenderOptions(
         preview=args.preview,
@@ -133,7 +259,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         options.sensitive_words = current_sensitive_words(args.project_dir)
-        result = render_project(args.project_dir, options, progress=_progress_printer())
+        if _is_postv(args.project_dir):  # dự án PostV: bộ dựng riêng, cùng cách báo kết quả
+            words = CensorStore(project_workspace(args.project_dir)).load()
+            result = render_postv(
+                args.project_dir, options, progress=_progress_printer(), censor_words=words
+            )
+        else:
+            result = render_project(args.project_dir, options, progress=_progress_printer())
     except TailTrimNeedsConfirmation as e:
         print(
             f"\nDỪNG: {e}\nChạy lại với --allow-long-trim nếu đúng là phần cần cắt.",

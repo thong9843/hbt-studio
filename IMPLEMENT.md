@@ -1,10 +1,34 @@
-# HBT Studio — Đặc tả triển khai (cho Claude Code)
+# HBT Studio — Đặc tả triển khai hợp nhất (cho Claude Code)
 
-> Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `reference/pipeline/*.py` → `DESIGN.md`.
-> Phiên bản: v1.4 · 21/10/2026 (v1.1 thương hiệu HBT; v1.2 50fps, outro, lời đọc 750 ký tự; v1.3 outro có lời; v1.4 ảnh bìa).
-> **Mục 4b–4d bên dưới GHI ĐÈ các tham số cũ ở mục 4** khi có mâu thuẫn.
-> Phạm vi file này: **Giai đoạn 1** (mốc M0–M4). Giai đoạn 2 chỉ định nghĩa interface ở mục 12.
-> Mọi tham số dựng video trong `reference/` **đã chạy thật trên 6 video**: giữ nguyên, trừ khi file này ghi khác.
+> Đọc theo thứ tự: `CLAUDE.md` → `PLAN.md` → file này → `DESIGN-HBT.md`.
+> Phiên bản: **v2.0 · 09/11/2026** — Đặc tả kỹ thuật duy nhất và toàn diện của dự án HBT Studio (gồm HBT v1.x, GĐ2 bán tự động, PostV video ngắn/đối thoại, và Chatting video tin nhắn).
+> Nguyên tắc tài liệu: **Đặc tả chỉ ở IMPLEMENT.md, kế hoạch chỉ ở PLAN.md**. File cũ chuyển vào `docs/archive/`.
+> Mọi tham số dựng video trong `reference/` đã chạy thật: giữ nguyên, trừ khi các mục bổ sung ghi đè có duyệt.
+
+---
+
+## Mục lục đặc tả
+
+- [0. Môi trường (Windows 10/11)](#0-môi-trường-windows-1011)
+- [1. Cấu trúc repo](#1-cấu-trúc-repo)
+- [2. Luồng dữ liệu tổng quát](#2-luồng-dữ-liệu-tổng-quát)
+- [3. Mô hình dữ liệu HBT](#3-mô-hình-dữ-liệu)
+- [4. Pipeline dựng video HBT](#4-pipeline-dựng-video)
+  - [4b. Mặc định 50fps](#4b-mặc-định-50fps-bổ-sung-21102026)
+  - [4c. Outro 4 giây](#4c-outro-4-giây-bổ-sung-21102026)
+  - [4d. Giới hạn lời đọc 750 ký tự & cắt đuôi giọng](#4d-giới-hạn-lời-đọc-750-ký-tự-và-cắt-đuôi-giọng-bổ-sung-21102026)
+  - [4e. Ảnh bìa tự động](#4e-ảnh-bìa-tự-động-bổ-sung-21102026)
+- [5. Phụ đề karaoke & Whisper](#5-phụ-đề-karaoke--whisper)
+- [6. Âm thanh](#6-âm-thanh)
+- [7. Kiểm tra từ nhạy cảm](#7-kiểm-tra-từ-nhạy-cảm)
+- [8. Nội dung đăng (Publish)](#8-nội-dung-đăng-publish)
+- [9. Backend API (FastAPI)](#9-backend-api-fastapi)
+- [10. Frontend (React + Vite)](#10-frontend-react--vite)
+- [11. Kiểm thử](#11-kiểm-thử)
+- [12. Giai đoạn 2 (GĐ2) — Tạo nội dung bán tự động](#12-giai-đoạn-2-gđ2--tạo-nội-dung-bán-tự-động-draft-comfyui-vieneu-nhạc)
+- [13. M5: Giao diện mới + khối JSON kịch bản](#13-m5-giao-diện-mới--khối-json-kịch-bản)
+- [14. PostV — Video dạng bài viết ngắn & đối thoại](#14-postv--video-dạng-bài-viết-ngắn--đối-thoại)
+- [15. Chatting — Video đoạn chat tin nhắn 9:16](#15-chatting--video-đoạn-chat-tin-nhắn-916)
 
 ---
 
@@ -114,7 +138,8 @@ Mỗi project là 1 thư mục `workspace/projects/<slug>/`:
 
 ```
 project.json
-images/scene-01.png …        # ảnh gốc người dùng tải lên
+images/<hash16>.png …       # ảnh cảnh người dùng tải lên: tên = 16 ký tự đầu hash nội dung (`content_hash_16`)
+images/cover.<ext>           # (tuỳ chọn) ảnh bìa riêng, 13.B15
 voice.<ext>  music.<ext>
 build/                       # file trung gian (xoá được), có cache theo hash
 renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
@@ -134,7 +159,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
   "settings": { "fps": 50, "captions": true, "aligner": "auto", "sfx_on_punch": true, "outro": true },
   "scenes": [
     {
-      "image": "images/scene-01.png",
+      "image": "images/3f9a1c0e5b7d2a84.png",
       "card": { "y": "top", "lines": [
         { "text": "Bạn là người", "size": "s" },
         { "text": "“được muỗi yêu”?", "size": "l", "color": "accent" } ] },
@@ -144,7 +169,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
       "caption_y": null
     },
     {
-      "image": "images/scene-05.png",
+      "image": "images/a17c4e90d2b86f35.png",
       "card": { "y": "top", "lines": [
         { "text": "Mùi da thu hút muỗi", "size": "s" },
         { "text": "gấp 100 lần", "size": "xl", "color": "accent" } ] },
@@ -176,6 +201,7 @@ renders/<job_id>/video.mp4  captions.srt  publish.txt  log.txt
 | `voice` (gốc project) | `"voice.mp3"` hoặc `{"file", "trim_end"}`: file giọng; `trim_end` = giây của file gốc để cắt đuôi (mục 4d.3) |
 | `scenes[].voice` | Lời đọc của cảnh. `|` = ngắt cụm phụ đề. `100{một trăm}` = hiển thị "100", đọc "một trăm" |
 | `punch` | `true` = cảnh "cú lật": phóng giật + hiện thẻ nhanh + whoosh |
+| `thumbnail.image` | `null` = nền bìa là ảnh của cảnh `thumbnail.scene`; hoặc `images/cover.(png\|jpg\|jpeg\|webp)` = ảnh bìa riêng tải lên (13.B15) |
 | `caption_y` | `null` = tự động (1400; nếu đáy thẻ > 1100 thì 230), hoặc số pixel |
 | `music.start` | `null` = tự chọn đoạn hay; hoặc số giây |
 
@@ -273,7 +299,7 @@ Mỗi video có ảnh bìa, tạo cùng lúc với video (module `pipeline/thumb
   - `cover_9x16.jpg`: 1080×1920, JPG chất lượng 93, sRGB, dưới 5 MB, dùng cho TikTok/Reels.
   - `youtube_3x2.jpg`: 1080×720, là dải cắt giữa y=600..1320 của cùng ảnh, dùng cho YouTube Shorts.
 - **Dữ liệu** (`project.json` → `thumbnail`, mục 3.1): `scene` (cảnh làm nền, mặc định 1), `lines` (2–3 dòng tiêu đề), `series` (chữ trên nhãn series), `accent` (màu dòng cuối, mặc định `#FFD43B`).
-- **Nền:** ảnh của cảnh được chọn (`thumbnail.scene`), độ sáng ×0,82, bão hoà ×1,1, thêm dải tối mềm quanh y=960 (alpha tối đa 0,5).
+- **Nền:** ảnh bìa riêng `thumbnail.image` nếu có (cắt giữa, 13.B15), không thì ảnh của cảnh được chọn (`thumbnail.scene`), độ sáng ×0,82, bão hoà ×1,1, thêm dải tối mềm quanh y=960 (alpha tối đa 0,5).
 - **Tiêu đề:** 2–3 dòng IN HOA, căn giữa, font **Bricolage Grotesque** 800 (width 78).
   - Font này (OFL) phải được thêm vào `backend/hbt/fonts/` kèm giấy phép. Khi chưa có thì dự phòng Be Vietnam Pro ExtraBold.
   - Dòng lớn nhất cỡ tối đa 185 px và vừa trong 950 px. Dòng cuối (từ khoá) màu `accent` (mặc định vàng `#FFD43B`), lớn hơn ×1,12 (tối đa 205 px) nếu vẫn vừa 950 px.
@@ -456,7 +482,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 | POST | `/projects` | `{title, series?, scene_count=8}` → tạo project rỗng |
 | GET / PUT / DELETE | `/projects/{slug}` | đọc / lưu toàn bộ `project.json` / xoá |
 | POST | `/projects/{slug}/duplicate` | nhân bản làm template |
-| POST | `/projects/{slug}/assets` | multipart: `kind=image|voice|music`, `scene_index` (từ 0, với ảnh) |
+| POST | `/projects/{slug}/assets` | multipart: `kind=image|cover|voice|music`, `scene_index` (từ 0, với ảnh); `cover` = ảnh bìa riêng (13.B15) |
 | GET | `/projects/{slug}/scenes/{scene_index}/preview.png` | khung hình tĩnh: ảnh + nhãn + thẻ + phụ đề mẫu (cụm đầu) |
 | POST | `/projects/{slug}/lint` | kết quả mục 7 |
 | POST | `/projects/{slug}/thumbnail/preview.jpg` | `{thumbnail?}` → ảnh bìa 9:16 theo **bản nháp** (không lưu); bỏ `thumbnail` thì dùng khối đã lưu; `?w=16..1080` thu nhỏ |
@@ -484,11 +510,11 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 - **Đánh số cảnh** (chủ dự án chốt 21/10/2026): ba nơi, hai cách đếm, một quy tắc đổi.
   - **API dùng chỉ số từ 0**, tham số tên `scene_index`: trong đường dẫn `/projects/{slug}/scenes/{scene_index}/preview.png`, trường form `scene_index` khi tải ảnh, và trường `scene_index` trong kết quả lint (`null` nếu áp dụng cho cả video). Chỉ số ngoài khoảng → 404 (preview) hoặc 400 (tải ảnh).
   - **Người dùng thấy số thứ tự từ 1** ("Cảnh 1"), và trường `thumbnail.scene` trong project.json cũng tính từ 1 (mục 4e).
-  - **Tên file ảnh** do backend đặt, đánh số từ 1: `scene_index` 0 → `images/scene-01.<ext>` (`storage.scene_image_stem` / `scene_index_from_stem`, có test hai chiều).
+  - **Tên file ảnh** do backend đặt theo mã băm nội dung: `images/<hash16>.<ext>` (trước đây là `scene-NN.<ext>`).
   - **Giao diện** hiển thị số từ 1 qua **một chỗ duy nhất**: `frontend/src/utils/scene.ts` (`sceneNumber`: từ 0 → từ 1; `sceneIndex`: từ 1 → từ 0). Không được tự cộng/trừ 1 ở nơi khác. Có test ép hai chiều đổi luôn ngược nhau (Vitest).
 - **Project nháp:** `POST /projects` tạo project chưa có ảnh/lời/giọng (mô hình cho phép rỗng). `POST /render` trả 422 kèm danh sách còn thiếu (`Project chưa đủ để dựng: Cảnh 1: chưa có ảnh; …`).
 - **`PUT /projects/{slug}`** thay toàn bộ `project.json`, không đổi slug (khác slug → 400), không tạo mới (chưa có → 404). **`DELETE`** → 204; 409 nếu project đang có job xếp hàng/đang chạy. **`duplicate`** chép `project.json`, ảnh, giọng, nhạc nhưng không chép `build/` và `renders/`; tiêu đề mặc định "… (bản sao)".
-- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/scene-NN.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
+- **`POST /projects/{slug}/assets`** (multipart `kind`, `file`, `scene_index` với ảnh) trả `{kind, path, project}`. Ảnh PNG/JPG/WEBP (≤ 30 MB, kiểm tra bằng Pillow) lưu thành `images/<hash16>.<ext>`; giọng/nhạc (≤ 200 MB, kiểm tra bằng ffprobe) lưu thành `voice.<ext>`/`music.<ext>`. Tải giọng mới thì bỏ `trim_end` cũ; tải nhạc mới thì đặt lại `start`/`credit`. 409 khi project đang dựng.
 - **`preview.png`:** 1080×1920, tuỳ chọn `?w=16..1080` để thu nhỏ; cache trong `build/previews/`; cảnh chưa có ảnh dùng `brand/hay-biet-tuot_avatar.png`.
 - **`POST /projects/{slug}/lint`:** `{issues, counts, blocked, problems}`. Từ M4: độ dài lời đọc, từ nhạy cảm (mục 7) và số chưa ghi cách đọc. **`/settings/sensitive-words`**: bản mặc định ở `hbt/data/sensitive_words.json`; khi sửa thì lưu bản riêng ở `workspace/settings/sensitive_words.json` và ưu tiên bản này.
 - **`POST /projects/{slug}/render`** nhận `{preview, preview_seconds, fps: 30|50|60, outro, allow_long_trim}`, trả 202 `{job_id}`. `preview_seconds` (số giây, 0 < giá trị ≤ 60, mặc định `null` = cả video; giao diện gửi 10) chỉ hợp lệ khi `preview = true`, sai thì 422 và không tạo job; job và `GET /renders` trả `preview_seconds`, `output.lufs` và `output.srt` có thể là `null` ở bản 10 s (mục 4). Trước khi tạo job, lint chạy với danh sách từ hiện hành: có từ mức `block` → **422** `Có từ bị chặn, sửa rồi dựng lại: Cảnh N: …` (liệt kê các từ), không tạo job (cùng kiểu với `Project chưa đủ để dựng`, kiểm sau lỗi thiếu dữ liệu và trước kiểm FFmpeg). Kết quả ở `renders/<job_id>/` (`video.mp4`, `captions.srt`, `publish.txt`, `log.txt`, `meta.json`).
@@ -505,7 +531,7 @@ Hiện trong UI với nút **Sao chép** từng khối. Khối `[Thumbnail]` ch�
 - **`POST /projects/{slug}/build/clean`** (chủ dự án chốt 23/10/2026): xoá mọi thứ trong `build/` **trừ `timing.json` và `timing.json.key`** (căn chữ là bước đắt nhất); không động `renders/`, ảnh, giọng, nhạc, `project.json`. Trả dung lượng trước/sau/giải phóng, danh sách file giữ lại và số mục không xoá được (`failed`). 404 nếu không có project; **409** khi project đang được dựng (không xoá gì). Không có lệnh CLI tương ứng.
 - `GET /projects/{slug}/renders` lịch sử các lần xuất (mới nhất trước, đọc từ `renders/<job_id>/meta.json`).
 - **`DELETE /projects/{slug}/renders/{job_id}`** (Đợt 5, 13.B13.7): xoá cả thư mục `renders/<job_id>/` (video, bìa, publish.txt, meta); không đụng `build/`, `timing.json`, `backups/`. `job_id` khớp `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` và đường dẫn đã resolve phải nằm trong `renders/` của dự án (sai → 422). 204 · 404 không có lần xuất · 409 job đó đang chạy / đang chờ, hoặc Windows khoá file (đổi tên thư mục thất bại nên không xoá dở dang). `last_final` và `cover` của `GET /projects` tự tính lại.
-- `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Ảnh tên chuẩn `images/scene-NN.<ext>` được đổi tên theo chỉ số mới để tải ảnh về sau không ghi đè ảnh của cảnh khác. 409 khi project đang dựng.
+- `POST /projects/{slug}/scenes/reorder` `{order}` (hoán vị của `0..n-1`; cảnh mới thứ i là cảnh cũ `order[i]`). Cảnh được đổi thứ tự trong `project.json`. 409 khi project đang dựng.
 - `POST /projects/{slug}/scenes/{scene_index}/preview.png` `{scene, theme?}`: xem trước bản nháp chưa lưu (ảnh phải nằm trong thư mục project, nếu không 422), để thấy kết quả ngay khi đang gõ.
 - `GET|PUT /settings/app`: `{default_fps, theme{primary,accent}, whisper_model, whisper_timeout_seconds}` lưu ở `workspace/settings/app.json`. `default_fps` và `theme` áp dụng cho project tạo mới; hai trường Whisper chỉ được lưu, M4 mới dùng.
 
@@ -704,22 +730,83 @@ Nhánh `feat/m5-ui-json` (từ `b240e97`, đã gộp `main` v0.5.1), tag `v0.6.0
 
 ---
 
-## 12. Giai đoạn 2 — interface để sẵn (chưa làm)
+## 12. Giai đoạn 2 (GĐ2) — Tạo nội dung bán tự động (Draft, ComfyUI, VieNeu, Nhạc)
 
-```python
-class ScriptProvider(Protocol):   # Claude API / Gemini API
-    def draft(self, topic: str, series: str, n_scenes: int) -> ProjectDraft: ...
-    # Bản nháp bắt buộc có: lời đọc từng cảnh (số viết dạng 100{một trăm}), thẻ chữ,
-    # prompt ảnh (không chữ, không bản đồ VN), thể loại nhạc + từ khoá Pixabay,
-    # nguồn kiểm chứng cho từng số liệu, và phải qua lint từ nhạy cảm (mục 7).
+> Chốt 02/11/2026. Hướng triển khai: Kịch bản **không** gọi API ngoài mạng (Claude chat xuất JSON nháp `hbt_draft: 1`), ảnh tạo qua ComfyUI local hoặc đường tay, giọng VieNeu-TTS local cho HBT. Giữ nguyên 3 điểm duyệt: kịch bản → ảnh → video.
+> Ràng buộc cứng: không sửa `backend/hbt/models.py`, `backend/hbt/pipeline/`, `reference/`, `backend/hbt/api/projects.py`; `PIPELINE_VERSION` giữ nguyên.
 
-class ImageProvider(Protocol):    # Forge API (--api) / ComfyUI API / thủ công
-    def generate(self, prompt: str, style: str, w: int = 768, h: int = 1344) -> bytes: ...
+### 12.1 Quyết định kỹ thuật (E1–E7)
 
-class VoiceProvider(Protocol):    # VieNeu-TTS local / Vbee API / thủ công
-    def synthesize(self, text: str, voice_id: str) -> bytes: ...
+| Mã | Quyết định | Chi tiết |
+|---|---|---|
+| **E1** | Dữ liệu nháp lưu `draft.json` | Đặt cạnh `project.json` trong thư mục dự án (`workspace/projects/<slug>/draft.json`). |
+| **E2** | JSON nháp `hbt_draft: 1` dạng phẳng | Bộ đọc tách các trường nháp (`topic`, `series_hint`, `music_mood`, `sources`, `image_prompt`) lưu vào `draft.json`; phần còn lại đưa vào bộ kiểm M5 (`ScriptIn`, K1–K12) không đổi. Thêm nút "Tạo dự án từ JSON nháp" ở Trang chủ. |
+| **E2b** | Tâm trạng nhạc `music_mood` | Dùng khoá gốc `music_mood` (chuỗi), không lồng vào `music` (trường cấm K4). |
+| **E3** | Kiểm tra nháp K13–K18 | Kết hợp bộ kiểm K1–K12 của M5 và K13–K18 riêng của GĐ2. |
+| **E4** | VieNeu cho HBT | Trước khi đọc: `{cách đọc}` → đọc chữ trong ngoặc; `|` → nghỉ 0,25 s; nối 0,25 s giữa các cảnh → `voice.wav`, lưu vào `voice.file`. Pipeline nhận file giọng như cũ. |
+| **E4b** | Giọng HBT nhớ lựa chọn | Không có giọng mặc định cứng; app nhớ lựa chọn gần nhất lưu ở `workspace/settings/gd2_prefs.json` (`hbt_voice`). Chưa chọn thì nút Tạo giọng tắt + nhắc chọn. |
+| **E5** | Tự chọn nhạc theo mood | Đọc trường `moods[]` có sẵn trong `library/music/index.json`. Khớp không dấu, chữ thường với `music_mood`. Tự động chọn bài đầu tiên khớp, không khớp thì để trống. Chỉ ĐỌC index, không ghi. |
+| **E6** | ComfyUI local | Cổng `http://127.0.0.1:8188`, workflow JSON trong repo, sinh ảnh 768×1344 dọc. ComfyUI không chạy → rẽ đường tay. |
+| **E7** | Tách module riêng | Toàn bộ mã GĐ2 nằm tại `backend/hbt/gd2/` và `backend/hbt/api/gd2.py`, router gắn ở `main.py`. Không sửa `api/projects.py`. |
+
+### 12.2 Định dạng JSON nháp `hbt_draft: 1` và `draft.json`
+
+JSON dán tạo dự án (`hbt_draft: 1`):
+```json
+{
+  "hbt_draft": 1,
+  "topic": "Vì sao muỗi thích đốt một số người hơn?",
+  "series_hint": "Vì sao…",
+  "music_mood": "tò mò",
+  "sources": [
+    { "id": "s1", "claim": "Muỗi phát hiện CO2 từ xa khoảng 10 m", "url": "https://www.cdc.gov/mosquitoes/" }
+  ],
+  "scenes": [
+    {
+      "voice": "Có người ngồi cả buổi không sao, | có người bị đốt sưng cả chân.",
+      "card": { "y": "top", "lines": [{ "text": "VÌ SAO MUỖI", "size": "l", "color": "ink" }, { "text": "CHỌN BẠN?", "size": "xl", "color": "accent" }] },
+      "labels": [],
+      "punch": true,
+      "caption_y": null,
+      "image_prompt": "close-up of a mosquito on human skin, macro photo, vertical 9:16"
+    }
+  ],
+  "publish": { "hook": "Bạn có phải "nam châm hút muỗi"?", "hashtags": ["haybiettuot", "muoi", "visao"] },
+  "thumbnail": { "scene": 1, "lines": ["VÌ SAO MUỖI", "CHỌN BẠN?"], "series": "", "accent": "#FFD43B" }
+}
 ```
-Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự động đều phải qua 3 điểm duyệt (kịch bản → ảnh → video).
+
+File lưu trữ `draft.json`:
+```json
+{
+  "draft": 1,
+  "topic": "Vì sao muỗi thích đốt một số người hơn?",
+  "series_hint": "Vì sao…",
+  "music_mood": "tò mò",
+  "sources": [{ "id": "s1", "claim": "Muỗi phát hiện CO2 từ xa khoảng 10 m", "url": "https://www.cdc.gov/mosquitoes/" }],
+  "scenes": [{ "image_prompt": "close-up of a mosquito...", "image_prompt_ok": true }],
+  "images_approved": false
+}
+```
+
+### 12.3 Bộ quy tắc kiểm tra K13–K18
+
+| Mã | Kiểm tra | Mức | Hành vi |
+|---|---|---|---|
+| **K13** | `hbt_draft` ≠ 1, hoặc thiếu/rỗng `topic` | Lỗi | Chặn tạo dự án |
+| **K14** | `sources[]` sai dạng (thiếu id/claim/url, hoặc id trùng) | Lỗi | Chặn tạo dự án |
+| **K15** | `music_mood` sai kiểu chuỗi, hoặc `image_prompt` không phải chuỗi | Lỗi | Chặn tạo dự án |
+| **K16** | Số liệu trong lời đọc thiếu nguồn trong `sources[].claim` | Cảnh báo | Hiện cảnh báo "Cảnh n: số X chưa có nguồn" (so theo con số, chuẩn hoá bỏ dấu chấm phẩy) |
+| **K17** | `image_prompt` chứa từ cấm (`text`, `chữ`, `map`, `bản đồ`, `Vietnam map`) | Cảnh báo | Nhắc xoá từ cấm tránh AI vẽ sai/thiếu chủ quyền |
+| **K18** | Thiếu `image_prompt` hoặc rỗng | Cảnh báo | Đánh dấu `image_prompt_ok: false`, cảnh đó đi đường tay |
+
+### 12.4 API GĐ2 (`backend/hbt/api/gd2.py`)
+
+- `POST /gd2/draft/check`: Nhận `{draft}`, kiểm tra không ghi đĩa; trả `{ok, errors[], warnings[], scenes, music_match}`.
+- `POST /gd2/draft/create`: Nhận `{draft, title?}`, tạo dự án, bóc trường nháp lưu `draft.json`, áp phần kịch bản vào `project.json`, tự chọn nhạc theo mood.
+- `GET /projects/{slug}/draft`: Đọc nội dung `draft.json` (404 nếu không có).
+- `PUT /projects/{slug}/draft/images-approved`: Đặt cờ `{approved: bool}` (404 nếu không có nháp).
+- `POST /projects/{slug}/draft/voice`: Tạo job tổng hợp giọng VieNeu cho toàn bộ cảnh HBT (`kind: "voice"`), lưu tiến độ theo cảnh.
 
 ---
 
@@ -844,7 +931,7 @@ Khoá API đặt trong `.env`, không commit. Mọi bản nháp sinh tự độn
 | Trường vắng | Giữ nguyên giá trị cũ |
 | Trường có mặt | Ghi đè **cả trường** (`card` thay toàn bộ; `labels: []` xoá hết nhãn; `publish`, `thumbnail` thay cả khối) |
 | `null` | Chỉ hợp lệ ở `caption_y` (= tự động); ở mọi nơi khác (`voice`, `card`, `labels`, `punch`, `publish`, `thumbnail`, `hbt_script`) là lỗi K3 |
-| Không đổi qua JSON | `image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
+| Không đổi qua JSON | `image` (cảnh) và `thumbnail.image`, `voice` gốc (file giọng), `music`, `settings`, `title`, `slug`, `series`, `theme` → nếu xuất hiện là **lỗi** (K4) |
 | Chuẩn hoá | NFC mọi chuỗi; hashtag bỏ `#` đầu và khoảng trắng hai đầu |
 | Đếm ký tự | Số ký tự Unicode sau NFC (Python `len`, JS `[...s.normalize('NFC')].length`); dùng chung bộ ca test cho hai phía |
 | Mô hình đầu vào | **`ScriptIn` riêng trong `backend/hbt/script.py`, `extra="forbid"`** (cho K4), chặt cả các khối con (`card`, `lines`, `labels`, `publish`, `thumbnail` là lớp con `extra="forbid"` của lớp trong `models.py`, nên `colour` hay `pucnh` ở bất kỳ cấp nào đều là K4). **Không đổi `models.py`** (`Project` giữ `extra="ignore"`); K12 vẫn kiểm bản sau gộp bằng `Project.model_validate` |
@@ -1036,4 +1123,269 @@ Nhánh `feat/v1-polish` (từ `main` `015b385`, tag `v0.6.0`), tag `v1.0.0`. Kh�
 4. **Hai lỗi thật do e2e bắt được, đã sửa:** (a) `DELETE /projects/{slug}` trả 500 khi Windows còn giữ file (vd ảnh xem trước vừa ghi): `Storage.delete` thử lại tới 5 lần cách 0,1 s, vẫn lỗi thì trả **409** (không còn 500); (b) menu ⋯ của thẻ Lịch sử ở hàng cuối bị khối "Dọn file tạm" đè khi rê chuột (hover tạo ngăn xếp riêng bằng `transform`), nên không bấm được Xoá: thẻ có menu đang mở được `z-index: 30` (`.ui-card-link:has(.ui-menu)`).
 5. **README** thêm mục "Hướng dẫn dùng (v1.0)": cài đặt, quy trình làm video thủ công, Dán JSON, lệnh, sự cố; chỉ chữ.
 6. **Không làm (sau `v1.0.0`):** bìa từ ảnh tải lên (cần `models.py` và `thumbnail.py`), "bài đang dùng", các việc máy mới (CUDA, `bench-align`, golden), PostV.
+
+### 13.B15 Quyết định đợt ảnh bìa tải lên (chủ dự án duyệt 28/10/2026)
+
+Nhánh `feat/cover-upload` (từ `main` `0e38efc`, tag `v1.0.0`), tag `v1.1.0`. Ngoại lệ có duyệt với "không sửa `pipeline/`, `models.py`": `Thumbnail.image`, `pipeline/thumbnail.py` và **chỉ** `make_covers` trong `pipeline/render.py`.
+
+1. **Dữ liệu:** `thumbnail.image: str | None = None`, chỉ nhận `images/cover.(png|jpg|jpeg|webp)` (regex đầy đủ, sai thì lỗi K12). `project.json` cũ không có trường này đọc bình thường.
+2. **API:** `POST /projects/{slug}/assets` `kind=cover` lưu `images/cover.<ext>` (`png|jpg|webp`, kiểm bằng Pillow, ≤ 30 MB, 413), cạnh ngắn < 540 px → 400. Chưa có khối `thumbnail` → 422 "Hãy bật ảnh bìa…". Đang dựng → 409. Cùng đuôi thì ghi đè; khác đuôi thì xoá `cover.*` cũ. Không thêm endpoint `DELETE`. `duplicate` chép cùng thư mục `images/`; `build/clean` không đụng.
+3. **Bỏ ảnh:** giao diện chỉ đặt `thumbnail.image = null` (lưu tự động); **file vẫn nằm trong `images/`** (bị ghi đè ở lần tải sau).
+4. **Bộ vẽ:** `thumbnail.cover_background(thumb, scenes, project_dir)` chọn nền (dùng cho xem trước API); `render_cover(..., fit_background=True)` cắt giữa kiểu cover (`ImageOps.fit`, LANCZOS, tâm 0,5/0,5) sau `exif_transpose`, không kéo giãn. Ảnh của cảnh vẫn dùng cách cũ (`resize` về 1080×1920). Mất file ảnh bìa lúc dựng: chỉ cảnh báo `Không vẽ được ảnh bìa: …`, video vẫn xuất, **không** quay về ảnh cảnh. Xem trước API trả 422 "Thiếu ảnh bìa …".
+5. **`PIPELINE_VERSION` đổi** `0112661f2845` → `1ca0e11133c9` vì băm nguyên file `render.py`; cache `build/` nguội một lần. `git diff v1.0.0 -- backend/hbt/pipeline/ reference/ backend/hbt/models.py` chỉ gồm `thumbnail.py`, `make_covers` và `Thumbnail.image`.
+6. **Đối chiếu "muỗi"** (máy cũ, bản đẹp 50 fps, dựng nguội, có khối `thumbnail` ở cả hai bên; v1.0.0 qua `git worktree`): framemd5 hình (2293 khung) và tiếng (1976 khung) giống hệt; `captions.srt` giống; `video.mp4`, `cover_9x16.jpg`, `youtube_3x2.jpg` giống từng byte. Thời gian dựng 173 s (v1.0.0) và 167 s (nhánh).
+7. **Khối JSON:** `thumbnail.image` là trường cấm (K4, kể cả `null`); dán khối `thumbnail` thay cả khối nhưng **giữ** `image` hiện có (không hiện trong khác biệt).
+8. **Giao diện:** trong `ThumbnailEditor` (ngăn "Bìa & đăng" và tab Xuất video): vùng thả ảnh (`CoverDrop`), ảnh xem trước nhỏ (`?v=` tăng sau mỗi lần tải), nút **Bỏ ảnh**; có ảnh thì chip cảnh nền bị tắt kèm chú thích. Lưu bản nháp trước khi tải. Không thêm gói npm; thẻ Trang chủ không đổi.
+9. **Không làm:** chọn vị trí cắt (có thể thêm `thumbnail.focus` sau).
+10. **Tồn (ghi 28/10/2026):**
+    - (a) **Đã sửa 02/11/2026.** Gốc: `CoverDrop` truyền `disabled: busy` cho `useDropzone`, nên lúc lần tải trước còn chạy thì `onChange` của ô nhập bị gỡ và file thả thêm bị nuốt im lặng. Giờ vùng thả không khoá khi bận, các lần tải xếp hàng bằng `scope` của `useMutation` (`ThumbnailEditor`, `PostvThumbnailEditor`). e2e từng "né" bằng `networkidle` vì ô kiểm "540 px" khớp cả lời trợ giúp (`.first()`) nên không đợi đúng lỗi của máy chủ; đã đổi sang `role=alert` và bỏ `networkidle`.
+    - (b) **Còn tồn.** e2e "Dán JSON" lỗi một lần ở `GET :8000` (Playwright `request`); chưa tái hiện được, không có thay đổi nào dựa trên phỏng đoán. Nghi ngờ: API đang khởi động/nạp lại (`uvicorn --reload`) trong khi Playwright chỉ chờ cổng 5173 của Vite. Nếu gặp lại, ghi giờ và `npm run dev` log để đối chiếu.
+    - (c) Backlog: `make_covers` (`render.py`) tự chọn ảnh nền bằng 2 dòng, trong khi xem trước dùng `thumbnail.cover_background`; gộp về một hàm khi được phép sửa `render.py` lại.
+    - (d) Tên ảnh cảnh thật là `images/<hash16>.<ext>`. Đã sửa mục 3 và mục 9; đối chiếu khớp với `storage.py`.
+
+
+---
+
+## 14. PostV — Video dạng bài viết ngắn & đối thoại
+
+> Chức năng video thứ 2 của HBT Studio (bắt đầu 29/10/2026, các mốc PV0–PV9, tag `v1.2.0`–`v1.15.2`).
+> Mục tiêu: chuyển thể bài viết mạng xã hội (Threads, Facebook, Reddit...) thành video dọc 9:16 trên nền gameplay, đọc bằng giọng VieNeu đa nhân vật, có phụ đề karaoke nhanh và thẻ bài Pillow.
+> Nguyên tắc độc lập (N8, K-34): Mã nguồn PostV nằm riêng trong `backend/hbt/postv/` và `frontend/src/pages/postv/`. Không sửa `backend/hbt/pipeline/`, `backend/hbt/models.py`, `reference/`, `backend/hbt/api/projects.py`.
+
+### 14.1 Nguyên tắc kỹ thuật & Quyết định chính (K-01 đến K-48)
+
+| Mã | Nội dung quyết định |
+|---|---|
+| **K-01** | Bộ dựng `postv/render.py` độc lập, tái sử dụng các bước encoding FFmpeg nhưng không sửa `pipeline/render.py`. |
+| **K-02, K-11** | Video dọc 1080×1920; mặc định **60 fps** (hỗ trợ 30 và 50 fps). |
+| **K-03** | Thời lượng tự do, khuyến nghị dưới 120 s (bỏ giới hạn 750 ký tự của Vbee). |
+| **K-04, K-35** | Giọng đọc: **VieNeu-TTS local** chạy tiến trình con trong `backend/.venv-tts`. Người dẫn mặc định Adam bựa, người bình luận xen kẽ nam/nữ theo `voice.seed`. |
+| **K-05, K-10** | Nền gameplay: Video dọc ≥ 720×1280, ≥ 3 s, có giấy phép/nguồn. Nối nhiều clip cắt thẳng nếu kịch bản dài. |
+| **K-06** | Ảnh bìa: Lấy khung hình gameplay hoặc ảnh tải lên cắt tỉ lệ 3:4 / 3:2. |
+| **K-23, K-26** | Thẻ bài trắng bo góc rộng ~90%, đỉnh y ≈ 12–35%. Có số liệu ♥ like, bình luận, chia sẻ. Phụ đề 1–3 từ màu vàng `#FFD43B` hoặc xanh lá. |
+| **K-27, K-41** | **Che từ nhạy cảm riêng:** Danh sách `postv/data/censor_words.json` + từ mức `block` của HBT. So khớp có dấu ("đéo" không trùng "đeo"). Bíp 1 kHz (âm lượng 0.35) + làm mờ thẻ chữ và phụ đề. Mức cảnh báo chỉ nhắc, không che. |
+| **K-33, K-37** | Không dùng ký hiệu `{cách đọc}` hay `|` trong kịch bản PostV (VieNeu tự xử lý). |
+| **K-36, K-38** | Giao diện: Thanh 5 bước ngang ở đầu màn hình `/postv/:slug`, trang tổng quan `/postv` riêng. |
+| **K-42–K-48** | PVA Tự động: Chuỗi 7 pha tự động sinh video dừng ở Xem nhanh 10 s; 5 phong cách lời dẫn (Kể chuyện, Hài hước, Drama, Hóng, Cảm động). |
+| **PV7b** | Meme phông xanh (`greenscreenmemes.com`, `library/memes/`): Lọc phông bằng FFmpeg `colorkey=0x00FF00:0.35:0.15` chèn cùng sfx. Bóc tách link Threads tự động qua Meta Bot SSR protocol. |
+| **PV9** | Giao diện Quick UI "Dán link/chữ → Video" tại `/postv`: Khung chat đơn giản, SSE streaming 6 pha (`fetch` → `pick` → `script` → `voice` → `render` → `done`), thẻ kết quả video 9:16. |
+
+### 14.2 Mô hình dữ liệu PostV (`postv/models.py`)
+
+Dự án có `kind: "postv"`, lưu trữ trong `workspace/projects/<slug>/project.json`:
+- `source`: Dữ liệu gốc bóc tách (`post`, `comments[]`, `stats`).
+- `script`: Tiêu đề, phong cách lời dẫn (`style`), danh sách `segments[]`.
+- `segments[]`: Từng đoạn video `{id, kind, speaker, text, voice, card, start, duration}` với `kind` gồm `hook`, `post`, `comment`.
+- `style`: Cấu hình `card_style` (Mượt / Nảy), `caption_style` (màu highlight, cỡ chữ), `fps` (60/50/30).
+- `background`: Cấu hình danh sách clip gameplay và nhạc nền (`music_volume: 0.15`, ducking −27 LUFS).
+
+### 14.3 Thư viện nền Gameplay (`library/backgrounds/`)
+
+- Cấu trúc: `library/backgrounds/<id>.<ext>` kèm file mô tả `index.json`.
+- Kiểm định: Chỉ chấp nhận video dọc (chiều cao > chiều rộng), độ phân giải tối thiểu 720×1280.
+- Bắt buộc ghi nhận tên clip (`title`), nguồn và giấy phép bản quyền.
+
+### 14.4 Bộ dựng PostV (`postv/render.py`)
+
+- Dựng hoàn chỉnh bằng **một lệnh FFmpeg duy nhất**:
+  - Filter graph phức tạp xử lý: Nối video nền gameplay, overlay thẻ Pillow theo timestamp, áp dụng subtitle karaoke, ducking âm thanh nhạc nền (−27 LUFS khi có tiếng đọc, −14 LUFS khi im lặng), chèn âm thanh bíp che từ nhạy cảm (1 kHz).
+  - Tốc độ dựng: ~1.6–1.8 s mỗi giây video trên CPU máy cũ.
+
+### 14.5 API PostV chính
+
+- `POST /postv/parse`: Phân tích link hoặc văn bản dán thành bài và các bình luận.
+- `POST /postv/auto`: Chạy toàn bộ luồng tự động 6 bước qua SSE stream.
+- `POST /projects/{slug}/postv/render`: Tạo job dựng video (fast 10s preview hoặc final full 60fps).
+- `POST /projects/{slug}/postv/voice/synthesize`: Tạo job tổng hợp giọng VieNeu cho các segments.
+- `GET/PUT /settings/postv-words`: Đọc và cập nhật danh sách từ che nhạy cảm của PostV.
+
+---
+
+## 15. Chatting — Video đoạn chat tin nhắn 9:16
+
+> Chức năng video thứ 3 của HBT Studio (triển khai 09/11/2026, các mốc CH0–CH4, tag `v1.16.0`).
+> Mục tiêu: Biến các câu chuyện, bài tâm sự, tranh luận trên mạng (Reddit, Threads, text thô) thành video chat 9:16 sinh động kiểu Messenger / Zalo, tin nhắn hiện từng dòng kèm tiếng gõ/pop, sticker cảm xúc, đọc bằng giọng VieNeu trên nền gameplay.
+> Độc lập hoàn toàn: Mã nguồn nằm tại `backend/hbt/chatting/`, API mount tại `backend/hbt/api/chatting.py`, giao diện tại `frontend/src/pages/chatting/`. Dữ liệu lưu tại `workspace/chatting/<slug>/`.
+
+### 15.1 Quyết định kỹ thuật đã chốt (CH-D1 đến CH-D7)
+
+| Mã | Quyết định | Chi tiết thực hiện |
+|---|---|---|
+| **CH-D1** | Nguồn vào Reddit & Threads | Backend hỗ trợ link Reddit (.json công khai) và Threads: **dùng chung PV7b (`extract_threads_post`), rủi ro bị chặn; có đường dán chữ; chuyển API chính thức khi xong GĐ4**. Nguồn khác (Voz, Facebook): dán chữ thô. Socket bị chặn ngoài domain Reddit/Threads. Tự động sanitize kịch bản LLM (cắt tin $\le$ 900 ký tự ưu tiên giữ tin đầu + 2 tin cuối, lọc sticker dư) và trả cảnh báo hiển thị trên UI. |
+| **CH-D2** | Viết chat bằng Ollama local | Sử dụng Ollama tại `http://127.0.0.1:11434`. Model mặc định: **`qwen2.5:3b-instruct`** (cấu hình qua `.env` `CHATTING_MODEL`). Luôn gửi **`keep_alive: 0`** để giải phóng bộ nhớ RAM ngay sau khi sinh kịch bản. Format JSON schema. Đo thời gian `timings` từng pha. |
+| **CH-D3** | Lưu trữ độc lập | Lưu trữ dạng file JSON tại `workspace/chatting/<slug>/chat.json` + `source.json` + media. Không database, không đụng `api/projects.py`. |
+| **CH-D4** | Vẽ giao diện bằng Pillow | Khung hình 1080×1920 mô phỏng Messenger, Zalo: màu sắc, bóng đổ, bo góc chuẩn; **không chứa logo hay tên ứng dụng** trên video. |
+| **CH-D5** | Avatar nhân vật linh hoạt | Ảnh đại diện do người dùng tải lên (vuông 256×256) hoặc tự động vẽ hình tròn chứa chữ cái đầu của tên nhân vật. |
+| **CH-D6** | Thư viện Sticker local | Sticker phân loại theo 10 thẻ cảm xúc trong `library/stickers/<tag>/`. Ứng dụng quét lập chỉ mục `index.json`, chọn sticker ngẫu nhiên theo seed. |
+| **CH-D7** | Hỗ trợ 2 Theme ban đầu | Triển khai 2 theme `messenger` và `zalo` kế thừa từ `ThemeBase`. Dễ dàng bổ sung thêm iMessage, Instagram trong tương lai. |
+
+### 15.2 Mô hình dữ liệu `chat.json` (`hbt_chat: 1`)
+
+File `workspace/chatting/<slug>/chat.json` tuân thủ schema Pydantic:
+- `hbt_chat`: Phiên bản định dạng, cố định bằng `1`.
+- `slug`: Định danh duy nhất (chỉ gồm `[a-z0-9-]`, tối đa 60 ký tự).
+- `title`: Tiêu đề đoạn hội thoại.
+- `theme`: Chủ đề giao diện (`messenger` hoặc `zalo`).
+- `characters[]`: Danh sách từ **2 đến 4 nhân vật**.
+  - `id`: Định danh (`c1`, `c2`...).
+  - `name`: Tên hiển thị (tối đa 24 ký tự).
+  - `avatar`: Đường dẫn ảnh hoặc `null`.
+  - `is_right`: Boolean, **đúng 1 nhân vật có `is_right: true`** (người nhắn chính, bong bóng bên phải).
+  - `voice_id`: ID giọng VieNeu gán cho nhân vật.
+- `messages[]`: Danh sách từ **8 đến 30 tin nhắn**.
+  - `id`: Mã tin nhắn (`m1`, `m2`...).
+  - `character_id`: ID nhân vật gửi.
+  - `text`: Nội dung tin nhắn (tối đa 900 ký tự).
+  - `sticker_tag`: Tag cảm xúc (thuộc 10 tag quy định) hoặc `null`. Tần suất sticker: **tối đa 1 sticker trên mỗi 3 tin nhắn**.
+- `background`: Cấu hình nền gameplay (`library/backgrounds/`).
+- `music`: Nhạc nền và âm lượng (`ducking`: −27 LUFS khi có tiếng đọc, −14 LUFS khi im lặng).
+- `settings`: Cấu hình `fps` (mặc định 60, hỗ trợ 30/50), `resolution` (1080×1920), `show_header` (true).
+- `renders[]`: Lịch sử các lần xuất video.
+
+### 15.3 Kịch bản & Ollama Prompt
+
+**Prompt hệ thống (`SYSTEM_PROMPT`):**
+Quy định vai trò chuyển thể bài viết mạng xã hội thành cuộc hội thoại kịch tính, ngắn gọn, tự nhiên giữa 2–4 người.
+- Nhân vật bên phải là người kể chuyện chính hoặc người nhận tin.
+- Lời thoại thuần phong cách nhắn tin tiếng Việt đời thường, không văn vở.
+- Phân bổ sticker vào các thời điểm cao trào cảm xúc.
+- Đầu ra bắt buộc định dạng chuẩn xác theo JSON schema của `ChatDoc`.
+
+**Đo lường thời gian (Timings):**
+Mọi lần chạy ghi nhận `timings` vào `source.json`:
+- `fetch_s`: Thời gian tải nguồn bài (Reddit API).
+- `llm_s`: Thời gian Ollama sinh kịch bản chat.
+- `llm_tokens`: Số lượng token sinh ra.
+- `llm_retry`: Số lần thử lại nếu JSON sai định dạng.
+- `model`: Tên model đã thực thi.
+- Đoạn đo benchmark trên máy cũ (i5-10400, CPU 12 threads) đạt trung vị ~91 s với model `qwen2.5:3b-instruct`.
+
+### 15.4 Thư viện Sticker (10 tags chuẩn)
+
+Thư mục `library/stickers/` chia làm 10 danh mục cảm xúc:
+1. `vui`: Vui vẻ, cười mỉm, hài lòng.
+2. `buon`: Buồn bã, ủ rũ, chán nản.
+3. `tuc_gian`: Giận dữ, bốc hoả, cáu gắt.
+4. `ngac_nhien`: Bất ngờ, mắt chữ O miệng chữ A.
+5. `khoc`: Khóc to, nước mắt giàn giụa.
+6. `ha_he`: Cười hả hê, đắc ý, cười lăn lộn.
+7. `nga_ngua`: Té ngửa, cạn lời, sốc.
+8. `bat_luc`: Bất lực, ôm đầu, thở dài.
+9. `chao`: Vẫy tay chào, làm quen.
+10. `dong_y`: Gật đầu, đồng tình, giơ ngón cái.
+Lệnh `python -m cli stickers-index` tự động quét các file ảnh (`.png`, `.webp`, `.gif`) và cập nhật `library/stickers/index.json`.
+
+### 15.5 Theme & Đồ hoạ Pillow (`backend/hbt/chatting/draw.py`)
+
+- Kích thước khung hình: 1080×1920 px (dọc 9:16).
+- Thanh tiêu đề (Header): 120 px ở đỉnh, hiển thị avatar nhóm/đối phương, tên người nhận, nút gọi video/thoại mô phỏng.
+- Bong bóng chat:
+  - Tin nhắn bên trái: Nền xám nhạt (Messenger) hoặc trắng (Zalo), chữ đen, bo góc mềm mại.
+  - Tin nhắn bên phải: Nền xanh gradient (Messenger) hoặc xanh biển (Zalo), chữ trắng.
+  - Avatar: Tròn đường kính 72 px, nằm cạnh tin nhắn đầu tiên trong chuỗi tin cùng người.
+  - Typing dots: 3 chấm nhảy sinh động báo hiệu đang gõ tin nhắn trước khi tin xuất hiện.
+  - Sticker: Vẽ trực tiếp vào dòng chat, kích thước tối đa 360 px, giữ tỷ lệ gốc.
+- Cuộn hội thoại: Tự động tính toán toạ độ y và cuộn mượt khi các tin nhắn mới xuất hiện tràn màn hình.
+
+### 15.6 Dòng thời gian & Quy tắc nhịp điệu (Timeline)
+
+Mỗi tin nhắn trải qua các pha thời gian chuẩn:
+1. `Intro`: 0.4 s mở đầu cảnh.
+2. `Typing`: 0.6 s hiển thị 3 chấm đang gõ (nếu tin có chữ).
+3. `Pop`: 150 ms hiệu ứng bung nở tin nhắn.
+4. `Voice`: Thời lượng phát file âm thanh giọng đọc VieNeu của tin nhắn đó.
+5. `Sticker`: 0.8 s dừng lại để người xem kịp nhìn nhận cảm xúc sticker.
+6. `Pause`: 0.25 s khoảng nghỉ trước khi chuyển sang tin nhắn kế tiếp.
+7. `Outro`: 1.5 s dừng hình ở cuối video trước khi kết thúc.
+
+### 15.7 Tổng hợp giọng đọc & Che từ nhạy cảm
+
+- Tích hợp VieNeu worker: Từng tin nhắn được sinh file âm thanh riêng biệt tại `workspace/chatting/<slug>/audio/m_{id}.wav`.
+- Phân vai giọng: Tự động phân bổ các voice ID trong VieNeu cho các nhân vật tham gia chat.
+- Che từ nhạy cảm: Tái sử dụng bộ kiểm duyệt K-41 (`postv/censor.py`), tự động che từ tục tĩu hoặc nhạy cảm mức `block` bằng tiếng bíp 1 kHz.
+- Dự phòng an toàn: Khi máy thiếu trọng số TTS hoặc worker không khả dụng, hệ thống tự động sinh file wav tĩnh mô phỏng thời lượng ước tính (`len(text) / 16.5 s`) để video vẫn dựng được bình thường.
+
+### 15.8 Bộ dựng Render & FFmpeg
+
+- Sinh kịch bản `ffconcat` từ các ảnh khung hình vẽ bằng Pillow tương ứng với từng mốc thời gian.
+- Trộn luồng âm thanh: Ghép các đoạn voice wav đúng mốc giây, chèn hiệu ứng âm thanh tiếng gõ bàn phím (typing sfx) và tiếng tin nhắn đến (pop sfx).
+- Ghép video nền gameplay ngẫu nhiên từ `library/backgrounds/` theo seed.
+- Nhạc nền tự động áp dụng bộ nén sidechain ducking (−27 LUFS khi có tiếng thoại, phục hồi −14 LUFS khi im lặng).
+- Chế độ dựng:
+  - Bản xem nhanh (`fast`): 30 fps, độ phân giải 540×960, preset `ultrafast`.
+  - Bản đẹp (`final`): 60 fps (hoặc 50 fps), độ phân giải 1080×1920, preset `medium`.
+
+### 15.9 API Chatting (`backend/hbt/api/chatting.py`)
+
+- `GET /chatting/status`: Kiểm tra trạng thái Ollama local và danh sách model khả dụng. Trả về thông báo thân thiện cho UI khi Ollama chưa bật.
+- `POST /chatting/sources/parse`: Phân tích URL Reddit lấy bài viết hoặc tiếp nhận văn bản dán.
+- `POST /chatting/create`: Tạo dự án chat mới từ dữ liệu kịch bản.
+- `GET /chatting/{slug}` & `PUT /chatting/{slug}`: Đọc và cập nhật toàn bộ cấu hình dự án chat.
+- `DELETE /chatting/{slug}`: Xoá dự án chat và toàn bộ dữ liệu media liên quan.
+- `POST /chatting/{slug}/assets/avatar`: Tải ảnh đại diện đại diện nhân vật.
+- `POST /chatting/{slug}/render`: Gửi yêu cầu dựng video (fast preview hoặc final).
+- `POST /chatting/auto`: Job chạy tự động toàn trình 4 pha (`fetch` → `llm` → `voice` → `render`), phát tiến độ thời gian thực qua Server-Sent Events (SSE) kèm số giây chạy thực tế của pha LLM.
+
+### 15.10 Giao diện người dùng Chatting
+
+- **Trang chủ Chatting (`/chatting`):**
+  - Khung nhập liệu đa năng: dán link Reddit hoặc dán văn bản trực tiếp.
+  - Các chip tuỳ chọn nhanh: Chọn theme (Messenger/Zalo), chọn nền gameplay, chọn nhạc nền, chọn tốc độ khung hình (60/30 fps).
+  - Thanh tiến trình 4 pha SSE: Hiển thị trạng thái trực quan từng pha, đếm số giây thời gian thực cho bước viết chat bằng Ollama.
+  - Lưới các dự án chat gần đây kèm thumbnail và trạng thái lần xuất.
+  - Màn hình thông báo thân thiện: "Chưa thấy Ollama. Mở Ollama rồi thử lại." khi chưa khởi động Ollama daemon.
+- **Trình soạn thảo Chatting (`/chatting/:slug`):**
+  - Thiết kế 3 cột chuyên nghiệp:
+    - Cột trái: Quản lý nhân vật (tên, avatar, giọng VieNeu, vị trí trái/phải) và danh sách tin nhắn thu nhỏ.
+    - Cột giữa: Trình soạn thảo chi tiết từng tin nhắn, đổi người gửi, chọn sticker cảm xúc từ thư viện trực quan.
+    - Cột phải: Khung xem trước video 9:16 thời gian thực, các tuỳ chọn xuất video (Xem nhanh / Xuất bản đẹp), trình phát video kết quả và nút tải về.
+
+### 15.11 Cải tiến Chatting CH5 (Mốc v1.18.1)
+
+- **Tách sạch lời thoại TTS (`clean_spoken_text`):**
+  - VieNeu TTS chỉ đọc lời thoại thuần tuý, tuyệt đối không đọc mốc giờ hoặc mô tả cảm xúc/trạng thái.
+  - Tự động bóc tách và loại bỏ các định dạng mốc giờ (`20:15`, `20h15`, `9 giờ 30`), trạng thái (`đã xem`, `seen`), mô tả sticker (`[sticker: ...]`, `(cười)`).
+  - Mốc thời gian được đưa vào metadata hiển thị bằng divider chữ mờ (`#8A8D91`) căn giữa màn hình (`Hôm nay 20:15`, `20:18`).
+- **Hybrid Sub-frames Animation 60 fps:**
+  - Typing indicator: Sinh 12 sub-frames (mỗi sub-frame 0.05 s) với 3 chấm nảy sóng sin `math.sin(pulse_step * 0.45 + i * 1.05) * 6` mượt mà.
+  - Pop-up tin nhắn: Sinh 6 sub-frames nảy đàn hồi (scale `0.72` $\to$ `1.02` $\to$ `1.0`) kết hợp cuộn trượt màn hình mượt trong 0.15 s.
+  - Cuộn màn hình (Scroll easing): Nội suy quadratic ease-out `1.0 - (1.0 - t)^2` qua 6 sub-frames khi tin nhắn mới đẩy dải chat vượt quá chiều cao hiển thị.
+  - Pha thoại tĩnh: Giữ duy nhất 1 frame kéo dài toàn bộ `wav_dur`, tối ưu hóa hiệu năng render trên máy cũ CPU i5-10400.
+- **Thiết kế lại giao diện Messenger chuẩn:**
+  - Header: Thanh đỉnh 120 px với avatar đối phương, chấm xanh Active `#31A24C`, trạng thái "Đang hoạt động", cùng bộ icon gọi thoại, gọi video và xem thông tin chuẩn màu `#0084FF`.
+  - Grouped bubble: Bo góc bất đối xứng (các tin nhắn liền kề cùng người gửi thu hẹp bán kính góc tiếp giáp về 8 px). Nền tin nhắn đối phương xám `#E4E6EB`, nền tin nhắn gửi đi xanh Messenger `#0084FF`. Avatar bên trái chỉ hiển thị ở tin nhắn cuối cùng trong nhóm.
+
+### 15.12 Chuyển đổi Chatting từ Ollama sang Gemini API (Mốc v2.2.0)
+
+- **Shared LLM (`hbt/shared/llm/__init__.py`):** Tái sử dụng `gemini_client.py` (`GEMINI_API_KEY`, fallback `MODELS`) qua `generate_structured_json()` với `responseMimeType: "application/json"`.
+- **Loại bỏ Ollama:** Xóa `OllamaClient` (`127.0.0.1:11434`, `qwen2.5:3b-instruct`, `keep_alive: 0`) thay bằng `GeminiChatClient`; `GET /api/chatting/status` trả về `gemini_configured`; giữ nguyên `sanitize_chat_raw` và `CHATTING_FAKE_LLM=1`.
+
+### 15.13 HBT Signature UI, Tự động 9:16, Watermark bản quyền & Kho Video hợp nhất (Mốc v4.0.0)
+
+- **Giao diện HBT Signature (`tokens.css`, `ui.css`, `HomePage.tsx`):** Bảng màu 4 sắc thái nhận diện thương hiệu Đen Carbon (`#0B0D12` / `#131720`), Trắng Tinh Khôi (`#FFFFFF` / `#F8FAFC`), Đỏ HBT Chủ Đạo (`#D9232E` $\to$ `#B91C1C`) và Vàng HBT Điểm Nhấn (`#FACC15` $\to$ `#F59E0B`, chữ `#0B0D12`); 3 thẻ Bento Động cơ trên Trang chủ (HBT Core Đỏ-Đen, PostV Trắng-Đỏ-Đen, Chatting Vàng-Đen).
+- **Tự động hóa 9:16 theo động cơ (`shared/pipeline/aspect.py`):** Loại bỏ công tắc Fill/Fit thủ công trên giao diện; áp cứng `HBT Core = fill` (full-bleed 1080×1920) và `PostV / Chatting = fit` (Smart Fit Blur `boxblur=40:5` giữ trọn khung hình gốc).
+- **Watermark bản quyền (`shared/pipeline/watermark.py`, `WatermarkControl.tsx`):** Vẽ lớp PNG 1080×1920 trong suốt bằng Pillow với bóng đổ mềm (`mode`: `both` / `text` / `logo`, mặc định `@HayBietTuot` + `brand/hbt-logo-mark.png`, góc `top-right` trong vùng an toàn Safe-Zone, `opacity: 0.35`, tự động ẩn ở 4 giây outro cuối), lưu trong `workspace/settings/app.json` và nối vào cả 3 động cơ (`core/render.py`, `postv/render.py`, `chatting/render.py`).
+- **Hợp nhất Kho Video đã xuất & Tinh gọn `/library` (`api/asset_hub.py`, `media_index.py`, `HomePage.tsx`, `AssetHubPage.tsx`):** Quét hợp nhất mọi thành phẩm `.mp4` cùng `publish.txt` từ cả 3 động cơ hiển thị trực tiếp tại mục **Video đã xuất gần đây** trên Trang chủ (`/`) kèm bộ lọc động cơ và Modal 9:16 Player (Xem video, Sao chép `publish.txt` 1 chạm, Tải `.mp4`, Xóa có xác nhận); trang `/library` giữ đúng 4 tab nguyên liệu đầu vào (`Nhạc nền`, `Video nền Gameplay`, `Sticker & Meme`, `Logo Watermark`).
+
+### 15.14 Creator Workstation v5.0, Chatting iOS, Watermark `bottom-right` & Kho Trực Tuyến (Mốc v5.0.0)
+
+- **Giao diện Creator Workstation v5.0 (`tokens.css`, `Sidebar.tsx`, `HomePage.tsx`, `PhonePreviewStage.tsx`):** Hệ thống Dual-Theme Daylight Studio & Midnight Aurora, màu định danh 3 động cơ, `QuickCreateDrawer`, `GlobalJobDock` (SSE toàn cục), khung `main` full-width và `PhonePreviewStage` Xanh Chàm Hoàng Gia.
+- **Watermark trong suốt vùng an toàn dưới (`watermark.py`, `WatermarkControl.tsx`):** Mặc định `bottom-right` (cách đáy `260px`, lề phải `48px`), không nền hộp, đồng bộ lớp phủ xem trước trực tiếp trên `PhonePreviewStage`.
+- **Chatting iOS (`templates/messenger_ios.html`, `instagram_ios.html`, `draw.py`, `timeline.py`, `llm.py`):** 2 theme iOS (`messenger`, `instagram`, tương thích ngược `zalo`), phân trang Fill & Reset không khoảng trắng thừa, siết tối đa 3 meme/video cách nhau $\ge 3$ tin và thời lượng linh hoạt `< 5.0s`.
+- **Kho Tài nguyên Trực tuyến & Smart Meme Tagging (`shared/online_sources/`, `AssetHubPage.tsx`, `OnlineAssetDrawer.tsx`):** Tìm & tải Pixabay Music/SFX, GreenScreenMemes, Giphy Stickers & SigStick Pack; tự gắn `tags`/`topic` cho meme và chọn `meme_id` khớp ngữ cảnh.
+
+### 16. StickV — Động cơ Người que 2D/2.5D & Nâng cấp v6.1 (Mốc v6.1.0)
+
+- **Kiến trúc & Tái sử dụng (`backend/hbt/stickv/`, `api/stickv.py`):** Dùng chung `shared/llm` (mặc định `gemini-3.1-flash-lite`, 500 RPD, chia lô chương cho video 5–15 phút), `shared/tts_client.py` (VieNeu-TTS batch, mặc định `"Thanh Bình"`, tự ánh xạ giọng khả dụng từ `list_voices()`), `shared/ffmpeg_utils.py` (`FFMPEG_RESOURCE_CLAMP`, `FFMPEG_ENCODE_CLAMP`), `core/audio.py` (`build_topic_bgm_playlist`), `shared/pipeline/watermark.py`, `pipeline/audio.py` (`build_outro_audio`) và `workspace/studio.db`.
+- **3 Chế độ Kịch bản (`StickvPage.tsx`, `stickv/llm.py`):** (1) Tạo tự động Gemini API cấu trúc 5 chặng, (2) Dán JSON từ Web Gemini Pro (0 Token + Copy Prompt Đạo diễn), (3) Dán lời thoại có sẵn (tự tách beat + gắn pose/bảng).
+- **Sân khấu & Chất lượng v6.1 (`stage.py`, `render.py`, `poses_init.py`):** Hỗ trợ `9:16` (`1080×1920`) và `16:9` (`1920×1080`), 2 theme (`#FAF7F0` / `#111827`), bảng minh họa co giãn theo nội dung (`bullets`, `big_number`, `comparison` có huy hiệu `VS`, `flow_steps`, `takeaway`), phụ đề Karaoke `#FFD43B` vùng giữa, tách nền trắng 4 cạnh biên tự động (`remove_white_background`), quét động toàn bộ pose mới (`GET /api/stickv/poses`), Video Pose `.mp4`/`.webm`/`.mov` khớp thời lượng lời thoại, và **Outro 4s HBT** (`xfade` + `acrossfade` 0.5s; nền `#B22228` cho `16:9`).
+- **Voicemod Tuna Meme SFX & Tìm kiếm Online Thống nhất (`shared/online_sources/tuna_sfx.py`, `asset_hub.py`, `OnlineAssetDrawer.tsx`):** Cổng `GET /api/asset-hub/online/search` kèm In-Memory TTL Cache 10 phút, timeout 4.5s/5s, mặc định `tuna` cho SFX (chuẩn hóa `-16 LUFS` khi tải về `library/sfx/`), thanh Search Online đồng bộ giữa Nhạc nền, SFX và Meme/Sticker.
+
+### 17. Tối ưu Nhịp đọc StickV & Đồng bộ 4 Động cơ vào `studio.db` (Mốc v6.1.1)
+
+- **Nhịp đọc tự nhiên & khóa Karaoke (`stickv/audio.py`, `models.py`, `llm.py`, `render.py`):** Tách câu con trong beat (`split_beat_sentences`), ghép khoảng lặng `0.10s` đầu beat, `0.30s` giữa các câu và `0.25s`/`0.45s` cuối beat (nhân theo `pause_scale`); dùng `align_silence()` khóa phụ đề Karaoke và `extract_wav_rms_envelope()` gọn trong vùng nói thực tế.
+- **Đồng bộ 4 động cơ vào `workspace/studio.db` (`shared/db/media_index.py`, `main.py`, `jobs.py`, `api/asset_hub.py`, `HomePage.tsx`):** `sync_renders_from_disk()` quét đệ quy cả 4 nguồn (`workspace/projects/*/renders/`, `workspace/chatting/*/renders/`, `workspace/stickv/*/renders/`, `assets/renders/`) với đường dẫn POSIX tương đối, tự khử trùng lặp `UNIQUE(file_path)` khi `upsert_render`, chạy tự động trong `lifespan` của FastAPI và ngay sau mỗi job render ở cả 4 động cơ.
+
+
+
 

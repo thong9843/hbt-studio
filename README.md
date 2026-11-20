@@ -53,6 +53,18 @@ backend\.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 
 Cần driver NVIDIA hỗ trợ CUDA 12. Không có GPU thì app vẫn chạy, chỉ chậm hơn hoặc dùng chế độ căn theo khoảng lặng.
 
+#### Giọng VieNeu cho PostV (tuỳ chọn)
+
+PostV có thể tự sinh giọng đọc tiếng Việt bằng **VieNeu-TTS**, chạy trên CPU (không cần GPU), trong một môi trường Python riêng để không làm lệch phiên bản gói của app:
+
+```powershell
+py -3.11 -m venv backend\.venv-tts
+backend\.venv-tts\Scripts\pip install -r backend
+equirements-tts.txt
+```
+
+`requirements-tts.txt` ghim `vieneu==3.8.3`. Trọng số mô hình (khoảng 580 MB) nằm ở `models\hf_vieneu`. App **không tự tải** trọng số: lần đầu hãy chạy thử một lần có mạng (đặt `HF_HOME` về `models\hf_vieneu`) hoặc chép thư mục `models\hf_vieneu` từ máy đã có. Thiếu gói hoặc thiếu trọng số thì thanh trái ghi "VieNeu: thiếu", bước 3 của PostV nói rõ thiếu gì, và bạn vẫn nhập file giọng như bình thường. Đọc khoảng 1 giây cho mỗi giây giọng trên CPU. Test VieNeu thật (`pytest -m slow`) tự bỏ qua nếu chưa cài.
+
 ### 3. Chạy
 
 ```powershell
@@ -137,6 +149,48 @@ backend\.venv\Scripts\python -m cli bench-align workspace/projects/<tên-dự-á
 - Không xoá được dự án hoặc lần xuất vì "file đang mở": đóng trình phát hoặc chương trình đang dùng file rồi thử lại.
 - Không bao giờ commit `workspace/`, `models/`, file media và `.env`.
 
+## Hướng dẫn dùng PostV (Video câu chuyện dọc)
+
+PostV là dạng video dọc 9:16 (gameplay nền + thẻ bài câu chuyện Threads + phụ đề Hooked), tài liệu đặc tả gộp tại `IMPLEMENT.md` (mục PostV).
+
+### Quy trình 5 bước
+
+1. **Nhập nguồn:** Dán link bài viết từ Threads (bấm **Lấy từ link**) hoặc dán trực tiếp nội dung chữ; ứng dụng tự động bóc tách bài gốc, tác giả, hình ảnh và phân tách các lượt đối thoại (hoặc bình luận). Hỗ trợ nhận diện số liệu (like, bình luận, chia sẻ).
+2. **Chọn đoạn:** Chọn lọc các bình luận muốn đưa vào video, kéo thả hoặc dùng nút đổi thứ tự, xem ước tính thời lượng.
+3. **Kịch bản và giọng:**
+   - Chỉnh sửa lời đọc từng đoạn (mỗi người một giọng đọc).
+   - Gắn **Meme / Sticker phông xanh** phản ứng: tìm kiếm trực tuyến từ kho greenscreenmemes.com, tải về máy và chọn vị trí hiển thị (góc dưới phải, giữa dưới, chính giữa); app tự động tách nền phông xanh bằng filter FFmpeg và hòa âm thanh meme vào SFX.
+   - Chọn giọng đọc VieNeu (nam/nữ) hoặc tải file giọng ngoài.
+   - Hỗ trợ **Dán JSON kịch bản** (có kiểm tra lỗi và tối đa 10 bản sao lưu để hoàn tác).
+   - Chọn nhạc nền và tinh chỉnh điểm bắt đầu.
+4. **Xem trước:**
+   - Chọn clip nền từ Thư viện nền (ngẫu nhiên hoặc tự chọn).
+   - Tinh chỉnh thẻ bài: câu mở đầu hook, từ nhấn, hiệu ứng thẻ (Mượt / Nảy).
+   - Chọn kiểu phụ đề (HBT vàng hoặc Mẫu xanh lá) và màu từ đang đọc.
+   - Nút **Xem nhanh** dựng 10 giây đầu ở độ phân giải thấp để duyệt nhịp.
+5. **Xuất video:**
+   - Chọn fps (30, 50, 60), tuỳ chọn outro 4 giây.
+   - Biên tập ảnh bìa (trích từ khung gameplay hoặc tải ảnh riêng, cắt 3:4 và 3:2).
+   - Bấm **Xuất bản đẹp** để dựng video hoàn chỉnh 1080×1920.
+   - Sao chép nội dung đăng (TikTok / YouTube Shorts kèm hashtag và dòng nguồn).
+   - Tải video, quản lý lịch sử xuất, dọn file tạm hoặc bấm **Xoá nguồn** khi cần gỡ dữ liệu gốc nhưng vẫn giữ kịch bản.
+
+### Chế độ Tạo tự động (PVA)
+
+Ở Bước 1, khối **Tạo tự động** cho phép chọn 1 trong 5 phong cách (`Kể chuyện`, `Hài hước`, `Drama`, `Hóng biến`, `Cảm động`) và số bình luận (2–5). Ứng dụng sẽ tự động chạy chuỗi 7 pha không dùng AI: làm sạch nội dung, sinh lời thoại, phân giọng ngẫu nhiên xen kẽ, chọn nền nhạc và dừng ở bản Xem nhanh 10 giây.
+
+### Chuyển media sang máy khác
+
+Thư viện nền, nhạc, giọng VieNeu và dự án mẫu không nằm trong Git. Gói ở máy nguồn rồi chép thư mục `workspace/transfer/` sang máy đích (chỉ cần `zipfile` của Python, không dùng mạng):
+
+```powershell
+backend\.venv\Scripts\python -m cli pack-media --dry-run          # chỉ xem số file và dung lượng
+backend\.venv\Scripts\python -m cli pack-media                    # ghi workspace/transfer/*.zip + manifest.json
+backend\.venv\Scripts\python -m cli unpack-media                  # ở máy đích, sau khi chép thư mục transfer
+```
+
+Chọn nhóm bằng `--groups backgrounds,music,hf_vieneu,samples`. Giải gói kiểm sha256 từng file và không ghi đè file Git đang theo dõi; `--with-index` cho phép chép cả `index.json` của thư viện, `--force` ghi đè file có sẵn nhưng khác nội dung.
+
 ## Lệnh hay dùng
 
 | Lệnh             | Việc                                       |
@@ -161,7 +215,7 @@ backend\.venv\Scripts\python -m cli bench-align workspace/projects/<tên-dự-á
 
 ## Kiểm thử trình duyệt (e2e)
 
-Chỉ chạy trên máy cá nhân, không nằm trong CI. Dùng trình duyệt **Microsoft Edge** có sẵn của Windows (không phải tải trình duyệt). Tám kịch bản: tạo project và lưu, nút Sáng/Tối, màn Âm thanh, Xem nhanh và Huỷ, xoá lần xuất ở Lịch sử, đổi cài đặt, dán JSON kịch bản, Tab/focus. Mỗi kịch bản tự xoá project thử bằng `DELETE` khi xong (và báo lỗi nếu không xoá được). Kịch bản Xem nhanh và xoá lần xuất dựng video thật bằng FFmpeg nên mất vài chục giây.
+Chỉ chạy trên máy cá nhân, không nằm trong CI. Dùng trình duyệt **Microsoft Edge** có sẵn của Windows (không phải tải trình duyệt). Chín kịch bản: tạo project và lưu, nút Sáng/Tối, màn Âm thanh, Xem nhanh và Huỷ, xoá lần xuất ở Lịch sử, đổi cài đặt, dán JSON kịch bản, Tab/focus, sinh giọng VieNeu ở bước 3 của PostV (tự bỏ qua nếu máy chưa cài VieNeu). Mỗi kịch bản tự xoá project thử bằng `DELETE` khi xong (và báo lỗi nếu không xoá được). Kịch bản Xem nhanh và xoá lần xuất dựng video thật bằng FFmpeg nên mất vài chục giây.
 
 ```powershell
 npm run e2e

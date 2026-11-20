@@ -5,6 +5,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
+  workers: 1,
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:5173', channel: 'msedge' },
   webServer: {
@@ -12,5 +13,9 @@ export default defineConfig({
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: true,
     timeout: 60_000,
+    env: {
+      ...process.env,
+      CHATTING_FAKE_LLM: '1',
+    },
   },
 });

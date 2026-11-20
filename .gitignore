@@ -1,8 +1,17 @@
 # Media & dữ liệu người dùng — không lên Git
 workspace/
 models/
+assets/
 library/music/**
 !library/music/index.json
+library/backgrounds/**
+!library/backgrounds/index.json
+library/memes/**
+!library/memes/index.json
+library/stickers/**
+!library/stickers/index.json
+library/stickman/**
+!library/stickman/poses/index.json
 *.mp3
 *.m4a
 *.ogg
@@ -19,6 +28,7 @@ library/music/**
 # Môi trường
 node_modules/
 .venv/
+.venv-tts/
 __pycache__/
 *.pyc
 *.egg-info/

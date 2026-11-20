@@ -1,46 +1,99 @@
-/* Token giao diện v2 theo DESIGN-HBT.md v2.0 mục 2-4 (IMPLEMENT 13.B1).
-   Sáng/tối theo hệ thống; `data-theme="light|dark"` trên <html> ép một chế độ (trang /dev/ui).
-   Khối tối được khai hai lần (media query và data-theme) vì CSS thuần không dùng chung được;
-   tokens.test.ts kiểm hai khối khớp nhau. */
+/* Hệ thống Token v10.0 — HBT VEED-Inspired Bright Minimalist & Quiet Dark (Luật 90 · 8 · 2).
+   Sáng/tối theo hệ thống hoặc `data-theme="light|dark"` trên <html>.
+   Khối tối được khai hai lần (media query và data-theme) để tokens.test.ts kiểm tra đồng bộ. */
 :root {
-  /* Màu (mục 2) */
-  --bg: #f5f5f7;
+  /* Bề mặt Bright Studio (Mặc định — Sáng & Tinh khiết chuẩn VEED.IO) */
+  --bg: #f7f8fa;
+  --bg-app: #f7f8fa;
   --card: #ffffff;
+  --surface-card: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f3f6;
+  --bg-subtle: #f1f3f6;
+  --bg-canvas: #eceff4;
+  --canvas-dot: rgba(17, 19, 24, 0.1);
   --nav: #ffffff;
-  --soft: #f0f0f3;
-  --soft-2: #f5f5f7;
-  --line: #ececf0;
-  --line-input: #d9d9de;
-  --text: #16120f;
-  --text-2: #3a3540;
-  --muted: #6e6a72;
-  --primary: #16120f;
-  --on-primary: #ffffff;
-  --accent: #f4b630;
-  --on-accent: #16120f;
-  --brand: #b22228;
-  --on-brand: #ffffff;
-  --tint-red: #fdecec;
-  --on-tint-red: #9c1d22;
-  --tint-yel: #fff3d1;
-  --on-tint-yel: #6b4a00;
-  --ok: #22a55b;
-  --ok-soft: #e6f5ec;
-  --on-ok-soft: #187a42;
-  --danger: #b3261e;
-  --on-danger: #ffffff;
-  --danger-soft: #fdecea;
-  --focus: #f4b630;
-  /* Thẻ nền tối cố định ở cả hai chế độ ("Lần xuất gần nhất"); không đảo theo --primary */
-  --hero: #16120f;
-  --on-hero: #ffffff;
+  --soft: #f1f3f6;
+  --soft-2: #eceff4;
+  --line: #e6e8ee;
+  --border-subtle: #e6e8ee;
+  --line-input: #d5d9e2;
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
-  /* Bóng (mục 4); chế độ tối bỏ bóng, dùng viền --line */
-  --shadow-card: 0 1px 2px rgba(22, 18, 15, 0.04), 0 8px 24px rgba(22, 18, 15, 0.05);
-  --shadow-card-hover: 0 2px 4px rgba(22, 18, 15, 0.06), 0 16px 40px rgba(22, 18, 15, 0.1);
-  --shadow-pop: 0 24px 64px rgba(22, 18, 15, 0.25);
-  --card-border: transparent;
-  --scrim: rgba(22, 18, 15, 0.5);
+  /* Badge Watermark thích ứng 2 chế độ */
+  --wm-badge-bg: #fdf2f2;
+  --wm-badge-border: rgba(217, 35, 46, 0.24);
+  --wm-badge-text: #b91c1c;
+
+  /* Chữ tương phản cao (Luật 90·8·2: #111318 & #5E6675, WCAG >= 5.0:1) */
+  --text: #111318;
+  --text-primary: #111318;
+  --text-2: #3b404c;
+  --text-secondary: #5e6675;
+  --muted: #5e6675;
+
+  /* Điểm nhấn thương hiệu HBT (#D9232E) & Nút mực VEED (#111318) */
+  --primary: #111318;
+  --on-primary: #ffffff;
+  --ink-action: #111318;
+  --on-ink-action: #ffffff;
+  --accent: #facc15;
+  --on-accent: #111318;
+  --brand: #d9232e;
+  --brand-hover: #be1b25;
+  --on-brand: #ffffff;
+  --accent-primary: #d9232e;
+  --accent-soft: #fdf2f2;
+  --on-accent-soft: #b91c1c;
+
+  /* Đồng bộ 4 động cơ theo bảng màu trung tính tinh gọn (bỏ màu cầu vồng) */
+  --engine-core: #d9232e;
+  --engine-core-strong: #be1b25;
+  --engine-core-soft: #fdf2f2;
+  --on-engine-core-soft: #b91c1c;
+
+  --engine-postv: #111318;
+  --engine-postv-strong: #111318;
+  --engine-postv-soft: #f1f3f6;
+  --on-engine-postv-soft: #111318;
+
+  --engine-chatting: #111318;
+  --engine-chatting-strong: #111318;
+  --engine-chatting-soft: #f1f3f6;
+  --on-engine-chatting-soft: #111318;
+
+  --engine-stickv: #d9232e;
+  --engine-stickv-strong: #be1b25;
+  --engine-stickv-soft: #fdf2f2;
+  --on-engine-stickv-soft: #b91c1c;
+
+  /* Ngữ nghĩa trạng thái */
+  --tint-red: #fdf2f2;
+  --on-tint-red: #b91c1c;
+  --tint-yel: #fef3c7;
+  --on-tint-yel: #92400e;
+  --ok: #16a34a;
+  --ok-soft: #dcfce7;
+  --on-ok-soft: #15803d;
+  --danger: #b91c1c;
+  --on-danger: #ffffff;
+  --danger-soft: #fee2e2;
+  --focus: #d9232e;
+
+  /* Bề mặt tối chuyên dụng cho khung xem trước video 9:16 */
+  --hero: #090b0f;
+  --on-hero: #ffffff;
+  --surface-dark: #151821;
+  --text-on-dark: #f4f6fa;
+  --muted-on-dark: #96a0b2;
+
+  /* Đổ bóng tối giản chuẩn VEED */
+  --shadow-card: 0 1px 3px rgba(17, 19, 24, 0.04), 0 1px 2px rgba(17, 19, 24, 0.02);
+  --shadow-card-hover: 0 8px 24px -4px rgba(17, 19, 24, 0.08), 0 2px 6px rgba(17, 19, 24, 0.04);
+  --shadow-pop: 0 16px 40px -8px rgba(17, 19, 24, 0.16);
+  --shadow-stage: 0 20px 44px -12px rgba(17, 19, 24, 0.18), 0 6px 16px -4px rgba(17, 19, 24, 0.1);
+  --card-border: #e6e8ee;
+  --scrim: rgba(17, 19, 24, 0.45);
 
   /* Khoảng cách: thang 4 px */
   --space-1: 4px;
@@ -54,23 +107,23 @@
   --space-16: 64px;
   --space-24: 96px;
 
-  /* Bo góc (mục 4) */
-  --radius-card: 24px;
-  --radius-dialog: 28px;
-  --radius-preview: 28px;
-  --radius-inner: 16px;
-  --radius-input: 14px;
+  /* Bo góc nhất quán (14px thẻ lớn, 10px nút/input, 8px nút nhỏ) */
+  --radius-card: 14px;
+  --radius-dialog: 16px;
+  --radius-preview: 16px;
+  --radius-inner: 10px;
+  --radius-input: 10px;
   --radius-pill: 999px;
 
   /* Bố cục */
-  --nav-w: 232px;
-  --nav-w-mini: 72px;
+  --nav-w: 224px;
+  --nav-w-mini: 64px;
 
-  /* Chuyển động (luật 13.B3.2): 90-200 ms, một đường cong */
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Chuyển động siêu nhẹ 0% Lag (90–200ms) */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-press: 90ms;
-  --dur: 150ms;
-  --dur-pop: 180ms;
+  --dur: 160ms;
+  --dur-pop: 140ms;
   --dur-slow: 200ms;
 
   color-scheme: light;
@@ -78,66 +131,130 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0f0f12;
-    --card: #18181c;
-    --nav: #16161a;
-    --soft: #26262c;
-    --soft-2: #1f1f25;
-    --line: #26262c;
-    --line-input: #3a3a42;
-    --text: #f4f4f6;
-    --text-2: #c9c9d1;
-    --muted: #a0a0aa;
-    --primary: #f4f4f6;
-    --on-primary: #0f0f12;
-    --ok: #3ccb7f;
-    --ok-soft: #26262c;
-    --on-ok-soft: #3ccb7f;
-    --tint-red: #26262c;
-    --on-tint-red: #ff8a8f;
-    --tint-yel: #26262c;
-    --on-tint-yel: #f4b630;
-    --danger: #ff6b6b;
-    --on-danger: #0f0f12;
-    --danger-soft: #26262c;
-    --shadow-card: none;
-    --shadow-card-hover: none;
-    --shadow-pop: none;
-    --card-border: var(--line);
-    --scrim: rgba(0, 0, 0, 0.6);
+    --bg: #0e1015;
+    --bg-app: #0e1015;
+    --card: #151821;
+    --surface-card: #151821;
+    --bg-surface: #151821;
+    --bg-elevated: #1c202b;
+    --bg-subtle: #1c202b;
+    --bg-canvas: #090b0f;
+    --canvas-dot: rgba(255, 255, 255, 0.08);
+    --nav: #151821;
+    --soft: #1c202b;
+    --soft-2: #232836;
+    --line: rgba(255, 255, 255, 0.08);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --line-input: rgba(255, 255, 255, 0.14);
+    --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --wm-badge-bg: rgba(229, 57, 69, 0.14);
+    --wm-badge-border: rgba(229, 57, 69, 0.28);
+    --wm-badge-text: #fca5a5;
+    --text: #f4f6fa;
+    --text-primary: #f4f6fa;
+    --text-2: #c4cad6;
+    --text-secondary: #96a0b2;
+    --muted: #96a0b2;
+    --primary: #f4f6fa;
+    --on-primary: #111318;
+    --ink-action: #f4f6fa;
+    --on-ink-action: #111318;
+    --brand-hover: #f04b56;
+    --accent-primary: #e53945;
+    --accent-soft: #2d1418;
+    --on-accent-soft: #fca5a5;
+
+    --engine-core-soft: #2d1418;
+    --on-engine-core-soft: #fca5a5;
+    --engine-postv-soft: #1c202b;
+    --on-engine-postv-soft: #f4f6fa;
+    --engine-chatting-soft: #1c202b;
+    --on-engine-chatting-soft: #f4f6fa;
+    --engine-stickv-soft: #2d1418;
+    --on-engine-stickv-soft: #fca5a5;
+
+    --ok: #22c55e;
+    --ok-soft: #102a1d;
+    --on-ok-soft: #4ade80;
+    --tint-red: #2d1418;
+    --on-tint-red: #fca5a5;
+    --tint-yel: #2b210e;
+    --on-tint-yel: #fde047;
+    --danger: #f87171;
+    --on-danger: #111318;
+    --danger-soft: #2e1518;
+
+    --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
+    --shadow-stage: 0 24px 48px -12px rgba(0, 0, 0, 0.72), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --scrim: rgba(4, 7, 15, 0.72);
 
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #0f0f12;
-  --card: #18181c;
-  --nav: #16161a;
-  --soft: #26262c;
-  --soft-2: #1f1f25;
-  --line: #26262c;
-  --line-input: #3a3a42;
-  --text: #f4f4f6;
-  --text-2: #c9c9d1;
-  --muted: #a0a0aa;
-  --primary: #f4f4f6;
-  --on-primary: #0f0f12;
-  --ok: #3ccb7f;
-  --ok-soft: #26262c;
-  --on-ok-soft: #3ccb7f;
-  --tint-red: #26262c;
-  --on-tint-red: #ff8a8f;
-  --tint-yel: #26262c;
-  --on-tint-yel: #f4b630;
-  --danger: #ff6b6b;
-  --on-danger: #0f0f12;
-  --danger-soft: #26262c;
-  --shadow-card: none;
-  --shadow-card-hover: none;
-  --shadow-pop: none;
-  --card-border: var(--line);
-  --scrim: rgba(0, 0, 0, 0.6);
+  --bg: #0e1015;
+  --bg-app: #0e1015;
+  --card: #151821;
+  --surface-card: #151821;
+  --bg-surface: #151821;
+  --bg-elevated: #1c202b;
+  --bg-subtle: #1c202b;
+  --bg-canvas: #090b0f;
+  --canvas-dot: rgba(255, 255, 255, 0.08);
+  --nav: #151821;
+  --soft: #1c202b;
+  --soft-2: #232836;
+  --line: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --line-input: rgba(255, 255, 255, 0.14);
+  --card-top-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --wm-badge-bg: rgba(229, 57, 69, 0.14);
+  --wm-badge-border: rgba(229, 57, 69, 0.28);
+  --wm-badge-text: #fca5a5;
+  --text: #f4f6fa;
+  --text-primary: #f4f6fa;
+  --text-2: #c4cad6;
+  --text-secondary: #96a0b2;
+  --muted: #96a0b2;
+  --primary: #f4f6fa;
+  --on-primary: #111318;
+  --ink-action: #f4f6fa;
+  --on-ink-action: #111318;
+  --brand-hover: #f04b56;
+  --accent-primary: #e53945;
+  --accent-soft: #2d1418;
+  --on-accent-soft: #fca5a5;
+
+  --engine-core-soft: #2d1418;
+  --on-engine-core-soft: #fca5a5;
+  --engine-postv-soft: #1c202b;
+  --on-engine-postv-soft: #f4f6fa;
+  --engine-chatting-soft: #1c202b;
+  --on-engine-chatting-soft: #f4f6fa;
+  --engine-stickv-soft: #2d1418;
+  --on-engine-stickv-soft: #fca5a5;
+
+  --ok: #22c55e;
+  --ok-soft: #102a1d;
+  --on-ok-soft: #4ade80;
+  --tint-red: #2d1418;
+  --on-tint-red: #fca5a5;
+  --tint-yel: #2b210e;
+  --on-tint-yel: #fde047;
+  --danger: #f87171;
+  --on-danger: #111318;
+  --danger-soft: #2e1518;
+
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
+  --shadow-stage: 0 24px 48px -12px rgba(0, 0, 0, 0.72), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --scrim: rgba(4, 7, 15, 0.72);
 
   color-scheme: dark;
 }

@@ -42,6 +42,7 @@ function page() {
         <Routes>
           <Route path="/" element={<ProjectsPage />} />
           <Route path="/p/:slug" element={<p>trang soạn</p>} />
+          <Route path="/postv/:slug" element={<p>trang PostV</p>} />
         </Routes>
       </NewProjectProvider>
     </ToastProvider>,
@@ -71,6 +72,44 @@ describe('ProjectsPage', () => {
     expect(within(card('Mới tạo')).getByText('Chưa dựng')).toBeInTheDocument();
   });
 
+  it('marks PostV projects with a badge and opens them on /postv', async () => {
+    stubFetch({
+      'GET /api/projects': [
+        summary('bai', 'Bài PostV', { kind: 'postv' }),
+        summary('muoi', 'Muỗi', { kind: 'video' }),
+      ],
+    });
+    page();
+    await screen.findByText('Bài PostV');
+    expect(within(card('Bài PostV')).getByText('PostV')).toBeInTheDocument();
+    expect(within(card('Muỗi')).queryByText('PostV')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Mở: Bài PostV' })).toHaveAttribute(
+      'href',
+      '/postv/bai',
+    );
+    expect(screen.getByRole('link', { name: 'Mở: Muỗi' })).toHaveAttribute('href', '/p/muoi');
+  });
+
+  it('duplicating a PostV project opens the copy on /postv', async () => {
+    const user = userEvent.setup();
+    stubFetch({
+      'GET /api/projects': [summary('bai', 'Bài PostV', { kind: 'postv' })],
+      'POST /api/projects/bai/duplicate': {
+        version: 1,
+        kind: 'postv',
+        slug: 'bai-ban-sao',
+        title: 'Bài PostV (bản sao)',
+      },
+    });
+    page();
+    await screen.findByText('Bài PostV');
+    await user.click(
+      within(card('Bài PostV')).getByRole('button', { name: 'Thao tác: Bài PostV' }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: 'Nhân bản' }));
+    expect(await screen.findByText('trang PostV')).toBeInTheDocument();
+  });
+
   it('uses the cover, then scene 1, then the HBT tile; images are lazy', async () => {
     stubFetch({
       'GET /api/projects': [
@@ -89,7 +128,7 @@ describe('ProjectsPage', () => {
     expect(img('Có bìa')).toHaveAttribute('loading', 'lazy');
     expect(img('Có bìa')).toHaveAttribute('decoding', 'async');
     expect(img('Chỉ ảnh')).toHaveAttribute('src', '/api/files/b/1.png');
-    expect(img('Trống')).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
+    expect(img('Trống')).toHaveAttribute('src', '/brand/hay-biet-tuot_avatar.png');
     expect(within(card('Trống')).getByText('Chưa có ảnh')).toBeInTheDocument();
   });
 
@@ -105,13 +144,13 @@ describe('ProjectsPage', () => {
     expect(img).toHaveAttribute('src', '/api/files/projects/a/images/x.png');
     fireEvent.error(img);
     const after = card('Ảnh hỏng').querySelector('img') as HTMLImageElement;
-    expect(after).toHaveAttribute('src', '/brand/hbt-logo-mark.png');
+    expect(after).toHaveAttribute('src', '/brand/hay-biet-tuot_avatar.png');
     expect(within(card('Ảnh hỏng')).getByText('Chưa có ảnh')).toBeInTheDocument();
     // Lỗi của ô HBT không làm vòng lặp: vẫn là ô HBT.
     fireEvent.error(after);
     expect(card('Ảnh hỏng').querySelector('img')).toHaveAttribute(
       'src',
-      '/brand/hbt-logo-mark.png',
+      '/brand/hay-biet-tuot_avatar.png',
     );
   });
 

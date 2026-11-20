@@ -4,6 +4,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
 import { api, projectFileUrl } from '../api/endpoints';
 import type { Fps, Job, RenderOptions, RenderRecord } from '../api/types';
+import { WatermarkControl } from '../components/WatermarkControl';
+import { ImagesReminder } from '../components/draft/ImagesReminder';
 import { ChecksCard } from '../components/export/ChecksCard';
 import { CleanCard } from '../components/export/CleanCard';
 import { HistoryGrid } from '../components/export/HistoryGrid';
@@ -224,6 +226,7 @@ export function ExportTab() {
     <div className="grid grid-cols-1 gap-[18px] p-6 min-[1024px]:grid-cols-[minmax(0,1fr)_300px]">
       <div className="min-w-0 space-y-[18px]">
         <h1 className="text-h1 font-extrabold uppercase">{X.title}</h1>
+        <ImagesReminder slug={slug} />
         <ChecksCard slug={slug} lint={lint} missing={missing} />
 
         {info && <ResultCard info={info} />}
@@ -268,6 +271,7 @@ export function ExportTab() {
               }
             />
           </div>
+          <WatermarkControl />
           <div className="space-y-2">
             <Button
               tone="ink"

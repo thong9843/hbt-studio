@@ -3,10 +3,23 @@ import { vi } from '../../i18n/vi';
 import { cx } from './cx';
 import './ui.css';
 
-export type ButtonTone = 'ink' | 'accent' | 'brand' | 'soft' | 'danger' | 'ghost';
+export type ButtonTone =
+  | 'ink'
+  | 'accent'
+  | 'brand'
+  | 'primary'
+  | 'soft'
+  | 'danger'
+  | 'ghost'
+  | 'magic'
+  | 'export'
+  | 'core'
+  | 'postv'
+  | 'chatting';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: ButtonTone;
+  variant?: ButtonTone;
   size?: 'sm' | 'md' | 'lg';
   /** Đang chạy việc: hiện vòng xoay, nút không bấm được. */
   busy?: boolean;
@@ -21,7 +34,8 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  * hoặc `<Link className="ui-btn ...">`, không truyền `href` / `to` / `as` vào đây.
  */
 export function Button({
-  tone = 'ink',
+  tone,
+  variant,
   size = 'md',
   busy,
   reason,
@@ -33,7 +47,16 @@ export function Button({
   type = 'button',
   ...rest
 }: Props) {
+  const resolvedTone = tone ?? variant ?? 'ink';
   const off = Boolean(disabled || busy);
+  const hasSheen =
+    resolvedTone === 'brand' ||
+    resolvedTone === 'primary' ||
+    resolvedTone === 'export' ||
+    resolvedTone === 'magic' ||
+    resolvedTone === 'core' ||
+    resolvedTone === 'postv' ||
+    resolvedTone === 'chatting';
   return (
     <button
       {...rest}
@@ -43,7 +66,8 @@ export function Button({
       title={off && reason ? reason : title}
       className={cx(
         'ui-btn',
-        `ui-btn-${tone}`,
+        `ui-btn-${resolvedTone === 'primary' ? 'brand' : resolvedTone}`,
+        hasSheen && 'ui-btn-sheen',
         size === 'lg' && 'ui-btn-lg',
         size === 'sm' && 'ui-btn-sm',
         className,

@@ -1,23 +1,47 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/endpoints';
-import type { ProjectSummary, RenderSummary } from '../api/types';
+import type { ProjectSummary, UnifiedRenderItem } from '../api/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyProjects } from '../components/EmptyProjects';
 import { ErrorNote } from '../components/ErrorNote';
-import { CheckIcon, PlayIcon } from '../components/icons';
+import { EngineShowcaseCards } from '../components/home/EngineShowcaseCards';
+import { RenderPlayerModal } from '../components/home/RenderPlayerModal';
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  MoreIcon,
+  PlayIcon,
+  SearchIcon,
+  TrashIcon,
+} from '../components/icons';
 import { CardImage } from '../components/ProjectCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Menu } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
+import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
+import { releaseVideoElementLocks } from '../utils/media';
+import { projectHref } from '../utils/projectHref';
 import { projectImage, projectStatus } from '../utils/projectStatus';
-import { latestExport, readiness } from '../utils/readiness';
+import { readiness } from '../utils/readiness';
 
 const RECENT = 4;
 const TONE = { final: 'red', preview: 'yel', none: 'neutral', broken: 'danger' } as const;
+
+const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', string> = {
+  all: 'Tất cả',
+  core: 'HBT Core',
+  postv: 'PostV',
+  chatting: 'Chatting',
+  stickv: 'StickV',
+};
 
 function Dot({ on, label }: { on: boolean; label: string }) {
   const t = vi.home.dot;
@@ -39,31 +63,46 @@ function Dot({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-/** Thẻ "Tiếp tục làm": dự án sửa gần nhất. Chấm nguyên liệu lấy bằng một lần GET project, không poll. */
-function Continue({ project }: { project: ProjectSummary }) {
+/** Thẻ "Tiếp tục dự án dở": dự án sửa gần nhất. */
+function Continue({
+  project,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onDelete: (p: ProjectSummary) => void;
+}) {
   const t = vi.home;
   const status = projectStatus(project);
   const brief = useQuery({
     queryKey: ['project-brief', project.slug],
     queryFn: () => api.getProject(project.slug),
+    enabled: project.kind !== 'postv',
   });
   const ready = brief.data ? readiness(brief.data) : null;
   const series = brief.data?.series;
   const video = project.last_final?.video ?? project.last_render?.video ?? null;
+  const fallbackKind = project.kind === 'postv' ? 'postv' : 'core';
+
   return (
-    <Card as="section" aria-label={t.continue} className="flex gap-6">
-      <div className="aspect-[9/16] w-[132px] shrink-0 overflow-hidden rounded-inner bg-soft">
-        <CardImage src={projectImage(project)} />
+    <Card
+      as="section"
+      aria-label={t.continue}
+      padded={false}
+      className="flex flex-wrap items-center gap-4 px-4 py-3"
+    >
+      <div className="aspect-[2/3] w-14 shrink-0 overflow-hidden rounded-lg border border-line bg-soft">
+        <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <p className="text-tiny font-semibold text-muted">{t.continue}</p>
-        <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
+
+      <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
+          <h2 className="truncate text-body font-extrabold text-text">{project.title}</h2>
+          <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
           <Badge tone={TONE[status.kind]}>{status.label}</Badge>
-          {series && <span className="text-small text-muted">{series}</span>}
+          {series && <span className="text-tiny text-muted">{series}</span>}
         </div>
         {ready ? (
-          <ul className="flex flex-wrap gap-x-4 gap-y-2" aria-label={t.dot.label}>
+          <ul className="flex flex-wrap gap-x-3 gap-y-1" aria-label={t.dot.label}>
             <Dot
               on={ready.images.total > 0 && ready.images.done === ready.images.total}
               label={t.dot.images(ready.images.done, ready.images.total)}
@@ -73,164 +112,432 @@ function Continue({ project }: { project: ProjectSummary }) {
             <Dot on={ready.cover} label={t.dot.cover} />
           </ul>
         ) : (
-          !brief.isError && <Skeleton width={260} height={20} />
+          project.kind !== 'postv' && !brief.isError && <Skeleton width={180} height={16} />
         )}
-        <div className="mt-auto flex flex-wrap gap-2 pt-2">
-          <Link to={`/p/${project.slug}`} className="ui-btn ui-btn-ink">
-            {t.open}
-          </Link>
-          {video && (
-            <a
-              href={video}
-              target="_blank"
-              rel="noreferrer"
-              className="ui-btn ui-btn-soft"
-              aria-label={`${t.watch}: ${project.title}`}
-            >
-              <PlayIcon size={18} />
-              {t.watch}
-            </a>
-          )}
-        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        {video && (
+          <a href={video} target="_blank" rel="noreferrer" className="ui-btn ui-btn-soft ui-btn-sm">
+            <PlayIcon size={14} />
+            {t.watch}
+          </a>
+        )}
+        <Link to={projectHref(project)} className="ui-btn ui-btn-ink ui-btn-sm">
+          Tiếp tục
+        </Link>
+        <Menu
+          label={vi.projects.menu(project.title)}
+          icon={<MoreIcon />}
+          items={[
+            {
+              key: 'delete',
+              label: vi.projects.delete,
+              danger: true,
+              onSelect: () => onDelete(project),
+            },
+          ]}
+        />
       </div>
     </Card>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="py-1">
-      <dt className="text-tiny font-semibold opacity-80">{label}</dt>
-      <dd className="num mt-1 text-h2 font-bold">{value}</dd>
-    </div>
-  );
-}
-
-/** Thẻ tối "Lần xuất gần nhất": số liệu lấy từ `last_final`/`last_render`, không gọi thêm /renders. */
-function LastExport({ project, render }: { project: ProjectSummary; render: RenderSummary }) {
-  const t = vi.home.last;
-  return (
-    <section
-      aria-label={t.title}
-      className="flex flex-col gap-4 rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
-    >
-      <p className="text-tiny font-semibold opacity-80">{vi.home.lastExport}</p>
-      <h2 className="line-clamp-2 text-title font-extrabold">{project.title}</h2>
-      <dl className="grid grid-cols-3 gap-2">
-        <Stat label={t.fps} value={render.fps ? `${render.fps}` : '—'} />
-        <Stat label={t.duration} value={render.duration ? formatDuration(render.duration) : '—'} />
-        <Stat
-          label={t.renderTime}
-          value={render.render_seconds ? formatDuration(render.render_seconds) : '—'}
-        />
-      </dl>
-      <p className="text-small opacity-80">
-        {render.preview ? t.preview : t.final} ·{' '}
-        <span className="num">{formatDate(render.created_at)}</span>
-      </p>
-      {render.video && (
-        <a
-          href={render.video}
-          target="_blank"
-          rel="noreferrer"
-          className="ui-btn ui-btn-accent mt-auto self-start"
-          aria-label={`${vi.home.watch}: ${project.title}`}
-        >
-          <PlayIcon size={18} />
-          {vi.home.watch}
-        </a>
-      )}
-    </section>
-  );
-}
-
-function RecentCard({ project }: { project: ProjectSummary }) {
+function RecentCard({
+  project,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onDelete: (p: ProjectSummary) => void;
+}) {
   const status = projectStatus(project);
-  const href = `/p/${project.slug}`;
+  const href = projectHref(project);
+  const fallbackKind = project.kind === 'postv' ? 'postv' : 'core';
   return (
-    <Card as="li" padded={false} className="ui-card-link overflow-hidden">
+    <Card as="li" padded={false} className="ui-card-link flex flex-col overflow-hidden">
       <Link to={href} aria-label={`${vi.projects.open}: ${project.title}`} className="block">
         <div className="aspect-[9/16] w-full overflow-hidden bg-soft">
-          <CardImage src={projectImage(project)} />
-        </div>
-        <div className="space-y-2 p-3">
-          <p className="line-clamp-2 text-small font-bold">{project.title}</p>
-          <Badge tone={TONE[status.kind]}>{status.label}</Badge>
+          <CardImage src={projectImage(project)} fallbackKind={fallbackKind} />
         </div>
       </Link>
+      <div className="flex flex-1 items-start justify-between gap-2 p-3.5">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <p className="line-clamp-2 text-small font-bold text-text">
+            <Link to={href} className="hover:underline">
+              {project.title}
+            </Link>
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={fallbackKind}>{fallbackKind === 'postv' ? vi.postv.badge : 'HBT'}</Badge>
+            <Badge tone={TONE[status.kind]}>{status.label}</Badge>
+          </div>
+        </div>
+        <Menu
+          label={vi.projects.menu(project.title)}
+          icon={<MoreIcon />}
+          items={[
+            {
+              key: 'delete',
+              label: vi.projects.delete,
+              danger: true,
+              onSelect: () => onDelete(project),
+            },
+          ]}
+        />
+      </div>
     </Card>
   );
 }
 
-function HomeSkeleton() {
+function RenderCoverPreview({ item }: { item: UnifiedRenderItem }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (item.cover_url && !imgFailed) {
+    return (
+      <img
+        src={item.cover_url}
+        alt={item.title}
+        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        loading="lazy"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-6" aria-busy="true">
-      <div className="grid grid-cols-1 gap-6 min-[1024px]:grid-cols-[3fr_2fr]">
-        <Skeleton height={236} className="!rounded-card" />
-        <Skeleton height={236} className="!rounded-card" />
-      </div>
-    </div>
+    <video
+      src={`${item.video_url}#t=0.5`}
+      muted
+      playsInline
+      preload="metadata"
+      poster="/brand/hay-biet-tuot_avatar.png"
+      className="h-full w-full object-cover"
+    />
   );
 }
 
 export function HomePage() {
-  const t = vi.home;
   const { open: openNew } = useNewProject();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const [engineFilter, setEngineFilter] = useState<
+    'all' | 'core' | 'postv' | 'chatting' | 'stickv'
+  >('all');
+  const [activeRender, setActiveRender] = useState<UnifiedRenderItem | null>(null);
+  const [deletingRender, setDeletingRender] = useState<UnifiedRenderItem | null>(null);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: api.listProjects,
   });
-  // Danh sách đã sắp theo `updated_at` mới nhất trước.
-  const latest = data?.[0];
-  const last = data ? latestExport(data) : null;
-  const recent = data?.slice(1, 1 + RECENT) ?? [];
+
+  const rendersQuery = useQuery({
+    queryKey: ['unified-renders'],
+    queryFn: () => api.listUnifiedRenders(),
+    retry: false,
+  });
+
+  const musicHubQuery = useQuery({
+    queryKey: ['asset-hub', 'music'],
+    queryFn: () => api.listAssetHub('music'),
+    retry: false,
+  });
+
+  const bgHubQuery = useQuery({
+    queryKey: ['asset-hub', 'backgrounds'],
+    queryFn: () => api.listAssetHub('backgrounds'),
+    retry: false,
+  });
+
+  const remove = useMutation({
+    mutationFn: (slug: string) => api.deleteProject(slug),
+    onSuccess: () => {
+      setDeleting(null);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      toast.info(vi.projects.deleted);
+    },
+    onError: (err: Error) => {
+      setDeleting(null);
+      toast.error(err);
+    },
+  });
+
+  const deleteRenderMut = useMutation({
+    mutationFn: (item: UnifiedRenderItem) => {
+      if (activeRender?.id === item.id) setActiveRender(null);
+      releaseVideoElementLocks(item.video_url);
+      return api.deleteUnifiedRender(item.id);
+    },
+    onSuccess: (_res, item) => {
+      queryClient.setQueryData<{ items: UnifiedRenderItem[] }>(['unified-renders'], (old) =>
+        old ? { items: old.items.filter((x) => x.id !== item.id) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
+      toast.info(`Đã xóa video "${item.title}"`);
+      if (activeRender?.id === item.id) setActiveRender(null);
+      setDeletingRender(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err);
+      setDeletingRender(null);
+    },
+  });
+
+  const q = searchQuery.trim().toLowerCase();
+
+  const filteredProjects = useMemo(() => {
+    const list = data ?? [];
+    if (!q) return list;
+    return list.filter(
+      (p) => p.title.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q),
+    );
+  }, [data, q]);
+
+  const latest = filteredProjects[0];
+  const recent = filteredProjects.slice(1, 1 + RECENT);
+
+  const allRenders = useMemo(() => rendersQuery.data?.items ?? [], [rendersQuery.data?.items]);
+  const filteredRenders = useMemo(() => {
+    return allRenders.filter((r) => {
+      if (engineFilter !== 'all' && r.engine !== engineFilter) return false;
+      if (q && !r.title.toLowerCase().includes(q) && !r.slug.toLowerCase().includes(q))
+        return false;
+      return true;
+    });
+  }, [allRenders, engineFilter, q]);
+
+  const totalAssets =
+    (musicHubQuery.data?.items.length ?? 0) + (bgHubQuery.data?.items.length ?? 0);
+
+  const handleCopyPublishText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.info('Đã sao chép nội dung đăng bài!');
+    } catch (err) {
+      toast.error(err);
+    }
+  };
 
   return (
-    <main className="mx-auto max-w-[1280px] space-y-8 px-6 py-10">
-      <h1 className="text-display font-extrabold uppercase">{t.title}</h1>
+    <main className="w-full max-w-full space-y-6 px-6 py-6 lg:px-8">
+      {/* Header tối giản cực đoan: 1 dòng tiêu đề + tìm kiếm + chip số liệu gọn */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-h1 font-extrabold tracking-tight text-text">{vi.veedHome.heroTitle}</h1>
 
-      {isPending && <HomeSkeleton />}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative w-full sm:w-[240px]">
+            <SearchIcon
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={vi.veedHome.searchPlaceholder}
+              aria-label="Tìm dự án hoặc video đã xuất"
+              className="ui-input !min-h-[36px] !pl-8 text-small"
+            />
+          </div>
+          <span className="rounded-pill border border-line bg-card px-3 py-1.5 text-tiny font-semibold text-muted tabular-nums">
+            {allRenders.length} video · {data?.length ?? 0} dự án · {totalAssets} tài nguyên
+          </span>
+        </div>
+      </header>
+
+      {/* 4 Thẻ Động cơ Sáng tạo tối giản */}
+      <EngineShowcaseCards />
+
       {error && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           <ErrorNote error={error} />
-          <Button tone="soft" onClick={() => void refetch()}>
+          <Button size="sm" tone="soft" onClick={() => void refetch()}>
             {vi.common.retry}
           </Button>
         </div>
       )}
-      {data && data.length === 0 && <EmptyProjects onCreate={openNew} />}
-      {latest && (
-        <>
-          <div className="grid grid-cols-1 gap-6 min-[1024px]:grid-cols-[3fr_2fr]">
-            <Continue project={latest} />
-            {last ? (
-              <LastExport project={last.project} render={last.render} />
-            ) : (
-              <section
-                aria-label={t.lastExport}
-                className="flex items-center justify-center rounded-card border border-[var(--card-border)] bg-hero p-6 text-on-hero"
-              >
-                <p className="text-body font-semibold">{t.last.none}</p>
-              </section>
-            )}
-          </div>
 
-          {recent.length > 0 && (
-            <section aria-label={t.recent} className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-h2 font-bold">{t.recent}</h2>
-                <Link to="/projects" className="ui-btn ui-btn-soft ui-btn-sm">
-                  {t.seeAll}
-                </Link>
-              </div>
-              <ul className="grid grid-cols-2 gap-6 min-[1024px]:grid-cols-4">
+      {/* Tầng 1: Thanh Tiếp tục làm nhỏ gọn (không kéo giãn tạo mảng trắng) */}
+      <section aria-label="Tiếp tục dự án dở" className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-title font-extrabold text-text">Tiếp tục làm</h2>
+          <Link to="/projects" className="text-small font-bold text-text hover:underline">
+            Xem tất cả →
+          </Link>
+        </div>
+
+        {isPending ? (
+          <Skeleton height={88} className="!rounded-card" />
+        ) : filteredProjects.length === 0 ? (
+          <EmptyProjects onCreate={() => openNew()} />
+        ) : (
+          <div className="space-y-4">
+            {latest && <Continue project={latest} onDelete={setDeleting} />}
+            {recent.length > 0 && (
+              <ul className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 {recent.map((p) => (
-                  <RecentCard key={p.slug} project={p} />
+                  <RecentCard key={p.slug} project={p} onDelete={setDeleting} />
                 ))}
               </ul>
-            </section>
-          )}
-        </>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Khu vực Video đã xuất gần đây (GET /api/renders) */}
+      <section aria-label="Video đã xuất gần đây" className="space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-title font-extrabold text-text">Video đã xuất gần đây</h2>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(['all', 'core', 'postv', 'chatting', 'stickv'] as const).map((eng) => {
+              const active = engineFilter === eng;
+              return (
+                <button
+                  key={eng}
+                  type="button"
+                  onClick={() => setEngineFilter(eng)}
+                  aria-pressed={active}
+                  className={`ui-chip ui-chip-sm ${active ? '!bg-primary !text-on-primary' : ''}`}
+                >
+                  {ENGINE_LABELS[eng]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {rendersQuery.isPending ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} height={320} className="!rounded-card" />
+            ))}
+          </div>
+        ) : filteredRenders.length === 0 ? (
+          <Card className="py-10 text-center">
+            <p className="text-body font-bold text-text">Chưa có video nào được xuất ở mục này</p>
+            <p className="mt-1 text-small text-muted">
+              Chọn một động cơ phía trên để tạo và xuất video 9:16 đầu tiên.
+            </p>
+          </Card>
+        ) : (
+          <ul className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            {filteredRenders.slice(0, 8).map((item) => (
+              <Card
+                key={item.id}
+                as="li"
+                padded={false}
+                className="group flex flex-col overflow-hidden transition-all duration-180 hover:-translate-y-0.5 hover:shadow-card-hover"
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveRender(item)}
+                  className="relative aspect-[9/16] w-full overflow-hidden bg-hero text-left"
+                  aria-label={`Xem video ${item.title}`}
+                >
+                  <RenderCoverPreview item={item} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25 opacity-80 transition-opacity group-hover:opacity-100" />
+                  <span className="absolute left-2.5 top-2.5">
+                    <Badge tone={item.engine}>{ENGINE_LABELS[item.engine]}</Badge>
+                  </span>
+                  <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-lg">
+                      <PlayIcon size={20} />
+                    </span>
+                  </span>
+                  {item.duration_sec > 0 && (
+                    <span className="num absolute bottom-2.5 right-2.5 rounded-md bg-black/80 px-2 py-0.5 text-tiny font-bold text-white">
+                      {formatDuration(item.duration_sec)}
+                    </span>
+                  )}
+                </button>
+
+                <div className="flex flex-1 flex-col justify-between gap-2.5 p-3.5">
+                  <div>
+                    <p className="line-clamp-2 text-small font-bold text-text">{item.title}</p>
+                    <p className="num mt-1 text-tiny text-muted">
+                      {item.size_mb} MB
+                      {item.created_at ? ` · ${formatDate(item.created_at)}` : ''}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <Button
+                      size="sm"
+                      tone="ink"
+                      icon={<PlayIcon size={13} />}
+                      onClick={() => setActiveRender(item)}
+                      className="flex-1"
+                    >
+                      Xem video
+                    </Button>
+                    <a
+                      href={item.video_url}
+                      download={`${item.slug || 'video'}.mp4`}
+                      title="Tải .mp4"
+                      aria-label={`Tải ${item.title}`}
+                      className="ui-icon-btn ui-icon-btn-sm bg-soft"
+                    >
+                      <DownloadIcon size={14} />
+                    </a>
+                    {item.publish_text && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyPublishText(item.publish_text)}
+                        title="Copy caption (publish.txt)"
+                        aria-label={`Copy caption ${item.title}`}
+                        className="ui-icon-btn ui-icon-btn-sm bg-soft"
+                      >
+                        <CopyIcon size={14} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDeletingRender(item)}
+                      title="Xóa video"
+                      aria-label={`Xóa video ${item.title}`}
+                      className="ui-icon-btn ui-icon-btn-sm text-danger hover:bg-danger-soft"
+                    >
+                      <TrashIcon size={14} />
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <RenderPlayerModal
+        item={activeRender}
+        onClose={() => setActiveRender(null)}
+        onCopyPublish={(text) => void handleCopyPublishText(text)}
+        onRequestDelete={(item) => setDeletingRender(item)}
+      />
+
+      {deleting && (
+        <ConfirmDialog
+          title={vi.projects.deleteTitle}
+          message={vi.projects.confirmDelete(deleting.title)}
+          confirmLabel={vi.projects.delete}
+          danger
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(deleting.slug)}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
+
+      {deletingRender && (
+        <ConfirmDialog
+          title="Xóa video đã xuất?"
+          message={`Bạn có chắc muốn xóa vĩnh viễn video "${deletingRender.title}" khỏi ổ cứng?`}
+          confirmLabel="Xóa vĩnh viễn"
+          danger
+          busy={deleteRenderMut.isPending}
+          onConfirm={() => deleteRenderMut.mutate(deletingRender)}
+          onCancel={() => setDeletingRender(null)}
+        />
       )}
     </main>
   );

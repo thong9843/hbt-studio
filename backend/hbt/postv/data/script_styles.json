@@ -1,0 +1,116 @@
+[
+  {
+    "id": "ke-chuyen",
+    "name": "Kể chuyện",
+    "hook": ["{text}", "Chuyện thật khó tin: {text}", "Nghe kể lại rằng: {text}"],
+    "intro_post": [
+      "Một bạn chia sẻ câu chuyện thế này:",
+      "Có một bài đăng kể rằng:",
+      "Câu chuyện bắt đầu như sau:"
+    ],
+    "intro_comment": [
+      "Có người hỏi ngay:",
+      "Một bạn khác nói:",
+      "Bình luận bên dưới bàn luận:",
+      "Thêm một ý kiến chia sẻ:"
+    ],
+    "commentary": [
+      "Bạn thấy câu chuyện này thế nào?",
+      "Liệu trong hoàn cảnh đó, bạn sẽ làm gì?",
+      "Để lại suy nghĩ của bạn bên dưới nhé!"
+    ],
+    "outro": ["Bấm theo dõi Hay Biết Tuốt để lắng nghe thêm nhiều câu chuyện thú vị mỗi ngày nhé!"]
+  },
+  {
+    "id": "hai-huoc",
+    "name": "Hài hước",
+    "hook": ["Cười xỉu với chuyện này: {text}", "{text}", "Đúng là chuyện dở khóc dở cười: {text}"],
+    "intro_post": [
+      "Một pha xử lý cực kỳ hài hước được chia sẻ:",
+      "Cư dân mạng đang cười nghiêng ngả với bài này:",
+      "Chuyện hài hước có một không hai:"
+    ],
+    "intro_comment": [
+      "Dân tình vào trêu ngay:",
+      "Có bạn hài hước bình luận:",
+      "Một pha cà khịa cực mạnh:",
+      "Bình luận làm ai cũng phải phì cười:"
+    ],
+    "commentary": [
+      "Đúng là không đỡ nổi luôn á!",
+      "Xem xong cười muốn xỉu với các thánh bình luận!",
+      "Bạn có pha nào hài hước tương tự chưa?"
+    ],
+    "outro": ["Thả tim và theo dõi kênh Hay Biết Tuốt để xả stress mỗi ngày nha!"]
+  },
+  {
+    "id": "drama",
+    "name": "Drama",
+    "hook": ["Vụ việc đang gây xôn xao: {text}", "{text}", "Căng đét chuyện này: {text}"],
+    "intro_post": [
+      "Tình huống căng thẳng vừa được chia sẻ:",
+      "Bài đăng đang gây tranh cãi nảy lửa:",
+      "Vụ việc bắt nguồn từ câu chuyện sau:"
+    ],
+    "intro_comment": [
+      "Ngay lập tức có người phản bác:",
+      "Một bình luận đứng về phía đối phương:",
+      "Có người chỉ ra điểm bất thường:",
+      "Ý kiến khác tiếp tục làm nóng vấn đề:"
+    ],
+    "commentary": [
+      "Phe nào đúng phe nào sai, thật khó phân định!",
+      "Theo bạn, ai mới là người có lý trong vụ này?",
+      "Drama này vẫn chưa có hồi kết, bạn nghĩ sao?"
+    ],
+    "outro": ["Theo dõi Hay Biết Tuốt để không bỏ lỡ diễn biến tiếp theo nhé!"]
+  },
+  {
+    "id": "hong",
+    "name": "Hóng",
+    "hook": ["Tin nóng hổi vừa cập nhật: {text}", "{text}", "Hóng biến mới nhất: {text}"],
+    "intro_post": [
+      "Cư dân mạng đang rần rần chia sẻ:",
+      "Mới hóng được vụ này cực hot:",
+      "Tin vừa lên sóng đã thu hút bão tương tác:"
+    ],
+    "intro_comment": [
+      "Tổ buôn vào hóng ngay:",
+      "Một tài khoản cập nhật thêm tình hình:",
+      "Dân hóng biến để lại lời nhắn:",
+      "Có người tag bạn bè vào xem gấp:"
+    ],
+    "commentary": [
+      "Các bạn đã hóng được tới đâu rồi?",
+      "Cùng hóng tiếp xem chuyện này đi về đâu nhé!",
+      "Nhanh tay để lại cảm nhận của bạn bên dưới!"
+    ],
+    "outro": ["Follow Hay Biết Tuốt để cùng hóng chuyện nhanh nhất mạng xã hội nha!"]
+  },
+  {
+    "id": "cam-dong",
+    "name": "Cảm động",
+    "hook": [
+      "Câu chuyện ấm áp làm lay động lòng người: {text}",
+      "{text}",
+      "Chạm vào trái tim: {text}"
+    ],
+    "intro_post": [
+      "Một mẩu chuyện nhỏ chứa chan tình người:",
+      "Khoảnh khắc ấm lòng được một bạn chia sẻ:",
+      "Giữa bộn bề cuộc sống, có câu chuyện này thật đẹp:"
+    ],
+    "intro_comment": [
+      "Nhiều người xúc động bày tỏ:",
+      "Một bình luận ấm áp gửi gắm:",
+      "Có người chia sẻ lại kỷ niệm tương tự:",
+      "Những lời động viên chân thành gửi tới tác giả:"
+    ],
+    "commentary": [
+      "Đôi khi những điều giản dị lại làm ta ấm lòng nhất.",
+      "Cuộc sống thật đẹp khi có những con người tử tế như vậy.",
+      "Cảm ơn vì một câu chuyện thật ý nghĩa!"
+    ],
+    "outro": ["Cùng Hay Biết Tuốt lan tỏa những điều tốt đẹp mỗi ngày bạn nhé!"]
+  }
+]

@@ -28,6 +28,8 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
       page.getByRole('button', { name: vi.nav.newVideo, exact: true }),
       page.getByRole('link', { name: vi.nav.home, exact: true }),
       page.getByRole('link', { name: vi.nav.projects, exact: true }),
+      page.getByRole('link', { name: vi.nav.postv, exact: true }),
+      page.getByRole('link', { name: vi.nav.chatting, exact: true }),
       page.getByRole('link', { name: vi.nav.settings, exact: true }),
       page.getByRole('button', { name: /^Đổi sang chế độ/ }),
     ];
@@ -36,7 +38,7 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
       await expect(stop).toBeFocused();
     }
     // Có vòng focus nhìn thấy (focus-visible) trên mục đang chọn bằng bàn phím.
-    const outline = await order[5].evaluate((el) => getComputedStyle(el).outlineStyle);
+    const outline = await order[7].evaluate((el) => getComputedStyle(el).outlineStyle);
     expect(outline).not.toBe('none');
 
     // 2. Dialog: Tab/Shift+Tab không ra ngoài; Esc đóng và trả focus về nút "Tạo video".
@@ -76,6 +78,47 @@ test('Tab/focus: thanh trái đúng thứ tự; Dialog và Menu giữ focus; Esc
     await page.keyboard.press('Escape');
     await expect(backups).toBeHidden();
     await expect(more).toBeFocused();
+  } finally {
+    await deleteProject(request, slug);
+  }
+});
+
+test('Tab/focus: thanh trái dự án PostV chứa đủ 5 bước và focus theo đúng thứ tự', async ({
+  page,
+  request,
+}) => {
+  let slug = '';
+  try {
+    const created = await request.post(`${API}/projects`, {
+      data: { title: `e2e focus postv ${Date.now()}`, kind: 'postv' },
+    });
+    expect(created.ok()).toBeTruthy();
+    slug = (await created.json()).slug;
+
+    await page.goto(`/postv/${slug}`);
+    await expect(page.getByRole('navigation', { name: vi.nav.main })).toBeVisible();
+
+    const order = [
+      page.getByRole('link', { name: vi.appName, exact: true }),
+      page.getByRole('button', { name: vi.nav.newVideo, exact: true }),
+      page.getByRole('link', { name: vi.nav.home, exact: true }),
+      page.getByRole('link', { name: vi.nav.projects, exact: true }),
+      page.getByRole('link', { name: vi.nav.postv, exact: true }),
+      page.getByRole('link', { name: vi.nav.chatting, exact: true }),
+      // 5 bước PostV ở thanh trái
+      page.getByRole('link', { name: vi.postv.steps[0], exact: true }),
+      page.getByRole('link', { name: vi.postv.steps[1], exact: true }),
+      page.getByRole('link', { name: vi.postv.steps[2], exact: true }),
+      page.getByRole('link', { name: vi.postv.steps[3], exact: true }),
+      page.getByRole('link', { name: vi.postv.steps[4], exact: true }),
+      page.getByRole('link', { name: vi.nav.settings, exact: true }),
+      page.getByRole('button', { name: /^Đổi sang chế độ/ }),
+    ];
+
+    for (const stop of order) {
+      await page.keyboard.press('Tab');
+      await expect(stop).toBeFocused();
+    }
   } finally {
     await deleteProject(request, slug);
   }

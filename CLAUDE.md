@@ -2,10 +2,11 @@
 
 ## Đầu mỗi phiên
 - Nếu chủ dự án chưa chạy `/kickoff`, tự làm theo `.claude/commands/kickoff.md` trước khi làm việc.
+- **Ponytail & Repo Harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (Ponytail mặc định mức `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`) cùng Repo Harness (khi được cài trên `GD-Config`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, giữ nguyên toàn bộ luật bắt buộc của `CLAUDE.md` và `GEMINI.md`.
 
 ## Bối cảnh
 - App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, hai máy (máy cũ: i5-10400, không GPU rời, 16 GB; máy mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB). Không giả định có GPU: IMPLEMENT §0.
-- Đọc `PLAN.md` (mục tiêu, lộ trình) và `IMPLEMENT.md` (đặc tả) trước khi code. Làm **đúng mốc đang mở** trong `IMPLEMENT.md` mục 11, không làm trước mốc sau.
+- Đọc `PLAN.md` (mục tiêu, lộ trình) và `IMPLEMENT.md` (đặc tả) trước khi code. Đặc tả chỉ ở `IMPLEMENT.md`, kế hoạch chỉ ở `PLAN.md` (không tạo file riêng). Làm **đúng mốc đang mở** trong `IMPLEMENT.md` mục 11, không làm trước mốc sau.
 - `reference/pipeline/` là code **đã chạy thật**. Khi port, giữ nguyên tham số FFmpeg, kích thước, màu, thời lượng. Muốn đổi → hỏi chủ dự án.
 
 ## Bắt buộc
@@ -16,28 +17,40 @@
 - Backend chỉ bind `127.0.0.1`. Không thêm đăng nhập, không gửi dữ liệu ra ngoài trừ khi tính năng Giai đoạn 2 yêu cầu và có khoá API trong `.env`.
 - Không commit: `workspace/`, `models/`, file media, `.env`. Ngoại lệ (tài sản cố định): logo và clip outro trong `brand/`, và `library/outro/voice.wav`.
 - Mỗi tính năng có test cho logic chính; `npm run lint` và `npm run test` phải xanh trước khi báo xong.
-- Commit theo Conventional Commits, mỗi mốc một nhánh `feat/mX-…`.
-- Gặp điểm đặc tả chưa nói tới: **hỏi chủ dự án**, không tự quyết. Quyết định xong thì ghi thêm vào `IMPLEMENT.md`.
+- Commit theo Conventional Commits, mỗi mốc một nhánh `feat/…`, `fix/…` hoặc `docs/…`.
+- Điểm đặc tả chưa rõ: khi lập kế hoạch thì **hỏi chủ dự án**; khi đang code thì chọn phương án an toàn nhất, ghi "Cần chốt" trong báo cáo. Quyết định xong thì ghi thêm vào `IMPLEMENT.md`.
 - Phải hỏi chủ dự án trước khi cài, gỡ hoặc nâng cấp bất kỳ phần mềm, driver hay gói nào ở cấp hệ thống (winget, choco, CUDA…). Gói Python trong `backend/.venv` và gói npm của dự án thì được tự cài.
-- Không tự push. Chỉ push khi chủ dự án yêu cầu.
-- Không commit khi lint hoặc test đang đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
+- Push nhánh khi kế hoạch đã duyệt có ghi. Không push và không merge khi lần chạy cuối của giai đoạn đỏ.
+- Không commit kết thúc giai đoạn khi lần chạy cuối đỏ. Mọi chuỗi lệnh kiểm tra dùng `&&` (không dùng `;`) và `set -o pipefail`.
+
+## Quy ước 6 Nhánh & 4 Tag Cố Định (Quy trình Git mới)
+- **Nhánh cố định theo giai đoạn:** `main`, `GD-Config`, `GD1-HBT` (`v1`), `GD2-PostV` (`v2`), `GD3-Chatting` (`v3`), `GD4-StickV` (`v4`). Tính năng lớn kế tiếp tạo nhánh `GD5-<TenTinhNang>` (`v5`, `v6`... hoặc `v4.1` cho bản sửa nhỏ). Cấm để tồn đọng nhánh `feat/*` rác sau khi merge.
+- **Vai trò nhánh `GD-Config`:** dùng để cài đặt, lưu trữ và cấu hình các extension, skill, repo hỗ trợ bên ngoài (Ponytail, Repo Harness...); sau khi xác nhận sạch lint thì merge `--no-ff` vào `main` để toàn dự án áp dụng.
+- **Luồng commit trong ngày:**
+  - Code thuộc tính năng/động cơ nào → commit và push lên đúng nhánh `GDx-...` của tính năng đó.
+  - Cài đặt/cấu hình extension, skill, harness hỗ trợ → commit trên `GD-Config` rồi merge `--no-ff` vào `main`.
+  - Code ngoài luồng (UI chung, hạ tầng `shared/`, fix toàn cục, tài liệu) → commit và push thẳng lên `main`.
+- **Luật khóa đầu phiên (Pre-flight Branch Check):** Bắt buộc in `git branch --show-current` và `git log -1 --oneline` trước khi sửa file đầu tiên trong phiên, xác nhận đang đứng đúng nhánh chủ dự án yêu cầu.
 
 ## Quy trình mốc
-- Mỗi mốc một nhánh riêng `feat/mX-…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`), mỗi commit đều có lint và test xanh.
+- Mỗi mốc một nhánh riêng `feat/…`, `fix/…` hoặc `docs/…`. Trong mốc, commit theo từng nhóm việc nhỏ (`feat` / `fix` / `test` / `docs`). Commit lẻ không bắt buộc xanh; chỉ đầu nhánh phải xanh.
 - Kết thúc mốc theo **đúng thứ tự**:
   1. Lint và test xanh.
   2. Commit cuối `chore(Mx): done`, chỉ cập nhật bảng Tiến độ trong `PLAN.md` và Nhật ký quyết định.
   3. CI trên GitHub xanh.
   4. Báo cáo cho chủ dự án duyệt.
-  5. Chỉ sau khi chủ dự án duyệt: merge `--no-ff` vào `main`, gắn tag `v0.x.0`, push.
+  5. Chỉ sau khi chủ dự án duyệt, hoặc khi lời duyệt đã cho phép sẵn (khi đó tự merge/tag lúc `gh` báo CI xanh ở đúng HEAD): merge `--no-ff` vào `main`, gắn tag có chú thích (`git tag -a`), push.
   6. Báo hash commit cuối của `main` và tag.
 - Chưa xong cả sáu bước thì **không bắt đầu mốc kế tiếp**.
 
-## Quy trình theo đợt (chốt 27/10/2026)
-- Mỗi commit: `npm run lint` + test liên quan (chỉ sửa frontend → Vitest; sửa backend → `pytest -m "not slow"`). Có thể dùng `npm run test:fast` (pytest không slow + Vitest). Cuối đợt chạy đầy đủ **một lần**: `set -o pipefail && npm run lint && npm run test`. CI vẫn chạy đầy đủ, kể cả test `slow`.
+## Quy trình theo đợt (chốt 02/11/2026)
+- **Nhịp mới (chốt 02/11/2026):** một giai đoạn có thể gồm nhiều mốc trên cùng một nhánh. Xong mỗi mốc **không** chạy lint, test, e2e và không chờ hay báo CI. Test + CI chạy **một lần** ở cuối giai đoạn, do chủ dự án định (kế hoạch đã duyệt có thể ghi sẵn). Chỉ gắn tag ở cuối giai đoạn.
+- Khi đang code, sau từng commit hoặc sửa nhỏ: **không** chạy pytest, Vitest, e2e. Sửa một test hỏng thì chỉ chạy lại riêng file đó nếu cần.
+- Xong cả giai đoạn: `set -o pipefail && npm run lint && npm run test` + `npm run e2e` **một lần** → commit → push. CI vẫn chạy đầy đủ, kể cả test `slow`.
+- Commit dọn hoặc docs sau giai đoạn: chỉ `npm run lint`, CI nhánh lo phần còn lại.
 - Test `slow` = dựng/căn chữ thật, từ 3 s trở lên mỗi test theo `pytest --durations=0` trên máy cũ; gắn `@pytest.mark.slow`. Thêm test dựng thật mới thì tự đo và gắn marker.
 - Kế hoạch đợt được duyệt xong thì làm hết các commit, báo **một lần** cuối đợt. Chỉ dừng khi: có điểm đặc tả chưa rõ, test đỏ không tự sửa được, cần đụng `pipeline/` hoặc `models.py`.
-- Cuối đợt được phép push nhánh `feat/mX-…` (không merge, không tag, không chờ CI). Merge và tag vẫn theo 6 bước đóng mốc.
+- Cuối đợt được phép push nhánh `feat/…`, `fix/…` hoặc `docs/…` (không merge, không tag). Merge và tag vẫn theo 6 bước đóng mốc.
 
 ## Lệnh hay dùng
 ```

@@ -201,3 +201,31 @@ def test_summary_without_lufs_for_the_head_preview(monkeypatch, tmp_path, capsys
     monkeypatch.setattr(cli, "render_project", lambda *a, **k: result)
     assert cli.main(["render", str(project_folder(tmp_path))]) == 0
     assert "(không đo)" in capsys.readouterr().out
+
+
+def test_main_routes_postv_projects_to_the_postv_renderer(monkeypatch, tmp_path, capsys):
+    project_dir = tmp_path / "workspace" / "projects" / "bai"
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.json").write_text('{"kind": "postv"}', encoding="utf-8")
+    seen = {}
+
+    def fake_postv(project, options, progress, censor_words):
+        seen.update(options=options, words=censor_words)
+        return fake_result(tmp_path)
+
+    def no_hbt(*_a, **_k):
+        raise AssertionError("dự án PostV không được qua bộ dựng HBT")
+
+    monkeypatch.setattr(cli, "render_postv", fake_postv)
+    monkeypatch.setattr(cli, "render_project", no_hbt)
+    assert cli.main(["render", str(project_dir), "--preview", "--seconds", "20"]) == 0
+    assert seen["options"].preview and seen["options"].preview_seconds == 20
+    assert seen["words"] is not None  # danh sách từ che riêng của PostV
+    assert "Xong trong 12 giây" in capsys.readouterr().out
+
+
+def test_main_keeps_hbt_projects_on_the_hbt_renderer(monkeypatch, tmp_path):
+    (tmp_path / "project.json").write_text('{"slug": "x"}', encoding="utf-8")
+    monkeypatch.setattr(cli, "render_project", lambda *a, **k: fake_result(tmp_path))
+    monkeypatch.setattr(cli, "render_postv", lambda *a, **k: pytest.fail("không phải PostV"))
+    assert cli.main(["render", str(tmp_path)]) == 0

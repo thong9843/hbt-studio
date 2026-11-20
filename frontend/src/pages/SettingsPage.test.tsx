@@ -53,10 +53,29 @@ describe('Cài đặt: các thẻ', () => {
     expect(await screen.findByRole('heading', { name: 'Cài đặt' })).toBeInTheDocument();
     expect(await screen.findByRole('region', { name: 'FPS mặc định' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Căn chữ' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Chế độ nâng cao' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Màu chủ đề' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Từ nhạy cảm' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '50 fps' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Tự động' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('toggles advanced mode and saves setting', async () => {
+    const user = userEvent.setup();
+    const { savedApp } = open();
+    const region = await screen.findByRole('region', { name: 'Chế độ nâng cao' });
+    const toggle = within(region).getByRole('button', { name: 'Không' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(toggle);
+    expect(within(region).getByRole('button', { name: 'Có' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(savedApp.length).toBe(1));
+    expect(savedApp[0].advanced_mode).toBe(true);
   });
 
   it('saves nothing until Lưu, then sends both settings and the word list', async () => {

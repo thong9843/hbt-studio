@@ -127,6 +127,8 @@ class RenderOptions:
     whisper_model: str | None = None  # model chọn trong Cài đặt (auto → .env → phần cứng)
     whisper_timeout: int | None = None  # giây; None → mặc định
     job_id: str | None = None  # tên thư mục renders/<job_id>; None → thời điểm dựng
+    aspect_mode: str | None = None  # "fill" | "fit" | None → theo settings.aspect_mode
+    watermark_enabled: bool | None = None  # None → theo app.json watermark.enabled
 
 
 @dataclass
@@ -442,10 +444,12 @@ def compose(
 def make_covers(project, project_dir: Path, out_dir: Path, brand_dir: Path) -> tuple[Path, Path]:
     """Vẽ `cover_9x16.jpg` và `youtube_3x2.jpg` từ `project.thumbnail` (mục 4e)."""
     thumb = project.thumbnail
-    bg = project_dir / project.scenes[thumb.scene - 1].image
+    uploaded = bool(thumb.image)  # ảnh bìa riêng (cắt giữa) thay cho ảnh của cảnh `thumb.scene`
+    bg = project_dir / (thumb.image or project.scenes[thumb.scene - 1].image)
     image = render_cover(
-        bg, thumb.lines, thumb.series or project.series, thumb.accent, brand_dir / LOGO_FILE
-    )
+        bg, thumb.lines, thumb.series or project.series, thumb.accent, brand_dir / LOGO_FILE,
+        fit_background=uploaded,
+    )  # fmt: skip
     return save_covers(image, out_dir)
 
 

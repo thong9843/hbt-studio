@@ -2,9 +2,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hbt.api import health
-from hbt.main import app
+from hbt.main import create_app
+from hbt.postv.voice import FakeVoice
 
-client = TestClient(app)
+client = TestClient(create_app(voice=FakeVoice(ok=False)))  # VieNeu: không phụ thuộc máy
 
 ENCODERS = """Encoders:
  V..... = Video
@@ -35,8 +36,8 @@ def fake_ffmpeg(monkeypatch, encoders=ENCODERS, filters=FILTERS, runs=True):
 
 def test_health_shape():
     body = client.get("/api/health").json()
-    assert set(body) == {"ok", "ffmpeg", "whisper", "gpu", "missing"}
-    assert all(isinstance(body[k], bool) for k in ("ok", "ffmpeg", "whisper", "gpu"))
+    assert set(body) == {"ok", "ffmpeg", "whisper", "gpu", "vieneu", "vieneu_note", "missing"}
+    assert all(isinstance(body[k], bool) for k in ("ok", "ffmpeg", "whisper", "gpu", "vieneu"))
     assert isinstance(body["missing"], list)
 
 
@@ -53,6 +54,8 @@ def test_ok_when_everything_present(monkeypatch):
         "ffmpeg": True,
         "whisper": False,
         "gpu": False,
+        "vieneu": False,
+        "vieneu_note": "Chưa cài VieNeu (giả)",
         "missing": [],
     }
 
