@@ -53,7 +53,7 @@ export function StudioTopBar({
         ) : (
           <div className="flex min-w-0 items-center gap-2">
             {engineBadge && (
-              <span className="shrink-0 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
+              <span className="shrink-0 whitespace-nowrap rounded-pill bg-[var(--accent-soft)] px-2.5 py-1 text-[13px] font-semibold text-[var(--on-accent-soft)]">
                 {engineBadge}
               </span>
             )}

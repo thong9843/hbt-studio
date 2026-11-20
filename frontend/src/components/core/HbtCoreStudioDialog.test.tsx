@@ -78,7 +78,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     expect(screen.getByRole('region', { name: 'Xem trước trực tiếp 9:16' })).toBeVisible();
 
     // Chỉnh sửa trực tiếp lời thoại phân đoạn 1
-    const seg1Input = screen.getByLabelText('Lời thoại phân đoạn 1');
+    const seg1Input = screen.getByLabelText('Lời thoại');
     await user.clear(seg1Input);
     await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa.');
 
@@ -153,7 +153,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
 
     const promptBox = await screen.findByLabelText('Câu nhắc 1-Click Prompt');
     await user.type(promptBox, 'Làm video vì sao về Đấu trường La Mã');
-    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
+    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng' }));
 
     expect(
       await screen.findByText('Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)'),
@@ -205,7 +205,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
       screen.getByLabelText('Câu nhắc 1-Click Prompt'),
       'Làm video vì sao về Đấu trường La Mã',
     );
-    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
+    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng' }));
 
     await waitFor(() => expect(capturedBodies).toHaveLength(1));
     expect(capturedBodies[0]?.selectedModel).toBe('gemini-3.5-flash-lite');

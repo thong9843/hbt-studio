@@ -98,7 +98,6 @@ export function StudioShell({
                       : 'text-muted hover:bg-card/60 hover:text-text',
                   )}
                 >
-                  <span className="shrink-0">{tab.icon}</span>
                   <span className="min-w-0 truncate">{tab.label}</span>
                   {tab.badge !== undefined && (
                     <span

@@ -682,20 +682,24 @@ export function PostvQuickPage() {
     <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg">
       <StudioTopBar
         engineBadge="PostV"
-        exportProps={{
-          aspect: '9:16',
-          outroEnabled: outro,
-          onOutroChange: setOutro,
-          showWatermarkControl: true,
-          onExportFinal: () => handleStartAuto(false),
-          finalLabel: isSubmitting ? T.creatingBtn : T.createBtn,
-          disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
-          isSubmitting,
-          isRendering: Boolean(jobId && !isFinished),
-          progressPct,
-          progressStage: stageMessage || currentStage,
-          onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
-        }}
+        exportProps={
+          jobId
+            ? {
+                aspect: '9:16',
+                outroEnabled: outro,
+                onOutroChange: setOutro,
+                showWatermarkControl: true,
+                onExportFinal: () => handleStartAuto(false),
+                finalLabel: isSubmitting ? T.creatingBtn : T.createBtn,
+                disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
+                isSubmitting,
+                isRendering: Boolean(jobId && !isFinished),
+                progressPct,
+                progressStage: stageMessage || currentStage,
+                onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
+              }
+            : undefined
+        }
       />
       {/* Khu vực giữa chính */}
       <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
@@ -806,12 +810,12 @@ export function PostvQuickPage() {
                       autoWidth
                       value={selectedVoice || ''}
                       onChange={(val) => handleVoiceChange(val)}
-                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[155px]"
+                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[180px]"
                       options={
                         voiceList?.voices && voiceList.voices.length > 0
                           ? voiceList.voices.map((v) => ({
                               value: v.id,
-                              label: v.label || v.id,
+                              label: (v.label || v.id).split(/\s*[–—-]\s*/)[0].trim(),
                             }))
                           : [{ value: '', label: T.voice.defaultOption }]
                       }
@@ -864,7 +868,7 @@ export function PostvQuickPage() {
                           setSelectedMusicId(val);
                         }
                       }}
-                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[165px]"
+                      triggerClassName="border-0 bg-transparent min-h-[28px] min-w-[140px] max-w-[220px]"
                       options={[
                         ...(musicList && musicList.length > 0
                           ? musicList.map((m) => ({ value: m.id, label: m.title }))

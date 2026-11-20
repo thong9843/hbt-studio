@@ -1,12 +1,12 @@
 import { useCallback, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
+import { isOnActiveJobPage, useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useRemainingText } from '../../hooks/useRemaining';
 import { NewProjectProvider } from '../NewProjectDialog';
 import { RenderJobProvider } from '../RenderJobProvider';
 import { GlobalJobDock } from './GlobalJobDock';
-import { Sidebar, SIDEBAR_COLLAPSED_KEY, type RenderProgress } from './Sidebar';
+import { RenderCard, Sidebar, SIDEBAR_COLLAPSED_KEY, type RenderProgress } from './Sidebar';
 import { StudioWorkspaceProvider } from './StudioWorkspaceContext';
 
 /** Điểm gãy: từ 1280 px thanh trái mặc định mở rộng (224px), dưới đó mặc định thu gọn (64px). */
@@ -28,14 +28,31 @@ function readStoredSidebarCollapsed(): boolean | null {
   }
 }
 
+/** Cô lập đăng ký tiến độ % riêng cho thẻ tiến độ Sidebar để Sidebar re-render 0 lần khi % nhảy. */
+function LiveSidebarRenderCard({ mini }: { mini: boolean }) {
+  const status = useRenderJobStatus();
+  const progress = useRenderJobProgress();
+  const remaining = useRemainingText();
+  if (!status.running) return null;
+  return (
+    <RenderCard
+      mini={mini}
+      render={{
+        percent: progress.percent,
+        step: progress.step,
+        remaining: remaining ?? undefined,
+        onCancel: () => void status.cancel(),
+      }}
+    />
+  );
+}
+
 /**
  * Thanh trái nhận tiến độ từ job toàn cục và cho phép người dùng chủ động mở rộng / thu gọn
  * trên mọi trang (không còn ép khóa cứng ở các trang Studio).
  */
 function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderProgress | null }) {
   const status = useRenderJobStatus();
-  const progress = useRenderJobProgress();
-  const remaining = useRemainingText();
   const location = useLocation();
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(() =>
     readStoredSidebarCollapsed(),
@@ -55,25 +72,17 @@ function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderPro
     });
   }, [defaultMini]);
 
-  // Khi đang ở trang /stickv và StickV đang chạy, nút Xuất video trên Topbar đã hiện tiến độ -> không lặp lại ở Sidebar
-  const hideSidebarProgressForActiveStudio =
-    status.running && status.kind === 'stickv' && location.pathname.startsWith('/stickv');
-
-  const fromJob: RenderProgress | null =
-    status.running && !hideSidebarProgressForActiveStudio
-      ? {
-          percent: progress.percent,
-          step: progress.step,
-          remaining: remaining ?? undefined,
-          onCancel: () => void status.cancel(),
-        }
-      : null;
+  const showLiveCard =
+    render === undefined &&
+    status.running &&
+    !isOnActiveJobPage(location.pathname, status.kind, status.slug);
 
   return (
     <Sidebar
       mini={mini}
       onToggleMini={handleToggleMini}
-      render={render === undefined ? fromJob : render}
+      render={render}
+      renderSlot={showLiveCard ? <LiveSidebarRenderCard mini={mini} /> : undefined}
     />
   );
 }

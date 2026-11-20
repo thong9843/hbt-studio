@@ -135,7 +135,7 @@ describe('StickvPage', () => {
     // 2. 4 Tab Inspector rút gọn vừa khít cột 376px, không cắt chữ
     const tablist = screen.getByRole('tablist', { name: 'Nhóm công cụ Studio' });
     const tabs = within(tablist).getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, '').trim())).toEqual([
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual([
       'Kịch bản',
       'Hình ảnh',
       'Âm thanh',
@@ -191,6 +191,18 @@ describe('StickvPage', () => {
     // 6. Chuyển tỷ lệ 9:16 | 16:9 trên Topbar
     fireEvent.click(within(banner).getByRole('button', { name: '16:9' }));
     expect(screen.getByText(/1920 × 1080 \(16:9\)/)).toBeInTheDocument();
+
+    // 7. Sửa lời đọc Beat #1, thêm Beat #2 rồi quay lại Beat #1 không bị mất nội dung chưa lưu
+    fireEvent.click(within(tablist).getByRole('tab', { name: /Kịch bản/i }));
+    const narrationInput = screen.getByLabelText('Lời đọc beat');
+    fireEvent.change(narrationInput, { target: { value: 'Lời thoại mới chưa lưu.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm Beat' }));
+    expect(screen.getByLabelText('Lời đọc beat')).toHaveValue('');
+    const timeline = screen.getByRole('contentinfo', { name: /Dải phân cảnh/i });
+    expect(within(timeline).queryByText('explain')).toBeNull();
+    expect(within(timeline).getByText('· 2.5s')).toBeInTheDocument();
+    fireEvent.click(within(timeline).getByText('Lời thoại mới chưa lưu.'));
+    expect(screen.getByLabelText('Lời đọc beat')).toHaveValue('Lời thoại mới chưa lưu.');
   });
 
   it('hides GlobalJobDock while on /stickv, shows it when navigating away, and re-renders StickvPage 0 times during 1% -> 100% progress updates', async () => {
@@ -269,7 +281,12 @@ describe('StickvPage', () => {
     expect(stickvPageRenderCount).toBe(rendersBeforeProgressTicks);
 
     // Nút Xuất trên Topbar vẫn cập nhật mượt mà qua external store: "Đang xuất · 48%"
-    expect(screen.getByRole('button', { name: /Đang xuất · 48%/i })).toBeInTheDocument();
+    const banner = screen.getByRole('banner');
+    expect(within(banner).getByRole('button', { name: /Đang xuất · 48%/i })).toBeInTheDocument();
+    // Không có nút Hủy dựng thừa đứng ngoài Topbar; Hủy dựng nằm gọn trong ExportPopover
+    const popoverDialog = screen.getByRole('dialog', { name: 'Cấu hình & Xuất video' });
+    expect(within(popoverDialog).getByRole('button', { name: 'Hủy dựng' })).toBeInTheDocument();
+    expect(within(banner).getAllByRole('button', { name: 'Hủy dựng' })).toHaveLength(1);
     expect(screen.getByText(/Dựng khung hình/)).toBeInTheDocument();
     expect(screen.getByText(/Beat 2\/4/)).toBeInTheDocument();
 

@@ -60,6 +60,8 @@ export interface SidebarProps {
   onToggleMini?: () => void;
   /** Có job đang chạy thì hiện thẻ tiến độ; `null` thì ẩn. */
   render?: RenderProgress | null;
+  /** Widget tiến độ tự đăng ký external store (tránh re-render toàn Sidebar). */
+  renderSlot?: ReactNode;
 }
 
 /** Mục thanh trái: biểu tượng + chữ; ở chế độ thu chỉ còn biểu tượng (vẫn có tên đọc). */
@@ -251,7 +253,7 @@ export function RenderCard({ render, mini }: { render: RenderProgress; mini: boo
  * - Có nút Mở rộng (224px) / Thu gọn (64px) rõ ràng ngay ở đầu thanh, lưu vào localStorage, hoạt động trên mọi trang.
  * - Chân Sidebar phân biệt sắc nét icon Bánh răng (Cài đặt) và Mặt trăng / Mặt trời (Sáng/Tối).
  */
-export function Sidebar({ mini, onToggleMini, render }: SidebarProps) {
+export function Sidebar({ mini, onToggleMini, render, renderSlot }: SidebarProps) {
   const { open: openNew } = useNewProject();
   const [quickOpen, setQuickOpen] = useState(false);
   const openVideo = useMatch('/p/:slug/*');
@@ -297,14 +299,9 @@ export function Sidebar({ mini, onToggleMini, render }: SidebarProps) {
         >
           <img src="/brand/hbt-logo-mark.png" alt="" className="h-8 w-auto shrink-0 rounded-lg" />
           {!mini && (
-            <div className="min-w-0">
-              <span className="block truncate text-body font-extrabold tracking-tight">
-                {vi.appName}
-              </span>
-              <span className="block truncate text-[11px] font-semibold text-muted">
-                Creator Workstation
-              </span>
-            </div>
+            <span className="whitespace-nowrap text-[15px] font-bold tracking-tight text-text">
+              {vi.appName}
+            </span>
           )}
         </Link>
 
@@ -367,7 +364,7 @@ export function Sidebar({ mini, onToggleMini, render }: SidebarProps) {
         {showPostvProjectSlug && <OpenPostvProject slug={showPostvProjectSlug} mini={mini} />}
       </nav>
 
-      {render && <RenderCard render={render} mini={mini} />}
+      {render ? <RenderCard render={render} mini={mini} /> : renderSlot}
       <div className="space-y-1 border-t border-line py-2">
         <NavItem to="/settings" icon={<SettingsIcon />} label={vi.nav.settings} mini={mini} />
         <ThemeToggle mini={mini} />
