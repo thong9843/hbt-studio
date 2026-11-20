@@ -1131,7 +1131,7 @@ class JobManager:
         script: Any,
         *,
         voice_id: str | None = None,
-        fps: int = 30,
+        fps: int = 60,
         preview: bool = False,
         aspect_mode: str = "fill",
     ) -> Job:
@@ -1174,7 +1174,7 @@ class JobManager:
                 voice_id=voice_id,
                 library_dir=self.library_dir,
                 brand_dir=self.brand_dir,
-                fps=job.fps or 30,
+                fps=job.fps or 60,
                 preview=job.preview,
                 aspect_mode=getattr(job, "aspect_mode", None) or "fill",
                 job_id=job.id,

@@ -391,8 +391,10 @@ def build_core_scene_layers_safe(
         gc.collect()
 
 
+DEFAULT_CORE_FPS = 60
 KEN_BURNS_MODES: tuple[str, ...] = ("zoom_in", "zoom_out", "pan_right", "pan_left")
-XFADE_DURATION_S = 0.32
+XFADE_TRANSITIONS: tuple[str, ...] = ("fade", "smoothleft", "smoothright", "dissolve")
+XFADE_DURATION_S = 0.45
 
 
 def build_ken_burns_filter(
@@ -401,33 +403,35 @@ def build_ken_burns_filter(
     *,
     width: int = 1080,
     height: int = 1920,
-    fps: int = 30,
+    fps: int = DEFAULT_CORE_FPS,
     punch: bool = False,
 ) -> tuple[str, str]:
-    """Tạo bộ lọc `zoompan` luân phiên 4 chuyển động Ken Burns mượt (hoặc `punch` nhấn mạnh)."""
+    """Tạo bộ lọc `zoompan` 60fps với đường cong Cosine Ease-In-Out (`0.5 - 0.5*cos(PI*p)`)."""
     n = max(1, int(n_frames))
+    denom = max(1, n - 1)
+    ease = f"(0.5-0.5*cos(PI*on/{denom}))"
     if punch:
         mode = "punch"
-        z_expr = f"1.12-0.08*(on/{n})"
+        z_expr = f"1.10-0.07*{ease}"
         x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
     else:
         mode = KEN_BURNS_MODES[(max(1, segment_index1) - 1) % len(KEN_BURNS_MODES)]
         if mode == "zoom_in":
-            z_expr = f"1.00+0.08*(on/{n})"
+            z_expr = f"1.00+0.07*{ease}"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif mode == "zoom_out":
-            z_expr = f"1.08-0.08*(on/{n})"
+            z_expr = f"1.07-0.07*{ease}"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif mode == "pan_right":
-            z_expr = "1.08"
-            x_expr = f"(iw-iw/zoom)*(on/{n})"
+            z_expr = "1.06"
+            x_expr = f"iw/2-(iw/zoom/2)+(iw-iw/zoom)*({ease}-0.5)"
             y_expr = "ih/2-(ih/zoom/2)"
         else:
-            z_expr = "1.08"
-            x_expr = f"(iw-iw/zoom)*(1-on/{n})"
+            z_expr = "1.06"
+            x_expr = f"iw/2-(iw/zoom/2)+(iw-iw/zoom)*(0.5-{ease})"
             y_expr = "ih/2-(ih/zoom/2)"
 
     zp = f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={n}:s={width}x{height}:fps={fps}"
@@ -438,9 +442,10 @@ def build_xfade_filter(
     clip_durations_s: list[float],
     *,
     transition_s: float = XFADE_DURATION_S,
-    fps: int = 30,
+    fps: int = DEFAULT_CORE_FPS,
 ) -> tuple[str, str, float]:
-    """Nối danh sách clip bằng `xfade` luân phiên `fade` / `slideleft`.
+    """Nối danh sách clip bằng `xfade` mượt luân phiên (`fade`, `smoothleft`, `smoothright`,
+    `dissolve`, mặc định `0.45s` ở `60fps`, đồng bộ `format=yuv420p,settb=AVTB`).
 
     Trả về `(filter_complex, out_label, total_duration_s)`.
     """
@@ -448,19 +453,19 @@ def build_xfade_filter(
         raise ValueError("Cần ít nhất 1 clip để nối xfade")
     if len(clip_durations_s) == 1:
         return (
-            f"[0:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS[vbody]",
+            f"[0:v]fps={fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[vbody]",
             "[vbody]",
             float(clip_durations_s[0]),
         )
 
     parts: list[str] = [
-        f"[{i}:v]fps={fps},settb=AVTB,setpts=PTS-STARTPTS[c{i}]"
+        f"[{i}:v]fps={fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[c{i}]"
         for i in range(len(clip_durations_s))
     ]
     cur_label = "[c0]"
     acc_dur = float(clip_durations_s[0])
     for idx in range(1, len(clip_durations_s)):
-        tr = "fade" if idx % 2 == 1 else "slideleft"
+        tr = XFADE_TRANSITIONS[(idx - 1) % len(XFADE_TRANSITIONS)]
         eff_t = min(transition_s, max(0.05, clip_durations_s[idx] * 0.4), max(0.05, acc_dur * 0.4))
         offset = max(0.0, acc_dur - eff_t)
         next_label = "[vbody]" if idx == len(clip_durations_s) - 1 else f"[xf{idx}]"
@@ -513,15 +518,14 @@ def render_core_segment_clip(
     segment_index1: int,
     out_mp4: Path,
     *,
-    fps: int = 30,
+    fps: int = DEFAULT_CORE_FPS,
     width: int = 1080,
     height: int = 1920,
     punch: bool = False,
     aspect_mode: AspectMode = "fill",
 ) -> Path:
-    """Dựng video clip cho 1 phân đoạn với Ken Burns 4 kiểu động và kẹp chuẩn tài nguyên FFmpeg:
-    `-threads 2`, `-filter_threads 2`, `-preset veryfast`, `-crf 22`, `-max_muxing_queue_size 512`.
-    """
+    """Dựng video clip 60fps cho 1 phân đoạn: phóng ảnh tĩnh 4x (`4320x7680` lanczos) trước
+    `zoompan` để khử hoàn toàn jitter làm tròn pixel, kẹp chuẩn tài nguyên FFmpeg."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     dur = max(0.8, round(duration_s, 3))
     n_frames = max(1, int(round(dur * fps)))
@@ -534,19 +538,19 @@ def render_core_segment_clip(
         fps=fps,
         punch=punch,
     )
-    sw, sh = (640, 1138) if width <= 540 else (1280, 2276)
+    sw, sh = width * 4, height * 4
     aspect_fc = build_aspect_filter(
         aspect_mode,
-        width=sw,
-        height=sh,
+        width=width,
+        height=height,
         input_label="0:v",
         output_label="bg_norm",
     )
     fc = (
         f"{aspect_fc};"
-        f"[bg_norm]{zp_filter}[bg];"
+        f"[bg_norm]scale={sw}:{sh}:flags=lanczos,{zp_filter}[bg];"
         f"[1:v]scale={width}:{height},format=rgba,fade=t=in:st=0.10:d=0.30:alpha=1[card];"
-        f"[bg][card]overlay=0:0:shortest=1,format=yuv420p[v]"
+        f"[bg][card]overlay=0:0:shortest=1,fps={fps},format=yuv420p,settb=AVTB[v]"
     )
 
     tmp_mp4 = out_mp4.with_name(out_mp4.stem + ".tmp.mp4")
@@ -674,7 +678,7 @@ def render_hbt_core_auto(
     voice_id: str | None = None,
     library_dir: Path | None = None,
     brand_dir: Path | None = None,
-    fps: int = 30,
+    fps: int = DEFAULT_CORE_FPS,
     preview: bool = False,
     aspect_mode: AspectMode = "fill",
     job_id: str | None = None,
@@ -919,7 +923,7 @@ def _render_hbt_core_auto_impl(
 
     # 5. Vẽ thẻ kem & dựng clip từng phân đoạn (Pillow .close() + gc.collect() + FFmpeg kẹp luồng)
     width, height = (540, 960) if preview else (1080, 1920)
-    out_fps = 30 if preview else fps
+    out_fps = 30 if preview else (fps or DEFAULT_CORE_FPS)
     theme_dict = project.theme.model_dump()
     segment_clips: list[Path] = []
     total_segs = len(script.segments)

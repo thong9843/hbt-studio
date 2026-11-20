@@ -78,7 +78,7 @@ class CoreV1RenderBody(BaseModel):
     script: str | dict[str, Any]
     slug: str | None = None
     voice_id: str | None = None
-    fps: int = Field(default=30)
+    fps: int = Field(default=60)
     preview: bool = False
     aspect_mode: Literal["fill", "fit"] = "fill"
 
@@ -92,7 +92,7 @@ class CoreV2PromptBody(BaseModel):
     selectedModel: str | None = Field(default=None)
     slug: str | None = None
     voice_id: str | None = None
-    fps: int = Field(default=30)
+    fps: int = Field(default=60)
     preview: bool = False
     aspect_mode: Literal["fill", "fit"] = "fill"
     auto_render: bool = True

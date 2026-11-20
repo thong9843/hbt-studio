@@ -726,22 +726,68 @@ def test_core_voice_lead_gap_tail_padding_and_karaoke_phrases(tmp_path: Path) ->
 def test_core_ken_burns_4_modes_and_xfade_and_loudnorm_ducking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hbt.core import render as core_render
+    from PIL import Image
 
-    modes = [
-        core_render.build_ken_burns_filter(i, 90, width=1080, height=1920, fps=30)[0]
+    from hbt.core import render as core_render
+    from hbt.pipeline.ffutil import probe
+
+    kb_results = [
+        core_render.build_ken_burns_filter(i, 120, width=1080, height=1920, fps=60)
         for i in range(1, 5)
     ]
-    assert modes == ["zoom_in", "zoom_out", "pan_right", "pan_left"]
-    punch_mode, punch_zp = core_render.build_ken_burns_filter(1, 90, punch=True)
-    assert punch_mode == "punch"
-    assert "zoompan=" in punch_zp
+    assert [m for m, _ in kb_results] == ["zoom_in", "zoom_out", "pan_right", "pan_left"]
+    for _, zp in kb_results:
+        assert "cos(PI*on/119)" in zp
+        assert ":fps=60" in zp
 
-    fc, out_lbl, total_dur = core_render.build_xfade_filter([4.32, 5.32, 3.0], transition_s=0.32)
+    punch_mode, punch_zp = core_render.build_ken_burns_filter(1, 120, punch=True)
+    assert punch_mode == "punch"
+    assert "cos(PI*on/119)" in punch_zp
+    assert ":fps=60" in punch_zp
+
+    fc, out_lbl, total_dur = core_render.build_xfade_filter(
+        [4.45, 5.45, 3.45, 4.45, 3.0], transition_s=0.45, fps=60
+    )
     assert out_lbl == "[vbody]"
-    assert "transition=fade" in fc
-    assert "transition=slideleft" in fc
-    assert abs(total_dur - 12.0) < 0.01
+    assert "fps=60,format=yuv420p,settb=AVTB" in fc
+    for tr in ("fade", "smoothleft", "smoothright", "dissolve"):
+        assert f"transition={tr}:duration=0.450" in fc
+    assert abs(total_dur - 19.0) < 0.01
+
+    # Kiểm chứng filtergraph phóng 4x (4320:7680) trước zoompan 60fps
+    base_png = tmp_path / "base.png"
+    card_png = tmp_path / "card.png"
+    Image.new("RGB", (1080, 1920), (35, 65, 110)).save(base_png)
+    Image.new("RGBA", (1080, 1920), (0, 0, 0, 0)).save(card_png)
+
+    captured_clip_cmd: list[Any] = []
+    real_run_ffmpeg = core_render.run_ffmpeg
+
+    def _spy_ffmpeg(args: list[Any]) -> None:
+        captured_clip_cmd.extend(args)
+        real_run_ffmpeg(args)
+
+    monkeypatch.setattr(core_render, "run_ffmpeg", _spy_ffmpeg)
+    real_clip = tmp_path / "clip_60fps.mp4"
+    core_render.render_core_segment_clip(
+        base_png,
+        card_png,
+        0.8,
+        1,
+        real_clip,
+        fps=60,
+        width=1080,
+        height=1920,
+    )
+    clip_fc = str(captured_clip_cmd[captured_clip_cmd.index("-filter_complex") + 1])
+    assert "scale=4320:7680:flags=lanczos" in clip_fc
+    assert "cos(PI*on/" in clip_fc
+    assert ":fps=60" in clip_fc
+
+    # Kiểm chứng thật bằng ffprobe: tốc độ khung hình đầu ra đúng 60/1
+    info = probe(real_clip)
+    v_stream = next(s for s in info.get("streams", []) if s.get("codec_type") == "video")
+    assert v_stream.get("r_frame_rate") == "60/1"
 
     captured_cmd: list[Any] = []
     monkeypatch.setattr(core_render, "run_ffmpeg", lambda args: captured_cmd.extend(args))

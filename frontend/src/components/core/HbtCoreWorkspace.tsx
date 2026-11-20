@@ -616,6 +616,7 @@ export function HbtCoreWorkspace({
       const res = await api.renderHbtCoreV1({
         script: validScript,
         slug: resultSlug ?? initialSlug ?? null,
+        fps: 60,
       });
       if (res.success === false || res.ok === false || !res.slug) {
         const msg = res.message || res.detail || res.error || vi.export.failed;
@@ -1176,7 +1177,7 @@ export function HbtCoreWorkspace({
               {
                 id: 'render',
                 icon: '🎬',
-                title: 'Render video hoàn chỉnh (FFmpeg timeline 9:16)',
+                title: 'Render video hoàn chỉnh (60fps · 9:16)',
                 state: renderState,
                 logs: stepLogs.render,
               },
