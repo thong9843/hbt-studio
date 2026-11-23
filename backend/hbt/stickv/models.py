@@ -86,6 +86,7 @@ class StickvBeat(BaseModel):
     interaction: StickvInteraction = "none"
     camera_shot: StickvCameraShot = "wide_stage"
     prop_query: str | None = Field(default=None, max_length=120)
+    image_prompt: str | None = Field(default=None, max_length=320)
     facing: StickvFacing = "right"
     motion: StickvMotion = "bounce"
     sfx_tag: StickvSfxTag = "whoosh"

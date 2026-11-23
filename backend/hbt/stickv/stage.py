@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
+from hbt.stickv.llm import format_unwrapped_text, unwrap_board_text
 from hbt.stickv.models import (
     STICKV_ASPECT_SIZES,
     StickvAspect,
@@ -814,10 +815,14 @@ def _draw_smart_board_content(
     content_alpha: float = 1.0,
 ) -> tuple[int, int, int, int]:
     """Vẽ bảng minh họa 100% beat (gồm thẻ tự động `none` & thẻ Polaroid `pinned_photo`)."""
-    if beat.board_type == "pinned_photo":
-        return _draw_pinned_photo_card(
-            canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
-        )
+    eff_btype = beat.board_type
+    if eff_btype == "pinned_photo":
+        if prop_img is not None:
+            return _draw_pinned_photo_card(
+                canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
+            )
+        # Chốt chặn cuối: KHÔNG vẽ khung Polaroid rỗng -> chuyển mềm sang thẻ phân tích 2 tầng
+        eff_btype = "bullets"
     prog = max(0.0, min(1.0, float(progress)))
     x0, y0, x1, max_y1 = box
     bw = x1 - x0
@@ -831,13 +836,17 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
-    takeaway = str(getattr(beat, "takeaway", "") or data.get("takeaway") or "").strip()
+    takeaway = (
+        format_unwrapped_text(getattr(beat, "takeaway", "") or data.get("takeaway") or "")
+        .replace("**", "")
+        .strip()
+    )
     hl_fill = _highlight_color_for_card(pal)
 
     tmp_draw = ImageDraw.Draw(canvas)
     est_h = 104
-    eff_title = beat.board_title or (
-        _extract_highlight_keyword(beat.narration) if beat.board_type == "none" else ""
+    eff_title = format_unwrapped_text(beat.board_title or "") or (
+        _extract_highlight_keyword(beat.narration) if eff_btype == "none" else ""
     )
     if eff_title:
         th = _measure_rich_wrapped_height(
@@ -845,9 +854,13 @@ def _draw_smart_board_content(
         )
         est_h += max(58, th + 16)
 
-    if beat.board_type in ("none", "bullets", "list", "card"):
-        items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
-        if not items and beat.board_type == "none":
+    if eff_btype in ("none", "bullets", "list", "card"):
+        items = [
+            format_unwrapped_text(it)
+            for it in (data.get("items") or [])
+            if format_unwrapped_text(it)
+        ][:3]
+        if not items:
             clauses = [
                 c.strip()
                 for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
@@ -859,19 +872,27 @@ def _draw_smart_board_content(
                 tmp_draw, it, f_body, max_width_px=max(200, bw - 96), line_gap=8
             )
             est_h += max(56, ih) + 22
-    elif beat.board_type == "recap_card":
+    elif eff_btype == "recap_card":
         est_h += 300
-    elif beat.board_type in ("big_number", "counter_grow"):
+    elif eff_btype in ("big_number", "counter_grow"):
         est_h += 240
-    elif beat.board_type == "quote":
-        q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
+    elif eff_btype == "quote":
+        q_txt = format_unwrapped_text(data.get("quote") or data.get("text") or beat.narration or "")
         qh = _measure_rich_wrapped_height(
             tmp_draw, q_txt, f_body, max_width_px=max(200, bw - 110), line_gap=12
         )
         est_h += max(140, qh + 64)
-    elif beat.board_type == "comparison":
-        left_items = [str(x) for x in (data.get("left_items") or []) if str(x).strip()][:4]
-        right_items = [str(x) for x in (data.get("right_items") or []) if str(x).strip()][:4]
+    elif eff_btype == "comparison":
+        left_items = [
+            format_unwrapped_text(x)
+            for x in (data.get("left_items") or [])
+            if format_unwrapped_text(x)
+        ][:4]
+        right_items = [
+            format_unwrapped_text(x)
+            for x in (data.get("right_items") or [])
+            if format_unwrapped_text(x)
+        ][:4]
         col_w_px = max(140, (bw - 120) // 2)
         lh = sum(
             _measure_rich_wrapped_height(
@@ -888,26 +909,30 @@ def _draw_smart_board_content(
             for x in right_items
         )
         est_h += 96 + max(110, lh, rh)
-    elif beat.board_type == "bar_compare":
+    elif eff_btype == "bar_compare":
         bars = (data.get("values") or data.get("bars") or [])[:4]
         est_h += max(230, len(bars) * 82 + 44)
-    elif beat.board_type == "flow_steps":
-        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
-            :4
-        ]
+    elif eff_btype == "flow_steps":
+        steps = [
+            format_unwrapped_text(s)
+            for s in (data.get("steps") or data.get("items") or [])
+            if format_unwrapped_text(s)
+        ][:4]
         for stp in steps:
             sh = _measure_rich_wrapped_height(
                 tmp_draw, stp, f_sub, max_width_px=max(180, bw - 160), line_gap=6, max_lines=2
             )
             est_h += max(78, sh + 34) + 14
-    elif beat.board_type == "timeline_era":
+    elif eff_btype == "timeline_era":
         ev_count = max(2, len((data.get("events") or data.get("items") or [])[:4]))
         est_h += ev_count * 88 + 24
-    elif beat.board_type == "location_map":
+    elif eff_btype == "location_map":
         est_h += 260
-    elif beat.board_type == "myth_vs_fact":
-        m_txt = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
-        f_txt = str(data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế")
+    elif eff_btype == "myth_vs_fact":
+        m_txt = format_unwrapped_text(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
+        f_txt = format_unwrapped_text(
+            data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế"
+        )
         mh = _measure_rich_wrapped_height(
             tmp_draw, m_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
         )
@@ -917,10 +942,10 @@ def _draw_smart_board_content(
         est_h += max(108, mh + 64) + max(108, fh + 64) + 28
 
     if takeaway:
-        est_h += 92
+        est_h += 116
 
     # Co giãn thông minh theo mật độ thực tế (đủ đầy đặn nhưng không dư khoảng trống > 25%)
-    min_ratio = 0.68 if beat.board_type in ("myth_vs_fact", "comparison") else 0.84
+    min_ratio = 0.68 if eff_btype in ("myth_vs_fact", "comparison") else 0.84
     min_card_h = max(280, int(round((max_y1 - y0) * min_ratio)))
     card_h = min(max_y1 - y0, max(min_card_h, est_h + 36))
     y1 = y0 + card_h
@@ -938,7 +963,7 @@ def _draw_smart_board_content(
             width=3,
         )
 
-        badge_txt = BOARD_BADGES.get(beat.board_type, "PHÂN TÍCH")
+        badge_txt = BOARD_BADGES.get(eff_btype, "PHÂN TÍCH")
         bb = shell_draw.textbbox((0, 0), badge_txt, font=f_badge)
         badge_w = (bb[2] - bb[0]) + 32
         shell_draw.rounded_rectangle(
@@ -948,10 +973,13 @@ def _draw_smart_board_content(
         )
         shell_draw.text((x0 + 48, y0 + 30), badge_txt, font=f_badge, fill=(255, 255, 255, 255))
 
+        raw_chap = (beat.chapter_title or "").strip()
+        if total_chapters <= 1:
+            raw_chap = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_chap).strip()
         chap_txt = (
             f"CHƯƠNG {beat.chapter}"
             if total_chapters > 1
-            else (beat.chapter_title or "KIẾN THỨC")[:18].upper()
+            else (raw_chap or "KIẾN THỨC")[:18].upper()
         )
         cbb = shell_draw.textbbox((0, 0), chap_txt, font=f_badge)
         cw_pill = (cbb[2] - cbb[0]) + 28
@@ -969,7 +997,7 @@ def _draw_smart_board_content(
 
         # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính (auto-fit không tràn chiều cao)
         title_max_h = max(72, int(round((y1 - y0) * 0.24)))
-        if beat.board_type in ("none", "bullets", "list", "card", "recap_card"):
+        if eff_btype in ("none", "bullets", "list", "card", "recap_card"):
             icon_sz = 56
             _draw_topic_circle_badge(inner_layer, (x0 + 62, cur_y + 28), icon_sz, pal, prop_img)
             title_x = x0 + 106
@@ -1007,11 +1035,15 @@ def _draw_smart_board_content(
             )
             cur_y += 10
 
-        content_bottom = y1 - (96 if takeaway else 28)
+        content_bottom = y1 - (112 if takeaway else 28)
 
-        if beat.board_type in ("none", "bullets", "list", "card"):
+        if eff_btype in ("none", "bullets", "list", "card"):
             # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & auto-fit vừa khít `content_bottom`
-            items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
+            items = [
+                format_unwrapped_text(it)
+                for it in (data.get("items") or [])
+                if format_unwrapped_text(it)
+            ][:3]
             if not items:
                 clauses = [
                     c.strip()
@@ -1050,12 +1082,12 @@ def _draw_smart_board_content(
                 )
                 cur_y = min(content_bottom, end_y + item_gap)
 
-        elif beat.board_type == "recap_card":
+        elif eff_btype == "recap_card":
             # 3 thẻ ngang đúc kết kiến thức cốt lõi (1 · 2 · 3)
             recap_items = [
-                str(it)
+                format_unwrapped_text(it)
                 for it in (data.get("items") or data.get("bullets") or [])
-                if str(it).strip()
+                if format_unwrapped_text(it)
             ][:3]
             if not recap_items:
                 recap_items = [
@@ -1094,8 +1126,9 @@ def _draw_smart_board_content(
                 )
                 cur_y = cy1 + 12
 
-        elif beat.board_type == "quote":
-            q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
+        elif eff_btype == "quote":
+            q_raw = data.get("quote") or data.get("text") or beat.narration or ""
+            q_txt = format_unwrapped_text(q_raw)
             draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
             _draw_rich_autofit_text(
                 draw,
@@ -1111,7 +1144,7 @@ def _draw_smart_board_content(
                 line_gap=12,
             )
 
-        elif beat.board_type == "counter_grow":
+        elif eff_btype == "counter_grow":
             raw_target = data.get("target", data.get("value", 100))
             try:
                 target_num = float(
@@ -1148,7 +1181,7 @@ def _draw_smart_board_content(
                     line_gap=8,
                 )
 
-        elif beat.board_type == "bar_compare":
+        elif eff_btype == "bar_compare":
             raw_bars = data.get("values") or data.get("bars") or []
             bars: list[tuple[str, float]] = []
             for idx, entry in enumerate(raw_bars[:4]):
@@ -1196,7 +1229,7 @@ def _draw_smart_board_content(
                 )
                 cur_y += 78
 
-        elif beat.board_type == "big_number":
+        elif eff_btype == "big_number":
             val = strip_rich_markup(str(data.get("value") or "100%"))
             lbl = str(data.get("label") or "")
             sub = str(data.get("sub") or "")
@@ -1234,7 +1267,7 @@ def _draw_smart_board_content(
                     line_gap=8,
                 )
 
-        elif beat.board_type == "comparison":
+        elif eff_btype == "comparison":
             mid_x = (x0 + x1) // 2
             col_gap = 18
             lx0, lx1 = x0 + 32, mid_x - col_gap
@@ -1258,8 +1291,8 @@ def _draw_smart_board_content(
             draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
             draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
 
-            left_t = str(data.get("left_title") or "Trước")
-            right_t = str(data.get("right_title") or "Sau")
+            left_t = format_unwrapped_text(data.get("left_title") or "Trước")
+            right_t = format_unwrapped_text(data.get("right_title") or "Sau")
             draw_rich_text_line(
                 draw,
                 left_t,
@@ -1280,8 +1313,16 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            left_list = [str(x) for x in (data.get("left_items") or [])[:4] if str(x).strip()]
-            right_list = [str(x) for x in (data.get("right_items") or [])[:4] if str(x).strip()]
+            left_list = [
+                format_unwrapped_text(x)
+                for x in (data.get("left_items") or [])[:4]
+                if format_unwrapped_text(x)
+            ]
+            right_list = [
+                format_unwrapped_text(x)
+                for x in (data.get("right_items") or [])[:4]
+                if format_unwrapped_text(x)
+            ]
             l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
             r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
             for item in left_list:
@@ -1323,9 +1364,11 @@ def _draw_smart_board_content(
                     + 6
                 )
 
-        elif beat.board_type == "flow_steps":
+        elif eff_btype == "flow_steps":
             steps = [
-                str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()
+                format_unwrapped_text(s)
+                for s in (data.get("steps") or data.get("items") or [])
+                if format_unwrapped_text(s)
             ][:4]
             active_count = max(1, int(math.ceil(prog * max(1, len(steps)))))
             n_steps = max(1, len(steps))
@@ -1381,21 +1424,21 @@ def _draw_smart_board_content(
                 )
                 cur_y = cy1 + step_gap
 
-        elif beat.board_type == "timeline_era":
+        elif eff_btype == "timeline_era":
             raw_ev = data.get("events") or data.get("items") or []
             events: list[tuple[str, str]] = []
             for idx, ev in enumerate(raw_ev[:4]):
                 if isinstance(ev, dict):
+                    raw_yr = ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"
+                    raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
                     events.append(
                         (
-                            strip_rich_markup(
-                                str(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}")
-                            ),
-                            str(ev.get("title") or ev.get("label") or ev.get("text") or ""),
+                            strip_rich_markup(format_unwrapped_text(raw_yr)),
+                            format_unwrapped_text(raw_tt),
                         )
                     )
                 else:
-                    s = str(ev)
+                    s = format_unwrapped_text(ev)
                     if ":" in s:
                         yr, tt = s.split(":", 1)
                         events.append((strip_rich_markup(yr).strip(), tt.strip()))
@@ -1444,7 +1487,7 @@ def _draw_smart_board_content(
                 )
                 cur_y += ev_slot_h
 
-        elif beat.board_type == "location_map":
+        elif eff_btype == "location_map":
             loc_name = str(
                 data.get("location") or data.get("place") or eff_title or "Di tích cổ đại"
             )
@@ -1491,15 +1534,23 @@ def _draw_smart_board_content(
                 max_width_px=max(140, (map_x1 - map_x0) - 40),
             )
 
-        elif beat.board_type == "myth_vs_fact":
-            myth_title = str(data.get("myth_title") or "").strip()
-            fact_title = str(data.get("fact_title") or "").strip()
-            myth_raw = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến").strip()
-            fact_raw = str(
+        elif eff_btype == "myth_vs_fact":
+            myth_title = (
+                format_unwrapped_text(data.get("myth_title") or "").replace("**", "").strip()
+            )
+            fact_title = (
+                format_unwrapped_text(data.get("fact_title") or "").replace("**", "").strip()
+            )
+            m_t, m_b = unwrap_board_text(
+                data.get("myth") or data.get("left") or "Lầm tưởng phổ biến"
+            )
+            f_t, f_b = unwrap_board_text(
                 data.get("fact") or data.get("right") or beat.narration or "Sự thật khoa học"
-            ).strip()
-            myth_full = f"**{myth_title}:** {myth_raw}" if myth_title else myth_raw
-            fact_full = f"**{fact_title}:** {fact_raw}" if fact_title else fact_raw
+            )
+            eff_mt = myth_title or m_t
+            eff_ft = fact_title or f_t
+            myth_full = f"**{eff_mt}:** {m_b}" if (eff_mt and m_b) else (eff_mt or m_b)
+            fact_full = f"**{eff_ft}:** {f_b}" if (eff_ft and f_b) else (eff_ft or f_b)
 
             text_w = max(200, bw - 116)
             m_text_h = _measure_rich_wrapped_height(
@@ -1572,22 +1623,27 @@ def _draw_smart_board_content(
             )
 
         if takeaway:
-            ty0 = y1 - 80
+            ty0 = y1 - 100
             draw.rounded_rectangle(
-                (x0 + 28, ty0, x1 - 28, y1 - 18),
+                (x0 + 28, ty0, x1 - 28, y1 - 16),
                 radius=16,
                 fill=pal["takeaway_bg"],
                 outline=pal["amber"],
                 width=2,
             )
-            draw_rich_text_line(
+            _draw_rich_autofit_text(
                 draw,
                 f"**CHỐT LẠI:** {takeaway}",
-                (x0 + 46, ty0 + 16),
-                f_sub,
+                (x0 + 44, ty0 + 12),
+                FONT_MEDIUM,
+                24,
+                18,
                 pal["pill_text"],
                 hl_fill,
-                max_width_px=max(180, bw - 92),
+                max_width_px=max(180, bw - 88),
+                max_height_px=64,
+                line_gap=5,
+                max_lines=2,
             )
 
         if inner_layer is not canvas:
@@ -1631,8 +1687,9 @@ def _composite_transitioned_board(
     cam_board_alpha: float = 1.0,
     clamp_bounds: tuple[int, int, int, int] | None = None,
     anchor_top_center: tuple[float, float] | None = None,
+    prev_board_img: Image.Image | None = None,
 ) -> None:
-    """Chuyển tiếp thẻ không hard-cut + tách lớp camera kẹp biên an toàn (không cắt chữ)."""
+    """Chuyển tiếp thẻ bằng Cross-Fade 0.28s Cosine Ease-In-Out (0% chớp trống, 0% cắt cứng)."""
     if cam_board_alpha <= 0.015:
         return
 
@@ -1669,25 +1726,27 @@ def _composite_transitioned_board(
         )
         return
 
-    enter_t = 0.35 if beat.board_type == "pinned_photo" else 0.30
-    exit_t = 0.35 if beat.board_type == "pinned_photo" else 0.22
+    enter_t = 0.28
     scale = float(cam_board_scale)
     dy_px = 0.0
     alpha = float(cam_board_alpha)
-    if not same_title:
-        if t_sec < enter_t:
-            u = _ease_out_cubic(t_sec / enter_t)
-            scale *= 0.96 + 0.04 * u
-            dy_px = 18.0 * (1.0 - u)
-            alpha *= u
-        elif (
-            has_next_diff_title
-            and duration_sec > (enter_t + exit_t)
-            and t_sec > (duration_sec - exit_t)
-        ):
-            u = _ease_in_cubic((t_sec - (duration_sec - exit_t)) / exit_t)
-            dy_px = -14.0 * u
-            alpha *= 1.0 - u
+    if not same_title and t_sec < enter_t:
+        u = _cosine_ease_in_out(t_sec / enter_t)
+        if prev_board_img is not None and prev_board_img.size == frame_rgba.size:
+            prev_alpha = max(0.0, min(1.0, (1.0 - u) * float(cam_board_alpha)))
+            if prev_alpha > 0.015:
+                fading_prev = prev_board_img.copy()
+                try:
+                    pa_band = fading_prev.getchannel("A").point(
+                        lambda p: int(round(p * prev_alpha))
+                    )
+                    fading_prev.putalpha(pa_band)
+                    frame_rgba.alpha_composite(fading_prev)
+                finally:
+                    fading_prev.close()
+        scale *= 0.98 + 0.02 * u
+        dy_px = 12.0 * (1.0 - u)
+        alpha *= u
 
     if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
         _draw_smart_board_content(
@@ -1856,12 +1915,17 @@ def draw_karaoke_strip(
     if not word_timings:
         return
 
+    for wd, _, _ in word_timings:
+        ws = str(wd or "")
+        if "{" in ws or "}" in ws or "'disp'" in ws or '"disp"' in ws:
+            raise ValueError(f"Từ Karaoke không hợp lệ (lọt chuỗi dict thô): {ws[:80]}")
+
     filtered_timings = word_timings
     micro_gap_hold = False
     if spoken_segments:
         active_seg: tuple[float, float, str] | None = None
         for st, et, txt in spoken_segments:
-            if st <= t_sec <= et:
+            if (st - 0.035) <= t_sec <= (et + 0.015):
                 active_seg = (st, et, txt)
                 break
         if active_seg is None:
@@ -1878,7 +1942,7 @@ def draw_karaoke_strip(
             seg_words = [
                 (wd, wst, wet)
                 for (wd, wst, wet) in word_timings
-                if wst >= (seg_st - 0.01) and wet <= (seg_et + 0.01)
+                if wst >= (seg_st - 0.04) and wet <= (seg_et + 0.02)
             ]
             if seg_words:
                 filtered_timings = seg_words
@@ -1902,6 +1966,9 @@ def draw_karaoke_strip(
             radius=18,
             fill=(15, 23, 42, 130),
         )
+        return
+
+    if t_sec > filtered_timings[-1][2] + 0.04:
         return
 
     active_idx = 0
@@ -1952,6 +2019,12 @@ def draw_karaoke_strip(
 def _ease_in_out(t: float) -> float:
     t = max(0.0, min(1.0, t))
     return t * t * (3.0 - 2.0 * t)
+
+
+def _cosine_ease_in_out(t: float) -> float:
+    """Đường cong Cosine Ease-In-Out êm ái cho chuyển góc máy & dịch chuyển nhân vật."""
+    u = max(0.0, min(1.0, float(t)))
+    return 0.5 * (1.0 - math.cos(math.pi * u))
 
 
 @dataclass(frozen=True)
@@ -2040,12 +2113,12 @@ def _target_layered_shot_params(
                 1.0,
                 clamp,
                 (w * 0.5, 118.0 * sy),
-                0.82,
-                0.36 * w,
+                0.92,
+                0.48 * w,
                 0.91 * h,
             )
         if shot_key == "closeup_react":
-            return base_box, 1.0, 0.0, None, None, 1.22, 0.50 * w, 0.93 * h
+            return base_box, 1.0, 0.0, None, None, 1.06, 0.50 * w, 0.92 * h
         return (
             base_box,
             1.0,
@@ -2114,9 +2187,9 @@ def compute_layered_camera_layout(
     h: int,
     t_sec: float,
     prev_stage_state: BeatStageState | None = None,
-    transition_dur: float = 0.55,
+    transition_dur: float = 0.70,
 ) -> LayeredCameraLayout:
-    """Tính tách lớp camera kẹp biên an toàn (mờ bảng mượt 0.30s ở closeup_react)."""
+    """Tính tách lớp camera kẹp biên an toàn (Cosine Ease-In-Out 0.70s chống giật cảnh)."""
     shot_key = (camera_shot or "wide_stage").strip().lower()
     box, t_bscale, t_balpha, clamp, anchor, t_cscale, t_cx, t_fy = _target_layered_shot_params(
         shot_key, aspect=aspect, w=w, h=h
@@ -2139,7 +2212,7 @@ def compute_layered_camera_layout(
     )
     p_balpha = float(getattr(prev_stage_state, "board_alpha", 1.0))
 
-    u = _ease_in_out(min(1.0, t_sec / transition_dur))
+    u = _cosine_ease_in_out(min(1.0, t_sec / transition_dur))
     # Riêng độ mờ bảng khi closeup_react (9:16) hạ về 0.0 mượt trong 0.30s đầu
     alpha_u = (
         _ease_out_cubic(min(1.0, t_sec / 0.30))
@@ -2182,17 +2255,23 @@ def _draw_compact_topic_pill(
     aspect: StickvAspect,
     narration: str = "",
     takeaway: str = "",
+    total_chapters: int = 1,
 ) -> None:
     """Vẽ huy hiệu Chương + dải Quote/Từ khóa nổi bật (2–6 từ) ở vùng trên khi `closeup_react`."""
     w, h = frame_rgba.size
     sy = h / (1920.0 if aspect == "9:16" else 1080.0)
     sx = w / (1080.0 if aspect == "9:16" else 1920.0)
-    raw_lbl = strip_rich_markup(chapter_title or f"Chương {chapter}").strip()
-    label = (
-        f"CHƯƠNG {chapter} · {raw_lbl[:28].upper()}"
-        if raw_lbl and f"{chapter}" not in raw_lbl
-        else raw_lbl[:34].upper()
-    )
+    raw_lbl = strip_rich_markup(chapter_title or "").strip()
+    if total_chapters <= 1:
+        raw_lbl = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_lbl).strip()
+        label = (raw_lbl or "ĐIỂM NHẤN CHÍNH")[:34].upper()
+    else:
+        raw_lbl = raw_lbl or f"Chương {chapter}"
+        label = (
+            f"CHƯƠNG {chapter} · {raw_lbl[:28].upper()}"
+            if raw_lbl and f"{chapter}" not in raw_lbl
+            else raw_lbl[:34].upper()
+        )
     f_pill = _load_font(FONT_EXTRABOLD, max(12, int(round(22 * sy))))
     d = ImageDraw.Draw(frame_rgba)
     bb = d.textbbox((0, 0), label, font=f_pill)
@@ -2328,19 +2407,19 @@ def compute_beat_character_target(
         if char_h > 0:
             scale = (base_target_h / char_h) * cam.char_scale
     elif interaction == "point_chart":
-        target_h = int(h * 0.38)
+        target_h = int(h * 0.42)
         if char_h > target_h and char_h > 0:
             scale = (target_h / char_h) * cam.char_scale
         eff_w = char_w * scale
         eff_h = char_h * scale
-        bx = w * 0.24 - eff_w * 0.5
+        bx = w * 0.48 - eff_w * 0.5
         by = cam.char_foot_y - eff_h
         return bx, by, scale
 
     eff_w = char_w * scale
     eff_h = char_h * scale
     if interaction == "hold_prop" and aspect == "9:16":
-        cx = w * (0.34 if cam.char_scale <= 1.0 else 0.50)
+        cx = w * 0.48
     elif interaction == "versus_split":
         cx = w * 0.5
     else:
@@ -2426,6 +2505,40 @@ def _composite_prop_overlay(
     resized.close()
 
 
+_ANIMATED_BOARD_TYPES: frozenset[str] = frozenset(
+    {"counter_grow", "bar_compare", "location_map", "flow_steps", "timeline_era"}
+)
+
+
+def _is_dark_stage_bg(
+    pal: dict[str, tuple[int, int, int, int]],
+    theme: StickvTheme,
+    domain: str,
+) -> bool:
+    if theme == "dark" or normalize_domain(domain) in (
+        "physics_science",
+        "cosmos_mystery",
+        "psychology_story",
+    ):
+        return True
+    r, g, b = pal["bg"][:3]
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 110.0
+
+
+def _apply_dark_bg_rim_light(char_rgba: Image.Image) -> Image.Image:
+    """Thêm viền sáng mảnh ~2px (#CBD5E1, 55% alpha) quanh silhouette trên nền tối."""
+    alpha = char_rgba.getchannel("A")
+    dilated = alpha.filter(ImageFilter.MaxFilter(5))
+    rim_a = dilated.point(lambda p: int(round(p * 0.55)))
+    rim = Image.new("RGBA", char_rgba.size, (203, 213, 225, 0))
+    rim.putalpha(rim_a)
+    rim.alpha_composite(char_rgba)
+    dilated.close()
+    rim_a.close()
+    alpha.close()
+    return rim
+
+
 def render_animated_beat_frame(
     *,
     bg_img: Image.Image,
@@ -2442,12 +2555,14 @@ def render_animated_beat_frame(
     draw_board: bool = False,
     extra_dy: float = 0.0,
     prev_stage_state: BeatStageState | None = None,
-    tween_dur: float = 0.40,
+    tween_dur: float = 0.55,
     spoken_segments: list[tuple[float, float, str]] | None = None,
     is_puppet: bool = False,
     total_chapters: int = 1,
     has_next_diff_title: bool = True,
     show_chapter_banner: bool = False,
+    board_cache: dict[str, Image.Image] | None = None,
+    prev_board_img: Image.Image | None = None,
 ) -> Image.Image:
     """Tổng hợp 1 frame động: backdrop + camera tách lớp + thẻ 2 tầng + puppet + karaoke."""
     frame = bg_img.copy()
@@ -2455,6 +2570,14 @@ def render_animated_beat_frame(
     pal = resolve_stage_palette(domain, theme)
     interaction = getattr(beat, "interaction", "none") or "none"
     camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
+    # Giữ nguyên thẻ recap_card ổn định ở beat CTA cuối khi beat liền trước đã là recap_card
+    if (
+        beat.board_type == "recap_card"
+        and camera_shot == "closeup_react"
+        and prev_stage_state is not None
+        and getattr(prev_stage_state, "last_board_type", "") == "recap_card"
+    ):
+        camera_shot = "wide_stage"
     cam_layout = compute_layered_camera_layout(
         camera_shot,
         aspect=aspect,
@@ -2470,25 +2593,55 @@ def render_animated_beat_frame(
             _draw_versus_split_layer(frame_rgba, beat, pal, aspect=aspect)
 
         if draw_board:
-            anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
-            prog = min(1.0, max(0.0, t_sec / anim_dur))
-            _composite_transitioned_board(
-                frame_rgba,
-                beat,
-                cam_layout.board_box,
-                pal,
-                t_sec=t_sec,
-                duration_sec=duration_sec,
-                progress=prog,
-                prop_img=prop_img,
-                prev_stage_state=prev_stage_state,
-                total_chapters=total_chapters,
-                has_next_diff_title=has_next_diff_title,
-                cam_board_scale=cam_layout.board_scale,
-                cam_board_alpha=cam_layout.board_alpha,
-                clamp_bounds=cam_layout.clamp_bounds,
-                anchor_top_center=cam_layout.anchor_top_center,
+            can_prebake = (
+                board_cache is not None
+                and beat.board_type not in _ANIMATED_BOARD_TYPES
+                and t_sec >= 0.72
             )
+            if can_prebake and board_cache is not None:
+                baked = board_cache.get("static_board")
+                if baked is None:
+                    baked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    _composite_transitioned_board(
+                        baked,
+                        beat,
+                        cam_layout.board_box,
+                        pal,
+                        t_sec=t_sec,
+                        duration_sec=duration_sec,
+                        progress=1.0,
+                        prop_img=prop_img,
+                        prev_stage_state=prev_stage_state,
+                        total_chapters=total_chapters,
+                        has_next_diff_title=has_next_diff_title,
+                        cam_board_scale=cam_layout.board_scale,
+                        cam_board_alpha=cam_layout.board_alpha,
+                        clamp_bounds=cam_layout.clamp_bounds,
+                        anchor_top_center=cam_layout.anchor_top_center,
+                    )
+                    board_cache["static_board"] = baked
+                frame_rgba.alpha_composite(baked)
+            else:
+                anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
+                prog = min(1.0, max(0.0, t_sec / anim_dur))
+                _composite_transitioned_board(
+                    frame_rgba,
+                    beat,
+                    cam_layout.board_box,
+                    pal,
+                    t_sec=t_sec,
+                    duration_sec=duration_sec,
+                    progress=prog,
+                    prop_img=prop_img,
+                    prev_stage_state=prev_stage_state,
+                    total_chapters=total_chapters,
+                    has_next_diff_title=has_next_diff_title,
+                    cam_board_scale=cam_layout.board_scale,
+                    cam_board_alpha=cam_layout.board_alpha,
+                    clamp_bounds=cam_layout.clamp_bounds,
+                    anchor_top_center=cam_layout.anchor_top_center,
+                    prev_board_img=prev_board_img,
+                )
 
         if aspect == "9:16" and camera_shot == "closeup_react" and cam_layout.board_alpha < 0.85:
             _draw_compact_topic_pill(
@@ -2501,6 +2654,7 @@ def render_animated_beat_frame(
                 narration=beat.narration,
                 takeaway=getattr(beat, "takeaway", "")
                 or str((beat.board_data or {}).get("takeaway") or ""),
+                total_chapters=total_chapters,
             )
 
         if interaction == "hold_prop" and prop_img is not None and cam_layout.board_alpha > 0.1:
@@ -2517,7 +2671,7 @@ def render_animated_beat_frame(
                 camera_shot=camera_shot,
             )
             if prev_stage_state is not None and tween_dur > 0 and t_sec < tween_dur:
-                p = _ease_in_out(t_sec / tween_dur)
+                p = _cosine_ease_in_out(t_sec / tween_dur)
                 base_x = prev_stage_state.x + (target_x - prev_stage_state.x) * p
                 base_y = prev_stage_state.y + (target_y - prev_stage_state.y) * p
                 cur_scale = prev_stage_state.scale + (target_scale - prev_stage_state.scale) * p
@@ -2554,11 +2708,18 @@ def render_animated_beat_frame(
             sy1 = int(round(base_y)) + eff_char.height + 6
             shadow_draw.ellipse((sx0, sy0, sx1, sy1), fill=(15, 23, 42, 42))
 
-            frame_rgba.alpha_composite(eff_char, (px, py))
+            if _is_dark_stage_bg(pal, theme, domain):
+                rimmed = _apply_dark_bg_rim_light(eff_char)
+                try:
+                    frame_rgba.alpha_composite(rimmed, (px, py))
+                finally:
+                    rimmed.close()
+            else:
+                frame_rgba.alpha_composite(eff_char, (px, py))
             if eff_char is not char_img:
                 eff_char.close()
 
-        if show_chapter_banner and getattr(beat, "chapter_title", ""):
+        if total_chapters > 1 and show_chapter_banner and getattr(beat, "chapter_title", ""):
             _draw_chapter_banner(
                 frame_rgba,
                 chapter=beat.chapter,

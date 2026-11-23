@@ -219,6 +219,7 @@ export function StickvPage() {
     Array<{ id: string; title: string; url: string; thumb_url: string; source: string }>
   >([]);
   const [refPhotoSearching, setRefPhotoSearching] = useState(false);
+  const [aiPhotoGenerating, setAiPhotoGenerating] = useState(false);
 
   // Trạng thái đóng/mở Accordion tạo kịch bản AI: tự động thu gọn khi dự án đã có >= 1 beat
   const [creatorManualOpen, setCreatorManualOpen] = useState<boolean | null>(null);
@@ -873,6 +874,40 @@ export function StickvPage() {
             }}
           >
             {refPhotoSearching ? vi.stickvJob.swappingPhotoBtn : vi.stickvJob.swapPhotoBtn}
+          </Button>
+          <Button
+            size="sm"
+            tone="soft"
+            busy={aiPhotoGenerating}
+            onClick={async () => {
+              if (!draft) return;
+              const prompt = (
+                activeBeat.image_prompt ||
+                activeBeat.prop_query ||
+                activeBeat.board_title ||
+                activeBeat.narration ||
+                ''
+              ).trim();
+              if (!prompt) return;
+              setAiPhotoGenerating(true);
+              try {
+                const res = await stickvApi.generateBeatPhoto(draft.slug, activeBeat.id, {
+                  prompt,
+                  caption: activeBeat.board_title ?? '',
+                });
+                setDraft(res.project);
+                setRefPhotoResults([]);
+                toast.info(vi.stickvJob.photoGeneratedToast);
+              } catch (err) {
+                toast.error(err);
+              } finally {
+                setAiPhotoGenerating(false);
+              }
+            }}
+          >
+            {aiPhotoGenerating
+              ? vi.stickvJob.generatingAiPhotoBtn
+              : vi.stickvJob.generateAiPhotoBtn}
           </Button>
           {propPreviewMap[activeBeat.id] && (
             <img

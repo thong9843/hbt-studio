@@ -15,13 +15,18 @@ from hbt.cinema.hardware import detect_hardware
 from hbt.cinema.schema import BeatSpec, TimelineSpec
 from hbt.stickv.audio import (
     GLOBAL_LEAD_SILENCE_S,
+    KARAOKE_LEAD_OFFSET_S,
+    MASTER_SAMPLE_RATE,
     align_beat_karaoke,
+    align_stickv_master_karaoke,
+    build_master_voice_wav,
     clean_tts_wav,
     load_beat_spoken_segments,
     mix_stickv_audio,
     sanitize_tts_text,
     split_beat_sentences,
     synth_stickv_beats_audio,
+    verify_zero_drift_timeline,
 )
 from hbt.stickv.models import StickvBeat
 from hbt.stickv.render import allocate_beat_frame_counts
@@ -252,3 +257,104 @@ def test_mix_stickv_audio_and_cinema_audio_48khz_with_empty_library(tmp_path: Pa
     with wave.open(str(out_cinema), "rb") as wf:
         assert wf.getframerate() == 48000
         assert wf.getnchannels() == 2
+
+
+def test_master_voice_clock_zero_drift_whisper_cache_and_lead_offset(tmp_path: Path) -> None:
+    """Audio-First Master Clock 48kHz: drift <= 0.03s, cache stickv_timing.json & bù -25ms."""
+    from unittest.mock import patch
+
+    from hbt.pipeline.whisper import WhisperConfig
+
+    sr = 24000
+    w1 = _write_pcm_wav(
+        tmp_path / "b001.wav",
+        np.concatenate([_zeros(180, sr=sr), _tone(820, sr=sr), _zeros(240, sr=sr)]),
+        sr=sr,
+    )
+    w2 = _write_pcm_wav(
+        tmp_path / "b002.wav",
+        np.concatenate([_zeros(40, sr=sr), _tone(900, freq=360.0, sr=sr), _zeros(240, sr=sr)]),
+        sr=sr,
+    )
+    beats = [
+        StickvBeat(id="b001", narration="Cầu thủ chạy rất nhanh."),
+        StickvBeat(id="b002", narration="Sợi cơ bền bỉ hơn nhiều."),
+    ]
+    master_wav, timeline, total_dur = build_master_voice_wav(
+        [(w1, 1.24), (w2, 1.18)],
+        tmp_path / "build" / "stickv_voice_full.wav",
+    )
+    assert master_wav.is_file()
+    with wave.open(str(master_wav), "rb") as wf:
+        assert wf.getframerate() == MASTER_SAMPLE_RATE
+        assert wf.getnchannels() == 1
+        pcm_dur = wf.getnframes() / float(MASTER_SAMPLE_RATE)
+    assert abs(pcm_dur - total_dur) <= 1e-4
+    assert len(timeline) == 2
+    assert timeline[0].beat_start_s == 0.0
+    assert abs(timeline[1].beat_start_s - timeline[0].beat_end_s) <= 1e-5
+
+    # Mock whisper_alignment trả về mốc tuyệt đối toàn cục -> kiểm tra lead -25ms & cache hit
+    call_count = 0
+
+    def fake_whisper(tokens, beat_idxs, wav, cfg, log):
+        nonlocal call_count
+        call_count += 1
+        times = []
+        for idx_t, b_i in enumerate(beat_idxs):
+            en = timeline[b_i]
+            base = en.beat_start_s + 0.20 + (idx_t % 5) * 0.14
+            times.append((base, min(en.beat_end_s, base + 0.12)))
+        return SimpleNamespace(times=times, aligner="whisper", info={"match_ratio": 0.96})
+
+    cache_file = tmp_path / "build" / "stickv_timing.json"
+    cfg = WhisperConfig(model="small", device="cpu", timeout=60)
+    with patch("hbt.stickv.audio.whisper_alignment", side_effect=fake_whisper):
+        timings1, meta1 = align_stickv_master_karaoke(
+            beats, timeline, master_wav, cache_file=cache_file, whisper_cfg=cfg
+        )
+        timings2, meta2 = align_stickv_master_karaoke(
+            beats, timeline, master_wav, cache_file=cache_file, whisper_cfg=cfg
+        )
+
+    assert call_count == 1
+    assert meta1["method"] == "whisper"
+    assert meta1["cache_hit"] is False
+    assert meta2["cache_hit"] is True
+    assert timings1 == timings2
+    # Từ hiển thị phải là chữ tiếng Việt sạch (KHÔNG bao giờ in raw dict {'disp': ...})
+    for b_rows in timings1.values():
+        for w_txt, _, _ in b_rows:
+            assert "{" not in w_txt and "'disp'" not in w_txt and len(w_txt) <= 30
+    # Từ đầu Beat 0 có mốc Whisper 0.20s -> bù KARAOKE_LEAD_OFFSET_S (-0.025s) thành 0.175s
+    assert timings1[0][0][1] == pytest.approx(0.20 + KARAOKE_LEAD_OFFSET_S, abs=0.002)
+
+    fps = 60
+    planned_dur = sum(allocate_beat_frame_counts([e.duration_s for e in timeline], fps)) / fps
+    drift = verify_zero_drift_timeline(timeline, planned_dur, total_dur, timings1)
+    assert drift <= 0.03
+
+    # Kiểm tra cắt tạp âm micro-burst 120ms (<= 140ms) sau >= 220ms im lặng cuối câu VieNeu
+    burst_sig = np.concatenate(
+        [
+            _zeros(80, sr=sr),
+            _tone(420, freq=260.0, amp=0.5, sr=sr),
+            _zeros(250, sr=sr),
+            _tone(120, freq=480.0, amp=0.35, sr=sr),
+            _zeros(60, sr=sr),
+        ]
+    )
+    b_src = _write_pcm_wav(tmp_path / "burst120.wav", burst_sig, sr=sr)
+    b_stats = clean_tts_wav(b_src, tmp_path / "burst120_clean.wav")
+    assert b_stats["ghosts_removed"] == 1
+
+    # Kiểm tra không nuốt lỗi Whisper: fallback_reason được ghi rõ vào metadata
+    _, meta_err = align_stickv_master_karaoke(
+        beats,
+        timeline,
+        master_wav,
+        whisper_cfg=None,
+        whisper_init_error="test-init-error",
+    )
+    assert meta_err["method"] == "rms20_vn"
+    assert meta_err["whisper_fallback_reason"] == "test-init-error"

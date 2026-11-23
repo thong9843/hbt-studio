@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import shutil
 import subprocess
@@ -12,9 +13,13 @@ from typing import Any
 
 from PIL import Image
 
+from hbt.app_settings import AppSettingsStore
+from hbt.config import load_settings
+from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import build_outro_audio
 from hbt.pipeline.cancel import CancelToken
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, run_ffmpeg
+from hbt.pipeline.whisper import WhisperConfig
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_ENCODE_CLAMP,
@@ -32,12 +37,16 @@ from hbt.stickv.animator import StickmanAnimator
 from hbt.stickv.audio import (
     GLOBAL_LEAD_SILENCE_S,
     LEAD_IN_SILENCE_S,
+    BeatTimelineEntry,
     align_beat_karaoke,
+    align_stickv_master_karaoke,
+    build_master_voice_wav,
     compute_pause_after,
     extract_wav_rms_envelope,
     load_beat_spoken_segments,
     mix_stickv_audio,
     synth_stickv_beats_audio,
+    verify_zero_drift_timeline,
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
@@ -51,6 +60,8 @@ from hbt.stickv.stage import (
     render_animated_beat_frame,
     render_beat_layers,
 )
+
+logger = logging.getLogger(__name__)
 
 # Chuẩn mã hóa tương thích tuyệt đối với Windows Media Player & mọi thiết bị di động
 STICKV_MP4_COMPAT_FLAGS: tuple[str, ...] = (
@@ -507,6 +518,10 @@ def _stream_chunk_frames_to_ffmpeg(
     prev_stage_state: BeatStageState | None,
     backdrop_renderer: BackdropRenderer,
     on_progress: Callable[[float, str], None] | None = None,
+    master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
+    beat_timeline: list[BeatTimelineEntry] | None = None,
+    ai_photo_budget: list[int] | None = None,
+    board_carry: dict[str, Image.Image | None] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -578,7 +593,16 @@ def _stream_chunk_frames_to_ffmpeg(
                         f"(Chương {beat.chapter})..."
                     ),
                 )
-            target_total_frames = max(cur_frame_offset + 1, int(round((cur_audio_t + dur_b) * fps)))
+            tl_entry = (
+                beat_timeline[g_idx]
+                if (beat_timeline is not None and 0 <= g_idx < len(beat_timeline))
+                else None
+            )
+            eff_dur_b = tl_entry.duration_s if tl_entry is not None else dur_b
+            target_end_s = (
+                tl_entry.beat_end_s if tl_entry is not None else (cur_audio_t + eff_dur_b)
+            )
+            target_total_frames = max(cur_frame_offset + 1, int(round(target_end_s * fps)))
             n_frames_beat = target_total_frames - cur_frame_offset
 
             bg_png, char_png = render_beat_layers(
@@ -603,24 +627,35 @@ def _stream_chunk_frames_to_ffmpeg(
                 else int(h * (0.48 if aspect == "9:16" else 0.64))
             )
             interaction = getattr(beat, "interaction", "none") or "none"
-            rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
+            rms_env = extract_wav_rms_envelope(wav_p, fps, eff_dur_b)
             pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
             lead_in = GLOBAL_LEAD_SILENCE_S if g_idx == 0 else (LEAD_IN_SILENCE_S * pause_scale)
             spoken_segs = load_beat_spoken_segments(wav_p)
-            speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+            speech_start = (
+                max(0.0, tl_entry.speech_start_s - tl_entry.beat_start_s)
+                if tl_entry is not None
+                else (spoken_segs[0][0] if spoken_segs else lead_in)
+            )
             speech_end = (
-                min(dur_b, spoken_segs[-1][1])
-                if spoken_segs
-                else max(lead_in + 0.3, dur_b - pause_after)
+                min(eff_dur_b, max(speech_start, tl_entry.speech_end_s - tl_entry.beat_start_s))
+                if tl_entry is not None
+                else (
+                    min(eff_dur_b, spoken_segs[-1][1])
+                    if spoken_segs
+                    else max(lead_in + 0.3, eff_dur_b - pause_after)
+                )
             )
-            word_timings = align_beat_karaoke(
-                beat.narration,
-                wav_p,
-                dur_b,
-                lead_in_s=speech_start,
-                pause_after_s=pause_after,
-                spoken_segments=spoken_segs,
-            )
+            if master_word_timings is not None and g_idx in master_word_timings:
+                word_timings = master_word_timings[g_idx]
+            else:
+                word_timings = align_beat_karaoke(
+                    beat.narration,
+                    wav_p,
+                    eff_dur_b,
+                    lead_in_s=speech_start,
+                    pause_after_s=pause_after,
+                    spoken_segments=spoken_segs,
+                )
 
             camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
             eff_pose = beat.pose
@@ -637,7 +672,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 anim_oneshot=getattr(beat, "anim_oneshot", None),
                 anim_loop=getattr(beat, "anim_loop", None),
                 facing=beat.facing,
-                duration_sec=dur_b,
+                duration_sec=eff_dur_b,
                 speech_start=speech_start,
                 speech_end=speech_end,
                 fps=fps,
@@ -652,27 +687,59 @@ def _stream_chunk_frames_to_ffmpeg(
                 wav_path=wav_p,
                 prev_pose_state=cur_state.pose_state if cur_state is not None else None,
                 global_t_offset=cur_frame_offset / max(1, fps),
+                board_type=beat.board_type,
             )
 
             prop_img: Image.Image | None = None
             raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
-            wants_card_icon = beat.board_type in (
-                "none",
-                "bullets",
-                "list",
-                "card",
-                "recap_card",
-            )
-            if not raw_prop_q and wants_card_icon:
-                raw_prop_q = infer_auto_prop_query(beat.narration)
-            if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
-                try:
-                    prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
-                    if prop_path.is_file():
-                        with Image.open(prop_path) as raw_prop:
-                            prop_img = raw_prop.convert("RGBA")
-                except Exception:
-                    prop_img = None
+            if beat.board_type == "pinned_photo":
+                photo_path: Path | None = None
+                if beat.media_path:
+                    cand_m = project_dir / beat.media_path
+                    if cand_m.is_file() and cand_m.suffix.lower() in {
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".webp",
+                    }:
+                        photo_path = cand_m
+                if photo_path is None:
+                    ref_q = raw_prop_q or beat.board_title or infer_auto_prop_query(beat.narration)
+                    try:
+                        cand_p, photo_src = resolve_reference_image(
+                            ref_q,
+                            library_dir,
+                            workspace_dir=project_dir.parent.parent,
+                            accent_color=accent,
+                            illustration_prompt=(getattr(beat, "image_prompt", None) or "").strip(),
+                            allow_ai_fallback=True,
+                            ai_budget=ai_photo_budget,
+                        )
+                        if photo_src != "iconify" and cand_p.is_file():
+                            photo_path = cand_p
+                    except Exception:
+                        photo_path = None
+                if photo_path is not None and photo_path.is_file():
+                    with Image.open(photo_path) as raw_photo:
+                        prop_img = raw_photo.convert("RGBA")
+            else:
+                wants_card_icon = beat.board_type in (
+                    "none",
+                    "bullets",
+                    "list",
+                    "card",
+                    "recap_card",
+                )
+                if not raw_prop_q and wants_card_icon:
+                    raw_prop_q = infer_auto_prop_query(beat.narration)
+                if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
+                    try:
+                        prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
+                        if prop_path.is_file():
+                            with Image.open(prop_path) as raw_prop:
+                                prop_img = raw_prop.convert("RGBA")
+                    except Exception:
+                        prop_img = None
 
             next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
             has_next_diff_title = next_beat is None or (
@@ -681,12 +748,16 @@ def _stream_chunk_frames_to_ffmpeg(
                 or not (beat.board_title or "").strip()
             )
             prev_ch = cur_state.last_chapter if cur_state is not None else None
-            show_chapter_banner = bool((getattr(beat, "chapter_title", "") or "").strip()) and (
-                g_idx == 0 or beat.chapter != prev_ch
+            show_chapter_banner = (
+                total_chapters > 1
+                and bool((getattr(beat, "chapter_title", "") or "").strip())
+                and (g_idx == 0 or beat.chapter != prev_ch)
             )
 
             last_char_size: tuple[int, int] | None = None
             last_cam = (1.0, 0.5, 0.5)
+            beat_board_cache: dict[str, Image.Image] = {}
+            prev_board_img = board_carry.get("img") if board_carry is not None else None
             try:
                 for f_idx in range(n_frames_beat):
                     if cancel is not None and f_idx % 8 == 0:
@@ -695,7 +766,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     global_t = (cur_frame_offset + f_idx) / fps
                     mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
                     if interaction == "versus_split":
-                        animator.facing = "left" if t_sec < dur_b * 0.5 else "right"
+                        animator.facing = "left" if t_sec < eff_dur_b * 0.5 else "right"
                     bg_frame = backdrop_renderer.render_frame(global_t)
                     anim_char, motion = animator.frame_at(f_idx, t_sec)
                     if anim_char is not None:
@@ -712,7 +783,7 @@ def _stream_chunk_frames_to_ffmpeg(
                             prop_img=prop_img,
                             domain=norm_domain,
                             theme=theme,
-                            duration_sec=dur_b,
+                            duration_sec=eff_dur_b,
                             draw_board=True,
                             extra_dy=motion.dy if motion.used_fallback else 0.0,
                             prev_stage_state=cur_state,
@@ -721,6 +792,8 @@ def _stream_chunk_frames_to_ffmpeg(
                             total_chapters=total_chapters,
                             has_next_diff_title=has_next_diff_title,
                             show_chapter_banner=show_chapter_banner,
+                            board_cache=beat_board_cache,
+                            prev_board_img=prev_board_img,
                         )
                     finally:
                         bg_frame.close()
@@ -774,7 +847,40 @@ def _stream_chunk_frames_to_ffmpeg(
                     last_board_type=beat.board_type,
                     last_chapter=beat.chapter,
                 )
+                if board_carry is not None:
+                    old_carried = board_carry.get("img")
+                    next_board = beat_board_cache.pop("static_board", None)
+                    if next_board is None and end_layout.board_alpha > 0.05:
+                        from hbt.stickv.stage import (
+                            _composite_transitioned_board,
+                            resolve_stage_palette,
+                        )
+
+                        next_board = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                        _composite_transitioned_board(
+                            next_board,
+                            beat,
+                            end_layout.board_box,
+                            resolve_stage_palette(norm_domain, theme),
+                            t_sec=max(1.0, end_t_b),
+                            duration_sec=eff_dur_b,
+                            progress=1.0,
+                            prop_img=prop_img,
+                            prev_stage_state=cur_state,
+                            total_chapters=total_chapters,
+                            has_next_diff_title=has_next_diff_title,
+                            cam_board_scale=end_layout.board_scale,
+                            cam_board_alpha=end_layout.board_alpha,
+                            clamp_bounds=end_layout.clamp_bounds,
+                            anchor_top_center=end_layout.anchor_top_center,
+                        )
+                    board_carry["img"] = next_board
+                    if old_carried is not None and old_carried is not next_board:
+                        old_carried.close()
             finally:
+                for cached_im in beat_board_cache.values():
+                    cached_im.close()
+                beat_board_cache.clear()
                 animator.close()
                 if char_img is not None:
                     char_img.close()
@@ -785,7 +891,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     char_png.unlink(missing_ok=True)
 
             cur_frame_offset += n_frames_beat
-            cur_audio_t += dur_b
+            cur_audio_t = target_end_s
             gc.collect()
 
         if proc.stdin is not None:
@@ -907,6 +1013,7 @@ def render_stickv(
     preview: bool = False,
     cancel: CancelToken | None = None,
     on_progress: Callable[[float, str], None] | None = None,
+    whisper_cfg: WhisperConfig | None = None,
 ) -> dict[str, Any]:
     """Dựng video StickV hoàn chỉnh theo từng chương và dọn sạch tệp tạm sau khi nối."""
     if not project.beats:
@@ -947,6 +1054,65 @@ def render_stickv(
             cancel=cancel,
         )
 
+        emit(24.0, "Đang chốt trục âm thanh chủ (48kHz) & căn mốc Karaoke Whisper...")
+        check_cancel()
+        build_dir = project_dir / "build"
+        voice_full_wav, beat_timeline, voice_full_dur = build_master_voice_wav(
+            beat_wavs, build_dir / "stickv_voice_full.wav"
+        )
+        anchored_beat_wavs: list[tuple[Path, float]] = []
+        for beat, (wav_p, _), entry in zip(beats, beat_wavs, beat_timeline, strict=True):
+            beat.duration_sec = round(entry.duration_s, 4)
+            anchored_beat_wavs.append((wav_p, entry.duration_s))
+        beat_wavs = anchored_beat_wavs
+
+        eff_whisper_cfg = whisper_cfg
+        whisper_init_err = ""
+        if eff_whisper_cfg is None and not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                app_cfg = AppSettingsStore(project_dir.parent.parent).load()
+                s = load_settings()
+                eff_whisper_cfg = WhisperConfig(
+                    model=_whisper.effective_model(app_cfg.whisper_model, s.whisper_model),
+                    device=s.whisper_device,
+                    timeout=app_cfg.whisper_timeout_seconds or _whisper.DEFAULT_TIMEOUT,
+                    models_dir=s.models_dir,
+                )
+            except Exception as exc:
+                whisper_init_err = f"Khởi tạo AppSettings/Settings lỗi ({exc}); thử mặc định auto"
+                logger.warning("StickV WhisperConfig init warning: %s", exc)
+                try:
+                    s_fb = load_settings()
+                    eff_whisper_cfg = WhisperConfig(
+                        model=_whisper.effective_model("auto", s_fb.whisper_model),
+                        device=s_fb.whisper_device,
+                        timeout=_whisper.DEFAULT_TIMEOUT,
+                        models_dir=s_fb.models_dir,
+                    )
+                    whisper_init_err = ""
+                except Exception as exc2:
+                    whisper_init_err = f"Không tạo được WhisperConfig: {exc2}"
+                    logger.warning("StickV WhisperConfig fallback failed: %s", exc2)
+                    eff_whisper_cfg = None
+
+        master_word_timings, _align_meta = align_stickv_master_karaoke(
+            beats,
+            beat_timeline,
+            voice_full_wav,
+            cache_file=build_dir / "stickv_timing.json",
+            whisper_cfg=eff_whisper_cfg,
+            whisper_init_error=whisper_init_err,
+            cancel=cancel,
+            beat_wavs=beat_wavs,
+        )
+        planned_frames = sum(allocate_beat_frame_counts([e.duration_s for e in beat_timeline], fps))
+        verify_zero_drift_timeline(
+            beat_timeline,
+            planned_frames / float(fps),
+            voice_full_dur,
+            master_word_timings,
+        )
+
         emit(28.0, "Đang trộn SFX & nhạc nền (-14 LUFS)...")
         check_cancel()
         mixed_wav = chunks_dir / "mixed.wav"
@@ -959,6 +1125,8 @@ def render_stickv(
             out_wav=mixed_wav,
             music_mood=project.music_mood,
             workspace_dir=project_dir.parent.parent,
+            voice_full_wav=voice_full_wav,
+            beat_timeline=beat_timeline,
         )
 
         chunks = group_beats_into_chunks(
@@ -975,6 +1143,8 @@ def render_stickv(
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
+        ai_photo_budget = [4]
+        board_carry: dict[str, Image.Image | None] = {"img": None}
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
@@ -1058,11 +1228,19 @@ def render_stickv(
                             prev_stage_state=prev_stage_state,
                             backdrop_renderer=shared_backdrop,
                             on_progress=on_progress,
+                            master_word_timings=master_word_timings,
+                            beat_timeline=beat_timeline,
+                            ai_photo_budget=ai_photo_budget,
+                            board_carry=board_carry,
                         )
                     )
                 chunk_clips.append(chunk_mp4)
                 gc.collect()
         finally:
+            carried = board_carry.get("img")
+            if carried is not None:
+                carried.close()
+                board_carry["img"] = None
             shared_backdrop.close()
 
         emit(85.0, "Đang nối chương & gắn watermark HBT...")

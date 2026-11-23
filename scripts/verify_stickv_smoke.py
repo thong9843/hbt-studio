@@ -103,18 +103,19 @@ def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, float, 
             camera_shot=getattr(b, "camera_shot", "wide_stage") or "wide_stage",
         )
         if prev_x is not None:
-            # Trong tween 0.40s @ 60fps = 24 frame -> bước nhảy tối đa mỗi frame (ease-in-out peak ~1.5x)
-            per_frame = abs(tx - prev_x) * (1.5 / 24.0)
+            # Trong tween Cosine Ease-In-Out 0.70s @ 60fps = 42 frame -> tốc độ đỉnh (pi/2)/42
+            per_frame = abs(tx - prev_x) * (math.pi * 0.5 / 42.0)
             max_jump_px = max(max_jump_px, per_frame)
         prev_x = tx
 
-    # Đo góc gập gối giải phẫu khi nhún 0% vs 3% chiều cao chân
+    # Đo góc gập gối trung thực: actual_knee_bend_deg = 180° - interior_angle(hip, knee, ankle)
+    # Khi đứng thẳng (dip=0, khoảng cách hông-cổ chân = 0.98*(L1+L2)) góc gập phải gần 0° (không ảo)
     leg_h = 180.0
-    l1, l2 = leg_h * 0.51, leg_h * 0.51
+    l1, l2 = leg_h * 0.50, leg_h * 0.50
     hip_stand = (100.0, 100.0)
-    ankle = (100.0, 100.0 + leg_h * 0.92)
+    ankle = (100.0, 100.0 + (l1 + l2) * 0.98)
     bends: list[float] = []
-    for dip in (0.0, 4.0, 10.0, 18.0):
+    for dip in (0.0, 6.0, 14.0):
         hip = (hip_stand[0], hip_stand[1] + dip)
         knee, foot = solve_2bone_ik(hip, ankle, l1, l2, bend_dir=1)
         v1 = (hip[0] - knee[0], hip[1] - knee[1])
@@ -122,8 +123,9 @@ def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, float, 
         n1 = max(1e-6, math.hypot(*v1))
         n2 = max(1e-6, math.hypot(*v2))
         cos_t = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)))
-        bend_deg = 180.0 - math.degrees(math.acos(cos_t))
-        bends.append(round(bend_deg, 2))
+        interior_deg = math.degrees(math.acos(cos_t))
+        actual_bend_deg = round(max(0.0, 180.0 - interior_deg), 2)
+        bends.append(actual_bend_deg)
     return round(max_jump_px, 2), min(bends), max(bends)
 
 
@@ -193,6 +195,21 @@ def inspect_project(
     if require_whisper and align_source != "whisper":
         failures.append(f"INV-02 FAIL: alignment_source={align_source} != whisper")
 
+    # INV-04: Kiểm tra sạch 100% chữ Karaoke trong stickv_timing.json (cấm lọt dict/chuỗi dài > 30)
+    corrupted_words: list[str] = []
+    sample_words: list[str] = []
+    for b_idx_str in sorted(timing_beats.keys(), key=lambda x: int(x) if x.isdigit() else 9999):
+        for row in timing_beats.get(b_idx_str) or []:
+            w = str(row[0]) if row else ""
+            if len(sample_words) < 5 and w:
+                sample_words.append(w)
+            if "{" in w or "}" in w or "'disp'" in w or '"disp"' in w or "'syl'" in w or len(w) > 30:
+                corrupted_words.append(w[:60])
+    if corrupted_words:
+        failures.append(
+            f"INV-04 FAIL: phát hiện {len(corrupted_words)} từ Karaoke bẩn/dict: {corrupted_words[:2]}"
+        )
+
     print(f"=== STICKV SMOKE VERIFIER: {project_dir.name} ===")
     print(f"MP4 file         : {mp4_path.name if mp4_path.is_file() else 'MISSING'}")
     print(f"video_stream_dur : {video_dur:.4f}s")
@@ -201,13 +218,14 @@ def inspect_project(
     print(f"voice_full_dur   : {voice_full_dur:.4f}s (outro={outro_enabled})")
     print(f"fps / pix_fmt    : {fps} fps / {pix_fmt} / audio {audio_sr}Hz")
     print(f"alignment_source : {align_source}")
+    print(f"sample_words[0:5]: {sample_words}")
     if fallback_reason:
         print(f"fallback_reason  : {fallback_reason}")
 
     if check_render:
         max_jump_px, min_bend, max_bend = _measure_render_motion(proj)
         print(f"max_char_jump_px : {max_jump_px} px/frame (ngưỡng <= 25.0)")
-        print(f"knee_bend_deg    : min={min_bend}° / max={max_bend}° (ngưỡng max > 2.0°)")
+        print(f"actual_knee_bend : min={min_bend}° / max={max_bend}° (ngưỡng max > 2.0°)")
         if max_jump_px > 25.0:
             failures.append(f"INV-03 FAIL: max_char_jump_px={max_jump_px} > 25")
         if max_bend <= 2.0:
