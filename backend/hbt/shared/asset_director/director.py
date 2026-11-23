@@ -101,7 +101,7 @@ class AssetDirector:
             sfx_q = str(m.get("sfx_query") or "").strip() or None
             raw_int = m.get("intensity")
             if raw_int is None:
-                # Tương thích ngược: tin nhắn legacy chỉ có `sticker` (chưa chấm điểm) -> xem như mức 4
+                # Tương thích ngược: tin legacy chỉ có `sticker` -> xem như mức 4
                 intensity = 4 if (meme_q or sticker or sfx_q) else 2
             else:
                 try:
@@ -110,7 +110,9 @@ class AssetDirector:
                     intensity = 2
             beat_role = m.get("beat_role")
             if not beat_role:
-                beat_role = "setup" if idx == 0 else ("reaction" if (meme_q or sticker) else "build")
+                beat_role = (
+                    "setup" if idx == 0 else ("reaction" if (meme_q or sticker) else "build")
+                )
 
             if meme_q or sticker:
                 raw_visual_count += 1
@@ -135,7 +137,11 @@ class AssetDirector:
         kept_visual = set(self.governor.select_visual_beats(cues))
         kept_sfx = set(self.governor.select_sfx_beats(cues))
 
-        video_seq = self.memory.advance_video_seq() if (kept_visual or kept_sfx) else self.memory.current_video_seq()
+        video_seq = (
+            self.memory.advance_video_seq()
+            if (kept_visual or kept_sfx)
+            else self.memory.current_video_seq()
+        )
         budget = FetchBudget()
         used_visual_ids: set[str] = set()
         used_sfx_ids: set[str] = set()

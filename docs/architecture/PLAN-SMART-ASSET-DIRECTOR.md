@@ -22,13 +22,14 @@
 
 3. **Kiểm thử cuối đợt (chạy duy nhất 1 lần qua Git Bash):**
    `"C:\Program Files\Git\bin\bash.exe" -lc 'set -o pipefail && npm run lint && npm run test:fast && npm run build'`
-   *(Không chạy slow tests / Playwright e2e; chủ dự án nghiệm thu trực tiếp trên giao diện).*
+   _(Không chạy slow tests / Playwright e2e; chủ dự án nghiệm thu trực tiếp trên giao diện)._
 
 ---
 
 ## 1. KIẾN TRÚC LÕI DÙNG CHUNG — `backend/hbt/shared/asset_director/`
 
 Tái sử dụng trực tiếp các cổng API miễn phí đã có trong `backend/hbt/shared/online_sources/` (kiểm tra đúng tên hàm thực tế trên đĩa trước khi gọi):
+
 - `stickers_online.py` — **Giphy Stickers** (ưu tiên #1 cho reaction/sticker vì phản hồi nhanh)
 - `greenmeme.py` — **GreenScreenMemes** (dùng cho meme phông xanh `.mp4` tại cao trào mạnh)
 - `tuna_sfx.py` — **Voicemod Tuna** (ưu tiên #1 cho SFX meme, chuẩn hóa `-16 LUFS`)
@@ -37,7 +38,7 @@ Tái sử dụng trực tiếp các cổng API miễn phí đã có trong `backe
 
 ### 1.1. Cấu trúc module
 
-~~~text
+```text
 backend/hbt/shared/asset_director/
 |-- __init__.py       # Export AssetDirector, PacingPolicy, DirectorConfig, direct_chat_assets
 |-- models.py         # Pydantic/dataclass: BeatCue, PacingPolicy, AssetCandidate, ResolvedAsset, DirectorReport
@@ -45,11 +46,12 @@ backend/hbt/shared/asset_director/
 |-- freshness.py      # Bộ nhớ độ mới & chống trùng lặp (workspace/asset_usage.json)
 |-- resolver.py       # Luồng Local -> Auto-Fetch Online -> Tải vào library/ -> Hậu xử lý & ghi index.json
 `-- director.py       # Facade điều phối tổng (direct_assets + reroll_asset cho nút "Đổi cái khác")
-~~~
+```
 
 ### 1.2. Lớp 1 — Chấm điểm ngữ cảnh từ AI (Prompt Contract)
 
 Thay vì để Gemini rải `sticker_tag` / `meme` tự do sau mỗi câu thoại, mọi động cơ dùng `AssetDirector` áp cùng chuẩn tín hiệu cho từng câu/beat:
+
 - `beat_role`: `"setup" | "build" | "twist" | "punchline" | "reaction"`
 - `intensity`: số nguyên từ `1` đến `5`:
   - `1 - 2`: dẫn chuyện / hỏi đáp bình thường
@@ -64,18 +66,19 @@ Thay vì để Gemini rải `sticker_tag` / `meme` tự do sau mỗi câu thoạ
 
 Ngay cả khi LLM trả về thừa `meme_query` / `sticker_tag` / `sfx_query`, `PacingGovernor` hậu kiểm bằng luật cứng Python không thể vượt rào:
 
-| Tham số khóa (`PacingPolicy`) | Cấu hình chuẩn cho `chatting` | Chuẩn bị sẵn cho `postv` / `stickv` / `core` (Đợt 1B) |
-| :--- | :--- | :--- |
-| `max_visual_memes` | **Tối đa `2 - 3` / video** (trần cứng `min(3, max(1, floor(total_msgs * 0.18)))`) | PostV: tối đa 3 · Core/StickV: tối đa 2 |
-| `min_gap_beats` | **Tối thiểu `4` tin nhắn** giữa 2 meme/sticker | Tối thiểu `3` cảnh/đoạn |
-| `min_gap_seconds` | **Tối thiểu `8.0s`** giữa 2 meme/sticker | Tối thiểu `8.0s` |
-| `forbid_consecutive` | **`True`** (cấm tuyệt đối 2 câu liền kề cùng có meme) | `True` |
-| `skip_opening_setup` | **`True`** (bỏ qua tin nhắn index `0` nếu `beat_role == "setup"`) | `True` |
-| `max_punch_sfx` | **Tối đa `2 - 4` điểm nhấn / video**, giãn cách `>= 6.5s` *(không tính tiếng UI `pop`/gõ phím)* | Tối đa `4` / video, giãn cách `>= 6.0s` |
-| `video_meme_duration_range` | **`1.2s - 3.8s`** (đọc duration thực tế, cắt gọn nếu file gốc dài hơn) | `1.2s - 3.8s` |
-| `static_sticker_duration_range` | **`0.9s - 1.6s`** (theo `intensity`: mức 4 là `1.1s`, mức 5 là `1.5s`) | `0.9s - 1.6s` |
+| Tham số khóa (`PacingPolicy`)   | Cấu hình chuẩn cho `chatting`                                                                   | Chuẩn bị sẵn cho `postv` / `stickv` / `core` (Đợt 1B) |
+| :------------------------------ | :---------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+| `max_visual_memes`              | **Tối đa `2 - 3` / video** (trần cứng `min(3, max(1, floor(total_msgs * 0.18)))`)               | PostV: tối đa 3 · Core/StickV: tối đa 2               |
+| `min_gap_beats`                 | **Tối thiểu `4` tin nhắn** giữa 2 meme/sticker                                                  | Tối thiểu `3` cảnh/đoạn                               |
+| `min_gap_seconds`               | **Tối thiểu `8.0s`** giữa 2 meme/sticker                                                        | Tối thiểu `8.0s`                                      |
+| `forbid_consecutive`            | **`True`** (cấm tuyệt đối 2 câu liền kề cùng có meme)                                           | `True`                                                |
+| `skip_opening_setup`            | **`True`** (bỏ qua tin nhắn index `0` nếu `beat_role == "setup"`)                               | `True`                                                |
+| `max_punch_sfx`                 | **Tối đa `2 - 4` điểm nhấn / video**, giãn cách `>= 6.5s` _(không tính tiếng UI `pop`/gõ phím)_ | Tối đa `4` / video, giãn cách `>= 6.0s`               |
+| `video_meme_duration_range`     | **`1.2s - 3.8s`** (đọc duration thực tế, cắt gọn nếu file gốc dài hơn)                          | `1.2s - 3.8s`                                         |
+| `static_sticker_duration_range` | **`0.9s - 1.6s`** (theo `intensity`: mức 4 là `1.1s`, mức 5 là `1.5s`)                          | `0.9s - 1.6s`                                         |
 
 **Thuật toán chọn điểm rơi đắt giá nhất (`select_beats`):**
+
 1. Lọc ứng viên hợp lệ: có tín hiệu (`meme_query` hoặc `sticker_tag` legacy) AND `intensity >= 4`. Nếu toàn video không có câu nào đạt mức `4`, cho phép hạ 1 bậc xuống đúng 1 câu có `intensity == 3` cao nhất thuộc nhóm `punchline` / `twist` để tránh video bị khô.
 2. Xếp hạng ứng viên theo khóa giảm dần: `(intensity, role_weight, position_spread_bonus)`, trong đó `role_weight`: `punchline=5, twist=4, reaction=4, build=2, setup=1`.
 3. Duyệt tham lam (greedy) từ ứng viên điểm cao nhất: chỉ giữ nếu thỏa `abs(idx - kept_idx) >= min_gap_beats` và `abs(est_t - kept_t) >= min_gap_seconds` cho tới khi đủ `max_visual_memes`.
@@ -84,9 +87,10 @@ Ngay cả khi LLM trả về thừa `meme_query` / `sticker_tag` / `sfx_query`, 
 ### 1.4. Lớp 3 — Bộ Nhớ Chống Lặp (`freshness.py`) & Tự Tải Thông Minh (`resolver.py`)
 
 #### A. Bộ nhớ độ mới (`workspace/asset_usage.json`)
+
 Lưu lịch sử gọn nhẹ theo định dạng JSON (ghi nguyên tử qua file `.tmp` + `os.replace`, có lock an toàn):
 
-~~~json
+```json
 {
   "version": 1,
   "video_seq": 42,
@@ -101,7 +105,7 @@ Lưu lịch sử gọn nhẹ theo định dạng JSON (ghi nguyên tử qua file
     }
   }
 }
-~~~
+```
 
 - **Quy tắc chấm điểm & chống lặp:**
   - **Cùng 1 video:** Cấm lặp tuyệt đối (`used_in_current_video` -> loại ngay).
@@ -109,7 +113,9 @@ Lưu lịch sử gọn nhẹ theo định dạng JSON (ghi nguyên tử qua file
   - **Xoay vòng kho đều:** Trừ thêm điểm nhẹ `min(0.20, use_count * 0.03)` để ưu tiên các file mới tải hoặc ít được dùng.
 
 #### B. Luồng `Local-First -> Smart Auto-Fetch` (`resolver.py`)
+
 Với mỗi từ khóa đã vượt qua `PacingGovernor`:
+
 1. **Quét kho local (`library/{memes,stickers,sfx,music}/index.json`):**
    - Chuẩn hóa từ khóa + ánh xạ đồng nghĩa Việt-Anh cơ bản (vd: `sốc/bất ngờ` <-> `shock/surprised`, `cà khịa/khinh` <-> `side eye/smug`, `bó tay` <-> `facepalm`, `cười` <-> `laugh`).
    - Tính `final_score = keyword_match_score(0..1) - cooldown_penalty - use_decay`.
@@ -127,6 +133,7 @@ Với mỗi từ khóa đã vượt qua `PacingGovernor`:
    - Nếu rớt mạng, API timeout hoặc chưa cấu hình API key: ghi log warning gọn và **rơi êm về file local ít dùng nhất**, tuyệt đối không bao giờ làm fail job tạo kịch bản hay render.
 
 #### C. Hàm đổi nhanh 1 chạm (`reroll_asset`)
+
 - Nhận `(category, query, exclude_ids, auto_fetch_online)` -> trả về 1 phương án khác khớp từ khóa nhưng loại trừ toàn bộ `exclude_ids` (file hiện tại + các file đã dùng trong cùng video), tự động tìm/tải thêm online nếu kho local đã cạn ứng viên mới.
 
 ---
@@ -134,6 +141,7 @@ Với mỗi từ khóa đã vượt qua `PacingGovernor`:
 ## 2. TÍCH HỢP ĐỢT 1A — CHATTING (`GD3-Chatting`)
 
 ### 2.1. Backend (`backend/hbt/chatting/` & `backend/hbt/api/chatting.py`)
+
 1. **`prompt.py`:**
    - Viết lại quy tắc chọn meme/SFX: nhấn mạnh **ít mà chất**, yêu cầu Gemini chấm `beat_role` và `intensity` (1..5) cho từng tin nhắn; chỉ gợi ý `meme_query` / `sfx_query` tiếng Anh ngắn gọn tại 2-3 đỉnh cao trào cảm xúc thật sự; **cấm rải sticker ở mọi câu**.
 2. **`models.py`:**
@@ -151,6 +159,7 @@ Với mỗi từ khóa đã vượt qua `PacingGovernor`:
    - Thêm endpoint **`POST /api/chatting/{slug}/messages/{msg_id}/reroll-asset`**: nhận `{kind: "meme" | "sticker" | "sfx", auto_fetch_online?: bool}`, đổi sang 1 tài nguyên mới không trùng, lưu `chat.json` và trả về tin nhắn đã cập nhật.
 
 ### 2.2. Frontend (`frontend/src/pages/chatting/`, `i18n/vi.ts`)
+
 - Giữ giao diện tối giản chuẩn Studio Craft, **không thêm rác UI**:
   - Trên thanh tùy chọn tạo kịch bản Chatting: thêm 1 công tắc gọn **"Tự tải tài nguyên online"** (mặc định Bật).
   - Trong `ChattingEditor.tsx`: chỉ tại các tin nhắn có gắn meme/sticker hoặc SFX, hiện gọn 1 thẻ tên/ảnh nhỏ + badge `Mới tải` (nếu vừa tải online) + nút 1 chạm **"Đổi cái khác"** gọi endpoint `reroll-asset` và nút **"Bỏ"** (`x`) để gỡ nhanh.
@@ -162,18 +171,19 @@ Với mỗi từ khóa đã vượt qua `PacingGovernor`:
 
 - **Đợt 1B:** Nối `AssetDirector` vào `PostV` (`GD2-PostV`), `StickV` (`GD4-StickV`) và `HBT Core` (`GD1-HBT`) để đồng bộ hóa tự tải BGM/SFX/Meme cho toàn bộ 4 động cơ.
 - **Đợt 2 — Editorial Cinema (Tối ưu CPU):**
-  1. *Preflight Quality Gate:* Tự rà lỗi tràn khung chữ / vi phạm Safe-Zone / lặp thoại trước khi tốn CPU render.
-  2. *Beat-Level Hash Cache:* Băm từng phân cảnh/tin nhắn; sửa 1 đoạn chỉ dựng lại đúng đoạn đó rồi `concat -c copy`.
-  3. *Audio Director:* Siết khoảng lặng thừa, ngắt nhạc nền `0.32s` trước cú twist, J/L-cut `0.18s`.
+  1. _Preflight Quality Gate:_ Tự rà lỗi tràn khung chữ / vi phạm Safe-Zone / lặp thoại trước khi tốn CPU render.
+  2. _Beat-Level Hash Cache:_ Băm từng phân cảnh/tin nhắn; sửa 1 đoạn chỉ dựng lại đúng đoạn đó rồi `concat -c copy`.
+  3. _Audio Director:_ Siết khoảng lặng thừa, ngắt nhạc nền `0.32s` trước cú twist, J/L-cut `0.18s`.
 - **Đợt 3 — Publish Kit & 3 Mẫu Bìa High-CTR (Clickbait sạch):**
   - Tự sinh gói xuất bản dùng chung cho 4 động cơ (`3` tiêu đề A/B, mô tả ngắn, hashtag theo nền tảng, `1` câu bình luận ghim mồi).
-  - Tự vẽ bìa bằng Pillow theo 3 mẫu sạch (có thật trong video): *Khoanh đỏ & Che mờ* (Core/StickV), *Chia đôi đối lập* (Core/StickV), *Tin nhắn/Bình luận che từ chốt* (Chatting/PostV).
+  - Tự vẽ bìa bằng Pillow theo 3 mẫu sạch (có thật trong video): _Khoanh đỏ & Che mờ_ (Core/StickV), _Chia đôi đối lập_ (Core/StickV), _Tin nhắn/Bình luận che từ chốt_ (Chatting/PostV).
 
 ---
 
 ## 4. TIÊU CHÍ KIỂM THỬ & NGHIỆM THU ĐỢT 1A
 
 ### 4.1. Kiểm thử tự động
+
 - **`backend/tests/test_asset_director.py`:**
   - Test `PacingGovernor`: kịch bản 15 tin nhắn mà LLM nhồi meme vào cả 15 tin -> bị siết còn tối đa `2 - 3` tin, khoảng cách `>= 4` tin, không có 2 tin liền kề, bỏ qua tin `setup` đầu tiên, giữ đúng các tin `intensity=5` (`punchline`/`twist`).
   - Test `FreshnessMemory`: cấm trùng trong cùng 1 video; tài nguyên dùng ở video `N` bị trừ điểm cooldown trong 6 video tiếp theo và hồi điểm từ video `N+6`.
@@ -187,4 +197,5 @@ Với mỗi từ khóa đã vượt qua `PacingGovernor`:
   - Test công tắc `auto_fetch_online` và nút **"Đổi cái khác"** cập nhật đúng tin nhắn.
 
 ### 4.2. Nghiệm thu thực tế nhanh trên máy cũ (`i5-10400`)
+
 - Tạo mới 1 video **Chatting** dài ~14-18 tin nhắn: xác nhận chỉ có **2-3 meme/sticker rơi đúng cao trào**, kho `library/` tự xuất hiện file mới tải về kèm `index.json`, và tạo tiếp tập thứ 2 cùng chủ đề không bị lặp lại đúng meme của tập 1.

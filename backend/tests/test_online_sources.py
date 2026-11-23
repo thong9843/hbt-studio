@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from hbt.app_settings import AppSettings, AppSettingsStore, resolve_online_api_key
-from hbt.chatting.llm import select_memes_for_chat
+from hbt.shared.asset_director import AssetDirector
 from hbt.shared.online_sources import (
     auto_tag_meme,
     batch_auto_tag_memes,
@@ -216,13 +216,33 @@ def test_meme_auto_tag_and_context_matching(tmp_path: Path) -> None:
     assert matched is not None
     assert matched["id"] == "shocked-omg"
 
-    # AI / fallback chọn meme không trùng lặp trong kịch bản Chatting
+    # AssetDirector chọn meme không trùng lặp trong kịch bản Chatting
     msgs = [
-        {"from": "a", "text": "Sốc quá trời ơi!", "sticker": "soc"},
-        {"from": "me", "text": "Cười xỉu với con mèo này", "sticker": "cuoi"},
-        {"from": "a", "text": "Thật sự sốc luôn á", "sticker": "soc"},
+        {"from": "a", "text": "Mở đầu câu chuyện", "beat_role": "setup", "intensity": 2},
+        {"from": "me", "text": "Tin dẫn 1", "beat_role": "build", "intensity": 2},
+        {"from": "a", "text": "Tin dẫn 2", "beat_role": "build", "intensity": 2},
+        {
+            "from": "a",
+            "text": "Sốc quá trời ơi!",
+            "beat_role": "twist",
+            "intensity": 5,
+            "meme_query": "shocked omg",
+            "sticker": "soc",
+        },
+        {"from": "me", "text": "Tin dẫn 3", "beat_role": "build", "intensity": 2},
+        {"from": "a", "text": "Tin dẫn 4", "beat_role": "build", "intensity": 2},
+        {"from": "me", "text": "Tin dẫn 5", "beat_role": "build", "intensity": 2},
+        {
+            "from": "me",
+            "text": "Cười xỉu với con mèo này",
+            "beat_role": "punchline",
+            "intensity": 5,
+            "meme_query": "cat laugh",
+            "sticker": "cuoi",
+        },
     ]
-    out_msgs = select_memes_for_chat(msgs, batch["items"])
+    director = AssetDirector(tmp_path, tmp_path / "ws", engine="chatting")
+    out_msgs, _report = director.direct_chat_messages(msgs, auto_fetch_online=False)
     chosen_ids = [m["meme_id"] for m in out_msgs if m.get("meme_id")]
     assert len(chosen_ids) == len(set(chosen_ids))  # Không bao giờ chọn trùng meme_id
 

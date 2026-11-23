@@ -439,7 +439,7 @@ def reroll_chatting_message_asset(
     if resolved is None:
         raise HTTPException(
             status_code=404,
-            detail="Không còn tài nguyên mới phù hợp để đổi (hãy bật Tự tải online hoặc bổ sung kho).",
+            detail="Không còn tài nguyên mới phù hợp để đổi (hãy bật Tự tải online).",
         )
 
     if body.kind == "sfx":

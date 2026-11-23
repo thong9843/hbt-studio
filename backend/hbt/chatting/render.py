@@ -417,7 +417,7 @@ def render_chat_video(
             if state.active_sticker:
                 stk_file = state_meme_files.get(global_i)
                 if stk_file and stk_file.is_file():
-                    # Ảnh / WebP / GIF sticker vẽ trực tiếp bằng Pillow; video .mp4/.webm ghép colorkey bằng FFmpeg
+                    # Ảnh/WebP/GIF vẽ bằng Pillow; video .mp4/.webm ghép colorkey bằng FFmpeg
                     if not state.is_meme_cutin or stk_file.suffix.lower() in SUPPORTED_IMAGE_EXTS:
                         try:
                             stk_img = load_sticker_or_meme_image(stk_file)

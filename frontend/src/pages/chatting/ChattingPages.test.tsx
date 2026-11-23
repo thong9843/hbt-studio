@@ -2,7 +2,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { renderWithProviders } from '../../test/render';
-import { stubFetch } from '../../test/fakes';
+import { json, stubFetch } from '../../test/fakes';
 import { ChattingHome } from './ChattingHome';
 import { ChattingEditor } from './ChattingEditor';
 
@@ -199,29 +199,27 @@ describe('Chatting Pages (Vitest)', () => {
 
     const updatedDoc = {
       ...initialDoc,
-      messages: [
-        { ...initialDoc.messages[0], meme_id: 'giphy-cat2' },
-        initialDoc.messages[1],
-      ],
+      messages: [{ ...initialDoc.messages[0], meme_id: 'giphy-cat2' }, initialDoc.messages[1]],
     };
 
     let rerolled = false;
     stubFetch({
-      'GET /api/chatting/asset-slug': () => ({
-        slug: 'asset-slug',
-        doc: rerolled ? updatedDoc : initialDoc,
-        source: { title: 'Đoạn chat có meme', body: '...' },
-        renders: [],
-        preview_url: null,
-      }),
+      'GET /api/chatting/asset-slug': () =>
+        json({
+          slug: 'asset-slug',
+          doc: rerolled ? updatedDoc : initialDoc,
+          source: { title: 'Đoạn chat có meme', body: '...' },
+          renders: [],
+          preview_url: null,
+        }),
       'POST /api/chatting/asset-slug/messages/0/reroll-asset': () => {
         rerolled = true;
-        return {
+        return json({
           ok: true,
           msg_id: 0,
           message: updatedDoc.messages[0],
           doc: updatedDoc,
-        };
+        });
       },
     });
 

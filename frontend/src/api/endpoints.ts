@@ -41,6 +41,7 @@ import type {
   SensitiveWords,
   Theme,
   ChatDoc,
+  ChatMessage,
   ChatProjectDetail,
   ChatProjectSummary,
   UnifiedRenderItem,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -131,7 +131,7 @@ class FreshnessMemory:
         video_seq: int | None = None,
     ) -> dict[str, Any]:
         key = self.make_key(category, asset_id)
-        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._lock:
             data = self._load_unlocked()
             seq = int(data.get("video_seq", 0)) if video_seq is None else int(video_seq)

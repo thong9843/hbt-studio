@@ -722,7 +722,9 @@ export function ChattingEditor() {
                       <button
                         type="button"
                         disabled={isRerolling !== null}
-                        onClick={() => void handleRerollAsset(activeMsg.meme_id ? 'meme' : 'sticker')}
+                        onClick={() =>
+                          void handleRerollAsset(activeMsg.meme_id ? 'meme' : 'sticker')
+                        }
                         className="rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80 disabled:opacity-50"
                       >
                         {isRerolling === 'meme'
@@ -744,9 +746,7 @@ export function ChattingEditor() {
                 {activeMsg.sfx_id && (
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/50 pt-2">
                     <div className="flex min-w-0 items-center gap-2 text-tiny">
-                      <span className="font-semibold text-muted">
-                        {vi.chatting.assetSfxLabel}:
-                      </span>
+                      <span className="font-semibold text-muted">{vi.chatting.assetSfxLabel}:</span>
                       <span className="truncate font-mono font-bold text-text">
                         {activeMsg.sfx_id}
                       </span>

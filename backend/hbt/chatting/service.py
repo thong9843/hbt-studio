@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -231,7 +232,8 @@ def run_chatting_auto_job(
     from hbt.shared.asset_director import AssetDirector
 
     director = AssetDirector(library_dir, workspace_dir, engine="chatting")
-    doc, director_report = director.direct_chat_doc(doc, auto_fetch_online=auto_fetch_online)
+    effective_online = auto_fetch_online and (os.environ.get("CHATTING_FAKE_LLM") != "1")
+    doc, director_report = director.direct_chat_doc(doc, auto_fetch_online=effective_online)
     director_summary = {
         "memes_kept": director_report.memes_kept,
         "memes_stripped": director_report.memes_stripped,

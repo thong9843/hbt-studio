@@ -98,18 +98,14 @@ def _expand_query_tokens(query: str) -> set[str]:
 def _keyword_match_score(query_tokens: set[str], candidate: AssetCandidate) -> float:
     if not query_tokens:
         return 0.35
-    haystack_text = " ".join(
-        [candidate.asset_id, candidate.title, candidate.file, *candidate.tags]
-    )
+    haystack_text = " ".join([candidate.asset_id, candidate.title, candidate.file, *candidate.tags])
     cand_tokens = {w for w in _fold_text(haystack_text).split() if len(w) >= 2}
     if not cand_tokens:
         return 0.0
     overlap = len(query_tokens & cand_tokens)
     if overlap == 0:
         # Khớp chuỗi con cho từ khóa ngắn (vd: "shock" trong "shocked")
-        partial = sum(
-            1 for qt in query_tokens if any(qt in ct or ct in qt for ct in cand_tokens)
-        )
+        partial = sum(1 for qt in query_tokens if any(qt in ct or ct in qt for ct in cand_tokens))
         return min(0.75, partial / max(1, len(query_tokens)) * 0.7)
     ratio = overlap / max(1, min(len(query_tokens), 4))
     return min(1.0, round(0.45 + ratio * 0.55, 4))
@@ -369,6 +365,7 @@ class AssetResolver:
                         )
 
                 elif provider == "greenmeme":
+
                     async def _search_gm() -> list[dict[str, Any]]:
                         async with httpx.AsyncClient(
                             timeout=self.config.search_timeout_s, follow_redirects=True
@@ -421,7 +418,9 @@ class AssetResolver:
                             score=0.92,
                         )
             except Exception as exc:
-                logger.warning("Auto-fetch visual (%s, q=%r) thất bại, rơi về nguồn khác: %s", provider, q, exc)
+                logger.warning(
+                    "Auto-fetch visual (%s, q=%r) thất bại, rơi về nguồn khác: %s", provider, q, exc
+                )
         return None
 
     def _fetch_sfx_online(self, query: str, *, exclude_ids: set[str]) -> ResolvedAsset | None:
@@ -488,6 +487,7 @@ class AssetResolver:
         try:
             fkey = resolve_online_api_key("FREESOUND_API_KEY", self.workspace_dir)
             if fkey:
+
                 async def _search_fs() -> list[dict[str, Any]]:
                     async with httpx.AsyncClient(
                         timeout=self.config.search_timeout_s, follow_redirects=True
@@ -549,6 +549,7 @@ class AssetResolver:
         try:
             pkey = resolve_online_api_key("PIXABAY_API_KEY", self.workspace_dir)
             if pkey:
+
                 async def _search_px() -> list[dict[str, Any]]:
                     async with httpx.AsyncClient(
                         timeout=self.config.search_timeout_s, follow_redirects=True
@@ -607,7 +608,9 @@ class AssetResolver:
 
         return None
 
-    def _fetch_bgm_online(self, mood_or_query: str, *, exclude_ids: set[str]) -> ResolvedAsset | None:
+    def _fetch_bgm_online(
+        self, mood_or_query: str, *, exclude_ids: set[str]
+    ) -> ResolvedAsset | None:
         q = (mood_or_query or "").strip() or "lofi chill"
         existing = _existing_source_ids(self.library_dir / "music")
 
@@ -615,6 +618,7 @@ class AssetResolver:
         try:
             fkey = resolve_online_api_key("FREESOUND_API_KEY", self.workspace_dir)
             if fkey:
+
                 async def _search_fs() -> list[dict[str, Any]]:
                     async with httpx.AsyncClient(
                         timeout=self.config.search_timeout_s, follow_redirects=True
@@ -679,6 +683,7 @@ class AssetResolver:
         try:
             pkey = resolve_online_api_key("PIXABAY_API_KEY", self.workspace_dir)
             if pkey:
+
                 async def _search_px() -> list[dict[str, Any]]:
                     async with httpx.AsyncClient(
                         timeout=self.config.search_timeout_s, follow_redirects=True
@@ -751,7 +756,9 @@ class AssetResolver:
         video_seq: int | None = None,
     ) -> ResolvedAsset | None:
         excluded = set(exclude_ids or ())
-        allow_online = self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        allow_online = (
+            self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        )
         cands = self._scan_category("memes") + self._scan_category("stickers")
         scored = self._score_local(cands, query, exclude_ids=excluded, video_seq=video_seq)
 
@@ -809,7 +816,9 @@ class AssetResolver:
         video_seq: int | None = None,
     ) -> ResolvedAsset | None:
         excluded = set(exclude_ids or ())
-        allow_online = self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        allow_online = (
+            self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        )
         cands = self._scan_category("sfx")
         scored = self._score_local(cands, query, exclude_ids=excluded, video_seq=video_seq)
 
@@ -862,7 +871,9 @@ class AssetResolver:
         video_seq: int | None = None,
     ) -> ResolvedAsset | None:
         excluded = set(exclude_ids or ())
-        allow_online = self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        allow_online = (
+            self.config.auto_fetch_online if auto_fetch_online is None else auto_fetch_online
+        )
         cands = self._scan_category("music")
         scored = self._score_local(
             cands, mood_or_query, exclude_ids=excluded, video_seq=video_seq, min_duration_s=50.0

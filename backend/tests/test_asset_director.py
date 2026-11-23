@@ -65,7 +65,9 @@ def test_pacing_governor_fallback_to_single_intensity_3_punchline() -> None:
         BeatCue(index=0, beat_role="setup", intensity=3, meme_query="hi", est_time_s=0.0),
         BeatCue(index=3, beat_role="build", intensity=3, meme_query="ok", est_time_s=9.0),
         BeatCue(index=8, beat_role="twist", intensity=3, meme_query="side eye", est_time_s=24.0),
-        BeatCue(index=11, beat_role="punchline", intensity=3, meme_query="facepalm", est_time_s=33.0),
+        BeatCue(
+            index=11, beat_role="punchline", intensity=3, meme_query="facepalm", est_time_s=33.0
+        ),
     ]
     gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
     assert gov.select_visual_beats(cues) == [11]
@@ -73,7 +75,13 @@ def test_pacing_governor_fallback_to_single_intensity_3_punchline() -> None:
 
 def test_pacing_governor_sfx_and_duration_clamps() -> None:
     cues = [
-        BeatCue(index=i, beat_role="twist" if i > 0 else "setup", intensity=4, sfx_query="vine boom", est_time_s=i * 2.5)
+        BeatCue(
+            index=i,
+            beat_role="twist" if i > 0 else "setup",
+            intensity=4,
+            sfx_query="vine boom",
+            est_time_s=i * 2.5,
+        )
         for i in range(12)
     ]
     gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
@@ -221,7 +229,9 @@ def test_resolver_auto_fetches_online_when_local_in_cooldown_or_missing(
 
     monkeypatch.setattr(
         "hbt.shared.asset_director.resolver.resolve_online_api_key",
-        lambda name, _ws=None: "test-key" if name in ("GIPHY_API_KEY", "VOICEMOD_TUNA_API_KEY") else "",
+        lambda name, _ws=None: (
+            "test-key" if name in ("GIPHY_API_KEY", "VOICEMOD_TUNA_API_KEY") else ""
+        ),
     )
 
     async def _mock_search_giphy(_q, **_kw):
@@ -239,12 +249,25 @@ def test_resolver_auto_fetches_online_when_local_in_cooldown_or_missing(
         fname = f"giphy-{sticker_id}.webp"
         out = stk_dir / fname
         out.write_bytes(b"webp-bytes")
-        rec = {"id": f"giphy-{sticker_id}", "file": fname, "title": title, "tag": "soc", "source": "giphy"}
+        rec = {
+            "id": f"giphy-{sticker_id}",
+            "file": fname,
+            "title": title,
+            "tag": "soc",
+            "source": "giphy",
+        }
         (stk_dir / "index.json").write_text(json.dumps([rec]), encoding="utf-8")
         return {"ok": True, "item": rec, "path": str(out)}
 
     async def _mock_search_tuna(_q, **_kw):
-        return [{"id": "t777", "title": "Bonk SFX", "preview_url": "https://tuna/bonk.mp3", "tags": ["bonk"]}]
+        return [
+            {
+                "id": "t777",
+                "title": "Bonk SFX",
+                "preview_url": "https://tuna/bonk.mp3",
+                "tags": ["bonk"],
+            }
+        ]
 
     async def _mock_import_tuna(*, item_id, title, preview_url, tags, library_dir, **_kw):
         sfx_dir = Path(library_dir) / "sfx"
@@ -252,12 +275,22 @@ def test_resolver_auto_fetches_online_when_local_in_cooldown_or_missing(
         fname = f"tuna-bonk-{item_id}.mp3"
         out = sfx_dir / fname
         out.write_bytes(b"mp3-bytes")
-        rec = {"id": f"tuna-{item_id}", "file": fname, "title": title, "tags": tags or ["bonk"], "source": "tuna"}
+        rec = {
+            "id": f"tuna-{item_id}",
+            "file": fname,
+            "title": title,
+            "tags": tags or ["bonk"],
+            "source": "tuna",
+        }
         (sfx_dir / "index.json").write_text(json.dumps([rec]), encoding="utf-8")
         return {"ok": True, "item": rec, "file_path": str(out)}
 
-    monkeypatch.setattr("hbt.shared.asset_director.resolver.search_giphy_stickers", _mock_search_giphy)
-    monkeypatch.setattr("hbt.shared.asset_director.resolver.import_giphy_sticker", _mock_import_giphy)
+    monkeypatch.setattr(
+        "hbt.shared.asset_director.resolver.search_giphy_stickers", _mock_search_giphy
+    )
+    monkeypatch.setattr(
+        "hbt.shared.asset_director.resolver.import_giphy_sticker", _mock_import_giphy
+    )
     monkeypatch.setattr("hbt.shared.asset_director.resolver.search_tuna_sfx", _mock_search_tuna)
     monkeypatch.setattr("hbt.shared.asset_director.resolver.import_tuna_sfx", _mock_import_tuna)
 

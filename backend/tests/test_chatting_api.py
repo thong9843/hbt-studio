@@ -61,7 +61,7 @@ def test_create_and_manage_chatting_project(client):
     get_res = None
     for _ in range(50):
         get_res = client.get(f"/api/chatting/{slug}")
-        if get_res.status_code == 200:
+        if get_res.status_code == 200 and get_res.json().get("doc") is not None:
             break
         time.sleep(0.1)
     assert get_res is not None and get_res.status_code == 200

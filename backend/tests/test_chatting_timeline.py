@@ -79,7 +79,12 @@ def test_resolve_meme_sticker_webp_and_sfx_paths(tmp_path: Path) -> None:
             Character(id="a", name="Nam", side="left"),
         ],
         messages=[
-            Message(from_="a", text=f"Tin {i}", meme_id="giphy-shock1" if i == 4 else None, intensity=5 if i == 4 else 2)
+            Message(
+                from_="a",
+                text=f"Tin {i}",
+                meme_id="giphy-shock1" if i == 4 else None,
+                intensity=5 if i == 4 else 2,
+            )
             for i in range(8)
         ],
     )

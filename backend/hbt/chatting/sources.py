@@ -291,7 +291,7 @@ def parse_direct_script(text: str) -> dict[str, Any]:
             raw_dialogues.append((speaker, speech, None, 2, "build"))
             continue
 
-        # 3. Kiểm tra sticker / meme từ cú pháp [meme: <tag>] hoặc [sticker: <tag>] (ưu tiên cao nhất)
+        # 3. Kiểm tra sticker/meme từ cú pháp [meme: <tag>] hoặc [sticker: <tag>]
         sticker: str | None = None
         intensity = 2
         beat_role = "setup" if not raw_dialogues else "build"

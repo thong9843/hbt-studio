@@ -121,7 +121,7 @@ class PacingGovernor:
         return sorted(idx for idx, _ in kept)
 
     def select_sfx_beats(self, cues: list[BeatCue]) -> list[int]:
-        """Lọc độc lập điểm nhấn punch SFX (tối đa max_punch_sfx, giãn cách >= min_sfx_gap_seconds)."""
+        """Lọc độc lập điểm nhấn punch SFX theo max_punch_sfx và min_sfx_gap_seconds."""
         n = len(cues)
         if n == 0 or self.policy.max_punch_sfx <= 0:
             return []

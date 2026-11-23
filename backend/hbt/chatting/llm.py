@@ -74,8 +74,20 @@ MOCK_CHAT_RESPONSE = {
         {"id": "a", "name": "Nam", "side": "left"},
     ],
     "messages": [
-        {"from": "a", "text": "Còn thức không ông ơi?", "beat_role": "setup", "intensity": 2, "sticker": None},
-        {"from": "me", "text": "Sao thế, có chuyện gì à?", "beat_role": "build", "intensity": 2, "sticker": None},
+        {
+            "from": "a",
+            "text": "Còn thức không ông ơi?",
+            "beat_role": "setup",
+            "intensity": 2,
+            "sticker": None,
+        },
+        {
+            "from": "me",
+            "text": "Sao thế, có chuyện gì à?",
+            "beat_role": "build",
+            "intensity": 2,
+            "sticker": None,
+        },
         {
             "from": "a",
             "text": "Vừa thấy ví ông để quên ở quán!",
@@ -85,10 +97,34 @@ MOCK_CHAT_RESPONSE = {
             "sfx_query": "vine boom",
             "sticker": "soc",
         },
-        {"from": "me", "text": "Ủa thật hả trời ơi?", "beat_role": "reaction", "intensity": 3, "sticker": None},
-        {"from": "a", "text": "Thật mà, nhân viên đang giữ này.", "beat_role": "build", "intensity": 2, "sticker": None},
-        {"from": "me", "text": "May quá, cảm ơn ông nhiều nha!", "beat_role": "build", "intensity": 2, "sticker": None},
-        {"from": "a", "text": "Mai nhớ bao trà sữa là được haha.", "beat_role": "build", "intensity": 3, "sticker": None},
+        {
+            "from": "me",
+            "text": "Ủa thật hả trời ơi?",
+            "beat_role": "reaction",
+            "intensity": 3,
+            "sticker": None,
+        },
+        {
+            "from": "a",
+            "text": "Thật mà, nhân viên đang giữ này.",
+            "beat_role": "build",
+            "intensity": 2,
+            "sticker": None,
+        },
+        {
+            "from": "me",
+            "text": "May quá, cảm ơn ông nhiều nha!",
+            "beat_role": "build",
+            "intensity": 2,
+            "sticker": None,
+        },
+        {
+            "from": "a",
+            "text": "Mai nhớ bao trà sữa là được haha.",
+            "beat_role": "build",
+            "intensity": 3,
+            "sticker": None,
+        },
         {
             "from": "me",
             "text": "Ok chốt luôn bạn ơi!",
@@ -188,9 +224,7 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
 
         raw_role = str(m.get("beat_role") or "").strip().lower()
         beat_role = (
-            raw_role
-            if raw_role in ("setup", "build", "twist", "punchline", "reaction")
-            else None
+            raw_role if raw_role in ("setup", "build", "twist", "punchline", "reaction") else None
         )
         raw_int = m.get("intensity")
         if raw_int is None:
