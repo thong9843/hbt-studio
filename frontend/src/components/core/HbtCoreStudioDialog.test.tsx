@@ -158,7 +158,7 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     renderDialog();
 
     const modelSelect = await screen.findByRole('combobox', { name: 'Mô hình Gemini (Model)' });
-    expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.8-flash');
+    expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.1-flash-lite');
     await user.click(modelSelect);
     await user.click(screen.getByRole('option', { name: /Gemini 3\.5 Flash Lite/i }));
     expect(modelSelect).toHaveAttribute('data-value', 'gemini-3.5-flash-lite');

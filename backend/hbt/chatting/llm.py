@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -21,45 +22,62 @@ from hbt.shared.llm import (
     normalize_model_name,
 )
 
-DEFAULT_MODEL = GEMINI_MODEL
+logger = logging.getLogger(__name__)
 
+DEFAULT_MODEL = GEMINI_MODEL
+CHATTING_MAX_OUTPUT_TOKENS = 8192
+
+_WRAPPER_KEYS = (
+    "data",
+    "chat",
+    "script",
+    "result",
+    "conversation",
+    "dialogue",
+    "response",
+    "output",
+)
+
+# Schema chuẩn Gemini REST `responseSchema` (không dùng anyOf/oneOf/additionalProperties/type mảng)
 CHAT_JSON_SCHEMA = {
-    "type": "object",
+    "type": "OBJECT",
     "properties": {
-        "title": {"type": "string"},
+        "title": {"type": "STRING"},
         "music_mood": {
-            "type": ["string", "null"],
-            "enum": ["vui_nhon", "kich_tinh", "bi_an", "thu_gian", "hanh_dong", None],
+            "type": "STRING",
+            "nullable": True,
+            "enum": ["vui_nhon", "kich_tinh", "bi_an", "thu_gian", "hanh_dong"],
         },
         "characters": {
-            "type": "array",
+            "type": "ARRAY",
             "items": {
-                "type": "object",
+                "type": "OBJECT",
                 "properties": {
-                    "id": {"type": "string"},
-                    "name": {"type": "string"},
-                    "side": {"type": "string", "enum": ["left", "right"]},
+                    "id": {"type": "STRING"},
+                    "name": {"type": "STRING"},
+                    "side": {"type": "STRING", "enum": ["left", "right"]},
                 },
                 "required": ["id", "name", "side"],
             },
         },
         "messages": {
-            "type": "array",
+            "type": "ARRAY",
             "items": {
-                "type": "object",
+                "type": "OBJECT",
                 "properties": {
-                    "from": {"type": "string"},
-                    "text": {"type": "string"},
+                    "from": {"type": "STRING"},
+                    "text": {"type": "STRING"},
                     "beat_role": {
-                        "type": ["string", "null"],
-                        "enum": ["setup", "build", "twist", "punchline", "reaction", None],
+                        "type": "STRING",
+                        "nullable": True,
+                        "enum": ["setup", "build", "twist", "punchline", "reaction"],
                     },
-                    "intensity": {"type": "integer", "minimum": 1, "maximum": 5},
-                    "meme_query": {"type": ["string", "null"]},
-                    "sfx_query": {"type": ["string", "null"]},
-                    "sticker": {"type": ["string", "null"]},
+                    "intensity": {"type": "INTEGER"},
+                    "meme_query": {"type": "STRING", "nullable": True},
+                    "sfx_query": {"type": "STRING", "nullable": True},
+                    "sticker": {"type": "STRING", "nullable": True},
                 },
-                "required": ["from", "text", "sticker"],
+                "required": ["from", "text"],
             },
         },
     },
@@ -363,6 +381,33 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _unwrap_chat_payload(parsed: Any, fallback_title: str = "") -> dict[str, Any] | None:
+    """Bóc tách & phục hồi cấu trúc JSON Chatting từ phản hồi Gemini (bọc khóa/mảng/thiếu title)."""
+    cur: Any = parsed
+    if isinstance(cur, list) and len(cur) == 1 and isinstance(cur[0], dict):
+        cur = cur[0]
+    if not isinstance(cur, dict):
+        return None
+
+    # Nếu bọc trong khóa trung gian (data/chat/script/result/conversation...) thì tự bóc ra
+    if not (isinstance(cur.get("characters"), list) and isinstance(cur.get("messages"), list)):
+        for key in _WRAPPER_KEYS:
+            inner = cur.get(key)
+            if isinstance(inner, dict) and (
+                isinstance(inner.get("characters"), list) or isinstance(inner.get("messages"), list)
+            ):
+                cur = inner
+                break
+
+    if not isinstance(cur.get("characters"), list) or not isinstance(cur.get("messages"), list):
+        return None
+
+    out = dict(cur)
+    if not str(out.get("title") or "").strip():
+        out["title"] = (fallback_title or "").strip()[:200] or "Đoạn chat vui"
+    return out
+
+
 class GeminiChatClient:
     """Client sinh kịch bản Chatting bằng Gemini API dùng chung cấu hình HBT Core."""
 
@@ -420,16 +465,58 @@ class GeminiChatClient:
             user_content,
             model=self.model,
             timeout=self.timeout,
+            response_schema=CHAT_JSON_SCHEMA,
+            max_output_tokens=CHATTING_MAX_OUTPUT_TOKENS,
         )
-        if (
-            not isinstance(parsed, dict)
-            or "title" not in parsed
-            or not isinstance(parsed.get("characters"), list)
-            or not isinstance(parsed.get("messages"), list)
-        ):
-            raise RuntimeError(
-                "Gemini trả về JSON thiếu trường bắt buộc title, characters, messages"
-            )
+        unwrapped = _unwrap_chat_payload(parsed, fallback_title=title)
 
-        sanitized = sanitize_chat_raw(parsed)
+        # Tự động retry 1 lần kèm nhắc cấu trúc JSON nếu thiếu characters/messages
+        if unwrapped is None:
+            raw_preview = json.dumps(parsed, ensure_ascii=False)[:300]
+            keys = list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__
+            logger.warning(
+                "Gemini thiếu trường bắt buộc (lần 1), keys=%s, preview=%s — thử lại 1 lần",
+                keys,
+                raw_preview,
+            )
+            retry_prompt = (
+                f"{user_content}\n\n"
+                "LƯU Ý BẮT BUỘC: Phản hồi trước thiếu trường bắt buộc. "
+                "Hãy trả về ĐÚNG 1 JSON object ở cấp gốc gồm đủ 3 khóa: "
+                "`title` (chuỗi), `characters` (mảng ít nhất 2 nhân vật), "
+                "`messages` (mảng ít nhất 8 tin nhắn). Không bọc trong khóa trung gian."
+            )
+            parsed_retry, retry_timings = generate_structured_json(
+                SYSTEM_PROMPT,
+                retry_prompt,
+                model=self.model,
+                timeout=self.timeout,
+                response_schema=CHAT_JSON_SCHEMA,
+                max_output_tokens=CHATTING_MAX_OUTPUT_TOKENS,
+            )
+            timings["llm_s"] = round(
+                float(timings.get("llm_s", 0.0)) + float(retry_timings.get("llm_s", 0.0)), 3
+            )
+            timings["llm_tokens"] = int(timings.get("llm_tokens", 0)) + int(
+                retry_timings.get("llm_tokens", 0)
+            )
+            timings["llm_retry"] = int(timings.get("llm_retry", 0)) + 1
+            unwrapped = _unwrap_chat_payload(parsed_retry, fallback_title=title)
+            if unwrapped is None:
+                retry_preview = json.dumps(parsed_retry, ensure_ascii=False)[:300]
+                retry_keys = (
+                    list(parsed_retry.keys())
+                    if isinstance(parsed_retry, dict)
+                    else type(parsed_retry).__name__
+                )
+                logger.warning(
+                    "Gemini vẫn thiếu trường bắt buộc sau retry, keys=%s, preview=%s",
+                    retry_keys,
+                    retry_preview,
+                )
+                raise RuntimeError(
+                    "Gemini trả về JSON thiếu trường bắt buộc title, characters, messages"
+                )
+
+        sanitized = sanitize_chat_raw(unwrapped)
         return sanitized, timings

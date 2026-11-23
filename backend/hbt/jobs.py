@@ -1037,9 +1037,8 @@ class JobManager:
             library_dir = self.library_dir
             brand_dir = self.brand_dir
             voice_provider = self.voice
-            chatting_model = (
-                getattr(job, "chatting_model", None)
-                or os.environ.get("CHATTING_MODEL", "gemini-3.1-flash-lite")
+            chatting_model = getattr(job, "chatting_model", None) or os.environ.get(
+                "CHATTING_MODEL", "gemini-3.1-flash-lite"
             )
 
             direct_script = getattr(job, "chatting_direct_script", False)
