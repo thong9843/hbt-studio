@@ -187,3 +187,49 @@ def test_sanitize_chat_raw_edge_cases():
         assert m.from_ in char_ids
         if m.sticker:
             assert m.sticker in {"ok", "tym", "haha", "wow", "sad", "angry"}
+
+
+def test_direct_script_keyword_spam_stripped_by_pacing_governor():
+    from hbt.chatting.llm import sanitize_chat_raw
+    from hbt.chatting.sources import parse_direct_script
+
+    lines = [
+        "Minh: Chào bạn haha",
+        "Linh: Ok bạn ơi",
+        "Minh: Hôm nay chán quá",
+        "Linh: Thật hả trời ơi",
+        "Minh: Vừa trúng số 10 tỷ [meme: soc]",
+        "Linh: Haha đùa à",
+        "Minh: Ok thật luôn",
+        "Linh: Chán chả buồn nói",
+        "Minh: Đi ăn mừng thôi [sticker: cuoi]",
+        "Linh: Ok chốt luôn",
+    ]
+    parsed = parse_direct_script("\n".join(lines))
+    clean = sanitize_chat_raw(parsed)
+    kept = [i for i, m in enumerate(clean["messages"]) if m.get("sticker")]
+    # Chỉ giữ tối đa 1-2 điểm cao trào tường minh (cách nhau >= 4 tin), loại sạch câu từ khóa yếu
+    assert 1 <= len(kept) <= 2
+    assert 4 in kept
+    for a, b in zip(kept, kept[1:], strict=False):
+        assert b - a >= 4
+
+
+def test_chatdoc_backward_compatible_with_legacy_chat_json():
+    from hbt.chatting.models import ChatDoc
+
+    legacy = {
+        "hbt_chat": 1,
+        "title": "Chat cũ",
+        "platform": "messenger",
+        "characters": [
+            {"id": "me", "name": "Tôi", "side": "right"},
+            {"id": "a", "name": "Bạn", "side": "left"},
+        ],
+        "messages": [{"from": "me" if i % 2 == 0 else "a", "text": f"Câu {i}"} for i in range(8)],
+    }
+    doc = ChatDoc.model_validate(legacy)
+    assert doc.auto_fetch_online is True
+    assert doc.messages[0].intensity == 2
+    assert doc.messages[0].meme_query is None
+    assert doc.messages[0].sfx_id is None

@@ -262,7 +262,7 @@ def parse_direct_script(text: str) -> dict[str, Any]:
         "ok": "ok",
     }
 
-    raw_dialogues: list[tuple[str, str, str | None]] = []
+    raw_dialogues: list[tuple[str, str, str | None, int, str]] = []
     char_names: list[str] = []
 
     last_speaker = "Người 1"
@@ -271,7 +271,7 @@ def parse_direct_script(text: str) -> dict[str, Any]:
         # 1. Kiểm tra dòng chuyển cảnh ngoặc đơn (5 phút sau), (10 phút sau tại nhà vệ sinh)...
         if is_scene_transition(line):
             speaker = last_speaker
-            raw_dialogues.append((speaker, line, None))
+            raw_dialogues.append((speaker, line, None, 2, "build"))
             continue
 
         m = dialogue_pattern.match(line)
@@ -288,17 +288,22 @@ def parse_direct_script(text: str) -> dict[str, Any]:
 
         # 2. Kiểm tra dòng thoại có phải chuyển cảnh bên trong thoại không
         if is_scene_transition(speech):
-            raw_dialogues.append((speaker, speech, None))
+            raw_dialogues.append((speaker, speech, None, 2, "build"))
             continue
 
-        # 3. Kiểm tra sticker / meme từ cú pháp [meme: <tag>] hoặc [sticker: <tag>]
+        # 3. Kiểm tra sticker / meme từ cú pháp [meme: <tag>] hoặc [sticker: <tag>] (ưu tiên cao nhất)
         sticker: str | None = None
+        intensity = 2
+        beat_role = "setup" if not raw_dialogues else "build"
+
         sm = sticker_bracket_pat.search(speech)
         if sm:
             raw_tag = sm.group(1).strip().lower()
             normalized_tag = tag_map.get(raw_tag)
             if normalized_tag and normalized_tag in VALID_STICKER_TAGS:
                 sticker = normalized_tag
+                intensity = 5
+                beat_role = "punchline"
                 speech = sticker_bracket_pat.sub("", speech).strip()
         if not sticker:
             spm = sticker_paren_pat.search(speech)
@@ -307,14 +312,18 @@ def parse_direct_script(text: str) -> dict[str, Any]:
                 normalized_tag = tag_map.get(raw_tag)
                 if normalized_tag and normalized_tag in VALID_STICKER_TAGS:
                     sticker = normalized_tag
+                    intensity = 5
+                    beat_role = "punchline"
                     speech = sticker_paren_pat.sub("", speech).strip()
 
-        # 4. Nhận diện cụm emoji ở cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️)
+        # 4. Nhận diện cụm emoji ở cuối câu (vd: 🤬🔨🔥, 🤣🤣🤣, 👁️👄👁️) -> mức 4 (reaction)
         if not sticker and speech:
             from hbt.chatting.stickers import EMOJI_TAG_MAP
 
             if "👁️👄👁️" in speech or "👁👄👁" in speech:
                 sticker = "soc"
+                intensity = 4
+                beat_role = "reaction"
             else:
                 em_scores = {}
                 for tag, emojis in EMOJI_TAG_MAP.items():
@@ -323,15 +332,19 @@ def parse_direct_script(text: str) -> dict[str, Any]:
                         em_scores[tag] = sc
                 if em_scores:
                     sticker = max(em_scores.items(), key=lambda x: x[1])[0]
+                    intensity = 4
+                    beat_role = "reaction"
 
-        # 5. Phân tích cảm xúc từ khóa nếu chưa có tag rõ ràng
+        # 5. Từ khóa cảm xúc nhẹ: chỉ gắn mức 3 ("build") để PacingGovernor lọc chống spam
         if not sticker and speech:
             detected = detect_emotion_tag(speech)
             if detected and detected in VALID_STICKER_TAGS:
                 sticker = detected
+                intensity = 3
+                beat_role = "build"
 
         if speech or sticker:
-            raw_dialogues.append((speaker, speech or "...", sticker))
+            raw_dialogues.append((speaker, speech or "...", sticker, intensity, beat_role))
 
     if not raw_dialogues:
         raise ValueError("Không tìm thấy câu thoại nào hợp lệ trong kịch bản")
@@ -370,7 +383,7 @@ def parse_direct_script(text: str) -> dict[str, Any]:
     from hbt.chatting.voice import clean_spoken_text
 
     messages: list[dict[str, Any]] = []
-    for speaker, speech, sticker in raw_dialogues:
+    for speaker, speech, sticker, intensity, beat_role in raw_dialogues:
         cid = char_id_map.get(speaker, char_id_map.get(char_names[0], "me") if char_names else "me")
         display_txt = (speech or "...").strip()
         if len(display_txt) > 300:
@@ -383,6 +396,8 @@ def parse_direct_script(text: str) -> dict[str, Any]:
                 "display_text": display_txt,
                 "spoken_text": spoken_txt,
                 "sticker": sticker,
+                "intensity": intensity,
+                "beat_role": beat_role,
             }
         )
 

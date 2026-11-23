@@ -25,17 +25,21 @@ from hbt.chatting.html_renderer import HtmlChatSession
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
 from hbt.chatting.stickers import (
+    SUPPORTED_IMAGE_EXTS,
     extract_meme_audio,
     find_meme_by_emojis,
     get_meme_metadata,
     load_sticker_or_meme_image,
     pick_sticker,
+    resolve_meme_or_sticker_path,
+    resolve_sfx_path,
 )
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
+from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
 from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 
 logger = logging.getLogger(__name__)
@@ -113,8 +117,7 @@ def assemble_voice_track(
                         "-y",
                         "-v",
                         "error",
-                        "-threads",
-                        "2",
+                        *FFMPEG_RESOURCE_CLAMP,
                         "-i",
                         str(audio_path),
                         "-ac",
@@ -303,18 +306,22 @@ def render_chat_video(
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
 
-    # Bộ nhớ theo phiên video: xoay vòng meme không lặp lại cho tới khi hết kho của tag
+    # Bộ nhớ theo phiên video: ưu tiên `msg.meme_id` từ Smart Asset Director, fallback xoay vòng
     used_memes: set[str] = set()
     state_meme_files: dict[int, Path] = {}
     for st_idx, st in enumerate(active_states):
         if st.active_sticker:
             chosen: Path | None = None
             if st.visible_count > 0:
-                msg_text = (
-                    getattr(doc.messages[st.visible_count - 1], "display_text", None)
-                    or doc.messages[st.visible_count - 1].text
+                cur_msg = doc.messages[st.visible_count - 1]
+                chosen = resolve_meme_or_sticker_path(
+                    library_dir, getattr(cur_msg, "meme_id", None)
                 )
-                chosen = find_meme_by_emojis(library_dir, msg_text, used_memes=used_memes)
+                if chosen is not None:
+                    used_memes.add(chosen.name)
+                else:
+                    msg_text = getattr(cur_msg, "display_text", None) or cur_msg.text
+                    chosen = find_meme_by_emojis(library_dir, msg_text, used_memes=used_memes)
             if chosen is None:
                 chosen = pick_sticker(
                     library_dir, st.active_sticker, doc.background.seed, used_memes=used_memes
@@ -407,13 +414,15 @@ def render_chat_video(
         for local_i, state in enumerate(chunk_states):
             global_i = chunk_idx + local_i
             stk_img = None
-            if state.active_sticker and not state.is_meme_cutin:
+            if state.active_sticker:
                 stk_file = state_meme_files.get(global_i)
                 if stk_file and stk_file.is_file():
-                    try:
-                        stk_img = load_sticker_or_meme_image(stk_file)
-                    except Exception:
-                        pass
+                    # Ảnh / WebP / GIF sticker vẽ trực tiếp bằng Pillow; video .mp4/.webm ghép colorkey bằng FFmpeg
+                    if not state.is_meme_cutin or stk_file.suffix.lower() in SUPPORTED_IMAGE_EXTS:
+                        try:
+                            stk_img = load_sticker_or_meme_image(stk_file)
+                        except Exception:
+                            pass
 
             visible_msgs = renderer.paginate_messages(
                 doc.messages[: state.visible_count],
@@ -536,7 +545,7 @@ def render_chat_video(
                     scale_msg=state.scale_last_msg,
                     s_seen=state.show_seen,
                     s_scroll=current_scroll_y,
-                    is_cutin=False,
+                    is_cutin=bool(state.is_meme_cutin and stk_img is not None),
                     dur=frame_dur,
                 )
 
@@ -635,11 +644,17 @@ def render_chat_video(
     for st_idx, state in enumerate(active_states):
         if state.show_typing and sfx_typing:
             event_tuples.append((state.start_time, sfx_typing, 0.4))
-        elif state.scale_last_msg < 1.0 and sfx_pop:
+        elif state.scale_last_msg < 1.0:
             if state.visible_count > 0:
                 last_m = doc.messages[state.visible_count - 1]
                 if not is_scene_transition(last_m.text):
-                    event_tuples.append((state.start_time, sfx_pop, 0.3))
+                    if sfx_pop:
+                        event_tuples.append((state.start_time, sfx_pop, 0.3))
+                    # Trộn thêm SFX điểm nhấn nếu tin nhắn có `sfx_id` (-16 LUFS đã chuẩn hóa)
+                    if getattr(last_m, "sfx_id", None):
+                        punch_sfx = resolve_sfx_path(library_dir, last_m.sfx_id)
+                        if punch_sfx is not None and punch_sfx.is_file():
+                            event_tuples.append((state.start_time, punch_sfx, 1.8))
         elif state.active_sticker:
             meme_audio_played = False
             if state.is_meme_cutin:

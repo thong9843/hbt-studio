@@ -102,3 +102,63 @@ def test_create_and_manage_chatting_project(client):
     # Kiểm tra đã xoá
     get_after_del = client.get(f"/api/chatting/{slug}")
     assert get_after_del.status_code == 404
+
+
+def test_reroll_asset_endpoint_updates_message_and_avoids_duplicates(tmp_path, monkeypatch):
+    import json
+
+    from hbt.chatting.models import Character, ChatDoc, Message
+    from hbt.chatting.store import save_chat
+
+    ws = tmp_path / "workspace"
+    lib = tmp_path / "library"
+    (lib / "memes").mkdir(parents=True)
+    (lib / "memes" / "m1.mp4").write_bytes(b"mp4-1")
+    (lib / "memes" / "m2.mp4").write_bytes(b"mp4-2")
+    (lib / "memes" / "index.json").write_text(
+        json.dumps(
+            [
+                {"id": "m1", "file": "m1.mp4", "title": "Cat Shocked 1", "tags": ["shock", "cat"]},
+                {"id": "m2", "file": "m2.mp4", "title": "Cat Shocked 2", "tags": ["shock", "cat"]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("WORKSPACE_DIR", str(ws))
+    monkeypatch.setenv("LIBRARY_DIR", str(lib))
+    monkeypatch.setenv("CHATTING_FAKE_LLM", "1")
+    app = create_app()
+    c = TestClient(app)
+
+    slug = "chat-reroll-test"
+    doc = ChatDoc(
+        title="Test Reroll",
+        auto_fetch_online=False,
+        characters=[
+            Character(id="me", name="Tôi", side="right"),
+            Character(id="a", name="Nam", side="left"),
+        ],
+        messages=[
+            Message(
+                from_="me" if i % 2 == 0 else "a",
+                text=f"Tin nhắn {i}",
+                sticker="soc" if i == 4 else None,
+                meme_id="m1" if i == 4 else None,
+                meme_query="cat shocked" if i == 4 else None,
+                intensity=5 if i == 4 else 2,
+            )
+            for i in range(8)
+        ],
+    )
+    save_chat(ws, slug, doc)
+
+    res = c.post(
+        f"/api/chatting/{slug}/messages/4/reroll-asset",
+        json={"kind": "meme", "auto_fetch_online": False},
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["ok"] is True
+    assert payload["message"]["meme_id"] == "m2"
+    assert payload["doc"]["messages"][4]["meme_id"] == "m2"

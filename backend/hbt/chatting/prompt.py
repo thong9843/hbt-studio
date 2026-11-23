@@ -9,7 +9,12 @@ Luật:
 - 2 đến 8 nhân vật (hỗ trợ nhóm chat nhiều người). Nhân vật kể chuyện chính là "me" (bên phải).
 - 12 đến 60 tin nhắn tùy theo thời lượng mục tiêu. Mỗi tin ngắn gọn dễ đọc, tổng dưới 5000 ký tự.
 - Tin đầu tiên phải gây tò mò ngay. Có cao trào và một cú twist hoặc câu chốt hài ở cuối.
-- TUYỆT ĐỐI KHÔNG gắn `sticker` sau mỗi câu thoại hay ở các câu hỏi/đáp thông thường. Chỉ gắn `sticker` (tối đa 1 đến 3 sticker cho TOÀN BỘ cuộc hội thoại, không bao giờ ở 2 tin liên tiếp) vào đúng những câu cao trào cảm xúc mạnh nhất, cú twist bất ngờ hoặc câu chốt hài hước (punchline). Chỉ dùng tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok.
+- QUY TẮC CHỌN MEME / STICKER / SFX (ÍT MÀ CHẤT — CẤM SPAM):
+  * Chấm `beat_role` ("setup" | "build" | "twist" | "punchline" | "reaction") và `intensity` (1..5) cho TỪNG tin nhắn (1-2: dẫn chuyện bình thường; 3: nhấn nhẹ; 4: cao trào/bẻ lái rõ; 5: đỉnh điểm hài/sốc/punchline).
+  * TUYỆT ĐỐI KHÔNG rải `sticker` hay `meme_query` ở mọi câu hay ở tin mở đầu `setup` hay 2 tin liền kề.
+  * Chỉ điền `meme_query` (2-4 từ tiếng Anh ngắn, vd: "cat shocked", "side eye", "facepalm", "mind blown") và `sticker` (tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok) tại tối đa 2-3 đỉnh cao trào thật sự có `intensity >= 4` và `beat_role` thuộc {"twist", "punchline", "reaction"}; mọi tin khác bắt buộc `null`.
+  * Chỉ điền `sfx_query` (1-3 từ tiếng Anh ngắn, vd: "vine boom", "bruh", "bonk", "dramatic sting") tại điểm nhấn `intensity >= 4`; còn lại bắt buộc `null`.
+  * Trả kèm `music_mood` tổng thể: "vui_nhon" | "kich_tinh" | "bi_an" | "thu_gian" | "hanh_dong".
 - Có thể gợi ý `media_hint` (chuỗi tiếng Việt ngắn mô tả ảnh/clip minh họa, hoặc `null`) ở tối đa 1-2 tin nhắn cao trào/bằng chứng (vd: "Ảnh chụp màn hình chuyển khoản", "Clip phản ứng bất ngờ").
 - Không có: rượu bia, máu me, bạo lực, thuốc, chính trị, tình dục, chửi thề nặng, thông tin cá nhân thật.
 - Chỉ trả về JSON đúng schema."""

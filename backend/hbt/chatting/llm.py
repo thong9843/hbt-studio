@@ -27,6 +27,10 @@ CHAT_JSON_SCHEMA = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "music_mood": {
+            "type": ["string", "null"],
+            "enum": ["vui_nhon", "kich_tinh", "bi_an", "thu_gian", "hanh_dong", None],
+        },
         "characters": {
             "type": "array",
             "items": {
@@ -46,6 +50,13 @@ CHAT_JSON_SCHEMA = {
                 "properties": {
                     "from": {"type": "string"},
                     "text": {"type": "string"},
+                    "beat_role": {
+                        "type": ["string", "null"],
+                        "enum": ["setup", "build", "twist", "punchline", "reaction", None],
+                    },
+                    "intensity": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "meme_query": {"type": ["string", "null"]},
+                    "sfx_query": {"type": ["string", "null"]},
                     "sticker": {"type": ["string", "null"]},
                 },
                 "required": ["from", "text", "sticker"],
@@ -57,19 +68,35 @@ CHAT_JSON_SCHEMA = {
 
 MOCK_CHAT_RESPONSE = {
     "title": "Bất ngờ nửa đêm",
+    "music_mood": "vui_nhon",
     "characters": [
         {"id": "me", "name": "Tôi", "side": "right"},
         {"id": "a", "name": "Nam", "side": "left"},
     ],
     "messages": [
-        {"from": "a", "text": "Còn thức không ông ơi?", "sticker": None},
-        {"from": "me", "text": "Sao thế, có chuyện gì à?", "sticker": None},
-        {"from": "a", "text": "Vừa thấy ví ông để quên ở quán!", "sticker": "soc"},
-        {"from": "me", "text": "Ủa thật hả trời ơi?", "sticker": None},
-        {"from": "a", "text": "Thật mà, nhân viên đang giữ này.", "sticker": None},
-        {"from": "me", "text": "May quá, cảm ơn ông nhiều nha!", "sticker": "cuoi"},
-        {"from": "a", "text": "Mai nhớ bao trà sữa là được haha.", "sticker": None},
-        {"from": "me", "text": "Ok chốt luôn bạn ơi!", "sticker": "ok"},
+        {"from": "a", "text": "Còn thức không ông ơi?", "beat_role": "setup", "intensity": 2, "sticker": None},
+        {"from": "me", "text": "Sao thế, có chuyện gì à?", "beat_role": "build", "intensity": 2, "sticker": None},
+        {
+            "from": "a",
+            "text": "Vừa thấy ví ông để quên ở quán!",
+            "beat_role": "twist",
+            "intensity": 5,
+            "meme_query": "cat shocked",
+            "sfx_query": "vine boom",
+            "sticker": "soc",
+        },
+        {"from": "me", "text": "Ủa thật hả trời ơi?", "beat_role": "reaction", "intensity": 3, "sticker": None},
+        {"from": "a", "text": "Thật mà, nhân viên đang giữ này.", "beat_role": "build", "intensity": 2, "sticker": None},
+        {"from": "me", "text": "May quá, cảm ơn ông nhiều nha!", "beat_role": "build", "intensity": 2, "sticker": None},
+        {"from": "a", "text": "Mai nhớ bao trà sữa là được haha.", "beat_role": "build", "intensity": 3, "sticker": None},
+        {
+            "from": "me",
+            "text": "Ok chốt luôn bạn ơi!",
+            "beat_role": "punchline",
+            "intensity": 4,
+            "meme_query": "thumbs up happy",
+            "sticker": "ok",
+        },
     ],
 }
 
@@ -155,15 +182,43 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
         st = m.get("sticker")
         if st is not None:
             raw_sticker_count += 1
-            st = str(st).strip()
+            st = str(st).strip().lower()
             if st not in VALID_STICKER_TAGS:
                 st = None
+
+        raw_role = str(m.get("beat_role") or "").strip().lower()
+        beat_role = (
+            raw_role
+            if raw_role in ("setup", "build", "twist", "punchline", "reaction")
+            else None
+        )
+        raw_int = m.get("intensity")
+        if raw_int is None:
+            intensity = 4 if (st or m.get("meme_query") or m.get("sfx_query")) else 2
+        else:
+            try:
+                intensity = max(1, min(5, int(raw_int)))
+            except (TypeError, ValueError):
+                intensity = 2
+
+        meme_q = str(m.get("meme_query") or "").strip()[:80] or None
+        sfx_q = str(m.get("sfx_query") or "").strip()[:60] or None
 
         msg_entry: dict[str, Any] = {
             "from": sender,
             "text": text,
             "sticker": st,
+            "beat_role": beat_role,
+            "intensity": intensity,
+            "meme_query": meme_q,
+            "sfx_query": sfx_q,
         }
+        if m.get("meme_id"):
+            msg_entry["meme_id"] = str(m["meme_id"])
+        if m.get("sfx_id"):
+            msg_entry["sfx_id"] = str(m["sfx_id"])
+        if m.get("asset_origin") in ("local", "online_fetched"):
+            msg_entry["asset_origin"] = m["asset_origin"]
         if m.get("display_text"):
             msg_entry["display_text"] = str(m["display_text"])
         if m.get("spoken_text") is not None:
@@ -218,45 +273,44 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Siết mật độ sticker/meme: tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
-    MAX_STICKERS = 3
-    MIN_STICKER_GAP = 4  # cách nhau ít nhất 3 tin ở giữa (idx_b - idx_a >= 4)
-    candidates: list[tuple[float, int]] = []
-    n_msgs = len(clean_msgs)
+    # 3. Siết mật độ sticker/meme & SFX bằng PacingGovernor (khóa cứng mật độ + giãn cách)
+    from hbt.shared.asset_director.models import BeatCue, PacingPolicy
+    from hbt.shared.asset_director.pacing import PacingGovernor
+
+    governor = PacingGovernor(PacingPolicy.for_engine("chatting"))
+    est_t = 0.4
+    cues: list[BeatCue] = []
     for idx, m in enumerate(clean_msgs):
-        raw_st = m.get("sticker")
-        if raw_st is None:
-            continue
-        st = str(raw_st).strip().lower()
-        if st not in VALID_STICKER_TAGS:
-            m["sticker"] = None
-            continue
-        m["sticker"] = st
-        txt = str(m.get("text", ""))
-        # Ưu tiên tin cao trào/twist/punchline (nửa sau, có dấu cảm xúc)
-        score = (idx / max(1, n_msgs)) * 2.0
-        if "!" in txt or "?" in txt:
-            score += 1.0
-        if st in ("soc", "cuoi", "gian", "khoc"):
-            score += 0.5
-        if idx >= n_msgs - 2:
-            score += 1.0
-        candidates.append((score, idx))
+        txt = str(m.get("text") or "")
+        cues.append(
+            BeatCue(
+                index=idx,
+                text=txt,
+                beat_role=m.get("beat_role") or ("setup" if idx == 0 else "reaction"),
+                intensity=int(m.get("intensity", 2)),
+                meme_query=m.get("meme_query"),
+                sticker_tag=m.get("sticker"),
+                sfx_query=m.get("sfx_query"),
+                est_time_s=round(est_t, 2),
+            )
+        )
+        est_t += max(1.3, min(5.5, len(txt) / 14.0)) + 0.85
 
-    # Chọn tối đa 3 vị trí điểm cao nhất mà vẫn cách nhau >= MIN_STICKER_GAP
-    chosen_indices: list[int] = []
-    for _score, idx in sorted(candidates, key=lambda x: (-x[0], x[1])):
-        if len(chosen_indices) >= MAX_STICKERS:
-            break
-        if all(abs(idx - prev) >= MIN_STICKER_GAP for prev in chosen_indices):
-            chosen_indices.append(idx)
+    chosen_set = set(governor.select_visual_beats(cues))
+    chosen_sfx_set = set(governor.select_sfx_beats(cues))
 
-    chosen_set = set(chosen_indices)
     dropped_stickers = 0
     for idx, m in enumerate(clean_msgs):
-        if m.get("sticker") is not None and idx not in chosen_set:
+        had_visual = bool(m.get("sticker") or m.get("meme_query") or m.get("meme_id"))
+        if had_visual and idx not in chosen_set:
             m["sticker"] = None
+            m["meme_query"] = None
+            m["meme_id"] = None
+            m["asset_origin"] = None
             dropped_stickers += 1
+        if idx not in chosen_sfx_set:
+            m["sfx_query"] = None
+            m["sfx_id"] = None
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
@@ -267,50 +321,12 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
     if dropped_stickers > 0:
         warnings.append(
             f"Đã lược bỏ {dropped_stickers} sticker/meme thừa "
-            f"để giữ tối đa {MAX_STICKERS} điểm cao trào."
+            f"để giữ tối đa {governor.effective_max_visual(len(clean_msgs))} điểm cao trào."
         )
 
     data["messages"] = clean_msgs
     data["warnings"] = warnings
     return data
-
-
-def select_memes_for_chat(
-    messages: list[dict[str, Any]],
-    memes_index: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Chọn/chuẩn hóa `meme_id` khớp ngữ cảnh cho kịch bản Chatting (tối đa 3 meme, không trùng)."""
-    if not memes_index:
-        return messages
-    from hbt.shared.online_sources.meme_tagging import match_meme_by_context
-
-    valid_ids = {str(it.get("id") or it.get("file") or "") for it in memes_index}
-    used_ids: set[str] = set()
-    assigned = 0
-
-    for m in messages:
-        if assigned >= 3:
-            m["meme_id"] = None
-            continue
-        raw_mid = str(m.get("meme_id") or "").strip()
-        if raw_mid and raw_mid in valid_ids and raw_mid not in used_ids:
-            used_ids.add(raw_mid)
-            assigned += 1
-            continue
-        if m.get("sticker"):
-            matched = match_meme_by_context(
-                str(m.get("text") or ""), memes_index, used_ids=used_ids
-            )
-            if matched:
-                mid = str(matched.get("id") or matched.get("file") or "")
-                if mid:
-                    m["meme_id"] = mid
-                    used_ids.add(mid)
-                    assigned += 1
-                    continue
-        m["meme_id"] = None
-
-    return messages
 
 
 class GeminiChatClient:

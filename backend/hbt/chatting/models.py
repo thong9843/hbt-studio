@@ -37,6 +37,12 @@ class Message(BaseModel):
     spoken_text: str | None = None
     sticker: str | None = None
     meme_id: str | None = None
+    beat_role: str | None = None
+    intensity: int = Field(default=2, ge=1, le=5)
+    meme_query: str | None = None
+    sfx_query: str | None = None
+    sfx_id: str | None = None
+    asset_origin: Literal["local", "online_fetched"] | None = None
     media_type: Literal["none", "image", "video"] = "none"
     media_path: str | None = None
     media_hint: str | None = None
@@ -89,6 +95,8 @@ class ChatDoc(BaseModel):
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
     aspect_mode: Literal["fill", "fit"] = "fit"
     music: str | None = "chill_02"
+    music_mood: str | None = None
+    auto_fetch_online: bool = True
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     characters: list[Character]
     messages: list[Message]
