@@ -2441,6 +2441,11 @@ def _composite_prop_overlay(
     resized.close()
 
 
+_ANIMATED_BOARD_TYPES: frozenset[str] = frozenset(
+    {"counter_grow", "bar_compare", "location_map", "flow_steps", "timeline_era"}
+)
+
+
 def render_animated_beat_frame(
     *,
     bg_img: Image.Image,
@@ -2463,6 +2468,7 @@ def render_animated_beat_frame(
     total_chapters: int = 1,
     has_next_diff_title: bool = True,
     show_chapter_banner: bool = False,
+    board_cache: dict[str, Image.Image] | None = None,
 ) -> Image.Image:
     """Tổng hợp 1 frame động: backdrop + camera tách lớp + thẻ 2 tầng + puppet + karaoke."""
     frame = bg_img.copy()
@@ -2488,25 +2494,54 @@ def render_animated_beat_frame(
             _draw_versus_split_layer(frame_rgba, beat, pal, aspect=aspect)
 
         if draw_board:
-            anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
-            prog = min(1.0, max(0.0, t_sec / anim_dur))
-            _composite_transitioned_board(
-                frame_rgba,
-                beat,
-                cam_layout.board_box,
-                pal,
-                t_sec=t_sec,
-                duration_sec=duration_sec,
-                progress=prog,
-                prop_img=prop_img,
-                prev_stage_state=prev_stage_state,
-                total_chapters=total_chapters,
-                has_next_diff_title=has_next_diff_title,
-                cam_board_scale=cam_layout.board_scale,
-                cam_board_alpha=cam_layout.board_alpha,
-                clamp_bounds=cam_layout.clamp_bounds,
-                anchor_top_center=cam_layout.anchor_top_center,
+            can_prebake = (
+                board_cache is not None
+                and beat.board_type not in _ANIMATED_BOARD_TYPES
+                and t_sec >= 0.56
             )
+            if can_prebake and board_cache is not None:
+                baked = board_cache.get("static_board")
+                if baked is None:
+                    baked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    _composite_transitioned_board(
+                        baked,
+                        beat,
+                        cam_layout.board_box,
+                        pal,
+                        t_sec=t_sec,
+                        duration_sec=duration_sec,
+                        progress=1.0,
+                        prop_img=prop_img,
+                        prev_stage_state=prev_stage_state,
+                        total_chapters=total_chapters,
+                        has_next_diff_title=has_next_diff_title,
+                        cam_board_scale=cam_layout.board_scale,
+                        cam_board_alpha=cam_layout.board_alpha,
+                        clamp_bounds=cam_layout.clamp_bounds,
+                        anchor_top_center=cam_layout.anchor_top_center,
+                    )
+                    board_cache["static_board"] = baked
+                frame_rgba.alpha_composite(baked)
+            else:
+                anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
+                prog = min(1.0, max(0.0, t_sec / anim_dur))
+                _composite_transitioned_board(
+                    frame_rgba,
+                    beat,
+                    cam_layout.board_box,
+                    pal,
+                    t_sec=t_sec,
+                    duration_sec=duration_sec,
+                    progress=prog,
+                    prop_img=prop_img,
+                    prev_stage_state=prev_stage_state,
+                    total_chapters=total_chapters,
+                    has_next_diff_title=has_next_diff_title,
+                    cam_board_scale=cam_layout.board_scale,
+                    cam_board_alpha=cam_layout.board_alpha,
+                    clamp_bounds=cam_layout.clamp_bounds,
+                    anchor_top_center=cam_layout.anchor_top_center,
+                )
 
         if aspect == "9:16" and camera_shot == "closeup_react" and cam_layout.board_alpha < 0.85:
             _draw_compact_topic_pill(

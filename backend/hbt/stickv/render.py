@@ -681,6 +681,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 wav_path=wav_p,
                 prev_pose_state=cur_state.pose_state if cur_state is not None else None,
                 global_t_offset=cur_frame_offset / max(1, fps),
+                board_type=beat.board_type,
             )
 
             prop_img: Image.Image | None = None
@@ -744,6 +745,7 @@ def _stream_chunk_frames_to_ffmpeg(
 
             last_char_size: tuple[int, int] | None = None
             last_cam = (1.0, 0.5, 0.5)
+            beat_board_cache: dict[str, Image.Image] = {}
             try:
                 for f_idx in range(n_frames_beat):
                     if cancel is not None and f_idx % 8 == 0:
@@ -778,6 +780,7 @@ def _stream_chunk_frames_to_ffmpeg(
                             total_chapters=total_chapters,
                             has_next_diff_title=has_next_diff_title,
                             show_chapter_banner=show_chapter_banner,
+                            board_cache=beat_board_cache,
                         )
                     finally:
                         bg_frame.close()
@@ -832,6 +835,9 @@ def _stream_chunk_frames_to_ffmpeg(
                     last_chapter=beat.chapter,
                 )
             finally:
+                for cached_im in beat_board_cache.values():
+                    cached_im.close()
+                beat_board_cache.clear()
                 animator.close()
                 if char_img is not None:
                     char_img.close()
