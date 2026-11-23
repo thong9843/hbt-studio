@@ -38,6 +38,16 @@ class CreateChatBody(BaseModel):
     direct_script: bool = False
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     model: str | None = Field(default=None)
+    auto_fetch_online: bool = True
+
+
+class RegenChatBody(BaseModel):
+    auto_fetch_online: bool | None = None
+
+
+class RerollAssetBody(BaseModel):
+    kind: Literal["meme", "sticker", "sfx"]
+    auto_fetch_online: bool | None = None
 
 
 class RenderChatBody(BaseModel):
@@ -110,6 +120,8 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
         slug=slug,
         direct_script=body.direct_script,
         target_duration_s=body.target_duration_s,
+        auto_fetch_online=body.auto_fetch_online,
+        model=body.model,
     )
 
     # Cập nhật job_id vào job.json
@@ -252,8 +264,12 @@ async def upload_chat_avatar(
 
 
 @router.post("/chatting/{slug}/regen")
-def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
-    """Viết lại kịch bản bằng Ollama từ source.json gốc."""
+def regen_chatting_project(
+    slug: str,
+    state: State,
+    body: RegenChatBody | None = None,
+) -> dict[str, Any]:
+    """Viết lại kịch bản bằng Gemini từ source.json gốc và chạy Smart Asset Director."""
     project_dir = get_project_dir(state.settings.workspace_dir, slug)
     if not project_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
@@ -315,23 +331,134 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
         sender = char_map.get(
             m["from"], default_old_right if m["from"] in new_rights else default_old_left
         )
-        messages.append(Message(from_=sender, text=m["text"], sticker=m.get("sticker")))
+        messages.append(
+            Message(
+                from_=sender,
+                text=m["text"],
+                sticker=m.get("sticker"),
+                meme_id=m.get("meme_id"),
+                beat_role=m.get("beat_role"),
+                intensity=int(m.get("intensity", 2)),
+                meme_query=m.get("meme_query"),
+                sfx_query=m.get("sfx_query"),
+                sfx_id=m.get("sfx_id"),
+                asset_origin=m.get("asset_origin"),
+            )
+        )
 
+    allow_online = (
+        body.auto_fetch_online
+        if (body is not None and body.auto_fetch_online is not None)
+        else doc.auto_fetch_online
+    )
     doc.title = chat_raw.get("title", doc.title)
+    doc.auto_fetch_online = allow_online
     doc.messages = messages
     doc.warnings = chat_raw.get("warnings", [])
+
+    from hbt.shared.asset_director import AssetDirector
+
+    director = AssetDirector(
+        state.settings.library_dir, state.settings.workspace_dir, engine="chatting"
+    )
+    doc, report = director.direct_chat_doc(doc, auto_fetch_online=allow_online)
+    director_summary = {
+        "memes_kept": report.memes_kept,
+        "memes_stripped": report.memes_stripped,
+        "sfx_kept": report.sfx_kept,
+        "fetched_online_count": report.fetched_online_count,
+    }
     save_chat(state.settings.workspace_dir, slug, doc)
 
     # Cập nhật timings
     timings = source.get("timings", {})
     timings.update(llm_timings)
+    timings["director_summary"] = director_summary
     source["timings"] = timings
+    source["director_summary"] = director_summary
     save_source(state.settings.workspace_dir, slug, source)
 
     return {
         "ok": True,
         "doc": doc.model_dump(by_alias=True),
         "timings": timings,
+        "director_summary": director_summary,
+    }
+
+
+@router.post("/chatting/{slug}/messages/{msg_id}/reroll-asset")
+def reroll_chatting_message_asset(
+    slug: str,
+    msg_id: int,
+    body: RerollAssetBody,
+    state: State,
+) -> dict[str, Any]:
+    """Đổi nhanh 1 chạm meme/sticker hoặc SFX cho 1 tin nhắn (không trùng trong video)."""
+    project_dir = get_project_dir(state.settings.workspace_dir, slug)
+    if not project_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
+
+    try:
+        doc = load_chat(state.settings.workspace_dir, slug)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Không đọc được chat.json: {e}") from e
+
+    if msg_id < 0 or msg_id >= len(doc.messages):
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy tin nhắn chỉ số {msg_id}")
+
+    msg = doc.messages[msg_id]
+    allow_online = (
+        body.auto_fetch_online if body.auto_fetch_online is not None else doc.auto_fetch_online
+    )
+
+    exclude_ids: set[str] = set()
+    for m in doc.messages:
+        if body.kind == "sfx":
+            if m.sfx_id:
+                exclude_ids.add(m.sfx_id)
+        else:
+            if m.meme_id:
+                exclude_ids.add(m.meme_id)
+
+    from hbt.shared.asset_director import AssetDirector
+
+    director = AssetDirector(
+        state.settings.library_dir, state.settings.workspace_dir, engine="chatting"
+    )
+    query = (
+        (msg.sfx_query or msg.text)
+        if body.kind == "sfx"
+        else (msg.meme_query or msg.sticker or msg.text)
+    )
+    resolved = director.reroll_asset(
+        body.kind,
+        query,
+        exclude_ids=exclude_ids,
+        auto_fetch_online=allow_online,
+        prefer_greenmeme=(body.kind == "meme"),
+    )
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không còn tài nguyên mới phù hợp để đổi (hãy bật Tự tải online).",
+        )
+
+    if body.kind == "sfx":
+        msg.sfx_id = resolved.asset_id
+        msg.asset_origin = resolved.origin
+    else:
+        msg.meme_id = resolved.asset_id
+        if not msg.sticker:
+            msg.sticker = "soc"
+        msg.asset_origin = resolved.origin
+
+    save_chat(state.settings.workspace_dir, slug, doc)
+    return {
+        "ok": True,
+        "msg_id": msg_id,
+        "message": msg.model_dump(by_alias=True),
+        "asset": resolved.model_dump(),
+        "doc": doc.model_dump(by_alias=True),
     }
 
 

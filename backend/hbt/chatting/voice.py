@@ -23,11 +23,206 @@ DEFAULT_CHAR_VOICES = {
     "left_3": "Mai Anh",
 }
 
+FEMALE_VOICES: tuple[str, ...] = ("Trúc Ly", "Mai Anh", "Thùy Dung")
+MALE_VOICES: tuple[str, ...] = ("Adam bựa", "Thiện Minh", "Hải Đăng")
+
+_FEMALE_NAME_HINTS = (
+    "linh",
+    "huong",
+    "hương",
+    "trang",
+    "mai",
+    "lan",
+    "ngoc",
+    "ngọc",
+    "thao",
+    "thảo",
+    "nhi",
+    "vy",
+    "my",
+    "truc",
+    "trúc",
+    "hoa",
+    "yen",
+    "yến",
+    "quynh",
+    "quỳnh",
+    "nga",
+    "chi",
+    "phuong",
+    "phương",
+    "nhung",
+    "oanh",
+    "huyen",
+    "huyền",
+    "ngan",
+    "ngân",
+    "dung",
+    "thuy",
+    "thùy",
+    "thuý",
+    "thúy",
+    "van",
+    "vân",
+    "mẹ",
+    "chị",
+    "cô",
+    "em gái",
+    "vợ",
+    "bạn gái",
+    "nữ",
+)
+
+_MALE_NAME_HINTS = (
+    "nam",
+    "minh",
+    "hung",
+    "hùng",
+    "tuan",
+    "tuấn",
+    "dung",
+    "dũng",
+    "hai",
+    "hải",
+    "dang",
+    "đăng",
+    "khanh",
+    "khánh",
+    "bao",
+    "bảo",
+    "huy",
+    "khang",
+    "khoa",
+    "duc",
+    "đức",
+    "long",
+    "phong",
+    "quan",
+    "quân",
+    "son",
+    "sơn",
+    "tung",
+    "tùng",
+    "bố",
+    "ba",
+    "chú",
+    "thầy",
+    "chồng",
+    "bạn trai",
+    "anh trai",
+)
+
+_FEMALE_PRONOUN_RE = re.compile(
+    r"\b(?:bà|chị|em gái|con nhỏ|bà ơi|bà nội|chị em|bà già|mấy bà)\b",
+    re.IGNORECASE,
+)
+_MALE_PRONOUN_RE = re.compile(
+    r"\b(?:ông ơi|thằng|anh trai|bố mày|cha nội|mấy ông)\b",
+    re.IGNORECASE,
+)
+
+
+def infer_character_gender(
+    name: str,
+    *,
+    explicit_gender: str | None = None,
+    dialogue_samples: list[str] | None = None,
+) -> str:
+    """Xác định giới tính nhân vật ('female' | 'male') từ trường tường minh, tên hoặc xưng hô."""
+    eg = str(explicit_gender or "").strip().lower()
+    if eg in ("female", "male"):
+        return eg
+
+    low_name = (name or "").strip().lower()
+    name_tokens = set(re.findall(r"[a-zà-ỹ]+", low_name))
+
+    # Ưu tiên khớp tên riêng / danh xưng
+    if any((h in low_name if " " in h else h in name_tokens) for h in _FEMALE_NAME_HINTS):
+        return "female"
+    if any((h in low_name if " " in h else h in name_tokens) for h in _MALE_NAME_HINTS):
+        return "male"
+
+    # Fallback theo xưng hô trong lời thoại
+    joined = " ".join(dialogue_samples or [])
+    fem_hits = len(_FEMALE_PRONOUN_RE.findall(joined))
+    male_hits = len(_MALE_PRONOUN_RE.findall(joined))
+    if fem_hits > male_hits:
+        return "female"
+    if male_hits > fem_hits:
+        return "male"
+    return "male"
+
+
+def assign_character_voices(
+    characters: list[dict[str, object]],
+    messages: list[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    """Gán giọng VieNeu khớp giới tính nữ/nam cho danh sách nhân vật (không gán nhầm giọng)."""
+    msgs_by_char: dict[str, list[str]] = {}
+    all_texts: list[str] = []
+    for m in messages or []:
+        cid = str(m.get("from") or "")
+        txt = str(m.get("text") or "")
+        msgs_by_char.setdefault(cid, []).append(txt)
+        all_texts.append(txt)
+
+    # Nếu đối phương gọi nhân vật bằng "bà"/"chị", nhân vật đó cũng là nữ
+    addressed_fem = any(re.search(r"\b(?:bà|chị|bà ơi)\b", t, re.IGNORECASE) for t in all_texts)
+
+    f_idx = 0
+    m_idx = 0
+    for c in characters:
+        cid = str(c.get("id") or "")
+        name = str(c.get("name") or "")
+        explicit = c.get("gender")
+        # Gộp lời thoại của chính nhân vật và câu đối phương xưng hô để suy đoán chính xác
+        samples = list(msgs_by_char.get(cid, []))
+        if addressed_fem and not explicit and not samples:
+            samples = all_texts
+        gender = infer_character_gender(
+            name,
+            explicit_gender=str(explicit) if explicit else None,
+            dialogue_samples=samples or (all_texts if addressed_fem else []),
+        )
+        c["gender"] = gender
+        cur_voice = str(c.get("voice") or "").strip()
+        if gender == "female":
+            if cur_voice not in FEMALE_VOICES:
+                c["voice"] = FEMALE_VOICES[f_idx % len(FEMALE_VOICES)]
+            f_idx += 1
+        else:
+            if cur_voice not in MALE_VOICES:
+                c["voice"] = MALE_VOICES[m_idx % len(MALE_VOICES)]
+            m_idx += 1
+    return characters
+
+
+# Chỉ lọc mốc giờ UI dạng hh:mm (20:15, 10:30 PM); giữ nguyên "2h sáng", "9 giờ 30" trong lời thoại
 TIME_PATTERNS = [
     re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b"),
-    re.compile(r"\b\d{1,2}h(?:\d{2})?\b", re.IGNORECASE),
-    re.compile(r"\b\d{1,2}\s*giờ(?:\s*\d{1,2}\s*phút)?\b", re.IGNORECASE),
 ]
+
+_TTS_SLANG_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(\d{1,2})h(\d{1,2})\b", re.IGNORECASE), r"\1 giờ \2"),
+    (re.compile(r"\b(\d{1,2})h\b", re.IGNORECASE), r"\1 giờ"),
+    (re.compile(r"\b(\d+)p\b", re.IGNORECASE), r"\1 phút"),
+    (re.compile(r"\b(\d+)k\b", re.IGNORECASE), r"\1 nghìn"),
+    (re.compile(r"\brep\b", re.IGNORECASE), "rép"),
+    (re.compile(r"\bcrush\b", re.IGNORECASE), "cờ rớt"),
+    (re.compile(r"\b(?:inbox|ib)\b", re.IGNORECASE), "in bốc"),
+    (re.compile(r"\bfb\b", re.IGNORECASE), "phây búc"),
+)
+
+
+def normalize_vietnamese_for_tts(text: str) -> str:
+    """Chuẩn hóa giờ viết tắt & từ lóng chat sang cách đọc tiếng Việt tự nhiên cho VieNeu-TTS."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    for pat, repl in _TTS_SLANG_RULES:
+        s = pat.sub(repl, s)
+    return re.sub(r"\s+", " ", s).strip()
+
 
 META_PATTERNS = [
     re.compile(r"\[(?:sticker|meme|ảnh|video|voice|audio|image|gif)[^\]]*\]", re.IGNORECASE),
@@ -136,11 +331,12 @@ def synthesize_chat_voices(
     for idx, msg in enumerate(doc.messages):
         char = char_map.get(msg.from_)
         voice_id = char.voice if char and char.voice else DEFAULT_CHAR_VOICES.get("me", "Adam bựa")
-        spoken = (
+        raw_spoken = (
             msg.spoken_text
             if getattr(msg, "spoken_text", None) is not None
             else clean_spoken_text(msg.text)
         )
+        spoken = normalize_vietnamese_for_tts(raw_spoken)
 
         # Nếu là chuyển cảnh ngoặc đơn hoặc sau khi lọc lời thoại mà rỗng
         is_trans = is_scene_transition(msg.text)

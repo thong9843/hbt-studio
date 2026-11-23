@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -42,6 +43,7 @@ def run_chatting_auto_job(
     slug_override: str | None = None,
     direct_script: bool = False,
     target_duration_s: float | None = None,
+    auto_fetch_online: bool = True,
     emit_event: ProgressEmit | None = None,
 ) -> tuple[str, Path]:
     """Chạy toàn bộ quy trình 4 pha của Chatting:
@@ -173,19 +175,21 @@ def run_chatting_auto_job(
         timings.update(llm_timings)
         chat_raw = sanitize_chat_raw(chat_raw)
 
-    # Khởi tạo ChatDoc (phân giọng khác nhau cho từng nhân vật trong Group Chat)
-    default_voices = ["Adam bựa", "Trúc Ly", "Thiện Minh", "Mai Anh", "Hải Đăng"]
+    # Khởi tạo ChatDoc (gán giọng VieNeu khớp giới tính nữ/nam cho từng nhân vật)
+    from hbt.chatting.voice import assign_character_voices
+
+    raw_chars_for_voice = [dict(c) for c in chat_raw.get("characters", [])]
+    assign_character_voices(raw_chars_for_voice, chat_raw.get("messages", []))
+
     characters: list[Character] = []
-    for idx, c in enumerate(chat_raw.get("characters", [])):
-        default_v = (
-            "Adam bựa" if c["side"] == "right" else default_voices[(idx + 1) % len(default_voices)]
-        )
+    for c in raw_chars_for_voice:
         characters.append(
             Character(
-                id=c["id"],
-                name=c["name"],
-                side=c["side"],
-                voice=c.get("voice") or default_v,
+                id=str(c["id"]),
+                name=str(c["name"]),
+                side=str(c["side"]),  # type: ignore[arg-type]
+                voice=str(c.get("voice") or "Adam bựa"),
+                gender=c.get("gender"),  # type: ignore[arg-type]
                 avatar=None,
             )
         )
@@ -199,6 +203,13 @@ def run_chatting_auto_job(
                 display_text=m.get("display_text"),
                 spoken_text=m.get("spoken_text"),
                 sticker=m.get("sticker"),
+                meme_id=m.get("meme_id"),
+                beat_role=m.get("beat_role"),
+                intensity=int(m.get("intensity", 2)),
+                meme_query=m.get("meme_query"),
+                sfx_query=m.get("sfx_query"),
+                sfx_id=m.get("sfx_id"),
+                asset_origin=m.get("asset_origin"),
                 media_type=m.get("media_type") or "none",
                 media_path=m.get("media_path"),
                 media_hint=m.get("media_hint"),
@@ -211,17 +222,34 @@ def run_chatting_auto_job(
         platform=platform,
         source={"kind": kind, "url": link_url},
         background={"name": background_name, "seed": 7},
+        music_mood=chat_raw.get("music_mood"),
+        auto_fetch_online=auto_fetch_online,
         target_duration_s=target_duration_s,
         characters=characters,
         messages=messages,
         warnings=chat_raw.get("warnings", []),
     )
 
+    # Smart Asset Director: chốt meme/sticker/SFX không spam, chống trùng lặp & tự tải online
+    from hbt.shared.asset_director import AssetDirector
+
+    director = AssetDirector(library_dir, workspace_dir, engine="chatting")
+    effective_online = auto_fetch_online and (os.environ.get("CHATTING_FAKE_LLM") != "1")
+    doc, director_report = director.direct_chat_doc(doc, auto_fetch_online=effective_online)
+    director_summary = {
+        "memes_kept": director_report.memes_kept,
+        "memes_stripped": director_report.memes_stripped,
+        "sfx_kept": director_report.sfx_kept,
+        "fetched_online_count": director_report.fetched_online_count,
+    }
+    timings["director_summary"] = director_summary
+
     # Lưu chat.json và source.json
     save_chat(workspace_dir, slug, doc)
     source_record = {
         **source_data,
         "timings": timings,
+        "director_summary": director_summary,
     }
     save_source(workspace_dir, slug, source_record)
 

@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { renderWithProviders } from '../../test/render';
-import { stubFetch } from '../../test/fakes';
+import { json, stubFetch } from '../../test/fakes';
 import { ChattingHome } from './ChattingHome';
 import { ChattingEditor } from './ChattingEditor';
 
@@ -41,6 +41,10 @@ describe('Chatting Pages (Vitest)', () => {
     expect(screen.getByPlaceholderText('Dán link Reddit hoặc dán câu chuyện…')).toBeInTheDocument();
     expect(screen.getByText('Messenger')).toBeInTheDocument();
     expect(screen.getByText('Instagram')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Tự tải tài nguyên online' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
     expect(screen.getByText('Tạo video')).toBeInTheDocument();
     expect(await screen.findByText('Dự án chat mẫu')).toBeInTheDocument();
   });
@@ -167,5 +171,69 @@ describe('Chatting Pages (Vitest)', () => {
     expect(await screen.findByText('Đang tạo video Chatting...')).toBeInTheDocument();
     expect(screen.getAllByText('Gemini đang viết kịch bản chat...').length).toBeGreaterThan(0);
     expect(screen.getByText('45%')).toBeInTheDocument();
+  });
+
+  it('ChattingEditor: hiện badge Mới tải và bấm Đổi cái khác gọi reroll-asset', async () => {
+    const initialDoc = {
+      hbt_chat: 1,
+      title: 'Đoạn chat có meme',
+      platform: 'messenger',
+      auto_fetch_online: true,
+      source: { kind: 'pasted' },
+      background: { name: 'minecraft4-1080p60', seed: 7 },
+      characters: [
+        { id: 'me', name: 'Tôi', side: 'right', voice: 'Adam bựa' },
+        { id: 'a', name: 'Linh', side: 'left', voice: 'Trúc Ly' },
+      ],
+      messages: [
+        {
+          from: 'a',
+          text: 'Sốc thật sự!',
+          sticker: 'soc',
+          meme_id: 'giphy-cat1',
+          asset_origin: 'online_fetched',
+        },
+        { from: 'me', text: 'Tin 2', sticker: null },
+      ],
+    };
+
+    const updatedDoc = {
+      ...initialDoc,
+      messages: [{ ...initialDoc.messages[0], meme_id: 'giphy-cat2' }, initialDoc.messages[1]],
+    };
+
+    let rerolled = false;
+    stubFetch({
+      'GET /api/chatting/asset-slug': () =>
+        json({
+          slug: 'asset-slug',
+          doc: rerolled ? updatedDoc : initialDoc,
+          source: { title: 'Đoạn chat có meme', body: '...' },
+          renders: [],
+          preview_url: null,
+        }),
+      'POST /api/chatting/asset-slug/messages/0/reroll-asset': () => {
+        rerolled = true;
+        return json({
+          ok: true,
+          msg_id: 0,
+          message: updatedDoc.messages[0],
+          doc: updatedDoc,
+        });
+      },
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/chatting/:slug" element={<ChattingEditor />} />
+      </Routes>,
+      '/chatting/asset-slug',
+    );
+
+    expect(await screen.findByText('giphy-cat1')).toBeInTheDocument();
+    expect(screen.getByText('Mới tải')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đổi cái khác' }));
+    expect(await screen.findByText('giphy-cat2')).toBeInTheDocument();
   });
 });

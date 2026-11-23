@@ -765,10 +765,17 @@ export interface ChatCharacter {
 }
 
 export interface ChatMessage {
-  id: string;
+  id?: string;
   from: string;
   text: string;
   sticker?: string | null;
+  meme_id?: string | null;
+  beat_role?: string | null;
+  intensity?: number;
+  meme_query?: string | null;
+  sfx_query?: string | null;
+  sfx_id?: string | null;
+  asset_origin?: 'local' | 'online_fetched' | null;
   media_type?: 'none' | 'image' | 'video';
   media_path?: string | null;
   media_hint?: string | null;
@@ -780,6 +787,8 @@ export interface ChatDoc {
   title: string;
   platform: 'messenger' | 'instagram' | 'zalo';
   aspect_mode?: AspectMode;
+  auto_fetch_online?: boolean;
+  music_mood?: string | null;
   target_duration_s?: number | null;
   characters: ChatCharacter[];
   messages: ChatMessage[];

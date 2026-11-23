@@ -10,6 +10,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import math
 import shutil
 import struct
 import time
@@ -20,22 +21,26 @@ from pathlib import Path
 from PIL import Image
 
 from hbt.chatting.audio import mix_voice_and_bgm_playlist
-from hbt.chatting.draw import ChatFrameRenderer
+from hbt.chatting.draw import ChatFrameRenderer, compute_meme_rect
 from hbt.chatting.html_renderer import HtmlChatSession
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
 from hbt.chatting.stickers import (
+    SUPPORTED_IMAGE_EXTS,
     extract_meme_audio,
     find_meme_by_emojis,
     get_meme_metadata,
     load_sticker_or_meme_image,
     pick_sticker,
+    resolve_meme_or_sticker_path,
+    resolve_sfx_path,
 )
 from hbt.chatting.themes import get_theme
 from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
+from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
 from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 
 logger = logging.getLogger(__name__)
@@ -44,9 +49,15 @@ ProgressCallback = Callable[[int, str], None]
 
 
 def cubic_ease_out(t: float) -> float:
-    """Hàm nội suy Cubic Ease-Out 1 - (1 - t)^3 cho chuyển động cuộn 60fps mượt mà."""
+    """Hàm nội suy Cubic Ease-Out 1 - (1 - t)^3 cho chuyển động 60fps dịu mắt."""
     tc = max(0.0, min(1.0, t))
     return 1.0 - (1.0 - tc) ** 3
+
+
+def cosine_ease_in_out(t: float) -> float:
+    """Hàm nội suy Cosine Ease-In-Out mượt mà cho chuyển trang & co giãn khung chat."""
+    tc = max(0.0, min(1.0, t))
+    return 0.5 * (1.0 - math.cos(math.pi * tc))
 
 
 def spring_scale_curve(num_frames: int = 18) -> list[float]:
@@ -78,17 +89,21 @@ def spring_scale_curve(num_frames: int = 18) -> list[float]:
 
 
 def assemble_voice_track(
-    audio_events: list[tuple[float, Path, float]],
+    audio_events: list[tuple[float, Path, float] | tuple[float, Path, float, float]],
     total_duration: float,
     out_wav: Path,
     sample_rate: int = 24000,
 ) -> None:
-    """Tạo track âm thanh tổng hợp (giọng nói + SFX) bằng cách cộng dồn mẫu PCM 16-bit."""
+    """Tạo track âm thanh tổng hợp (giọng nói + SFX + meme) với hỗ trợ gain_db từng lớp."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     total_samples = int(total_duration * sample_rate)
     buffer = bytearray(total_samples * 2)  # 16-bit mono
 
-    for start_time, audio_path, _dur in audio_events:
+    for ev in audio_events:
+        start_time = ev[0]
+        audio_path = ev[1]
+        gain_db = float(ev[3]) if len(ev) >= 4 else 0.0
+        gain_lin = 10.0 ** (gain_db / 20.0) if gain_db != 0.0 else 1.0
         if not audio_path.is_file():
             continue
         try:
@@ -113,8 +128,7 @@ def assemble_voice_track(
                         "-y",
                         "-v",
                         "error",
-                        "-threads",
-                        "2",
+                        *FFMPEG_RESOURCE_CLAMP,
                         "-i",
                         str(audio_path),
                         "-ac",
@@ -138,10 +152,11 @@ def assemble_voice_track(
             end_idx = min(len(buffer), start_idx + len(raw_data))
             copy_len = end_idx - start_idx
             if copy_len > 0 and start_idx < len(buffer):
-                # Cộng dồn mẫu PCM 16-bit với kiểm soát chống tràn âm (audio mixing)
+                # Cộng dồn mẫu PCM 16-bit kèm hệ số gain_lin chống lấn át giọng đọc
                 for k in range(0, copy_len, 2):
                     cur_val = struct.unpack_from("<h", buffer, start_idx + k)[0]
-                    add_val = struct.unpack_from("<h", raw_data, k)[0]
+                    add_raw = struct.unpack_from("<h", raw_data, k)[0]
+                    add_val = int(round(add_raw * gain_lin)) if gain_lin != 1.0 else add_raw
                     mixed = max(-32768, min(32767, cur_val + add_val))
                     struct.pack_into("<h", buffer, start_idx + k, mixed)
         except Exception as e:
@@ -303,18 +318,22 @@ def render_chat_video(
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
 
-    # Bộ nhớ theo phiên video: xoay vòng meme không lặp lại cho tới khi hết kho của tag
+    # Bộ nhớ theo phiên video: ưu tiên `msg.meme_id` từ Smart Asset Director, fallback xoay vòng
     used_memes: set[str] = set()
     state_meme_files: dict[int, Path] = {}
     for st_idx, st in enumerate(active_states):
         if st.active_sticker:
             chosen: Path | None = None
             if st.visible_count > 0:
-                msg_text = (
-                    getattr(doc.messages[st.visible_count - 1], "display_text", None)
-                    or doc.messages[st.visible_count - 1].text
+                cur_msg = doc.messages[st.visible_count - 1]
+                chosen = resolve_meme_or_sticker_path(
+                    library_dir, getattr(cur_msg, "meme_id", None)
                 )
-                chosen = find_meme_by_emojis(library_dir, msg_text, used_memes=used_memes)
+                if chosen is not None:
+                    used_memes.add(chosen.name)
+                else:
+                    msg_text = getattr(cur_msg, "display_text", None) or cur_msg.text
+                    chosen = find_meme_by_emojis(library_dir, msg_text, used_memes=used_memes)
             if chosen is None:
                 chosen = pick_sticker(
                     library_dir, st.active_sticker, doc.background.seed, used_memes=used_memes
@@ -326,14 +345,38 @@ def render_chat_video(
     chunk_files: list[Path] = []
     frame_counter = 0
     current_scroll_y: float = 0.0
+    acc_time: float = 0.0
+    prev_page_msgs: list[Message] = []
+    prev_card_h: int = 360
 
     chunk_concat_lines: list[str] = []
     chunk_pngs: list[Path] = []
     last_chunk_fname = ""
-    spring_scales = spring_scale_curve(18)
 
     html_session = HtmlChatSession(doc.platform)
     html_session.start()
+
+    def snap_dur(raw_d: float) -> float:
+        """Khóa mốc frame tích lũy `round(acc_t * fps)` để không rơi/lặp frame."""
+        nonlocal acc_time
+        t_start = round(acc_time * fps) / float(fps)
+        acc_time += max(1.0 / float(fps), raw_d)
+        t_end = round(acc_time * fps) / float(fps)
+        return max(1.0 / float(fps), round(t_end - t_start, 5))
+
+    def emit_image_frame(img: Image.Image, raw_dur: float, *, add_wm: bool = True) -> None:
+        nonlocal frame_counter, last_chunk_fname
+        fname = f"frame_{frame_counter:05d}.png"
+        fpath = frames_dir / fname
+        if add_wm and wm_img is not None:
+            img.alpha_composite(wm_img)
+        img.save(fpath, format="PNG", compress_level=1)
+        dur = snap_dur(raw_dur)
+        chunk_pngs.append(fpath)
+        chunk_concat_lines.append(f"file '{fname}'\n")
+        chunk_concat_lines.append(f"duration {dur:.5f}\n")
+        last_chunk_fname = fname
+        frame_counter += 1
 
     def save_subframe(
         v_msgs: list[Message],
@@ -347,14 +390,28 @@ def render_chat_video(
         s_scroll: float | None = None,
         is_cutin: bool = False,
         dur: float = 0.05,
+        msg_opacity: float = 1.0,
+        msg_offset_y: float = 0.0,
+        typing_opacity: float = 1.0,
+        meme_opacity: float = 1.0,
+        meme_scale: float = 1.0,
+        frame_h_override: int | None = None,
     ) -> None:
         nonlocal frame_counter, last_chunk_fname
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
 
+        is_anim_frame = (
+            msg_opacity < 0.999
+            or abs(msg_offset_y) > 0.1
+            or typing_opacity < 0.999
+            or meme_opacity < 0.999
+            or abs(meme_scale - 1.0) > 0.001
+            or frame_h_override is not None
+        )
         used_html = False
-        if html_session.active and not is_cutin and s_img is None:
-            state = renderer.build_html_state(
+        if html_session.active and not is_cutin and s_img is None and not is_anim_frame:
+            state_json = renderer.build_html_state(
                 visible_messages=v_msgs,
                 show_typing=s_typing,
                 typing_pulse_step=t_pulse,
@@ -362,7 +419,7 @@ def render_chat_video(
                 show_seen=s_seen,
                 scroll_offset_override=s_scroll,
             )
-            used_html = html_session.render_frame(state, fpath)
+            used_html = html_session.render_frame(state_json, fpath)
 
         if used_html:
             if wm_img is not None and not is_cutin:
@@ -383,15 +440,22 @@ def render_chat_video(
                 show_seen=s_seen,
                 scroll_offset_override=s_scroll,
                 is_meme_cutin=is_cutin,
+                last_msg_opacity=msg_opacity,
+                last_msg_offset_y=msg_offset_y,
+                typing_opacity=typing_opacity,
+                meme_opacity=meme_opacity,
+                meme_scale=meme_scale,
+                frame_height_override=frame_h_override,
             )
             if wm_img is not None and not is_cutin:
                 img.alpha_composite(wm_img)
             img.save(fpath, format="PNG", compress_level=1)
             img.close()
 
+        snapped = snap_dur(dur)
         chunk_pngs.append(fpath)
         chunk_concat_lines.append(f"file '{fname}'\n")
-        chunk_concat_lines.append(f"duration {dur:.4f}\n")
+        chunk_concat_lines.append(f"duration {snapped:.5f}\n")
         last_chunk_fname = fname
         frame_counter += 1
 
@@ -407,13 +471,15 @@ def render_chat_video(
         for local_i, state in enumerate(chunk_states):
             global_i = chunk_idx + local_i
             stk_img = None
-            if state.active_sticker and not state.is_meme_cutin:
+            if state.active_sticker:
                 stk_file = state_meme_files.get(global_i)
                 if stk_file and stk_file.is_file():
-                    try:
-                        stk_img = load_sticker_or_meme_image(stk_file)
-                    except Exception:
-                        pass
+                    # Ảnh/WebP/GIF vẽ bằng Pillow; video .mp4/.webm ghép colorkey bằng FFmpeg
+                    if not state.is_meme_cutin or stk_file.suffix.lower() in SUPPORTED_IMAGE_EXTS:
+                        try:
+                            stk_img = load_sticker_or_meme_image(stk_file)
+                        except Exception:
+                            pass
 
             visible_msgs = renderer.paginate_messages(
                 doc.messages[: state.visible_count],
@@ -437,93 +503,152 @@ def render_chat_video(
                         (state.start_time, state.start_time + frame_dur, m_path, sx, sy, sw, sh)
                     )
 
-            # 1. Typing 60fps: 18 sub-frames + Cubic Ease-Out cuộn dạng float
+            target_card_h = renderer.compute_card_height(
+                visible_msgs, show_typing=state.show_typing, show_seen=state.show_seen
+            )
+
+            # 1. Typing 60fps: fade-in 0.20s, sóng 3 chấm chậm (~1.1s/chu kỳ), fade-out 0.18s
             if state.show_typing:
-                num_sub = 18
-                sub_dur = frame_dur / num_sub
+                num_sub = max(12, int(round(frame_dur * fps)))
+                sub_dur = frame_dur / float(num_sub)
+                fade_in_s = min(0.20, frame_dur * 0.35)
+                fade_out_s = min(0.18, frame_dur * 0.30)
                 for k in range(num_sub):
-                    if target_scroll_y > current_scroll_y:
-                        t = (k + 1) / float(num_sub)
-                        ease = cubic_ease_out(t)
-                        scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
+                    t_local = (k + 0.5) * sub_dur
+                    if t_local < fade_in_s:
+                        t_op = cubic_ease_out(t_local / max(0.01, fade_in_s))
+                    elif t_local > (frame_dur - fade_out_s):
+                        t_op = cubic_ease_out((frame_dur - t_local) / max(0.01, fade_out_s))
                     else:
-                        scroll_k = target_scroll_y
+                        t_op = 1.0
+                    p_h = cubic_ease_out((k + 1) / float(num_sub))
+                    cur_h = int(round(prev_card_h + (target_card_h - prev_card_h) * p_h))
                     save_subframe(
                         v_msgs=visible_msgs,
                         s_typing=True,
                         t_char_id=state.typing_char_id,
                         t_pulse=k,
-                        s_img=stk_img,
+                        s_img=None,
                         s_right=state.sticker_from_right,
                         scale_msg=1.0,
                         s_seen=state.show_seen,
-                        s_scroll=scroll_k,
+                        s_scroll=target_scroll_y,
                         dur=sub_dur,
+                        typing_opacity=t_op,
+                        frame_h_override=cur_h,
                     )
+                prev_card_h = target_card_h
                 current_scroll_y = target_scroll_y
 
-            # 2. Pop-up chuẩn 60fps: 18 sub-frames Spring Easing (0.80->0.92->1.03->0.99->1.0)
+            # 2. Xuất hiện tin nhắn dịu 60fps (0.40s) + Cross-Fade 0.45s khi sang trang mới
             elif state.scale_last_msg < 1.0:
-                num_sub = len(spring_scales)
-                sub_dur = frame_dur / float(num_sub)
-                for k, scale in enumerate(spring_scales):
-                    if target_scroll_y > current_scroll_y:
-                        t = (k + 1) / float(num_sub)
-                        ease = cubic_ease_out(t)
-                        scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
-                    else:
-                        scroll_k = target_scroll_y
-                    save_subframe(
-                        v_msgs=visible_msgs,
-                        s_typing=False,
-                        t_char_id=None,
-                        t_pulse=0,
-                        s_img=stk_img,
-                        s_right=state.sticker_from_right,
-                        scale_msg=scale,
-                        s_seen=state.show_seen,
-                        s_scroll=scroll_k,
-                        dur=sub_dur,
+                is_page_reset = bool(prev_page_msgs) and len(visible_msgs) < len(prev_page_msgs)
+                if is_page_reset:
+                    xfade_dur = min(0.45, frame_dur)
+                    num_xf = max(12, int(round(xfade_dur * fps)))
+                    sub_dur = xfade_dur / float(num_xf)
+                    old_img = renderer.render_chat_view(
+                        visible_messages=prev_page_msgs,
+                        show_typing=False,
+                        show_seen=True,
+                        frame_height_override=prev_card_h,
                     )
+                    new_img = renderer.render_chat_view(
+                        visible_messages=visible_msgs,
+                        show_typing=False,
+                        show_seen=state.show_seen,
+                        frame_height_override=target_card_h,
+                    )
+                    for k in range(num_xf):
+                        alpha = cosine_ease_in_out((k + 1) / float(num_xf))
+                        blended = Image.blend(old_img, new_img, alpha)
+                        emit_image_frame(blended, sub_dur)
+                        blended.close()
+                    old_img.close()
+                    new_img.close()
+                    remain = frame_dur - xfade_dur
+                    if remain > 0.01:
+                        save_subframe(
+                            v_msgs=visible_msgs,
+                            s_seen=state.show_seen,
+                            dur=remain,
+                            frame_h_override=target_card_h,
+                        )
+                else:
+                    num_sub = max(12, int(round(frame_dur * fps)))
+                    sub_dur = frame_dur / float(num_sub)
+                    for k in range(num_sub):
+                        p = (k + 1) / float(num_sub)
+                        ease = cubic_ease_out(p)
+                        sc = 0.97 + 0.03 * ease
+                        off_y = 22.0 * (1.0 - ease)
+                        cur_h = int(round(prev_card_h + (target_card_h - prev_card_h) * ease))
+                        save_subframe(
+                            v_msgs=visible_msgs,
+                            s_typing=False,
+                            s_img=None,
+                            s_right=state.sticker_from_right,
+                            scale_msg=sc,
+                            s_seen=state.show_seen,
+                            s_scroll=target_scroll_y,
+                            dur=sub_dur,
+                            msg_opacity=ease,
+                            msg_offset_y=off_y,
+                            frame_h_override=cur_h,
+                        )
+                prev_page_msgs = list(visible_msgs)
+                prev_card_h = target_card_h
                 current_scroll_y = target_scroll_y
 
-            # 3. Scroll 60fps: nội suy 18 sub-frames bằng Cubic Ease-Out với toạ độ float
-            elif target_scroll_y > current_scroll_y and frame_dur >= 0.2:
-                scroll_dur = min(0.30, frame_dur * 0.75)
-                num_sub = 18
-                sub_dur = scroll_dur / float(num_sub)
-                for k in range(num_sub):
-                    t = (k + 1) / float(num_sub)
-                    ease = cubic_ease_out(t)
-                    scroll_k = current_scroll_y + (target_scroll_y - current_scroll_y) * ease
+            # 3. Meme/Sticker tĩnh: fade-in + scale 0.94->1.0 (0.28s), hold, fade-out (0.25s)
+            elif state.is_meme_cutin and stk_img is not None:
+                in_d = min(0.28, frame_dur * 0.35)
+                out_d = min(0.25, frame_dur * 0.30)
+                hold_d = max(0.0, frame_dur - in_d - out_d)
+                n_in = max(6, int(round(in_d * fps)))
+                for k in range(n_in):
+                    ease = cubic_ease_out((k + 1) / float(n_in))
                     save_subframe(
                         v_msgs=visible_msgs,
-                        s_typing=False,
-                        t_char_id=None,
-                        t_pulse=0,
                         s_img=stk_img,
                         s_right=state.sticker_from_right,
-                        scale_msg=state.scale_last_msg,
                         s_seen=state.show_seen,
-                        s_scroll=scroll_k,
-                        dur=sub_dur,
+                        is_cutin=True,
+                        dur=in_d / float(n_in),
+                        meme_opacity=ease,
+                        meme_scale=0.94 + 0.06 * ease,
+                        frame_h_override=target_card_h,
                     )
-                current_scroll_y = target_scroll_y
-                remain_dur = frame_dur - scroll_dur
-                if remain_dur > 0.005:
+                if hold_d > 0.01:
                     save_subframe(
                         v_msgs=visible_msgs,
-                        s_typing=False,
-                        t_char_id=None,
-                        t_pulse=0,
                         s_img=stk_img,
                         s_right=state.sticker_from_right,
-                        scale_msg=state.scale_last_msg,
                         s_seen=state.show_seen,
-                        s_scroll=current_scroll_y,
-                        dur=remain_dur,
+                        is_cutin=True,
+                        dur=hold_d,
+                        meme_opacity=1.0,
+                        meme_scale=1.0,
+                        frame_h_override=target_card_h,
                     )
+                n_out = max(6, int(round(out_d * fps)))
+                for k in range(n_out):
+                    ease_out = 1.0 - cubic_ease_out((k + 1) / float(n_out))
+                    save_subframe(
+                        v_msgs=visible_msgs,
+                        s_img=stk_img,
+                        s_right=state.sticker_from_right,
+                        s_seen=state.show_seen,
+                        is_cutin=True,
+                        dur=out_d / float(n_out),
+                        meme_opacity=max(0.0, ease_out),
+                        meme_scale=1.0,
+                        frame_h_override=target_card_h,
+                    )
+                prev_page_msgs = list(visible_msgs)
+                prev_card_h = target_card_h
 
+            # 4. Đoạn đứng yên lúc đọc thoại / nghỉ: tái sử dụng 1 frame tĩnh (tối ưu tốc độ CPU)
             else:
                 current_scroll_y = target_scroll_y
                 save_subframe(
@@ -536,9 +661,12 @@ def render_chat_video(
                     scale_msg=state.scale_last_msg,
                     s_seen=state.show_seen,
                     s_scroll=current_scroll_y,
-                    is_cutin=False,
+                    is_cutin=bool(state.is_meme_cutin and stk_img is not None),
                     dur=frame_dur,
+                    frame_h_override=target_card_h,
                 )
+                prev_page_msgs = list(visible_msgs)
+                prev_card_h = target_card_h
 
             pct = 35 + int(25 * (global_i + 1) / total_states)
             tick(pct, f"Vẽ & nén phân đoạn {global_i + 1}/{total_states}")
@@ -625,21 +753,31 @@ def render_chat_video(
     # 4. Trộn âm thanh và SFX (60-75%)
     tick(60, "Trộn âm thanh và nhạc nền")
     voice_mix_wav = build_dir / "voice_mix.wav"
-    event_tuples = [(e.start_time, e.wav_path, e.duration) for e in timeline.audio_events]
+    event_tuples: list[tuple[float, Path, float] | tuple[float, Path, float, float]] = [
+        (e.start_time, e.wav_path, e.duration, 0.0) for e in timeline.audio_events
+    ]
 
-    # Kích hoạt âm thanh SFX từ library/sfx/
+    # Kích hoạt âm thanh SFX từ library/sfx/ với gain dịu tai (không gắt, không át giọng VieNeu)
     sfx_pop = pick_sfx_file(library_dir, "pop")
     sfx_typing = pick_sfx_file(library_dir, "typing")
     sfx_ding = pick_sfx_file(library_dir, "ding")
+    char_sides = {c.id: c.side for c in doc.characters}
 
     for st_idx, state in enumerate(active_states):
         if state.show_typing and sfx_typing:
-            event_tuples.append((state.start_time, sfx_typing, 0.4))
-        elif state.scale_last_msg < 1.0 and sfx_pop:
+            event_tuples.append((state.start_time, sfx_typing, 0.4, -7.0))
+        elif state.scale_last_msg < 1.0:
             if state.visible_count > 0:
                 last_m = doc.messages[state.visible_count - 1]
                 if not is_scene_transition(last_m.text):
-                    event_tuples.append((state.start_time, sfx_pop, 0.3))
+                    if sfx_pop:
+                        pop_gain = -5.5 if char_sides.get(last_m.from_) == "left" else -4.0
+                        event_tuples.append((state.start_time, sfx_pop, 0.3, pop_gain))
+                    # Trộn thêm SFX điểm nhấn nếu tin nhắn có `sfx_id` (-16 LUFS đã chuẩn hóa)
+                    if getattr(last_m, "sfx_id", None):
+                        punch_sfx = resolve_sfx_path(library_dir, last_m.sfx_id)
+                        if punch_sfx is not None and punch_sfx.is_file():
+                            event_tuples.append((state.start_time, punch_sfx, 1.8, -5.0))
         elif state.active_sticker:
             meme_audio_played = False
             if state.is_meme_cutin:
@@ -656,10 +794,11 @@ def render_chat_video(
                             max_duration=state.duration,
                         )
                     if meme_wav.is_file() and meme_wav.stat().st_size > 1000:
-                        event_tuples.append((state.start_time, meme_wav, state.duration))
+                        # Giảm audio gốc của clip meme xuống -8dB so với giọng VieNeu
+                        event_tuples.append((state.start_time, meme_wav, state.duration, -8.0))
                         meme_audio_played = True
             if not meme_audio_played and sfx_ding:
-                event_tuples.append((state.start_time, sfx_ding, 0.5))
+                event_tuples.append((state.start_time, sfx_ding, 0.5, -6.0))
 
     assemble_voice_track(event_tuples, target_duration, voice_mix_wav)
 
@@ -678,8 +817,8 @@ def render_chat_video(
     render_id = int(time.time())
     out_mp4 = renders_dir / f"render_{render_id}.mp4"
 
-    # Thu thập danh sách meme video chuyển động cần chèn bằng colorkey (đã xoay vòng không lặp lại)
-    meme_clips: list[tuple[Path, float, float, float]] = []
+    # Thu thập danh sách meme video chuyển động đặt DƯỚI đáy khung chat (không đè chữ) + fade in/out
+    meme_clips: list[tuple[Path, float, float, float, int, int, int, int]] = []
     for st_idx, state in enumerate(active_states):
         if state.is_meme_cutin and state.active_sticker:
             stk_file = state_meme_files.get(st_idx)
@@ -691,7 +830,17 @@ def render_chat_video(
                 meta = get_meme_metadata(library_dir, stk_file.name)
                 ss_start = float(meta.get("start_time", 0.0))
                 m_dur = min(state.duration, max(0.5, target_duration - state.start_time))
-                meme_clips.append((stk_file, state.start_time, m_dur, ss_start))
+                card_bot = renderer.compute_card_bottom_y(
+                    doc.messages[: state.visible_count],
+                    show_typing=False,
+                    show_seen=state.show_seen,
+                )
+                mx, my, mw, mh = compute_meme_rect(card_bot, 720, 480)
+                sx = int(round(mx * coord_scale))
+                sy = int(round(my * coord_scale))
+                sw = max(64, (int(round(mw * coord_scale)) // 2) * 2)
+                sh = max(64, (int(round(mh * coord_scale)) // 2) * 2)
+                meme_clips.append((stk_file, state.start_time, m_dur, ss_start, sx, sy, sw, sh))
 
     cmd: list[str] = [
         "-y",
@@ -713,18 +862,23 @@ def render_chat_video(
         prev_v = "v_base"
 
         if meme_clips:
-            m_w = 720 if not preview else 360
-            for k, (m_path, m_start, m_dur, ss_start) in enumerate(meme_clips):
+            for k, (m_path, m_start, m_dur, ss_start, mx, my, mw, mh) in enumerate(meme_clips):
                 cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
                 inp_idx = next_inp_idx
                 next_inp_idx += 1
+                fade_in = min(0.28, m_dur * 0.3)
+                fade_out = min(0.25, m_dur * 0.28)
+                fade_out_st = max(0.0, m_dur - fade_out)
                 filter_parts.append(
-                    f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
+                    f"[{inp_idx}:v]format=rgba,colorkey=0x00FF00:0.3:0.1,"
+                    f"scale={mw}:{mh}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                    f"fade=t=in:st=0:d={fade_in:.3f}:alpha=1,"
+                    f"fade=t=out:st={fade_out_st:.3f}:d={fade_out:.3f}:alpha=1,"
                     f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
                 )
                 next_v = f"v_meme{k}"
                 filter_parts.append(
-                    f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
+                    f"[{prev_v}][m{k}]overlay=x={mx}+({mw}-w)/2:y={my}+({mh}-h)/2:"
                     f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})'"
                     f":eof_action=pass[{next_v}]"
                 )
