@@ -2,7 +2,7 @@
 
 ## Đầu mỗi phiên
 - Nếu chủ dự án chưa chạy `/kickoff`, tự làm theo `.claude/commands/kickoff.md` trước khi làm việc.
-- **Ponytail & Repo Harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (Ponytail mặc định mức `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`) cùng Repo Harness (khi được cài trên `GD-Config`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, giữ nguyên toàn bộ luật bắt buộc của `CLAUDE.md` và `GEMINI.md`.
+- **Ponytail, Regression Guard & Repo Harness (bắt buộc trước khi code):** luôn đọc và áp dụng quy tắc trong `AGENTS.md` (Ponytail mặc định mức `full`, kỹ năng mở rộng trong `.agents/skills/ponytail*/SKILL.md`), skill chống tái lỗi `.agents/skills/regression-guard/SKILL.md` + Sổ Bất Biến `docs/REGRESSION-LEDGER.md`, cùng Repo Harness (khi được cài trên `GD-Config`) trước mọi thay đổi code — làm thay đổi nhỏ nhất nhưng hoàn chỉnh, không over-engineer, giữ nguyên toàn bộ luật bắt buộc của `CLAUDE.md` và `GEMINI.md`.
 
 ## Bối cảnh
 - App **chạy local** để dựng video ngắn tiếng Việt cho kênh "Hay Biết Tuốt". Một người dùng, Windows, hai máy (máy cũ: i5-10400, không GPU rời, 16 GB; máy mới: i5-14400F, RTX 2060 Super 8 GB, 32 GB). Không giả định có GPU: IMPLEMENT §0.
