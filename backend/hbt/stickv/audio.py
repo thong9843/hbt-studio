@@ -1062,6 +1062,23 @@ def _fallback_rms_beat_karaoke(
     )
 
 
+def _extract_token_display(tok: Any) -> str:
+    """Bóc đúng chuỗi hiển thị tiếng Việt (`disp`) từ token `parse_voice` (cấm in dict thô)."""
+    if isinstance(tok, dict):
+        raw = tok.get("disp") or tok.get("text") or tok.get("word") or ""
+        return str(raw).strip()
+    if hasattr(tok, "disp"):
+        return str(tok.disp or "").strip()
+    if hasattr(tok, "text"):
+        return str(tok.text or "").strip()
+    return str(tok or "").strip()
+
+
+def _is_corrupted_karaoke_word(word: str) -> bool:
+    w = str(word or "")
+    return "{" in w or "}" in w or "'disp'" in w or '"disp"' in w or "'syl'" in w or len(w) > 30
+
+
 def _compute_timing_cache_key(
     voice_full_wav: Path,
     beats: list[StickvBeat],
@@ -1076,9 +1093,9 @@ def _compute_timing_cache_key(
     for b in beats:
         h.update(f"|{b.id}:{b.narration}".encode())
     cfg_sig = (
-        f"whisper:{whisper_cfg.model}:{whisper_cfg.device}:{whisper_cfg.timeout}"
+        f"whisper_v2:{whisper_cfg.model}:{whisper_cfg.device}:{whisper_cfg.timeout}"
         if whisper_cfg is not None
-        else "rms20_vn"
+        else "rms20_vn_v2"
     )
     h.update(f"|{cfg_sig}|{lead_offset_s:.4f}".encode())
     return h.hexdigest()
@@ -1105,12 +1122,18 @@ def align_stickv_master_karaoke(
             if isinstance(cached, dict) and cached.get("cache_key") == cache_key:
                 raw_beats = cached.get("beats") or {}
                 loaded: dict[int, list[tuple[str, float, float]]] = {}
+                corrupted = False
                 for idx in range(len(beats)):
                     rows = raw_beats.get(str(idx), [])
-                    loaded[idx] = [(str(w), float(st), float(et)) for w, st, et in rows]
-                meta = dict(cached.get("meta") or {})
-                meta["cache_hit"] = True
-                return loaded, meta
+                    parsed_rows = [(str(w), float(st), float(et)) for w, st, et in rows]
+                    if any(_is_corrupted_karaoke_word(w) for w, _, _ in parsed_rows):
+                        corrupted = True
+                        break
+                    loaded[idx] = parsed_rows
+                if not corrupted:
+                    meta = dict(cached.get("meta") or {})
+                    meta["cache_hit"] = True
+                    return loaded, meta
         except Exception:
             pass
 
@@ -1150,7 +1173,7 @@ def align_stickv_master_karaoke(
                     for tok, b_idx, (t_st, t_en) in zip(
                         all_tokens, all_beat_idxs, aligned.times, strict=True
                     ):
-                        w_txt = str(getattr(tok, "text", tok)).strip()
+                        w_txt = _extract_token_display(tok)
                         if w_txt:
                             per_beat_raw[b_idx].append((w_txt, float(t_st), float(t_en)))
                     for idx, entry in enumerate(beat_timeline):

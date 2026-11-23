@@ -322,6 +322,10 @@ def test_master_voice_clock_zero_drift_whisper_cache_and_lead_offset(tmp_path: P
     assert meta1["cache_hit"] is False
     assert meta2["cache_hit"] is True
     assert timings1 == timings2
+    # Từ hiển thị phải là chữ tiếng Việt sạch (KHÔNG bao giờ in raw dict {'disp': ...})
+    for b_rows in timings1.values():
+        for w_txt, _, _ in b_rows:
+            assert "{" not in w_txt and "'disp'" not in w_txt and len(w_txt) <= 30
     # Từ đầu Beat 0 có mốc Whisper 0.20s -> bù KARAOKE_LEAD_OFFSET_S (-0.025s) thành 0.175s
     assert timings1[0][0][1] == pytest.approx(0.20 + KARAOKE_LEAD_OFFSET_S, abs=0.002)
 

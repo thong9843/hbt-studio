@@ -521,6 +521,7 @@ def _stream_chunk_frames_to_ffmpeg(
     master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
     beat_timeline: list[BeatTimelineEntry] | None = None,
     ai_photo_budget: list[int] | None = None,
+    board_carry: dict[str, Image.Image | None] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -756,6 +757,7 @@ def _stream_chunk_frames_to_ffmpeg(
             last_char_size: tuple[int, int] | None = None
             last_cam = (1.0, 0.5, 0.5)
             beat_board_cache: dict[str, Image.Image] = {}
+            prev_board_img = board_carry.get("img") if board_carry is not None else None
             try:
                 for f_idx in range(n_frames_beat):
                     if cancel is not None and f_idx % 8 == 0:
@@ -791,6 +793,7 @@ def _stream_chunk_frames_to_ffmpeg(
                             has_next_diff_title=has_next_diff_title,
                             show_chapter_banner=show_chapter_banner,
                             board_cache=beat_board_cache,
+                            prev_board_img=prev_board_img,
                         )
                     finally:
                         bg_frame.close()
@@ -844,6 +847,36 @@ def _stream_chunk_frames_to_ffmpeg(
                     last_board_type=beat.board_type,
                     last_chapter=beat.chapter,
                 )
+                if board_carry is not None:
+                    old_carried = board_carry.get("img")
+                    next_board = beat_board_cache.pop("static_board", None)
+                    if next_board is None and end_layout.board_alpha > 0.05:
+                        from hbt.stickv.stage import (
+                            _composite_transitioned_board,
+                            resolve_stage_palette,
+                        )
+
+                        next_board = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                        _composite_transitioned_board(
+                            next_board,
+                            beat,
+                            end_layout.board_box,
+                            resolve_stage_palette(norm_domain, theme),
+                            t_sec=max(1.0, end_t_b),
+                            duration_sec=eff_dur_b,
+                            progress=1.0,
+                            prop_img=prop_img,
+                            prev_stage_state=cur_state,
+                            total_chapters=total_chapters,
+                            has_next_diff_title=has_next_diff_title,
+                            cam_board_scale=end_layout.board_scale,
+                            cam_board_alpha=end_layout.board_alpha,
+                            clamp_bounds=end_layout.clamp_bounds,
+                            anchor_top_center=end_layout.anchor_top_center,
+                        )
+                    board_carry["img"] = next_board
+                    if old_carried is not None and old_carried is not next_board:
+                        old_carried.close()
             finally:
                 for cached_im in beat_board_cache.values():
                     cached_im.close()
@@ -1111,6 +1144,7 @@ def render_stickv(
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
         ai_photo_budget = [4]
+        board_carry: dict[str, Image.Image | None] = {"img": None}
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
@@ -1197,11 +1231,16 @@ def render_stickv(
                             master_word_timings=master_word_timings,
                             beat_timeline=beat_timeline,
                             ai_photo_budget=ai_photo_budget,
+                            board_carry=board_carry,
                         )
                     )
                 chunk_clips.append(chunk_mp4)
                 gc.collect()
         finally:
+            carried = board_carry.get("img")
+            if carried is not None:
+                carried.close()
+                board_carry["img"] = None
             shared_backdrop.close()
 
         emit(85.0, "Đang nối chương & gắn watermark HBT...")

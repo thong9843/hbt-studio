@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
@@ -1687,8 +1687,9 @@ def _composite_transitioned_board(
     cam_board_alpha: float = 1.0,
     clamp_bounds: tuple[int, int, int, int] | None = None,
     anchor_top_center: tuple[float, float] | None = None,
+    prev_board_img: Image.Image | None = None,
 ) -> None:
-    """Chuyển tiếp thẻ không hard-cut + tách lớp camera kẹp biên an toàn (không cắt chữ)."""
+    """Chuyển tiếp thẻ bằng Cross-Fade 0.28s Cosine Ease-In-Out (0% chớp trống, 0% cắt cứng)."""
     if cam_board_alpha <= 0.015:
         return
 
@@ -1725,14 +1726,26 @@ def _composite_transitioned_board(
         )
         return
 
-    enter_t = 0.22
+    enter_t = 0.28
     scale = float(cam_board_scale)
     dy_px = 0.0
     alpha = float(cam_board_alpha)
     if not same_title and t_sec < enter_t:
-        u = _ease_out_cubic(t_sec / enter_t)
-        scale *= 0.96 + 0.04 * u
-        dy_px = 14.0 * (1.0 - u)
+        u = _cosine_ease_in_out(t_sec / enter_t)
+        if prev_board_img is not None and prev_board_img.size == frame_rgba.size:
+            prev_alpha = max(0.0, min(1.0, (1.0 - u) * float(cam_board_alpha)))
+            if prev_alpha > 0.015:
+                fading_prev = prev_board_img.copy()
+                try:
+                    pa_band = fading_prev.getchannel("A").point(
+                        lambda p: int(round(p * prev_alpha))
+                    )
+                    fading_prev.putalpha(pa_band)
+                    frame_rgba.alpha_composite(fading_prev)
+                finally:
+                    fading_prev.close()
+        scale *= 0.98 + 0.02 * u
+        dy_px = 12.0 * (1.0 - u)
         alpha *= u
 
     if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
@@ -1901,6 +1914,11 @@ def draw_karaoke_strip(
     """Vẽ dải phụ đề Karaoke khóa câu đang nói, có đệm highlight >= 14px chống dính chữ."""
     if not word_timings:
         return
+
+    for wd, _, _ in word_timings:
+        ws = str(wd or "")
+        if "{" in ws or "}" in ws or "'disp'" in ws or '"disp"' in ws:
+            raise ValueError(f"Từ Karaoke không hợp lệ (lọt chuỗi dict thô): {ws[:80]}")
 
     filtered_timings = word_timings
     micro_gap_hold = False
@@ -2095,12 +2113,12 @@ def _target_layered_shot_params(
                 1.0,
                 clamp,
                 (w * 0.5, 118.0 * sy),
-                0.82,
-                0.42 * w,
+                0.92,
+                0.48 * w,
                 0.91 * h,
             )
         if shot_key == "closeup_react":
-            return base_box, 1.0, 0.0, None, None, 1.22, 0.50 * w, 0.93 * h
+            return base_box, 1.0, 0.0, None, None, 1.06, 0.50 * w, 0.92 * h
         return (
             base_box,
             1.0,
@@ -2389,19 +2407,19 @@ def compute_beat_character_target(
         if char_h > 0:
             scale = (base_target_h / char_h) * cam.char_scale
     elif interaction == "point_chart":
-        target_h = int(h * 0.38)
+        target_h = int(h * 0.42)
         if char_h > target_h and char_h > 0:
             scale = (target_h / char_h) * cam.char_scale
         eff_w = char_w * scale
         eff_h = char_h * scale
-        bx = w * 0.24 - eff_w * 0.5
+        bx = w * 0.48 - eff_w * 0.5
         by = cam.char_foot_y - eff_h
         return bx, by, scale
 
     eff_w = char_w * scale
     eff_h = char_h * scale
     if interaction == "hold_prop" and aspect == "9:16":
-        cx = w * (0.34 if cam.char_scale <= 1.0 else 0.50)
+        cx = w * 0.48
     elif interaction == "versus_split":
         cx = w * 0.5
     else:
@@ -2492,6 +2510,35 @@ _ANIMATED_BOARD_TYPES: frozenset[str] = frozenset(
 )
 
 
+def _is_dark_stage_bg(
+    pal: dict[str, tuple[int, int, int, int]],
+    theme: StickvTheme,
+    domain: str,
+) -> bool:
+    if theme == "dark" or normalize_domain(domain) in (
+        "physics_science",
+        "cosmos_mystery",
+        "psychology_story",
+    ):
+        return True
+    r, g, b = pal["bg"][:3]
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 110.0
+
+
+def _apply_dark_bg_rim_light(char_rgba: Image.Image) -> Image.Image:
+    """Thêm viền sáng mảnh ~2px (#CBD5E1, 55% alpha) quanh silhouette trên nền tối."""
+    alpha = char_rgba.getchannel("A")
+    dilated = alpha.filter(ImageFilter.MaxFilter(5))
+    rim_a = dilated.point(lambda p: int(round(p * 0.55)))
+    rim = Image.new("RGBA", char_rgba.size, (203, 213, 225, 0))
+    rim.putalpha(rim_a)
+    rim.alpha_composite(char_rgba)
+    dilated.close()
+    rim_a.close()
+    alpha.close()
+    return rim
+
+
 def render_animated_beat_frame(
     *,
     bg_img: Image.Image,
@@ -2508,13 +2555,14 @@ def render_animated_beat_frame(
     draw_board: bool = False,
     extra_dy: float = 0.0,
     prev_stage_state: BeatStageState | None = None,
-    tween_dur: float = 0.70,
+    tween_dur: float = 0.55,
     spoken_segments: list[tuple[float, float, str]] | None = None,
     is_puppet: bool = False,
     total_chapters: int = 1,
     has_next_diff_title: bool = True,
     show_chapter_banner: bool = False,
     board_cache: dict[str, Image.Image] | None = None,
+    prev_board_img: Image.Image | None = None,
 ) -> Image.Image:
     """Tổng hợp 1 frame động: backdrop + camera tách lớp + thẻ 2 tầng + puppet + karaoke."""
     frame = bg_img.copy()
@@ -2592,6 +2640,7 @@ def render_animated_beat_frame(
                     cam_board_alpha=cam_layout.board_alpha,
                     clamp_bounds=cam_layout.clamp_bounds,
                     anchor_top_center=cam_layout.anchor_top_center,
+                    prev_board_img=prev_board_img,
                 )
 
         if aspect == "9:16" and camera_shot == "closeup_react" and cam_layout.board_alpha < 0.85:
@@ -2659,7 +2708,14 @@ def render_animated_beat_frame(
             sy1 = int(round(base_y)) + eff_char.height + 6
             shadow_draw.ellipse((sx0, sy0, sx1, sy1), fill=(15, 23, 42, 42))
 
-            frame_rgba.alpha_composite(eff_char, (px, py))
+            if _is_dark_stage_bg(pal, theme, domain):
+                rimmed = _apply_dark_bg_rim_light(eff_char)
+                try:
+                    frame_rgba.alpha_composite(rimmed, (px, py))
+                finally:
+                    rimmed.close()
+            else:
+                frame_rgba.alpha_composite(eff_char, (px, py))
             if eff_char is not char_img:
                 eff_char.close()
 

@@ -609,7 +609,7 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
     assert lay_focus.clamp_bounds is not None
     assert lay_focus.clamp_bounds[1] >= 115
     assert lay_focus.clamp_bounds[3] <= 865
-    assert lay_focus.char_scale == pytest.approx(0.82)
+    assert lay_focus.char_scale == pytest.approx(0.92)
 
     lay_close_fade = compute_layered_camera_layout(
         "closeup_react",
@@ -630,7 +630,7 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
         prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
     )
     assert lay_close_done.board_alpha == pytest.approx(0.0, abs=0.01)
-    assert lay_close_done.char_scale == pytest.approx(1.22)
+    assert lay_close_done.char_scale == pytest.approx(1.06)
 
     # 2. Kiểm tra focus_board không đẩy chữ lên sát mép y < 110 và closeup_react ẩn bảng lớn
     bg = Image.new("RGB", (540, 960), (250, 247, 240))
@@ -1149,3 +1149,18 @@ def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> N
         assert box[2] - box[0] > 800
     finally:
         canvas.close()
+
+    # 4. Guard cứng trong draw_karaoke_strip: từ chứa dict thô phải ném ValueError ngay
+    from hbt.stickv.stage import draw_karaoke_strip
+
+    bad_frame = Image.new("RGBA", (540, 960), (0, 0, 0, 255))
+    try:
+        with pytest.raises(ValueError, match="dict"):
+            draw_karaoke_strip(
+                bad_frame,
+                [("{'disp': 'tượng', 'syl': ['tuong']}", 0.0, 0.5)],
+                0.2,
+                aspect="9:16",
+            )
+    finally:
+        bad_frame.close()
