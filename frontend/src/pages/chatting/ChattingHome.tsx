@@ -43,7 +43,7 @@ export function ChattingHome() {
   const [platform, setPlatform] = useState<'messenger' | 'instagram'>('messenger');
   const [background, setBackground] = useState('minecraft4-1080p60');
   const [targetDuration, setTargetDuration] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
   const [isDirectScript, setIsDirectScript] = useState(false);
   const [autoFetchOnline, setAutoFetchOnline] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -120,7 +120,7 @@ export function ChattingHome() {
               Hệ thống dùng chung <code className="font-mono font-bold">GEMINI_API_KEY</code> với
               HBT Core (model{' '}
               <code className="font-mono font-bold">
-                {status?.model_name || 'gemini-3.8-flash'}
+                {status?.model_name || 'gemini-3.1-flash-lite'}
               </code>
               ). Hoặc chọn tab <b>{vi.chatting.tabDirectScript}</b> để dựng ngay không cần API Key.
             </p>
@@ -229,10 +229,10 @@ export function ChattingHome() {
                 onChange={(val) => setSelectedModel(val)}
                 options={(
                   status?.models ?? [
-                    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-                    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-                    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
                     { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+                    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
+                    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+                    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
                   ]
                 ).map((m) => ({
                   value: m.id,

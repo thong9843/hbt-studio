@@ -159,7 +159,7 @@ def get_hbt_core_models() -> Any:
         logger.exception("Lỗi không mong đợi tại GET /hbt/core/models: %s", exc)
         return {
             "models": [],
-            "default": "gemini-3.8-flash",
+            "default": "gemini-3.1-flash-lite",
             "error": str(exc),
         }
 

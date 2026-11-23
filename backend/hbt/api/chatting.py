@@ -121,6 +121,7 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
         direct_script=body.direct_script,
         target_duration_s=body.target_duration_s,
         auto_fetch_online=body.auto_fetch_online,
+        model=body.model,
     )
 
     # Cập nhật job_id vào job.json
