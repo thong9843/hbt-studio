@@ -55,7 +55,8 @@ export function VoiceCard({ latest }: { latest: RenderRecord | undefined }) {
       {tail && (
         <div className="ui-inner flex items-center justify-between gap-3 p-3">
           <Badge tone="yel">
-            {latest?.trimmed_tail_seconds
+            {typeof latest?.trimmed_tail_seconds === 'number' &&
+            Number.isFinite(latest.trimmed_tail_seconds)
               ? T.trimmedSeconds(latest.trimmed_tail_seconds.toFixed(1).replace('.', ','))
               : T.trimmed}
           </Badge>

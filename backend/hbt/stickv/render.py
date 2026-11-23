@@ -22,6 +22,7 @@ from hbt.shared.ffmpeg_utils import (
     measure_audio_duration,
 )
 from hbt.shared.online_sources.iconify_props import resolve_prop_png
+from hbt.shared.online_sources.reference_images import resolve_reference_image
 from hbt.shared.pipeline.watermark import (
     WatermarkSettings,
     build_watermark_overlay_filter,
@@ -119,13 +120,16 @@ def _stream_beat_frames_to_ffmpeg(
     lead_in = (
         GLOBAL_LEAD_SILENCE_S if global_frame_offset == 0 else (LEAD_IN_SILENCE_S * pause_scale)
     )
-    speech_end = max(lead_in + 0.3, dur - pause_after)
     spoken_segs = load_beat_spoken_segments(wav_path)
+    speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+    speech_end = (
+        min(dur, spoken_segs[-1][1]) if spoken_segs else max(lead_in + 0.3, dur - pause_after)
+    )
     word_timings = align_beat_karaoke(
         beat.narration,
         wav_path,
         dur,
-        lead_in_s=lead_in,
+        lead_in_s=speech_start,
         pause_after_s=pause_after,
         spoken_segments=spoken_segs,
     )
@@ -177,7 +181,7 @@ def _stream_beat_frames_to_ffmpeg(
         anim_loop=getattr(beat, "anim_loop", None),
         facing=beat.facing,
         duration_sec=dur,
-        speech_start=lead_in,
+        speech_start=speech_start,
         speech_end=speech_end,
         fps=fps,
         rms_env=rms_env,
@@ -186,6 +190,9 @@ def _stream_beat_frames_to_ffmpeg(
         target_height=target_char_h,
         char_img_fallback=char_img,
         interaction=interaction,
+        emotion=getattr(beat, "emotion", "auto"),
+        face_mood=getattr(beat, "face_mood", None),
+        narration=beat.narration,
         beat_id=beat.id,
         animation_mode=animation_mode,
         wav_path=wav_path,
@@ -195,7 +202,20 @@ def _stream_beat_frames_to_ffmpeg(
 
     prop_img: Image.Image | None = None
     prop_query = (getattr(beat, "prop_query", None) or "").strip()
-    if interaction == "hold_prop" and prop_query:
+    if beat.board_type == "pinned_photo":
+        photo_path: Path | None = None
+        if beat.media_path:
+            cand_m = out_mp4.parents[2] / beat.media_path
+            if cand_m.is_file():
+                photo_path = cand_m
+        if photo_path is None:
+            ref_q = prop_query or beat.board_title or infer_auto_prop_query(beat.narration)
+            accent = DOMAIN_PALETTES[norm_domain]["accent"]
+            photo_path, _ = resolve_reference_image(ref_q, library_dir, accent_color=accent)
+        if photo_path is not None and photo_path.is_file():
+            with Image.open(photo_path) as raw_photo:
+                prop_img = raw_photo.convert("RGBA")
+    elif interaction == "hold_prop" and prop_query:
         accent = DOMAIN_PALETTES[norm_domain]["accent"]
         prop_path = resolve_prop_png(prop_query, library_dir, accent_color=accent)
         if prop_path.is_file():
@@ -586,13 +606,18 @@ def _stream_chunk_frames_to_ffmpeg(
             rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
             pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
             lead_in = GLOBAL_LEAD_SILENCE_S if g_idx == 0 else (LEAD_IN_SILENCE_S * pause_scale)
-            speech_end = max(lead_in + 0.3, dur_b - pause_after)
             spoken_segs = load_beat_spoken_segments(wav_p)
+            speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+            speech_end = (
+                min(dur_b, spoken_segs[-1][1])
+                if spoken_segs
+                else max(lead_in + 0.3, dur_b - pause_after)
+            )
             word_timings = align_beat_karaoke(
                 beat.narration,
                 wav_p,
                 dur_b,
-                lead_in_s=lead_in,
+                lead_in_s=speech_start,
                 pause_after_s=pause_after,
                 spoken_segments=spoken_segs,
             )
@@ -613,7 +638,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 anim_loop=getattr(beat, "anim_loop", None),
                 facing=beat.facing,
                 duration_sec=dur_b,
-                speech_start=lead_in,
+                speech_start=speech_start,
                 speech_end=speech_end,
                 fps=fps,
                 rms_env=rms_env,
@@ -841,7 +866,7 @@ def _append_outro(
     fc = (
         f"[0:v]fps={fps},format=yuv420p,settb=AVTB[v0];"
         f"{outro_vf}"
-        f"[v0][v1]xfade=transition=fade:duration=0.5:offset={offset:.3f}[vout];"
+        f"[v0][v1]xfade=transition=fade:duration=0.5:offset={offset:.3f},fps={fps}[vout];"
         "[2:a][3:a]acrossfade=d=0.5:c1=tri:c2=tri[aout]"
     )
 
@@ -896,7 +921,7 @@ def render_stickv(
             cancel.check()
 
     beats = project.beats[:3] if preview else project.beats
-    fps = 24 if preview else min(30, project.fps)
+    fps = 30 if preview else 60
     w, h = STICKV_ASPECT_SIZES[project.aspect]
 
     audio_dir = project_dir / "audio"

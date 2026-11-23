@@ -3,10 +3,10 @@ import { useState } from 'react';
 export type SafeZonePlatform = 'none' | 'tiktok' | 'shorts' | 'reels';
 
 const LABELS: Record<SafeZonePlatform, string> = {
-  none: 'Tắt Safe-Zone',
+  none: 'Tắt',
   tiktok: 'TikTok',
-  shorts: 'YT Shorts',
-  reels: 'FB Reels',
+  shorts: 'Shorts',
+  reels: 'Reels',
 };
 
 export function SafeZoneToolbar({
@@ -17,16 +17,17 @@ export function SafeZoneToolbar({
   onChange: (p: SafeZonePlatform) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-nowrap items-center justify-center gap-1.5">
       {(['none', 'tiktok', 'shorts', 'reels'] as SafeZonePlatform[]).map((p) => (
         <button
           key={p}
           type="button"
+          aria-pressed={platform === p}
           onClick={() => onChange(p)}
-          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-transform duration-150 active:scale-95 ${
+          className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition-colors ${
             platform === p
-              ? 'border-amber-400/70 bg-amber-400/15 text-amber-300'
-              : 'border-line bg-soft text-muted hover:text-text'
+              ? 'border-primary bg-primary text-on-primary'
+              : 'border-line bg-soft text-text-2 hover:bg-soft-2 hover:text-text'
           }`}
         >
           {LABELS[p]}

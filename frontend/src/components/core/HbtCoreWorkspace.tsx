@@ -15,6 +15,7 @@ import type {
   HbtCoreTopic,
 } from '../../api/types';
 import { SAMPLE_V1_SCRIPT, useStudioWorkspace } from '../../hooks/studioWorkspace';
+import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { WaterfallProgress, type WaterfallStep, type WaterfallStepState } from '../../shared';
@@ -37,9 +38,9 @@ import { cx } from '../ui/cx';
 const T = vi.hbtCore;
 
 const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Mặc định / Nhanh)' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
   { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)' },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
 ];
 
@@ -69,6 +70,52 @@ interface VoiceProgressDetail {
   percent: number;
 }
 
+function PrepareProgressBar({
+  totalFallback,
+  onCancel,
+}: {
+  totalFallback: number;
+  onCancel: () => void;
+}) {
+  const progress = useRenderJobProgress();
+  const cur = progress.currentBeat ?? 0;
+  const total = progress.totalBeats ?? totalFallback;
+  const rawPct =
+    typeof progress.percent === 'number' && Number.isFinite(progress.percent)
+      ? progress.percent
+      : 0;
+  const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const label = progress.message || progress.stage || T.prepare.stageFallback;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line bg-soft px-3 py-2 text-tiny"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="font-bold text-text truncate">
+          {label}
+          {total > 0 && cur > 0 ? ` (${cur}/${total})` : ''}
+        </span>
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+          <div
+            className="h-full rounded-full bg-brand transition-all duration-200"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-mono text-muted tabular-nums">{pct}%</span>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-inner border border-line bg-card px-2 py-0.5 text-tiny font-bold text-muted hover:text-text"
+      >
+        {vi.common.cancel}
+      </button>
+    </div>
+  );
+}
+
 export function HbtCoreWorkspace({
   slug: initialSlug,
   onClose,
@@ -77,6 +124,7 @@ export function HbtCoreWorkspace({
   const toast = useToast();
   const queryClient = useQueryClient();
   const shared = useStudioWorkspace();
+  const renderJob = useRenderJobStatus();
   const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   const [localTitle, setLocalTitle] = useState(SAMPLE_V1_SCRIPT.title);
@@ -119,7 +167,16 @@ export function HbtCoreWorkspace({
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const [v2Loading, setV2Loading] = useState(false);
+  const [preparingStarting, setPreparingStarting] = useState(false);
+  const [regenSceneIdx, setRegenSceneIdx] = useState<number | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageMissingKey, setImageMissingKey] = useState(false);
+  const [imgVersion, setImgVersion] = useState(0);
+
+  const isPreparing =
+    preparingStarting ||
+    (renderJob.running &&
+      (renderJob.kind === 'hbt_core_prepare' || renderJob.kind === 'hbt_core_images'));
 
   // Render & SSE state
   const [rendering, setRendering] = useState(false);
@@ -182,6 +239,47 @@ export function HbtCoreWorkspace({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      (renderJob.kind !== 'hbt_core_images' && renderJob.kind !== 'hbt_core_prepare') ||
+      !renderJob.finished
+    ) {
+      return;
+    }
+    if (renderJob.finished.status === 'done') {
+      setImgVersion((v) => v + 1);
+      const out = renderJob.finished.output as
+        { missing_cloudflare_key?: boolean; warning?: string } | null | undefined;
+      if (out?.missing_cloudflare_key) {
+        setImageError(out.warning || T.prepare.missingCfWarning);
+        setImageMissingKey(true);
+      } else {
+        setImageError(null);
+        setImageMissingKey(false);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+      const doneSlug = renderJob.finished.project || resultSlug || initialSlug;
+      if (doneSlug) {
+        setResultSlug(doneSlug);
+        void api
+          .getProjectCoreScript(doneSlug)
+          .then((res) => {
+            if (res?.script?.segments?.length) {
+              setTitle(res.script.title);
+              setTopic((res.script.topic as HbtCoreTopic) || 'science');
+              setSegments(res.script.segments);
+              setJsonText(JSON.stringify(res.script, null, 2));
+            }
+          })
+          .catch(() => undefined);
+      }
+    } else if (renderJob.finished.status === 'failed' && renderJob.finished.error) {
+      setImageError(renderJob.finished.error);
+      setImageMissingKey(/cloudflare|cài đặt/i.test(renderJob.finished.error));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderJob.finished, renderJob.kind, queryClient]);
 
   const safeIndex = Math.min(selectedSegIndex, Math.max(0, segments.length - 1));
   const activeSegment = segments[safeIndex];
@@ -309,6 +407,104 @@ export function HbtCoreWorkspace({
     }
   };
 
+  const buildCurrentScript = (): HbtCoreScript => ({
+    title,
+    topic,
+    total_segments: segments.length,
+    segments: segments.map((s, idx) => ({
+      id: idx + 1,
+      order: idx + 1,
+      title: s.title ?? '',
+      text: s.text,
+      sticker: s.sticker || 'question',
+      image_prompt: s.image_prompt ?? '',
+      image: s.image || `images/scene-${String(idx + 1).padStart(2, '0')}.png`,
+      sfx: s.sfx || 'whoosh',
+    })),
+  });
+
+  const handleImageApiError = (err: unknown) => {
+    let msg: string = T.autoImage.missingKeyError;
+    let missingKey = false;
+    if (err instanceof ApiError) {
+      const body = err.body as { code?: unknown; detail?: unknown; message?: unknown } | null;
+      if (body?.code === 'missing_cloudflare_key') missingKey = true;
+      if (typeof body?.detail === 'string' && body.detail.trim()) msg = body.detail;
+      else if (typeof body?.message === 'string' && body.message.trim()) msg = body.message;
+      else if (err.message) msg = err.message;
+    } else if (err instanceof Error && err.message) {
+      msg = err.message;
+    }
+    if (/cloudflare|cài đặt/i.test(msg)) missingKey = true;
+    setImageError(msg);
+    setImageMissingKey(missingKey);
+    toast.error(new Error(msg));
+  };
+
+  const handlePrepareContent = async () => {
+    setImageError(null);
+    setImageMissingKey(false);
+    setFallbackNotice(null);
+    setRenderError(null);
+    setPreparingStarting(true);
+    try {
+      const targetSlug = resultSlug ?? initialSlug ?? '_new';
+      const cleanPrompt = prompt.trim();
+      const payload = cleanPrompt
+        ? {
+            prompt: cleanPrompt,
+            topic: v2Topic,
+            selectedModel,
+          }
+        : {
+            script: buildCurrentScript(),
+          };
+      const res = await api.prepareHbtCore(targetSlug, payload);
+      if (res.slug) setResultSlug(res.slug);
+      renderJob.attachJob({
+        jobId: res.job_id,
+        slug: res.slug,
+        kind: 'hbt_core_prepare',
+        stage: cleanPrompt ? 'Tạo kịch bản' : 'Sinh giọng đọc',
+        currentBeat: 0,
+        totalBeats: res.total ?? segments.length,
+      });
+    } catch (err) {
+      handleImageApiError(err);
+    } finally {
+      setPreparingStarting(false);
+    }
+  };
+
+  const handleGenerateSingleImage = async (idx: number) => {
+    const seg = segments[idx];
+    if (!seg) return;
+    setImageError(null);
+    setImageMissingKey(false);
+    if (assets?.cloudflare_configured === false) {
+      setImageError(T.autoImage.missingKeyError);
+      setImageMissingKey(true);
+      return;
+    }
+    setRegenSceneIdx(idx);
+    try {
+      const targetSlug = resultSlug ?? initialSlug ?? '_new';
+      const res = await api.generateHbtCoreSceneImage(targetSlug, idx, {
+        image_prompt: seg.image_prompt ?? '',
+        script: buildCurrentScript(),
+      });
+      if (res.slug) setResultSlug(res.slug);
+      updateSegment(idx, { image: res.image });
+      setImgVersion((v) => v + 1);
+      void queryClient.invalidateQueries({ queryKey: ['hbt-core-assets'] });
+      toast.info(T.autoImage.sceneDoneToast(idx + 1));
+    } catch (err) {
+      handleImageApiError(err);
+    } finally {
+      setRegenSceneIdx(null);
+    }
+  };
+
   const connectJobSse = (jobId: string, targetSlug: string) => {
     if (esRef.current) {
       esRef.current.close();
@@ -420,6 +616,7 @@ export function HbtCoreWorkspace({
       const res = await api.renderHbtCoreV1({
         script: validScript,
         slug: resultSlug ?? initialSlug ?? null,
+        fps: 60,
       });
       if (res.success === false || res.ok === false || !res.slug) {
         const msg = res.message || res.detail || res.error || vi.export.failed;
@@ -442,80 +639,6 @@ export function HbtCoreWorkspace({
     }
   };
 
-  const handleRunV2Prompt = async () => {
-    const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) return;
-
-    setV2Loading(true);
-    setFallbackNotice(null);
-    setRenderError(null);
-    setStepLogs({
-      script: [`Gửi yêu cầu Gemini (${selectedModel}) cho chủ đề: "${cleanPrompt}"`],
-      voice: [],
-      assets: [],
-      render: [],
-    });
-    try {
-      const res = await api.promptHbtCoreV2({
-        prompt: cleanPrompt,
-        topic: v2Topic,
-        selectedModel,
-        slug: resultSlug ?? initialSlug ?? null,
-        auto_render: true,
-      });
-      if (res.fallback_v1 || res.success === false || res.ok === false || !res.script) {
-        const fallbackMsg =
-          res.message ||
-          res.detail ||
-          res.error ||
-          'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
-        setFallbackNotice(fallbackMsg);
-        setShowAdvancedJson(true);
-        toast.error(new Error(fallbackMsg));
-        return;
-      }
-
-      const sc = res.script;
-      setTitle(sc.title);
-      setTopic((sc.topic as HbtCoreTopic) || v2Topic);
-      setSegments(sc.segments);
-      setSelectedSegIndex(0);
-      setJsonText(JSON.stringify(sc, null, 2));
-      if (res.slug) {
-        setResultSlug(res.slug);
-      }
-      toast.info(T.v2.successToast);
-      if (res.job_id && res.slug) {
-        connectJobSse(res.job_id, res.slug);
-      }
-    } catch (err) {
-      let msg = 'Lỗi gọi Gemini Flash API. Đã tự động chuyển sang chế độ chỉnh tay.';
-      if (err instanceof ApiError) {
-        const errBody = err.body as {
-          message?: unknown;
-          detail?: unknown;
-          error?: unknown;
-        } | null;
-        if (errBody && typeof errBody.message === 'string' && errBody.message.trim()) {
-          msg = errBody.message;
-        } else if (errBody && typeof errBody.detail === 'string' && errBody.detail.trim()) {
-          msg = errBody.detail;
-        } else if (errBody && typeof errBody.error === 'string' && errBody.error.trim()) {
-          msg = errBody.error;
-        } else if (err.message) {
-          msg = err.message;
-        }
-      } else if (err instanceof Error && err.message) {
-        msg = err.message;
-      }
-      setFallbackNotice(msg);
-      setShowAdvancedJson(true);
-      toast.error(new Error(msg));
-    } finally {
-      setV2Loading(false);
-    }
-  };
-
   const sfxOptions = assets?.sfx_presets ?? ['whoosh', 'pop', 'impact', 'none'];
   const existingImages = assets?.images ?? [];
   const geminiModels =
@@ -530,16 +653,25 @@ export function HbtCoreWorkspace({
     if (activeSegment.image.startsWith('http') || activeSegment.image.startsWith('/')) {
       return activeSegment.image;
     }
-    if (resultSlug && existingImages.includes(activeSegment.image)) {
-      return projectFileUrl(resultSlug, activeSegment.image);
+    const normalizedRel = activeSegment.image.startsWith('images/')
+      ? activeSegment.image
+      : `images/${activeSegment.image}`;
+    if (
+      resultSlug &&
+      (existingImages.includes(activeSegment.image) ||
+        existingImages.includes(normalizedRel) ||
+        imgVersion > 0)
+    ) {
+      const base = projectFileUrl(resultSlug, normalizedRel);
+      return imgVersion > 0 ? `${base}?v=${imgVersion}` : base;
     }
     return null;
   })();
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
       {/* KHU VỰC TRÁI: WORKSPACE & PROMPT-FIRST INPUT */}
-      <div className="min-w-0 space-y-6">
+      <div className="min-w-0 space-y-5">
         {/* Thanh Prompt thông minh trung tâm */}
         <section
           aria-label="Thanh Prompt trung tâm"
@@ -566,7 +698,10 @@ export function HbtCoreWorkspace({
                 autoWidth
                 value={selectedModel}
                 onChange={(val) => setSelectedModel(val)}
-                options={geminiModels.map((m) => ({ value: m.id, label: m.name }))}
+                options={geminiModels.map((m) => ({
+                  value: m.id,
+                  label: m.name.replace(/\s*\([^)]*\)/g, '').trim(),
+                }))}
                 className="min-w-[180px]"
               />
 
@@ -610,32 +745,55 @@ export function HbtCoreWorkspace({
 
             <div className="flex flex-wrap items-center gap-2">
               {onClose && (
-                <Button tone="soft" size="sm" disabled={rendering || v2Loading} onClick={onClose}>
+                <Button tone="soft" size="sm" disabled={rendering || isPreparing} onClick={onClose}>
                   {vi.common.close}
                 </Button>
               )}
               <button
                 type="button"
-                disabled={v2Loading || rendering || !prompt.trim()}
-                onClick={() => void handleRunV2Prompt()}
+                disabled={isPreparing || rendering}
+                onClick={() => void handlePrepareContent()}
                 className="ui-btn ui-btn-ink ui-btn-sm"
               >
                 <SparklesIcon size={16} />
-                <span>{v2Loading ? T.studio.generatingBtn : T.studio.generateBtn}</span>
+                <span>{isPreparing ? T.prepare.preparingBtn : T.prepare.prepareBtn}</span>
               </button>
               <ExportPopover
                 aspect="9:16"
                 showWatermarkControl
                 onExportFinal={() => void handleStartV1Render()}
-                finalLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-                disabled={rendering || v2Loading}
+                finalLabel={rendering ? T.v1.renderingBtn : T.prepare.exportBtn}
+                disabled={rendering || isPreparing}
                 isRendering={rendering}
                 progressPct={progressPct}
                 progressStage={progressStep}
               />
             </div>
           </div>
+          {isPreparing && (
+            <PrepareProgressBar
+              totalFallback={segments.length}
+              onCancel={() => void renderJob.cancel()}
+            />
+          )}
         </section>
+
+        {imageError && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-danger/30 bg-danger-soft p-3.5 text-small text-danger"
+          >
+            <div className="flex items-start gap-2">
+              <AlertIcon size={18} />
+              <span>{imageError}</span>
+            </div>
+            {imageMissingKey && (
+              <Link to="/settings" className="ui-btn ui-btn-soft ui-btn-sm">
+                {T.autoImage.openSettingsLink}
+              </Link>
+            )}
+          </div>
+        )}
 
         {/* Thông báo fallback V2 -> V1 nếu Gemini lỗi / hết quota */}
         {fallbackNotice && (
@@ -714,7 +872,6 @@ export function HbtCoreWorkspace({
                 index: idx + 1,
                 title: seg.title,
                 summary: seg.text,
-                badge: `${STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'} ${seg.sticker || 'question'}`,
               }))}
               selectedId={String(safeIndex)}
               onSelect={(id) => setSelectedSegIndex(Number(id))}
@@ -742,6 +899,9 @@ export function HbtCoreWorkspace({
                         {STICKER_EMOJI[seg.sticker || 'question'] ?? '✨'}{' '}
                         {seg.sticker || 'question'}
                       </Badge>
+                      {typeof seg.duration === 'number' && Number.isFinite(seg.duration) && (
+                        <Badge tone="ok">{seg.duration.toFixed(1)}s</Badge>
+                      )}
                     </div>
                     {segments.length > 1 && (
                       <button
@@ -755,9 +915,23 @@ export function HbtCoreWorkspace({
                     )}
                   </div>
 
+                  {seg.audio_path && resultSlug && (
+                    <div className="flex items-center gap-2 rounded-inner border border-line bg-soft px-2.5 py-1.5">
+                      <span className="text-tiny font-bold text-muted whitespace-nowrap">
+                        {T.prepare.audioPreviewLabel}
+                      </span>
+                      <audio
+                        controls
+                        preload="none"
+                        src={`${projectFileUrl(resultSlug, seg.audio_path)}?v=${imgVersion}`}
+                        className="h-7 flex-1"
+                      />
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Input
-                      label={T.v1.segmentCardTitleLabel(idx + 1)}
+                      label={T.v1.segmentCardTitleLabel}
                       value={seg.title ?? ''}
                       placeholder="TIÊU ĐỀ THẺ KEM NGẮN"
                       onChange={(e) =>
@@ -767,7 +941,7 @@ export function HbtCoreWorkspace({
                     <div className="ui-field">
                       <StudioSelect
                         id={`hbt-core-sticker-${idx}`}
-                        label={T.v1.segmentStickerLabel(idx + 1)}
+                        label={T.v1.segmentStickerLabel}
                         value={seg.sticker || 'question'}
                         onChange={(val) => updateSegment(idx, { sticker: val })}
                         options={STICKER_PRESETS.map((st) => ({
@@ -779,7 +953,7 @@ export function HbtCoreWorkspace({
                   </div>
 
                   <Textarea
-                    label={T.v1.segmentTextLabel(idx + 1)}
+                    label={T.v1.segmentTextLabel}
                     rows={2}
                     value={seg.text}
                     onChange={(e) => updateSegment(idx, { text: e.target.value })}
@@ -788,16 +962,31 @@ export function HbtCoreWorkspace({
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <label htmlFor={`hbt-core-img-prompt-${idx}`} className="ui-label !mb-0">
-                        {T.v1.segmentImagePromptLabel(idx + 1)}
+                        {T.v1.segmentImagePromptLabel}
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyImagePrompt(idx, seg.image_prompt ?? '')}
-                        className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2"
-                      >
-                        {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
-                        <span>{T.studio.copyPrompt}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={regenSceneIdx === idx || isPreparing || rendering}
+                          onClick={() => void handleGenerateSingleImage(idx)}
+                          className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2 disabled:opacity-50"
+                        >
+                          <SparklesIcon size={13} />
+                          <span>
+                            {regenSceneIdx === idx
+                              ? T.autoImage.regeningSceneBtn
+                              : T.autoImage.regenSceneBtn}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyImagePrompt(idx, seg.image_prompt ?? '')}
+                          className="inline-flex items-center gap-1 rounded-inner border border-line bg-soft px-2.5 py-1 text-tiny font-bold text-text transition hover:bg-soft-2"
+                        >
+                          {copiedIdx === idx ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+                          <span>{T.studio.copyPrompt}</span>
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       id={`hbt-core-img-prompt-${idx}`}
@@ -812,7 +1001,7 @@ export function HbtCoreWorkspace({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <Input
-                        label={T.v1.segmentImageLabel(idx + 1)}
+                        label={T.v1.segmentImageLabel}
                         value={seg.image}
                         placeholder={T.v1.imagePlaceholder}
                         list={`hbt-core-imgs-${idx}`}
@@ -830,7 +1019,7 @@ export function HbtCoreWorkspace({
                     <div className="ui-field">
                       <StudioSelect
                         id={`hbt-core-sfx-${idx}`}
-                        label={T.v1.segmentSfxLabel(idx + 1)}
+                        label={T.v1.segmentSfxLabel}
                         value={seg.sfx}
                         onChange={(val) => updateSegment(idx, { sfx: val })}
                         options={[
@@ -849,74 +1038,77 @@ export function HbtCoreWorkspace({
         </section>
       </div>
 
-      {/* KHU VỰC PHẢI: LIVE VERTICAL PREVIEW 9:16 & TIẾN TRÌNH */}
-      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-        <PhonePreviewStage
-          title={T.studio.previewTitle}
-          badgeText={T.studio.segmentLabel(safeIndex + 1, segments.length)}
-          safeZone={safeZone}
-          onSafeZoneChange={setSafeZone}
-          exportBusy={rendering}
-          exportDisabled={rendering || v2Loading}
-          exportLabel={rendering ? T.v1.renderingBtn : T.studio.renderBtn}
-          onExport={() => void handleStartV1Render()}
-          footer={
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={safeIndex <= 0}
-                onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
-              >
-                ← Trước
-              </Button>
-              <Button
-                tone="soft"
-                size="sm"
-                disabled={safeIndex >= segments.length - 1}
-                onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
-              >
-                Sau →
-              </Button>
-            </div>
-          }
-        >
-          {activeImageSrc ? (
-            <img
-              src={activeImageSrc}
-              alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
-              <span className="text-3xl opacity-60">🖼️</span>
-              <p className="mt-2 line-clamp-3 text-tiny text-muted-on-dark">
-                {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+      {/* KHU VỰC PHẢI: SÂN KHẤU DOT-GRID XEM TRƯỚC 9:16 & TIẾN TRÌNH */}
+      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+        <div className="ui-stage-dots rounded-card border border-line p-3">
+          <PhonePreviewStage
+            title={T.studio.previewTitle}
+            badgeText={T.studio.segmentLabel(safeIndex + 1, segments.length)}
+            safeZone={safeZone}
+            onSafeZoneChange={setSafeZone}
+            exportBusy={rendering}
+            exportDisabled={rendering || isPreparing}
+            exportLabel={rendering ? T.v1.renderingBtn : T.prepare.exportBtn}
+            onExport={() => void handleStartV1Render()}
+            showWatermarkControl={false}
+            footer={
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <Button
+                  tone="soft"
+                  size="sm"
+                  disabled={safeIndex <= 0}
+                  onClick={() => setSelectedSegIndex((i) => Math.max(0, i - 1))}
+                >
+                  ← Trước
+                </Button>
+                <Button
+                  tone="soft"
+                  size="sm"
+                  disabled={safeIndex >= segments.length - 1}
+                  onClick={() => setSelectedSegIndex((i) => Math.min(segments.length - 1, i + 1))}
+                >
+                  Sau →
+                </Button>
+              </div>
+            }
+          >
+            {activeImageSrc ? (
+              <img
+                src={activeImageSrc}
+                alt={activeSegment?.title || `Cảnh ${safeIndex + 1}`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center px-5 text-center">
+                <span className="text-3xl opacity-60">🖼️</span>
+                <p className="mt-2 line-clamp-3 text-tiny text-muted-on-dark">
+                  {activeSegment?.image_prompt || activeSegment?.image || T.studio.previewHint}
+                </p>
+              </div>
+            )}
+
+            {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
+            <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
+              <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
+                {activeSegment?.title || title}
               </p>
             </div>
-          )}
 
-          {/* Thẻ kem (Cream Card) ở vùng trên khung 9:16 */}
-          <div className="absolute inset-x-4 top-6 rounded-2xl bg-[#F7EEDA] px-3.5 py-2.5 text-center shadow-md">
-            <p className="text-small font-extrabold uppercase leading-tight text-[#1E1816]">
-              {activeSegment?.title || title}
-            </p>
-          </div>
+            {/* Sticker biểu cảm */}
+            <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
+              <span aria-hidden="true">
+                {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
+              </span>
+            </div>
 
-          {/* Sticker biểu cảm */}
-          <div className="absolute right-4 top-24 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/45 text-2xl shadow">
-            <span aria-hidden="true">
-              {STICKER_EMOJI[activeSegment?.sticker || 'question'] ?? '🤔'}
-            </span>
-          </div>
-
-          {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
-          <div className="absolute inset-x-4 bottom-8 text-center">
-            <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
-              {activeSegment?.text || '…'}
-            </p>
-          </div>
-        </PhonePreviewStage>
+            {/* Phụ đề karaoke mô phỏng ở vùng dưới */}
+            <div className="absolute inset-x-4 bottom-8 text-center">
+              <p className="inline-block rounded-lg bg-black/55 px-2.5 py-1 text-tiny font-bold leading-snug text-[#FFD43B]">
+                {activeSegment?.text || '…'}
+              </p>
+            </div>
+          </PhonePreviewStage>
+        </div>
 
         <CinemaInspectorPanel
           coreScript={{
@@ -926,18 +1118,15 @@ export function HbtCoreWorkspace({
             segments,
           }}
           beatIndex={safeIndex}
-          disabled={rendering || v2Loading}
+          disabled={rendering || isPreparing}
         />
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
-        {(v2Loading || rendering || resultVideoUrl || renderError) &&
+        {(rendering || resultVideoUrl || renderError) &&
           (() => {
             const done = Boolean(resultVideoUrl) && !rendering;
-            const scriptState: WaterfallStepState = v2Loading
-              ? 'running'
-              : renderError && !rendering && progressPct <= 5
-                ? 'error'
-                : 'done';
+            const scriptState: WaterfallStepState =
+              renderError && !rendering && progressPct <= 5 ? 'error' : 'done';
             const voiceState: WaterfallStepState = done
               ? 'done'
               : progressStep === 'voice' && rendering
@@ -988,7 +1177,7 @@ export function HbtCoreWorkspace({
               {
                 id: 'render',
                 icon: '🎬',
-                title: 'Render video hoàn chỉnh (FFmpeg timeline 9:16)',
+                title: 'Render video hoàn chỉnh (60fps · 9:16)',
                 state: renderState,
                 logs: stepLogs.render,
               },
@@ -998,7 +1187,7 @@ export function HbtCoreWorkspace({
               <div className="space-y-3">
                 <WaterfallProgress
                   title={T.progress.title}
-                  overallPercent={v2Loading ? 10 : progressPct}
+                  overallPercent={progressPct}
                   steps={wfSteps}
                   error={renderError}
                 />

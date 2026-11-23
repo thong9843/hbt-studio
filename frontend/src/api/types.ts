@@ -237,7 +237,16 @@ export interface Job {
 export interface ActiveJob {
   id: string;
   slug: string;
-  kind: 'preview' | 'final' | 'voice' | 'postv_quick' | 'postv_auto' | 'hbt_core_auto' | 'stickv';
+  kind:
+    | 'preview'
+    | 'final'
+    | 'voice'
+    | 'postv_quick'
+    | 'postv_auto'
+    | 'hbt_core_auto'
+    | 'hbt_core_images'
+    | 'hbt_core_prepare'
+    | 'stickv';
   mode?: 'preview' | 'final';
   status: JobStatus;
   progress: number;
@@ -272,6 +281,9 @@ export interface WatermarkSettings {
   opacity: number;
 }
 
+export type CloudflareImageModel =
+  '@cf/black-forest-labs/flux-2-klein-4b' | '@cf/black-forest-labs/flux-1-schnell';
+
 export interface AppSettings {
   default_fps: Fps;
   theme: Theme;
@@ -283,6 +295,9 @@ export interface AppSettings {
   giphy_api_key?: string;
   freesound_api_key?: string;
   voicemod_tuna_api_key?: string;
+  cloudflare_account_id?: string;
+  cloudflare_api_token?: string;
+  cloudflare_image_model?: CloudflareImageModel;
 }
 
 export interface SensitiveCategory {
@@ -858,6 +873,8 @@ export interface HbtCoreAssetsInfo {
   images: string[];
   gemini_configured: boolean;
   gemini_models?: HbtCoreGeminiModel[];
+  cloudflare_configured?: boolean;
+  cloudflare_model?: CloudflareImageModel;
 }
 
 export interface HbtCoreRenderResponse {
@@ -993,6 +1010,8 @@ export type StickvEmotion =
   | 'sad'
   | 'happy'
   | 'excited';
+export type StickvFaceMood =
+  'explaining' | 'curious' | 'excited' | 'skeptical' | 'shocked' | 'warm_cta';
 export type StickvBoardType =
   | 'none'
   | 'bullets'
@@ -1007,7 +1026,8 @@ export type StickvBoardType =
   | 'timeline_era'
   | 'location_map'
   | 'myth_vs_fact'
-  | 'recap_card';
+  | 'recap_card'
+  | 'pinned_photo';
 export type StickvSfxTag = 'none' | 'whoosh' | 'pop' | 'vine_boom' | 'ding';
 
 export interface StickvBeat {
@@ -1017,6 +1037,7 @@ export interface StickvBeat {
   narration: string;
   pose: string;
   emotion?: StickvEmotion;
+  face_mood?: StickvFaceMood | null;
   anim_oneshot?: string | null;
   anim_loop?: string;
   interaction?: StickvInteraction;

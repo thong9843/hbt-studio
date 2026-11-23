@@ -39,7 +39,7 @@ def _public_kind(job: Job) -> str:
     raw = getattr(job, "kind", "render")
     if raw in ("stickv", "stickv_render"):
         return "stickv"
-    if raw in ("postv_quick", "postv_auto", "voice", "hbt_core_auto"):
+    if raw in ("postv_quick", "postv_auto", "voice", "hbt_core_auto", "hbt_core_images"):
         return raw
     return "preview" if job.preview else "final"
 

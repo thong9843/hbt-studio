@@ -93,6 +93,27 @@ describe('Cài đặt: các thẻ', () => {
     expect(await screen.findByText('Đã lưu')).toBeInTheDocument();
   });
 
+  it('configures Cloudflare Workers AI credentials and image model', async () => {
+    const { savedApp } = open();
+    const user = userEvent.setup();
+    const cfRegion = await screen.findByRole('region', { name: 'Cloudflare Workers AI' });
+    expect(within(cfRegion).getByText('Chưa cấu hình')).toBeInTheDocument();
+
+    await user.type(within(cfRegion).getByLabelText('Account ID'), 'acc-demo');
+    await user.type(within(cfRegion).getByLabelText('API Token'), 'tok-secret');
+    expect(within(cfRegion).getByText('Đã cấu hình')).toBeInTheDocument();
+
+    await user.click(within(cfRegion).getByRole('button', { name: /Flux 1 Schnell/i }));
+    await user.click(screen.getByRole('button', { name: 'Lưu' }));
+
+    await waitFor(() => expect(savedApp).toHaveLength(1));
+    expect(savedApp[0]).toMatchObject({
+      cloudflare_account_id: 'acc-demo',
+      cloudflare_api_token: 'tok-secret',
+      cloudflare_image_model: '@cf/black-forest-labs/flux-1-schnell',
+    });
+  });
+
   it('warns that medium / large-v3 are slow without a GPU', async () => {
     open();
     const user = userEvent.setup();

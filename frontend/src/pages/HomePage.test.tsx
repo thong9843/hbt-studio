@@ -47,18 +47,12 @@ describe('HomePage v5.0', () => {
     });
     page();
 
-    expect(
-      screen.getByText(/HBT Studio v5\.0 · Next-Gen Creator Workstation/i),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Tạo kịch bản AI' })).toHaveAttribute('href', '/core');
-    expect(screen.getByRole('link', { name: 'Dán link Threads / Reddit' })).toHaveAttribute(
-      'href',
-      '/postv',
-    );
-    expect(screen.getByRole('link', { name: 'Tạo đoạn chat 2 người' })).toHaveAttribute(
-      'href',
-      '/chatting',
-    );
+    expect(screen.getByRole('heading', { name: 'Hôm nay dựng gì?' })).toBeInTheDocument();
+    expect(screen.queryByText(/HBT Studio v5\.0/i)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Mở Core' })).toHaveAttribute('href', '/core');
+    expect(screen.getByRole('link', { name: 'Mở PostV' })).toHaveAttribute('href', '/postv');
+    expect(screen.getByRole('link', { name: 'Mở Chatting' })).toHaveAttribute('href', '/chatting');
+    expect(screen.getByRole('link', { name: 'Mở StickV' })).toHaveAttribute('href', '/stickv');
 
     await waitFor(() => expect(screen.getByText('Vì sao muỗi đốt bạn')).toBeInTheDocument());
   });

@@ -5,9 +5,10 @@ import { MusicIcon, PlayIcon, StopIcon, TrashIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const safe = typeof bytes === 'number' && Number.isFinite(bytes) ? bytes : 0;
+  if (safe < 1024) return `${safe} B`;
+  if (safe < 1024 * 1024) return `${(safe / 1024).toFixed(1)} KB`;
+  return `${(safe / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 interface AudioTrackRowProps {

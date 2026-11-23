@@ -78,18 +78,19 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     expect(screen.getByRole('region', { name: 'Xem trước trực tiếp 9:16' })).toBeVisible();
 
     // Chỉnh sửa trực tiếp lời thoại phân đoạn 1
-    const seg1Input = screen.getByLabelText('Lời thoại phân đoạn 1');
+    const seg1Input = screen.getByLabelText('Lời thoại');
     await user.clear(seg1Input);
     await user.type(seg1Input, 'Lời thoại mới đã chỉnh sửa.');
 
-    // Bấm "Dựng video"
-    await user.click(screen.getAllByRole('button', { name: 'Dựng video' })[0]);
+    // Bấm "Xuất video" trực tiếp trên khung xem trước
+    const exportBtns = screen.getAllByRole('button', { name: 'Xuất video' });
+    await user.click(exportBtns[exportBtns.length - 1]);
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
-  it('reveals hidden JSON editor via advanced toggle and parses Hay Biet Tot schema without 750-word warnings', async () => {
+  it('reveals hidden JSON editor via advanced toggle and parses Hay Biet Tuot schema without 750-word warnings', async () => {
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
       'GET /api/hbt/core/models': geminiModelsMock,
@@ -132,62 +133,23 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
     expect(screen.queryByText(/750/)).not.toBeInTheDocument();
   });
 
-  it('opens advanced JSON fallback notice when Gemini API fails or quota is exceeded', async () => {
-    stubFetch({
-      'GET /api/hbt-core/assets': assetsMock,
-      'GET /api/hbt/core/models': geminiModelsMock,
-      'POST /api/hbt-core/v2/prompt': () =>
-        new Response(
-          JSON.stringify({
-            detail:
-              'Gemini API đã hết hạn mức (Quota 429). Đã tự động chuyển sang Chế độ V1 (Bán tự động / JSON Thủ công).',
-            reason: 'quota_exceeded',
-            fallback_v1: true,
-          }),
-          { status: 429, headers: { 'Content-Type': 'application/json' } },
-        ),
-    });
-
-    const user = userEvent.setup();
-    renderDialog();
-
-    const promptBox = await screen.findByLabelText('Câu nhắc 1-Click Prompt');
-    await user.type(promptBox, 'Làm video vì sao về Đấu trường La Mã');
-    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
-
-    expect(
-      await screen.findByText('Đã tự động chuyển sang Chế độ V1 (Phao cứu sinh)'),
-    ).toBeVisible();
-    expect(await screen.findByLabelText(/Khối JSON kịch bản/)).toBeVisible();
-  });
-
-  it('allows selecting a Gemini model in the prompt toolbar and sends selectedModel in API payload', async () => {
+  it('triggers 3-phase prepare endpoint with selectedModel when clicking Chuẩn bị nội dung', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
     const capturedBodies: Record<string, unknown>[] = [];
     stubFetch({
       'GET /api/hbt-core/assets': assetsMock,
       'GET /api/hbt/core/models': geminiModelsMock,
-      'POST /api/hbt-core/v2/prompt': (_url: string, init?: RequestInit) => {
+      'POST /api/hbt-core/_new/prepare': (_url: string, init?: RequestInit) => {
         capturedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         return new Response(
           JSON.stringify({
             ok: true,
-            mode: 'v2',
             slug: 'dau-truong-la-ma',
-            job_id: null,
-            script: {
-              title: 'Vì sao Đấu trường La Mã vĩ đại?',
-              topic: 'history',
-              segments: [
-                {
-                  order: 1,
-                  text: 'Đấu trường La Mã là kỳ quan cổ đại.',
-                  image: 'scene-01.png',
-                  sfx: 'whoosh',
-                },
-              ],
-            },
+            job_id: 'job-prep-1',
+            total: 3,
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
+          { status: 202, headers: { 'Content-Type': 'application/json' } },
         );
       },
     });
@@ -205,9 +167,58 @@ describe('HbtCoreWorkspace (Prompt-First & V1/V2)', () => {
       screen.getByLabelText('Câu nhắc 1-Click Prompt'),
       'Làm video vì sao về Đấu trường La Mã',
     );
-    await user.click(screen.getByRole('button', { name: 'Tạo & Dựng video' }));
+    await user.click(screen.getByRole('button', { name: 'Chuẩn bị nội dung' }));
 
     await waitFor(() => expect(capturedBodies).toHaveLength(1));
     expect(capturedBodies[0]?.selectedModel).toBe('gemini-3.5-flash-lite');
+    expect(capturedBodies[0]?.prompt).toBe('Làm video vì sao về Đấu trường La Mã');
+  });
+
+  it('shows clear Vietnamese error with Settings link when single-scene Vẽ lại lacks Cloudflare key', async () => {
+    stubFetch({
+      'GET /api/hbt-core/assets': { ...assetsMock, cloudflare_configured: false },
+      'GET /api/hbt/core/models': geminiModelsMock,
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const regenBtn = await screen.findByRole('button', { name: 'Vẽ lại' });
+    await user.click(regenBtn);
+
+    expect(
+      await screen.findByText('Chưa cấu hình Cloudflare Account ID hoặc API Token.'),
+    ).toBeVisible();
+    const settingsLink = screen.getByRole('link', { name: 'Mở Cài đặt' });
+    expect(settingsLink).toHaveAttribute('href', '/settings');
+  });
+
+  it('triggers single-scene regenerate endpoint when clicking Vẽ lại', async () => {
+    let calledUrl = '';
+    stubFetch({
+      'GET /api/hbt-core/assets': { ...assetsMock, cloudflare_configured: true },
+      'GET /api/hbt/core/models': geminiModelsMock,
+      'POST /api/hbt-core/_new/scenes/0/generate-image': (url: string) => {
+        calledUrl = url;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            slug: 'dau-truong-la-ma',
+            scene_index: 0,
+            image: 'images/scene-01.png',
+            url: '/api/files/projects/dau-truong-la-ma/images/scene-01.png',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      },
+    });
+
+    const user = userEvent.setup();
+    renderDialog();
+
+    const regenBtn = await screen.findByRole('button', { name: 'Vẽ lại' });
+    await user.click(regenBtn);
+
+    await waitFor(() => expect(calledUrl).toContain('/api/hbt-core/_new/scenes/0/generate-image'));
   });
 });

@@ -38,22 +38,24 @@ export function StudioTopBar({
 }: StudioTopBarProps) {
   return (
     <header className="flex h-[56px] shrink-0 items-center justify-between gap-3 border-b border-line bg-card px-3.5">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Link
           to="/"
           aria-label={vi.studioShell.backToHome}
           title={vi.studioShell.backToHome}
-          className="ui-icon-btn ui-icon-btn-sm border border-line bg-soft text-text"
+          className="ui-icon-btn ui-icon-btn-sm shrink-0 border border-line bg-soft text-text"
         >
           <ArrowLeftIcon size={15} />
         </Link>
 
         {projectSelector ? (
-          <div className="flex min-w-0 items-center gap-1.5">{projectSelector}</div>
+          <div className="flex min-w-0 max-w-[260px] items-center gap-1.5 lg:max-w-[360px]">
+            {projectSelector}
+          </div>
         ) : (
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 max-w-[260px] items-center gap-2 lg:max-w-[360px]">
             {engineBadge && (
-              <span className="shrink-0 rounded-pill bg-[var(--accent-soft)] px-2.5 py-0.5 text-tiny font-bold text-[var(--on-accent-soft)]">
+              <span className="shrink-0 whitespace-nowrap rounded-pill bg-[var(--accent-soft)] px-2.5 py-1 text-[13px] font-semibold text-[var(--on-accent-soft)]">
                 {engineBadge}
               </span>
             )}

@@ -143,6 +143,25 @@ export function useRenderJobProgress(): RenderJobProgressSnapshot {
   );
 }
 
+/** Đúng trang đang hiển thị trực tiếp tiến độ của job active (ẩn Dock/Sidebar lặp). */
+export function isOnActiveJobPage(
+  pathname: string,
+  kind: ActiveJob['kind'] | null,
+  slug: string | null,
+): boolean {
+  if (kind === 'stickv' && pathname.startsWith('/stickv')) {
+    return true;
+  }
+  if (
+    (kind === 'preview' || kind === 'final') &&
+    slug &&
+    pathname.startsWith(`/p/${slug}/export`)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Hook đầy đủ tương thích ngược (gộp cả trạng thái vòng đời + tiến độ tức thời).
  */

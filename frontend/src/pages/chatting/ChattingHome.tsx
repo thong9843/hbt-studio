@@ -17,7 +17,7 @@ const BACKGROUND_OPTIONS = [
 ];
 
 const DURATION_OPTIONS = [
-  { id: '', label: 'Tự động (tối đa 5p)' },
+  { id: '', label: 'Tự động (≤ 5p)' },
   { id: '60', label: '1 phút (60s)' },
   { id: '90', label: '1 phút 30s (90s)' },
   { id: '120', label: '2 phút (120s)' },
@@ -99,27 +99,14 @@ export function ChattingHome() {
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-bg">
-      <StudioTopBar
-        engineBadge="Chatting · 60fps"
-        title="Hội thoại Tin nhắn Messenger / Instagram"
-        exportProps={{
-          aspect: '9:16',
-          showWatermarkControl: true,
-          onExportFinal: () => void handleCreate(),
-          finalLabel: isSubmitting ? 'Đang khởi tạo…' : vi.chatting.createBtn,
-          disabled: !inputText.trim() || isSubmitting,
-          isSubmitting,
-        }}
-      />
+      <StudioTopBar engineBadge="Chatting" />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-7 lg:px-8">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-2.5 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-card text-text shadow-card">
             <MessagesSquareIcon size={22} />
           </div>
           <h1 className="text-h1 font-bold tracking-tight text-text">{vi.chatting.title}</h1>
-          <p className="mt-1 text-small text-muted">
-            Tạo video dạng tin nhắn Messenger / Zalo 60fps nhanh chóng
-          </p>
+          <p className="mt-1 text-small text-muted">{vi.chatting.subtitle}</p>
         </div>
 
         {/* Màn trống cảnh báo nếu chưa cấu hình GEMINI_API_KEY và đang ở chế độ AI */}
@@ -132,15 +119,14 @@ export function ChattingHome() {
               <code className="font-mono font-bold">
                 {status?.model_name || 'gemini-3.8-flash'}
               </code>
-              ). Hoặc bạn có thể chọn tab <b>Dán kịch bản trực tiếp (Bypass LLM)</b> để tạo video
-              ngay không cần API Key.
+              ). Hoặc chọn tab <b>{vi.chatting.tabDirectScript}</b> để dựng ngay không cần API Key.
             </p>
           </div>
         )}
 
         {/* Khung nhập chuẩn VEED Bright Minimalist */}
         <div className="rounded-card border border-line bg-card p-5 shadow-card">
-          {/* Tab chọn chế độ: Viết AI vs Kịch bản trực tiếp */}
+          {/* Tab chọn chế độ gọn 2–3 từ */}
           <div className="mb-4 flex items-center gap-2 border-b border-line pb-3">
             <button
               type="button"
@@ -149,7 +135,7 @@ export function ChattingHome() {
                 !isDirectScript ? 'bg-text text-bg shadow-sm' : 'bg-soft text-muted hover:text-text'
               }`}
             >
-              Từ bài viết / Link (AI viết)
+              {vi.chatting.tabFromPost}
             </button>
             <button
               type="button"
@@ -160,7 +146,7 @@ export function ChattingHome() {
                   : 'bg-soft text-muted hover:text-text'
               }`}
             >
-              Dán kịch bản trực tiếp (Bypass LLM)
+              {vi.chatting.tabDirectScript}
             </button>
           </div>
 
@@ -169,7 +155,7 @@ export function ChattingHome() {
             onChange={(e) => setInputText(e.target.value)}
             placeholder={
               isDirectScript
-                ? 'Dán kịch bản đối thoại trực tiếp không qua AI, ví dụ:\nMinh: Ê tối nay đi ăn lẩu không?\nLinh: Mấy giờ thế? Tao đang bận tí việc (ngại)\nMinh: Tầm 7 rưỡi nhé!\nLinh: Ok chốt luôn [sticker: ok]'
+                ? 'Dán kịch bản đối thoại trực tiếp, ví dụ:\nMinh: Tối nay đi ăn không?\nLinh: Mấy giờ thế? (ngại)\nMinh: 7 rưỡi nhé!\nLinh: Ok chốt [sticker: ok]'
                 : vi.chatting.inputPlaceholder
             }
             rows={6}
@@ -183,80 +169,90 @@ export function ChattingHome() {
             </div>
           )}
 
-          {/* Hàng chip điều khiển */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-tiny font-semibold text-muted">{vi.chatting.platform}:</span>
-              <button
-                type="button"
-                onClick={() => setPlatform('messenger')}
-                className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
-                  platform === 'messenger'
-                    ? 'bg-primary text-on-primary'
-                    : 'bg-soft text-text hover:bg-soft/80'
-                }`}
-              >
-                {vi.chatting.messenger}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPlatform('instagram')}
-                className={`rounded-full px-4 py-1.5 text-tiny font-bold transition-colors ${
-                  platform === 'instagram'
-                    ? 'bg-primary text-on-primary'
-                    : 'bg-soft text-text hover:bg-soft/80'
-                }`}
-              >
-                {vi.chatting.instagram}
-              </button>
+          {/* Lưới 4 cột cố định — nhãn nằm phía trên mỗi ô chọn, không bao giờ rớt lẻ loi */}
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="space-y-1.5">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-muted">
+                {vi.chatting.platform}
+              </span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPlatform('messenger')}
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
+                    platform === 'messenger'
+                      ? 'bg-primary text-on-primary'
+                      : 'bg-soft text-text hover:bg-soft-2'
+                  }`}
+                >
+                  {vi.chatting.messenger}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlatform('instagram')}
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-tiny font-bold transition-colors ${
+                    platform === 'instagram'
+                      ? 'bg-primary text-on-primary'
+                      : 'bg-soft text-text hover:bg-soft-2'
+                  }`}
+                >
+                  {vi.chatting.instagram}
+                </button>
+              </div>
+            </div>
 
-              <span className="ml-4 text-tiny font-semibold text-muted">
-                {vi.chatting.background}:
+            <div className="space-y-1.5">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-muted">
+                {vi.chatting.background}
               </span>
               <StudioSelect
                 aria-label={vi.chatting.background}
-                variant="pill"
-                autoWidth
+                variant="compact"
                 value={background}
                 onChange={(val) => setBackground(val)}
                 options={BACKGROUND_OPTIONS.map((bg) => ({ value: bg.id, label: bg.label }))}
-                className="min-w-[165px]"
-              />
-
-              {!isDirectScript && (
-                <>
-                  <span className="ml-3 text-tiny font-semibold text-muted">Model Gemini:</span>
-                  <StudioSelect
-                    aria-label="Model Gemini"
-                    variant="pill"
-                    autoWidth
-                    value={selectedModel}
-                    onChange={(val) => setSelectedModel(val)}
-                    options={(
-                      status?.models ?? [
-                        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-                        { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-                        { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
-                        { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
-                      ]
-                    ).map((m) => ({ value: m.id, label: m.name }))}
-                    className="min-w-[170px]"
-                  />
-                </>
-              )}
-
-              <span className="ml-3 text-tiny font-semibold text-muted">Thời lượng:</span>
-              <StudioSelect
-                aria-label="Thời lượng video"
-                variant="pill"
-                autoWidth
-                value={targetDuration}
-                onChange={(val) => setTargetDuration(val)}
-                options={DURATION_OPTIONS.map((d) => ({ value: d.id, label: d.label }))}
-                className="min-w-[160px]"
               />
             </div>
 
+            <div className="space-y-1.5">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-muted">
+                {vi.chatting.modelLabel}
+              </span>
+              <StudioSelect
+                aria-label={vi.chatting.modelLabel}
+                variant="compact"
+                disabled={isDirectScript}
+                value={selectedModel}
+                onChange={(val) => setSelectedModel(val)}
+                options={(
+                  status?.models ?? [
+                    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+                    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+                    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
+                    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+                  ]
+                ).map((m) => ({
+                  value: m.id,
+                  label: m.name.replace(/\s*\([^)]*\)/g, '').trim(),
+                }))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-muted">
+                {vi.chatting.durationLabel}
+              </span>
+              <StudioSelect
+                aria-label={vi.chatting.durationLabel}
+                variant="compact"
+                value={targetDuration}
+                onChange={(val) => setTargetDuration(val)}
+                options={DURATION_OPTIONS.map((d) => ({ value: d.id, label: d.label }))}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 flex justify-end border-t border-line pt-4">
             <Button
               tone="chatting"
               size="lg"

@@ -108,4 +108,28 @@ export const stickvApi = {
       'GET',
       `/stickv/iconify/search?q=${encodeURIComponent(q)}`,
     ),
+
+  searchReferenceImages: (q: string, limit = 6) =>
+    apiRequest<{
+      items: Array<{
+        id: string;
+        title: string;
+        url: string;
+        thumb_url: string;
+        width: number;
+        height: number;
+        source: string;
+      }>;
+    }>('GET', `/stickv/reference-images/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+  applyReferenceImage: (
+    slug: string,
+    beatId: string,
+    body: { url: string; query?: string; caption?: string },
+  ) =>
+    apiRequest<{ ok: boolean; media_path: string; project: StickvProject }>(
+      'POST',
+      `/stickv/${encodeURIComponent(slug)}/beats/${encodeURIComponent(beatId)}/reference-image`,
+      { json: body },
+    ),
 };

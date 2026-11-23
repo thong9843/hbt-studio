@@ -11,6 +11,7 @@
   --bg-elevated: #f1f3f6;
   --bg-subtle: #f1f3f6;
   --bg-canvas: #eceff4;
+  --canvas-dot: rgba(17, 19, 24, 0.1);
   --nav: #ffffff;
   --soft: #f1f3f6;
   --soft-2: #eceff4;
@@ -90,6 +91,7 @@
   --shadow-card: 0 1px 3px rgba(17, 19, 24, 0.04), 0 1px 2px rgba(17, 19, 24, 0.02);
   --shadow-card-hover: 0 8px 24px -4px rgba(17, 19, 24, 0.08), 0 2px 6px rgba(17, 19, 24, 0.04);
   --shadow-pop: 0 16px 40px -8px rgba(17, 19, 24, 0.16);
+  --shadow-stage: 0 20px 44px -12px rgba(17, 19, 24, 0.18), 0 6px 16px -4px rgba(17, 19, 24, 0.1);
   --card-border: #e6e8ee;
   --scrim: rgba(17, 19, 24, 0.45);
 
@@ -137,6 +139,7 @@
     --bg-elevated: #1c202b;
     --bg-subtle: #1c202b;
     --bg-canvas: #090b0f;
+    --canvas-dot: rgba(255, 255, 255, 0.08);
     --nav: #151821;
     --soft: #1c202b;
     --soft-2: #232836;
@@ -184,6 +187,7 @@
     --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
     --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
     --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
+    --shadow-stage: 0 24px 48px -12px rgba(0, 0, 0, 0.72), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
     --card-border: rgba(255, 255, 255, 0.08);
     --scrim: rgba(4, 7, 15, 0.72);
 
@@ -200,6 +204,7 @@
   --bg-elevated: #1c202b;
   --bg-subtle: #1c202b;
   --bg-canvas: #090b0f;
+  --canvas-dot: rgba(255, 255, 255, 0.08);
   --nav: #151821;
   --soft: #1c202b;
   --soft-2: #232836;
@@ -247,6 +252,7 @@
   --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
   --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.5);
   --shadow-pop: 0 20px 48px rgba(0, 0, 0, 0.65);
+  --shadow-stage: 0 24px 48px -12px rgba(0, 0, 0, 0.72), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
   --card-border: rgba(255, 255, 255, 0.08);
   --scrim: rgba(4, 7, 15, 0.72);
 
