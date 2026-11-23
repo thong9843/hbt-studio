@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +13,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
+from hbt.app_settings import resolve_online_api_key
+from hbt.shared.image_gen.cloudflare_flux import (
+    CloudflareImageError,
+    derive_project_seed,
+    generate_illustration_image,
+)
 from hbt.shared.llm import AVAILABLE_GEMINI_MODELS, GEMINI_MODEL, GeminiClientError
 from hbt.shared.online_sources.iconify_props import search_iconify_icons
 from hbt.shared.online_sources.reference_images import (
@@ -231,6 +238,81 @@ def apply_beat_reference_image(
     saved = save_stickv_project(
         state.settings.workspace_dir, proj.model_copy(update={"beats": updated_beats})
     )
+    return {"ok": True, "media_path": rel_path, "project": saved.model_dump(mode="json")}
+
+
+class StickvGeneratePhotoBody(BaseModel):
+    prompt: str = Field(default="", max_length=320)
+    caption: str = Field(default="", max_length=120)
+
+
+@router.post("/stickv/{slug}/beats/{beat_id}/generate-photo")
+def generate_beat_ai_photo(
+    slug: str,
+    beat_id: str,
+    body: StickvGeneratePhotoBody,
+    state: State,
+) -> dict[str, Any]:
+    """Vẽ lại tranh minh họa 2D cho khung Polaroid bằng Cloudflare Flux (768x512)."""
+    proj = load_stickv_project(state.settings.workspace_dir, slug)
+    target_beat = next((b for b in proj.beats if b.id == beat_id), None)
+    if target_beat is None:
+        raise NotFound(f"Không tìm thấy beat '{beat_id}'")
+
+    ws_dir = state.settings.workspace_dir
+    acc_id = resolve_online_api_key("CLOUDFLARE_ACCOUNT_ID", ws_dir)
+    token = resolve_online_api_key("CLOUDFLARE_API_TOKEN", ws_dir)
+    if not acc_id or not token:
+        raise BadRequest(
+            "Chưa cấu hình Cloudflare Account ID hoặc API Token. Vào Cài đặt để nhập khóa."
+        )
+
+    prompt_txt = (
+        body.prompt.strip()
+        or (target_beat.image_prompt or "").strip()
+        or (target_beat.prop_query or "").strip()
+        or (target_beat.board_title or "").strip()
+        or (target_beat.narration or "").strip()[:160]
+    )
+    if not prompt_txt:
+        raise BadRequest("Vui lòng nhập mô tả hình minh họa")
+
+    pdir = stickv_project_dir(ws_dir, slug)
+    digest = hashlib.sha1(f"{beat_id}:{prompt_txt}".encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+    dest = pdir / "media" / f"{beat_id}_ai_{digest}.jpg"
+    try:
+        generate_illustration_image(
+            prompt_txt,
+            dest,
+            account_id=acc_id,
+            api_token=token,
+            width=768,
+            height=512,
+            seed=derive_project_seed(f"{slug}:{beat_id}"),
+        )
+    except CloudflareImageError as exc:
+        raise Unprocessable(str(exc)) from exc
+
+    rel_path = f"media/{dest.name}"
+    updated_beats: list[StickvBeat] = []
+    for b in proj.beats:
+        if b.id == beat_id:
+            bdata = dict(b.board_data or {})
+            if body.caption.strip():
+                bdata["caption"] = body.caption.strip()[:80]
+            updated_beats.append(
+                b.model_copy(
+                    update={
+                        "media_path": rel_path,
+                        "board_type": "pinned_photo",
+                        "image_prompt": prompt_txt[:320],
+                        "board_data": bdata,
+                    }
+                )
+            )
+        else:
+            updated_beats.append(b)
+    saved = save_stickv_project(ws_dir, proj.model_copy(update={"beats": updated_beats}))
     return {"ok": True, "media_path": rel_path, "project": saved.model_dump(mode="json")}
 
 

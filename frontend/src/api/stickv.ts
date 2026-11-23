@@ -132,4 +132,15 @@ export const stickvApi = {
       `/stickv/${encodeURIComponent(slug)}/beats/${encodeURIComponent(beatId)}/reference-image`,
       { json: body },
     ),
+
+  generateBeatPhoto: (
+    slug: string,
+    beatId: string,
+    body?: { prompt?: string; caption?: string },
+  ) =>
+    apiRequest<{ ok: boolean; media_path: string; project: StickvProject }>(
+      'POST',
+      `/stickv/${encodeURIComponent(slug)}/beats/${encodeURIComponent(beatId)}/generate-photo`,
+      { json: body ?? {} },
+    ),
 };

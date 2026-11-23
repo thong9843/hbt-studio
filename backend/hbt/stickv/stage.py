@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
+from hbt.stickv.llm import format_unwrapped_text, unwrap_board_text
 from hbt.stickv.models import (
     STICKV_ASPECT_SIZES,
     StickvAspect,
@@ -814,10 +815,14 @@ def _draw_smart_board_content(
     content_alpha: float = 1.0,
 ) -> tuple[int, int, int, int]:
     """Vẽ bảng minh họa 100% beat (gồm thẻ tự động `none` & thẻ Polaroid `pinned_photo`)."""
-    if beat.board_type == "pinned_photo":
-        return _draw_pinned_photo_card(
-            canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
-        )
+    eff_btype = beat.board_type
+    if eff_btype == "pinned_photo":
+        if prop_img is not None:
+            return _draw_pinned_photo_card(
+                canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
+            )
+        # Chốt chặn cuối: KHÔNG vẽ khung Polaroid rỗng -> chuyển mềm sang thẻ phân tích 2 tầng
+        eff_btype = "bullets"
     prog = max(0.0, min(1.0, float(progress)))
     x0, y0, x1, max_y1 = box
     bw = x1 - x0
@@ -831,13 +836,15 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
-    takeaway = str(getattr(beat, "takeaway", "") or data.get("takeaway") or "").strip()
+    takeaway = format_unwrapped_text(
+        getattr(beat, "takeaway", "") or data.get("takeaway") or ""
+    ).replace("**", "").strip()
     hl_fill = _highlight_color_for_card(pal)
 
     tmp_draw = ImageDraw.Draw(canvas)
     est_h = 104
-    eff_title = beat.board_title or (
-        _extract_highlight_keyword(beat.narration) if beat.board_type == "none" else ""
+    eff_title = format_unwrapped_text(beat.board_title or "") or (
+        _extract_highlight_keyword(beat.narration) if eff_btype == "none" else ""
     )
     if eff_title:
         th = _measure_rich_wrapped_height(
@@ -845,9 +852,9 @@ def _draw_smart_board_content(
         )
         est_h += max(58, th + 16)
 
-    if beat.board_type in ("none", "bullets", "list", "card"):
-        items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
-        if not items and beat.board_type == "none":
+    if eff_btype in ("none", "bullets", "list", "card"):
+        items = [format_unwrapped_text(it) for it in (data.get("items") or []) if format_unwrapped_text(it)][:3]
+        if not items:
             clauses = [
                 c.strip()
                 for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
@@ -859,19 +866,19 @@ def _draw_smart_board_content(
                 tmp_draw, it, f_body, max_width_px=max(200, bw - 96), line_gap=8
             )
             est_h += max(56, ih) + 22
-    elif beat.board_type == "recap_card":
+    elif eff_btype == "recap_card":
         est_h += 300
-    elif beat.board_type in ("big_number", "counter_grow"):
+    elif eff_btype in ("big_number", "counter_grow"):
         est_h += 240
-    elif beat.board_type == "quote":
-        q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
+    elif eff_btype == "quote":
+        q_txt = format_unwrapped_text(data.get("quote") or data.get("text") or beat.narration or "")
         qh = _measure_rich_wrapped_height(
             tmp_draw, q_txt, f_body, max_width_px=max(200, bw - 110), line_gap=12
         )
         est_h += max(140, qh + 64)
-    elif beat.board_type == "comparison":
-        left_items = [str(x) for x in (data.get("left_items") or []) if str(x).strip()][:4]
-        right_items = [str(x) for x in (data.get("right_items") or []) if str(x).strip()][:4]
+    elif eff_btype == "comparison":
+        left_items = [format_unwrapped_text(x) for x in (data.get("left_items") or []) if format_unwrapped_text(x)][:4]
+        right_items = [format_unwrapped_text(x) for x in (data.get("right_items") or []) if format_unwrapped_text(x)][:4]
         col_w_px = max(140, (bw - 120) // 2)
         lh = sum(
             _measure_rich_wrapped_height(
@@ -888,26 +895,30 @@ def _draw_smart_board_content(
             for x in right_items
         )
         est_h += 96 + max(110, lh, rh)
-    elif beat.board_type == "bar_compare":
+    elif eff_btype == "bar_compare":
         bars = (data.get("values") or data.get("bars") or [])[:4]
         est_h += max(230, len(bars) * 82 + 44)
-    elif beat.board_type == "flow_steps":
-        steps = [str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()][
-            :4
-        ]
+    elif eff_btype == "flow_steps":
+        steps = [
+            format_unwrapped_text(s)
+            for s in (data.get("steps") or data.get("items") or [])
+            if format_unwrapped_text(s)
+        ][:4]
         for stp in steps:
             sh = _measure_rich_wrapped_height(
                 tmp_draw, stp, f_sub, max_width_px=max(180, bw - 160), line_gap=6, max_lines=2
             )
             est_h += max(78, sh + 34) + 14
-    elif beat.board_type == "timeline_era":
+    elif eff_btype == "timeline_era":
         ev_count = max(2, len((data.get("events") or data.get("items") or [])[:4]))
         est_h += ev_count * 88 + 24
-    elif beat.board_type == "location_map":
+    elif eff_btype == "location_map":
         est_h += 260
-    elif beat.board_type == "myth_vs_fact":
-        m_txt = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
-        f_txt = str(data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế")
+    elif eff_btype == "myth_vs_fact":
+        m_txt = format_unwrapped_text(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
+        f_txt = format_unwrapped_text(
+            data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế"
+        )
         mh = _measure_rich_wrapped_height(
             tmp_draw, m_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
         )
@@ -917,10 +928,10 @@ def _draw_smart_board_content(
         est_h += max(108, mh + 64) + max(108, fh + 64) + 28
 
     if takeaway:
-        est_h += 92
+        est_h += 116
 
     # Co giãn thông minh theo mật độ thực tế (đủ đầy đặn nhưng không dư khoảng trống > 25%)
-    min_ratio = 0.68 if beat.board_type in ("myth_vs_fact", "comparison") else 0.84
+    min_ratio = 0.68 if eff_btype in ("myth_vs_fact", "comparison") else 0.84
     min_card_h = max(280, int(round((max_y1 - y0) * min_ratio)))
     card_h = min(max_y1 - y0, max(min_card_h, est_h + 36))
     y1 = y0 + card_h
@@ -938,7 +949,7 @@ def _draw_smart_board_content(
             width=3,
         )
 
-        badge_txt = BOARD_BADGES.get(beat.board_type, "PHÂN TÍCH")
+        badge_txt = BOARD_BADGES.get(eff_btype, "PHÂN TÍCH")
         bb = shell_draw.textbbox((0, 0), badge_txt, font=f_badge)
         badge_w = (bb[2] - bb[0]) + 32
         shell_draw.rounded_rectangle(
@@ -948,11 +959,10 @@ def _draw_smart_board_content(
         )
         shell_draw.text((x0 + 48, y0 + 30), badge_txt, font=f_badge, fill=(255, 255, 255, 255))
 
-        chap_txt = (
-            f"CHƯƠNG {beat.chapter}"
-            if total_chapters > 1
-            else (beat.chapter_title or "KIẾN THỨC")[:18].upper()
-        )
+        raw_chap = (beat.chapter_title or "").strip()
+        if total_chapters <= 1:
+            raw_chap = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_chap).strip()
+        chap_txt = f"CHƯƠNG {beat.chapter}" if total_chapters > 1 else (raw_chap or "KIẾN THỨC")[:18].upper()
         cbb = shell_draw.textbbox((0, 0), chap_txt, font=f_badge)
         cw_pill = (cbb[2] - cbb[0]) + 28
         shell_draw.rounded_rectangle(
@@ -969,7 +979,7 @@ def _draw_smart_board_content(
 
         # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính (auto-fit không tràn chiều cao)
         title_max_h = max(72, int(round((y1 - y0) * 0.24)))
-        if beat.board_type in ("none", "bullets", "list", "card", "recap_card"):
+        if eff_btype in ("none", "bullets", "list", "card", "recap_card"):
             icon_sz = 56
             _draw_topic_circle_badge(inner_layer, (x0 + 62, cur_y + 28), icon_sz, pal, prop_img)
             title_x = x0 + 106
@@ -1007,11 +1017,11 @@ def _draw_smart_board_content(
             )
             cur_y += 10
 
-        content_bottom = y1 - (96 if takeaway else 28)
+        content_bottom = y1 - (112 if takeaway else 28)
 
-        if beat.board_type in ("none", "bullets", "list", "card"):
+        if eff_btype in ("none", "bullets", "list", "card"):
             # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & auto-fit vừa khít `content_bottom`
-            items = [str(it) for it in (data.get("items") or []) if str(it).strip()][:3]
+            items = [format_unwrapped_text(it) for it in (data.get("items") or []) if format_unwrapped_text(it)][:3]
             if not items:
                 clauses = [
                     c.strip()
@@ -1050,12 +1060,12 @@ def _draw_smart_board_content(
                 )
                 cur_y = min(content_bottom, end_y + item_gap)
 
-        elif beat.board_type == "recap_card":
+        elif eff_btype == "recap_card":
             # 3 thẻ ngang đúc kết kiến thức cốt lõi (1 · 2 · 3)
             recap_items = [
-                str(it)
+                format_unwrapped_text(it)
                 for it in (data.get("items") or data.get("bullets") or [])
-                if str(it).strip()
+                if format_unwrapped_text(it)
             ][:3]
             if not recap_items:
                 recap_items = [
@@ -1094,8 +1104,8 @@ def _draw_smart_board_content(
                 )
                 cur_y = cy1 + 12
 
-        elif beat.board_type == "quote":
-            q_txt = str(data.get("quote") or data.get("text") or beat.narration or "")
+        elif eff_btype == "quote":
+            q_txt = format_unwrapped_text(data.get("quote") or data.get("text") or beat.narration or "")
             draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
             _draw_rich_autofit_text(
                 draw,
@@ -1111,7 +1121,7 @@ def _draw_smart_board_content(
                 line_gap=12,
             )
 
-        elif beat.board_type == "counter_grow":
+        elif eff_btype == "counter_grow":
             raw_target = data.get("target", data.get("value", 100))
             try:
                 target_num = float(
@@ -1148,7 +1158,7 @@ def _draw_smart_board_content(
                     line_gap=8,
                 )
 
-        elif beat.board_type == "bar_compare":
+        elif eff_btype == "bar_compare":
             raw_bars = data.get("values") or data.get("bars") or []
             bars: list[tuple[str, float]] = []
             for idx, entry in enumerate(raw_bars[:4]):
@@ -1196,7 +1206,7 @@ def _draw_smart_board_content(
                 )
                 cur_y += 78
 
-        elif beat.board_type == "big_number":
+        elif eff_btype == "big_number":
             val = strip_rich_markup(str(data.get("value") or "100%"))
             lbl = str(data.get("label") or "")
             sub = str(data.get("sub") or "")
@@ -1234,7 +1244,7 @@ def _draw_smart_board_content(
                     line_gap=8,
                 )
 
-        elif beat.board_type == "comparison":
+        elif eff_btype == "comparison":
             mid_x = (x0 + x1) // 2
             col_gap = 18
             lx0, lx1 = x0 + 32, mid_x - col_gap
@@ -1258,8 +1268,8 @@ def _draw_smart_board_content(
             draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
             draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
 
-            left_t = str(data.get("left_title") or "Trước")
-            right_t = str(data.get("right_title") or "Sau")
+            left_t = format_unwrapped_text(data.get("left_title") or "Trước")
+            right_t = format_unwrapped_text(data.get("right_title") or "Sau")
             draw_rich_text_line(
                 draw,
                 left_t,
@@ -1280,8 +1290,8 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            left_list = [str(x) for x in (data.get("left_items") or [])[:4] if str(x).strip()]
-            right_list = [str(x) for x in (data.get("right_items") or [])[:4] if str(x).strip()]
+            left_list = [format_unwrapped_text(x) for x in (data.get("left_items") or [])[:4] if format_unwrapped_text(x)]
+            right_list = [format_unwrapped_text(x) for x in (data.get("right_items") or [])[:4] if format_unwrapped_text(x)]
             l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
             r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
             for item in left_list:
@@ -1323,9 +1333,11 @@ def _draw_smart_board_content(
                     + 6
                 )
 
-        elif beat.board_type == "flow_steps":
+        elif eff_btype == "flow_steps":
             steps = [
-                str(s) for s in (data.get("steps") or data.get("items") or []) if str(s).strip()
+                format_unwrapped_text(s)
+                for s in (data.get("steps") or data.get("items") or [])
+                if format_unwrapped_text(s)
             ][:4]
             active_count = max(1, int(math.ceil(prog * max(1, len(steps)))))
             n_steps = max(1, len(steps))
@@ -1381,7 +1393,7 @@ def _draw_smart_board_content(
                 )
                 cur_y = cy1 + step_gap
 
-        elif beat.board_type == "timeline_era":
+        elif eff_btype == "timeline_era":
             raw_ev = data.get("events") or data.get("items") or []
             events: list[tuple[str, str]] = []
             for idx, ev in enumerate(raw_ev[:4]):
@@ -1389,13 +1401,13 @@ def _draw_smart_board_content(
                     events.append(
                         (
                             strip_rich_markup(
-                                str(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}")
+                                format_unwrapped_text(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}")
                             ),
-                            str(ev.get("title") or ev.get("label") or ev.get("text") or ""),
+                            format_unwrapped_text(ev.get("title") or ev.get("label") or ev.get("text") or ""),
                         )
                     )
                 else:
-                    s = str(ev)
+                    s = format_unwrapped_text(ev)
                     if ":" in s:
                         yr, tt = s.split(":", 1)
                         events.append((strip_rich_markup(yr).strip(), tt.strip()))
@@ -1444,7 +1456,7 @@ def _draw_smart_board_content(
                 )
                 cur_y += ev_slot_h
 
-        elif beat.board_type == "location_map":
+        elif eff_btype == "location_map":
             loc_name = str(
                 data.get("location") or data.get("place") or eff_title or "Di tích cổ đại"
             )
@@ -1491,15 +1503,17 @@ def _draw_smart_board_content(
                 max_width_px=max(140, (map_x1 - map_x0) - 40),
             )
 
-        elif beat.board_type == "myth_vs_fact":
-            myth_title = str(data.get("myth_title") or "").strip()
-            fact_title = str(data.get("fact_title") or "").strip()
-            myth_raw = str(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến").strip()
-            fact_raw = str(
+        elif eff_btype == "myth_vs_fact":
+            myth_title = format_unwrapped_text(data.get("myth_title") or "").replace("**", "").strip()
+            fact_title = format_unwrapped_text(data.get("fact_title") or "").replace("**", "").strip()
+            m_t, m_b = unwrap_board_text(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
+            f_t, f_b = unwrap_board_text(
                 data.get("fact") or data.get("right") or beat.narration or "Sự thật khoa học"
-            ).strip()
-            myth_full = f"**{myth_title}:** {myth_raw}" if myth_title else myth_raw
-            fact_full = f"**{fact_title}:** {fact_raw}" if fact_title else fact_raw
+            )
+            eff_mt = myth_title or m_t
+            eff_ft = fact_title or f_t
+            myth_full = f"**{eff_mt}:** {m_b}" if (eff_mt and m_b) else (eff_mt or m_b)
+            fact_full = f"**{eff_ft}:** {f_b}" if (eff_ft and f_b) else (eff_ft or f_b)
 
             text_w = max(200, bw - 116)
             m_text_h = _measure_rich_wrapped_height(
@@ -1572,22 +1586,27 @@ def _draw_smart_board_content(
             )
 
         if takeaway:
-            ty0 = y1 - 80
+            ty0 = y1 - 100
             draw.rounded_rectangle(
-                (x0 + 28, ty0, x1 - 28, y1 - 18),
+                (x0 + 28, ty0, x1 - 28, y1 - 16),
                 radius=16,
                 fill=pal["takeaway_bg"],
                 outline=pal["amber"],
                 width=2,
             )
-            draw_rich_text_line(
+            _draw_rich_autofit_text(
                 draw,
                 f"**CHỐT LẠI:** {takeaway}",
-                (x0 + 46, ty0 + 16),
-                f_sub,
+                (x0 + 44, ty0 + 12),
+                FONT_MEDIUM,
+                24,
+                18,
                 pal["pill_text"],
                 hl_fill,
-                max_width_px=max(180, bw - 92),
+                max_width_px=max(180, bw - 88),
+                max_height_px=64,
+                line_gap=5,
+                max_lines=2,
             )
 
         if inner_layer is not canvas:
@@ -2172,17 +2191,23 @@ def _draw_compact_topic_pill(
     aspect: StickvAspect,
     narration: str = "",
     takeaway: str = "",
+    total_chapters: int = 1,
 ) -> None:
     """Vẽ huy hiệu Chương + dải Quote/Từ khóa nổi bật (2–6 từ) ở vùng trên khi `closeup_react`."""
     w, h = frame_rgba.size
     sy = h / (1920.0 if aspect == "9:16" else 1080.0)
     sx = w / (1080.0 if aspect == "9:16" else 1920.0)
-    raw_lbl = strip_rich_markup(chapter_title or f"Chương {chapter}").strip()
-    label = (
-        f"CHƯƠNG {chapter} · {raw_lbl[:28].upper()}"
-        if raw_lbl and f"{chapter}" not in raw_lbl
-        else raw_lbl[:34].upper()
-    )
+    raw_lbl = strip_rich_markup(chapter_title or "").strip()
+    if total_chapters <= 1:
+        raw_lbl = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_lbl).strip()
+        label = (raw_lbl or "ĐIỂM NHẤN CHÍNH")[:34].upper()
+    else:
+        raw_lbl = raw_lbl or f"Chương {chapter}"
+        label = (
+            f"CHƯƠNG {chapter} · {raw_lbl[:28].upper()}"
+            if raw_lbl and f"{chapter}" not in raw_lbl
+            else raw_lbl[:34].upper()
+        )
     f_pill = _load_font(FONT_EXTRABOLD, max(12, int(round(22 * sy))))
     d = ImageDraw.Draw(frame_rgba)
     bb = d.textbbox((0, 0), label, font=f_pill)
@@ -2445,6 +2470,9 @@ def render_animated_beat_frame(
     pal = resolve_stage_palette(domain, theme)
     interaction = getattr(beat, "interaction", "none") or "none"
     camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
+    # Giữ nguyên thẻ recap_card ổn định ở beat CTA cuối (không ẩn bảng sang closeup_react rỗng)
+    if beat.board_type == "recap_card" and camera_shot == "closeup_react":
+        camera_shot = "wide_stage"
     cam_layout = compute_layered_camera_layout(
         camera_shot,
         aspect=aspect,
@@ -2491,6 +2519,7 @@ def render_animated_beat_frame(
                 narration=beat.narration,
                 takeaway=getattr(beat, "takeaway", "")
                 or str((beat.board_data or {}).get("takeaway") or ""),
+                total_chapters=total_chapters,
             )
 
         if interaction == "hold_prop" and prop_img is not None and cam_layout.board_alpha > 0.1:
@@ -2548,7 +2577,7 @@ def render_animated_beat_frame(
             if eff_char is not char_img:
                 eff_char.close()
 
-        if show_chapter_banner and getattr(beat, "chapter_title", ""):
+        if total_chapters > 1 and show_chapter_banner and getattr(beat, "chapter_title", ""):
             _draw_chapter_banner(
                 frame_rgba,
                 chapter=beat.chapter,

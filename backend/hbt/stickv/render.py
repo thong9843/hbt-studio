@@ -517,6 +517,7 @@ def _stream_chunk_frames_to_ffmpeg(
     on_progress: Callable[[float, str], None] | None = None,
     master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
     beat_timeline: list[BeatTimelineEntry] | None = None,
+    ai_photo_budget: list[int] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -684,23 +685,49 @@ def _stream_chunk_frames_to_ffmpeg(
 
             prop_img: Image.Image | None = None
             raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
-            wants_card_icon = beat.board_type in (
-                "none",
-                "bullets",
-                "list",
-                "card",
-                "recap_card",
-            )
-            if not raw_prop_q and wants_card_icon:
-                raw_prop_q = infer_auto_prop_query(beat.narration)
-            if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
-                try:
-                    prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
-                    if prop_path.is_file():
-                        with Image.open(prop_path) as raw_prop:
-                            prop_img = raw_prop.convert("RGBA")
-                except Exception:
-                    prop_img = None
+            if beat.board_type == "pinned_photo":
+                photo_path: Path | None = None
+                if beat.media_path:
+                    cand_m = project_dir / beat.media_path
+                    if cand_m.is_file() and cand_m.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                        photo_path = cand_m
+                if photo_path is None:
+                    ref_q = raw_prop_q or beat.board_title or infer_auto_prop_query(beat.narration)
+                    try:
+                        cand_p, photo_src = resolve_reference_image(
+                            ref_q,
+                            library_dir,
+                            workspace_dir=project_dir.parent.parent,
+                            accent_color=accent,
+                            illustration_prompt=(getattr(beat, "image_prompt", None) or "").strip(),
+                            allow_ai_fallback=True,
+                            ai_budget=ai_photo_budget,
+                        )
+                        if photo_src != "iconify" and cand_p.is_file():
+                            photo_path = cand_p
+                    except Exception:
+                        photo_path = None
+                if photo_path is not None and photo_path.is_file():
+                    with Image.open(photo_path) as raw_photo:
+                        prop_img = raw_photo.convert("RGBA")
+            else:
+                wants_card_icon = beat.board_type in (
+                    "none",
+                    "bullets",
+                    "list",
+                    "card",
+                    "recap_card",
+                )
+                if not raw_prop_q and wants_card_icon:
+                    raw_prop_q = infer_auto_prop_query(beat.narration)
+                if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
+                    try:
+                        prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
+                        if prop_path.is_file():
+                            with Image.open(prop_path) as raw_prop:
+                                prop_img = raw_prop.convert("RGBA")
+                    except Exception:
+                        prop_img = None
 
             next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
             has_next_diff_title = next_beat is None or (
@@ -709,8 +736,10 @@ def _stream_chunk_frames_to_ffmpeg(
                 or not (beat.board_title or "").strip()
             )
             prev_ch = cur_state.last_chapter if cur_state is not None else None
-            show_chapter_banner = bool((getattr(beat, "chapter_title", "") or "").strip()) and (
-                g_idx == 0 or beat.chapter != prev_ch
+            show_chapter_banner = (
+                total_chapters > 1
+                and bool((getattr(beat, "chapter_title", "") or "").strip())
+                and (g_idx == 0 or beat.chapter != prev_ch)
             )
 
             last_char_size: tuple[int, int] | None = None
@@ -1048,6 +1077,7 @@ def render_stickv(
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
+        ai_photo_budget = [4]
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
@@ -1133,6 +1163,7 @@ def render_stickv(
                             on_progress=on_progress,
                             master_word_timings=master_word_timings,
                             beat_timeline=beat_timeline,
+                            ai_photo_budget=ai_photo_budget,
                         )
                     )
                 chunk_clips.append(chunk_mp4)

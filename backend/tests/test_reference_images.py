@@ -269,3 +269,100 @@ def test_stickv_reference_images_api_search_and_apply(tmp_path: Path, monkeypatc
 
     # Xác nhận hàm search_reference_images không crash khi query rỗng
     assert search_reference_images("") == []
+
+
+def test_resolve_reference_image_3tier_cloudflare_fallback_and_budget(tmp_path: Path) -> None:
+    """Wikimedia/Pixabay rỗng -> rơi sang Cloudflare Flux (768x512, cache .jpg, tôn trọng budget)."""
+    clear_reference_image_cache()
+    lib = tmp_path / "library"
+    cf_calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "api.cloudflare.com" in str(request.url):
+            cf_calls.append({"url": str(request.url), "body": request.content.decode("utf-8")})
+            return httpx.Response(
+                200,
+                content=_png_bytes((768, 512), color=(210, 120, 60)),
+                headers={"content-type": "image/png"},
+            )
+        return httpx.Response(200, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    budget = [1]
+    try:
+        p1, src1 = resolve_reference_image(
+            "endurance muscle fiber structure",
+            lib,
+            illustration_prompt="Cross section of slow-twitch muscle fibers",
+            cf_account_id="acc-test",
+            cf_api_token="tok-test",
+            ai_budget=budget,
+            client=client,
+        )
+        # Gọi lại cùng query -> trúng cache .jpg, không gọi lại Cloudflare
+        p2, src2 = resolve_reference_image(
+            "endurance muscle fiber structure",
+            lib,
+            illustration_prompt="Cross section of slow-twitch muscle fibers",
+            cf_account_id="acc-test",
+            cf_api_token="tok-test",
+            ai_budget=budget,
+            client=client,
+        )
+    finally:
+        client.close()
+
+    assert src1 == "cloudflare_flux"
+    assert p1.suffix == ".jpg" and p1.is_file()
+    assert src2 == "cache" and p2 == p1
+    assert len(cf_calls) == 1
+    assert budget == [0]
+
+
+def test_stickv_generate_beat_ai_photo_endpoint(tmp_path: Path, monkeypatch) -> None:
+    ws = tmp_path / "workspace"
+    lib = tmp_path / "library"
+    ws.mkdir()
+    lib.mkdir()
+    settings = Settings(
+        workspace_dir=ws,
+        library_dir=lib,
+        whisper_model="auto",
+        whisper_device="cpu",
+        default_fps=50,
+    )
+    app = create_app(settings)
+    proj = create_stickv_project(
+        ws,
+        title="Nghịch lý thể hình cầu thủ",
+        beats=[
+            StickvBeat(
+                id="b001",
+                narration="Sợi cơ bền bỉ giúp chạy suốt 90 phút.",
+                board_title="Sợi cơ bền bỉ",
+                prop_query="soccer player sprint",
+            )
+        ],
+    )
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acc-demo")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok-demo")
+
+    def fake_gen(prompt: str, dest: Path, **_kw) -> Path:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(_png_bytes((768, 512)))
+        return dest
+
+    monkeypatch.setattr("hbt.api.stickv.generate_illustration_image", fake_gen)
+
+    with TestClient(app) as client:
+        r = client.post(
+            f"/api/stickv/{proj.slug}/beats/b001/generate-photo",
+            json={"prompt": "Slow-twitch muscle fibers diagram", "caption": "Sợi cơ bền bỉ"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        beat0 = body["project"]["beats"][0]
+        assert beat0["board_type"] == "pinned_photo"
+        assert beat0["media_path"].startswith("media/b001_ai_")
+        assert beat0["board_data"]["caption"] == "Sợi cơ bền bỉ"

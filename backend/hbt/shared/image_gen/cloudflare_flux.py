@@ -31,6 +31,12 @@ STYLE_ANCHOR = (
     "no text, no letters, no watermark."
 )
 
+STICKV_STYLE_ANCHOR = (
+    "Clean 2D flat editorial infographic illustration, crisp dark ink outlines, "
+    "vibrant modern educational colors, simple clear subject, "
+    "no text, no letters, no watermark."
+)
+
 GEN_WIDTH = 768
 GEN_HEIGHT = 1344
 TARGET_WIDTH = 1080
@@ -331,3 +337,83 @@ def generate_scene_image(
     finally:
         if own_client:
             http_client.close()
+
+
+def generate_illustration_image(
+    prompt: str,
+    dest_path: Path,
+    *,
+    account_id: str,
+    api_token: str,
+    width: int = 768,
+    height: int = 512,
+    steps: int = DEFAULT_STEPS,
+    seed: int | None = None,
+    style_anchor: str = STICKV_STYLE_ANCHOR,
+    timeout: float = REQUEST_TIMEOUT,
+    client: httpx.Client | None = None,
+) -> Path:
+    """Sinh 1 ảnh minh họa 2D ngang (768x512, flux-1-schnell) cho StickV Polaroid, không phóng 9:16."""
+    clean_account = (account_id or "").strip()
+    clean_token = (api_token or "").strip()
+    if not clean_account or not clean_token:
+        raise CloudflareImageError(
+            "Chưa cấu hình Cloudflare Account ID hoặc API Token. Vào Cài đặt để nhập khóa.",
+            code="missing_cloudflare_key",
+            status_code=400,
+        )
+
+    base = (prompt or "").strip()
+    styled = (
+        base
+        if (base and "editorial infographic" in base.lower())
+        else (f"{style_anchor} {base}".strip() if base else style_anchor)
+    )
+    payload: dict[str, Any] = {
+        "prompt": styled,
+        "width": int(width),
+        "height": int(height),
+        "steps": int(steps),
+    }
+    if seed is not None:
+        payload["seed"] = int(seed)
+
+    headers = {"Authorization": f"Bearer {clean_token}"}
+    own_client = client is None
+    http_client = client if client is not None else httpx.Client(timeout=timeout)
+    try:
+        resp = _post_with_retry(
+            http_client,
+            _endpoint_url(clean_account, FLUX_1_SCHNELL),
+            headers,
+            json=payload,
+        )
+        if resp.status_code >= 400:
+            detail = _extract_error_detail(resp)
+            raise CloudflareImageError(
+                f"Cloudflare Workers AI lỗi HTTP {resp.status_code}: {detail}",
+                status_code=502 if resp.status_code >= 500 else resp.status_code,
+            )
+        raw_bytes = _decode_image_bytes(resp)
+    finally:
+        if own_client:
+            http_client.close()
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dest_path.with_name(dest_path.name + ".tmp")
+    fmt = "JPEG" if dest_path.suffix.lower() in {".jpg", ".jpeg"} else "PNG"
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as src:
+            rgb = src.convert("RGB")
+            try:
+                if fmt == "JPEG":
+                    rgb.save(tmp_path, format="JPEG", quality=90)
+                else:
+                    rgb.save(tmp_path, format="PNG")
+            finally:
+                rgb.close()
+        os.replace(tmp_path, dest_path)
+    except Exception as exc:  # noqa: BLE001
+        tmp_path.unlink(missing_ok=True)
+        raise CloudflareImageError(f"Không lưu được ảnh minh họa Cloudflare: {exc}") from exc
+    return dest_path
