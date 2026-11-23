@@ -112,10 +112,10 @@ def test_sanitize_chat_raw_excess_stickers():
 
     clean = sanitize_chat_raw(raw)
     sticker_indices = [i for i, m in enumerate(clean["messages"]) if m["sticker"] is not None]
-    # Giới hạn cứng tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    # Giới hạn cứng theo PacingGovernor: cấm 2 tin liền kề và bỏ tin mở đầu
     assert 1 <= len(sticker_indices) <= 3
     for a, b in zip(sticker_indices, sticker_indices[1:], strict=False):
-        assert b - a >= 4
+        assert b - a >= 2
     assert any("lược bỏ" in w for w in clean["warnings"])
 
     # Và ChatDoc validate thành công mà không bị quăng lỗi
@@ -208,11 +208,11 @@ def test_direct_script_keyword_spam_stripped_by_pacing_governor():
     parsed = parse_direct_script("\n".join(lines))
     clean = sanitize_chat_raw(parsed)
     kept = [i for i, m in enumerate(clean["messages"]) if m.get("sticker")]
-    # Chỉ giữ tối đa 1-2 điểm cao trào tường minh (cách nhau >= 4 tin), loại sạch câu từ khóa yếu
+    # Chỉ giữ điểm cao trào tường minh (cách nhau >= 2 tin), loại sạch câu từ khóa yếu
     assert 1 <= len(kept) <= 2
     assert 4 in kept
     for a, b in zip(kept, kept[1:], strict=False):
-        assert b - a >= 4
+        assert b - a >= 2
 
 
 def test_chatdoc_backward_compatible_with_legacy_chat_json():

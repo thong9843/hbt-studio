@@ -56,6 +56,7 @@ CHAT_JSON_SCHEMA = {
                     "id": {"type": "STRING"},
                     "name": {"type": "STRING"},
                     "side": {"type": "STRING", "enum": ["left", "right"]},
+                    "gender": {"type": "STRING", "nullable": True, "enum": ["female", "male"]},
                 },
                 "required": ["id", "name", "side"],
             },
@@ -192,6 +193,9 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             if side not in ("left", "right"):
                 side = "left"
             char_entry: dict[str, Any] = {"id": cid, "name": name, "side": side}
+            raw_gender = str(c.get("gender") or "").strip().lower()
+            if raw_gender in ("female", "male"):
+                char_entry["gender"] = raw_gender
             if c.get("voice"):
                 char_entry["voice"] = str(c["voice"])
             chars.append(char_entry)
@@ -376,6 +380,12 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             f"để giữ tối đa {governor.effective_max_visual(len(clean_msgs))} điểm cao trào."
         )
 
+    # Gán giọng VieNeu khớp giới tính nữ/nam cho từng nhân vật
+    from hbt.chatting.voice import assign_character_voices
+
+    assign_character_voices(chars, clean_msgs)
+
+    data["characters"] = chars
     data["messages"] = clean_msgs
     data["warnings"] = warnings
     return data

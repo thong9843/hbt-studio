@@ -27,14 +27,15 @@ class BeatCue(BaseModel):
 class PacingPolicy(BaseModel):
     """Luật khóa cứng mật độ meme/sticker/SFX cho từng động cơ."""
 
-    max_visual_memes: int = 3
-    visual_ratio_cap: float = 0.18
-    min_gap_beats: int = 4
-    min_gap_seconds: float = 8.0
+    max_visual_memes: int = 7
+    visual_ratio_cap: float = 0.30
+    target_seconds_per_meme: float = 16.0
+    min_gap_beats: int = 2
+    min_gap_seconds: float = 6.5
     forbid_consecutive: bool = True
     skip_opening_setup: bool = True
-    max_punch_sfx: int = 4
-    min_sfx_gap_seconds: float = 6.5
+    max_punch_sfx: int = 5
+    min_sfx_gap_seconds: float = 6.0
     video_meme_duration_range: tuple[float, float] = (1.2, 3.8)
     static_sticker_duration_range: tuple[float, float] = (0.9, 1.6)
 
@@ -43,7 +44,7 @@ class PacingPolicy(BaseModel):
         key = (engine or "chatting").strip().lower()
         if key == "postv":
             return cls(
-                max_visual_memes=3,
+                max_visual_memes=4,
                 visual_ratio_cap=0.22,
                 min_gap_beats=3,
                 min_gap_seconds=8.0,
@@ -52,7 +53,7 @@ class PacingPolicy(BaseModel):
             )
         if key in ("core", "stickv"):
             return cls(
-                max_visual_memes=2,
+                max_visual_memes=3,
                 visual_ratio_cap=0.20,
                 min_gap_beats=3,
                 min_gap_seconds=8.0,
@@ -70,7 +71,7 @@ class DirectorConfig(BaseModel):
     local_score_threshold: float = 0.55
     search_timeout_s: float = 4.5
     download_timeout_s: float = 10.0
-    max_fetch_visual: int = 3
+    max_fetch_visual: int = 6
     max_fetch_sfx: int = 3
     max_fetch_bgm: int = 1
     cache_ttl_s: float = 600.0

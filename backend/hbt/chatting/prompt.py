@@ -8,20 +8,20 @@ BẮT BUỘC trả về ĐÚNG 1 JSON object ở cấp gốc gồm 3 khóa bắt
 
 Luật:
 - Viết lại hoàn toàn bằng tiếng Việt tự nhiên, giọng người trẻ Việt Nam nhắn tin (ngắn, có "á", "hả", "trời ơi", viết tắt vừa phải). Đổi tên người, địa danh sang tên Việt. Không chép nguyên văn bài gốc.
-- 2 đến 8 nhân vật (hỗ trợ nhóm chat nhiều người). Nhân vật kể chuyện chính là "me" (bên phải, `"side": "right"`).
+- 2 đến 8 nhân vật (hỗ trợ nhóm chat nhiều người). Nhân vật kể chuyện chính là "me" (bên phải, `"side": "right"`). BẮT BUỘC khai báo `"gender": "female"` hoặc `"male"` cho TỪNG nhân vật khớp tên và cách xưng hô (vd: Linh/Trang/bà/chị -> `"female"`, Nam/Minh/ông/anh -> `"male"`).
 - 12 đến 60 tin nhắn tùy theo thời lượng mục tiêu. Mỗi tin ngắn gọn dễ đọc, tổng dưới 5000 ký tự.
 - Tin đầu tiên phải gây tò mò ngay. Có cao trào và một cú twist hoặc câu chốt hài ở cuối.
-- QUY TẮC CHỌN MEME / STICKER / SFX (ÍT MÀ CHẤT — CẤM SPAM):
+- QUY TẮC CHỌN MEME / STICKER / SFX (CÂN ĐỐI NHỊP — CẤM 2 TIN LIỀN KỀ):
   * Chấm `beat_role` ("setup" | "build" | "twist" | "punchline" | "reaction") và `intensity` (1..5) cho TỪNG tin nhắn (1-2: dẫn chuyện bình thường; 3: nhấn nhẹ; 4: cao trào/bẻ lái rõ; 5: đỉnh điểm hài/sốc/punchline).
-  * TUYỆT ĐỐI KHÔNG rải `sticker` hay `meme_query` ở mọi câu hay ở tin mở đầu `setup` hay 2 tin liền kề.
-  * Chỉ điền `meme_query` (2-4 từ tiếng Anh ngắn, vd: "cat shocked", "side eye", "facepalm", "mind blown") và `sticker` (tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok) tại tối đa 2-3 đỉnh cao trào thật sự có `intensity >= 4` và `beat_role` thuộc {"twist", "punchline", "reaction"}; mọi tin khác bắt buộc `null`.
+  * Phân bổ đều ~1 meme mỗi 15-17 giây từ đầu đến cuối (4-6 điểm nhấn cho đoạn chat ~1-2 phút); TUYỆT ĐỐI KHÔNG gắn meme ở tin mở đầu `setup` hay ở 2 tin liền kề nhau.
+  * Điền `meme_query` (2-4 từ tiếng Anh ngắn, vd: "cat shocked", "side eye", "facepalm", "mind blown") và `sticker` (tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok) tại các câu cao trào (`intensity >= 4`) hoặc điểm nhấn thú vị (`intensity == 3` phân bổ đều); mọi tin dẫn chuyện bình thường bắt buộc `null`.
   * Chỉ điền `sfx_query` (1-3 từ tiếng Anh ngắn, vd: "vine boom", "bruh", "bonk", "dramatic sting") tại điểm nhấn `intensity >= 4`; còn lại bắt buộc `null`.
   * Trả kèm `music_mood` tổng thể: "vui_nhon" | "kich_tinh" | "bi_an" | "thu_gian" | "hanh_dong".
-- Có thể gợi ý `media_hint` (chuỗi tiếng Việt ngắn mô tả ảnh/clip minh họa, hoặc `null`) ở tối đa 1-2 tin nhắn cao trào/bằng chứng.
+- TUYỆT ĐỐI KHÔNG tự bịa tình tiết phụ thuộc vào việc gửi ảnh/video trong chat (như "Nè xem ảnh tao vừa gửi đi", "Nhìn ảnh này xem", "Gửi ảnh chụp màn hình nè") trừ khi nội dung gốc có đính kèm ảnh; hãy kể trực tiếp bằng lời thoại để câu chuyện trọn vẹn 100%.
 - Không có: rượu bia, máu me, bạo lực, thuốc, chính trị, tình dục, chửi thề nặng, thông tin cá nhân thật.
 
 Mẫu JSON đầu ra chuẩn (trả về ĐÚNG 1 JSON object cấp gốc có đủ `title`, `characters`, `messages`):
-{"title":"Bất ngờ nửa đêm","music_mood":"vui_nhon","characters":[{"id":"me","name":"Tôi","side":"right"},{"id":"a","name":"Nam","side":"left"}],"messages":[{"from":"a","text":"Còn thức không ông ơi?","beat_role":"setup","intensity":2,"meme_query":null,"sfx_query":null,"sticker":null},{"from":"a","text":"Ví ông bỏ quên ở quán rồi kìa!","beat_role":"twist","intensity":5,"meme_query":"cat shocked","sfx_query":"vine boom","sticker":"soc"}]}"""
+{"title":"Bất ngờ nửa đêm","music_mood":"vui_nhon","characters":[{"id":"me","name":"Tôi","side":"right","gender":"male"},{"id":"a","name":"Nam","side":"left","gender":"male"}],"messages":[{"from":"a","text":"Còn thức không ông ơi?","beat_role":"setup","intensity":2,"meme_query":null,"sfx_query":null,"sticker":null},{"from":"a","text":"Ví ông bỏ quên ở quán rồi kìa!","beat_role":"twist","intensity":5,"meme_query":"cat shocked","sfx_query":"vine boom","sticker":"soc"}]}"""
 
 
 def build_user_prompt(

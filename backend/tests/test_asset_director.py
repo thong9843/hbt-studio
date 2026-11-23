@@ -13,7 +13,7 @@ from hbt.shared.asset_director import (
 
 
 def test_pacing_governor_strips_15_msg_spam_and_keeps_climax() -> None:
-    """15 tin nhắn bị LLM nhồi meme cả 15 -> siết còn <= 2 tin, cách >= 4 tin, bỏ setup đầu."""
+    """15 tin nhắn (~45s) bị LLM nhồi meme cả 15 -> siết còn <= 4 tin, cấm liền kề, bỏ setup đầu."""
     cues = [
         BeatCue(
             index=i,
@@ -28,35 +28,57 @@ def test_pacing_governor_strips_15_msg_spam_and_keeps_climax() -> None:
     gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
     kept = gov.select_visual_beats(cues)
 
-    # floor(15 * 0.18) = 2
-    assert 1 <= len(kept) <= 2
+    # 45s -> round(45/16) = 3 meme
+    assert 2 <= len(kept) <= 4
     assert 0 not in kept
     assert 6 in kept and 13 in kept
     for a, b in zip(kept, kept[1:], strict=False):
-        assert b - a >= 4
-        assert cues[b].est_time_s - cues[a].est_time_s >= 8.0
+        assert b - a >= 2
+        assert cues[b].est_time_s - cues[a].est_time_s >= 6.5
 
 
 def test_pacing_governor_enforces_time_gap_and_no_consecutive() -> None:
-    """Dù intensity=5 liên tiếp, không bao giờ chọn 2 tin sát nhau hoặc cách < 8.0s."""
+    """Dù intensity=5 liên tiếp, không bao giờ chọn 2 tin sát nhau hoặc cách < 6.5s."""
     cues = [
         BeatCue(
             index=i,
             beat_role="punchline" if i > 0 else "setup",
             intensity=5,
             meme_query="cat shocked",
-            est_time_s=i * 1.5,  # 15 tin * 1.5s = 22.5s
+            est_time_s=i * 1.5,
         )
         for i in range(18)
     ]
     gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
     kept = gov.select_visual_beats(cues)
 
-    assert 1 <= len(kept) <= 3
+    assert 2 <= len(kept) <= 5
     assert 0 not in kept
     for a, b in zip(kept, kept[1:], strict=False):
-        assert b - a >= 4
-        assert cues[b].est_time_s - cues[a].est_time_s >= 8.0
+        assert b - a >= 2
+        assert cues[b].est_time_s - cues[a].est_time_s >= 6.5
+
+
+def test_pacing_governor_targets_5_to_6_memes_for_84s_video() -> None:
+    """Video ~84s (21 tin) phải phân bổ 5-6 meme đều từ đầu->cuối, cấm 2 tin liền kề."""
+    cues = [
+        BeatCue(
+            index=i,
+            text=f"Câu chuyện {i}",
+            beat_role="setup" if i == 0 else ("punchline" if i in (5, 12, 19) else "reaction"),
+            intensity=5 if i in (5, 12, 19) else 3,
+            meme_query=f"meme {i}" if i > 0 else None,
+            est_time_s=i * 4.0,  # 21 * 4s = 84s
+        )
+        for i in range(21)
+    ]
+    gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
+    kept = gov.select_visual_beats(cues)
+    assert 5 <= len(kept) <= 6
+    assert 0 not in kept
+    for a, b in zip(kept, kept[1:], strict=False):
+        assert b - a >= 2
+        assert cues[b].est_time_s - cues[a].est_time_s >= 6.5
 
 
 def test_pacing_governor_fallback_to_single_intensity_3_punchline() -> None:

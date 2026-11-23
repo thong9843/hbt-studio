@@ -25,6 +25,7 @@ class Character(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     side: Literal["left", "right"]
     voice: str = "nam_1"
+    gender: Literal["female", "male"] | None = None
     avatar: str | None = None
 
 

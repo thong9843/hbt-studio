@@ -165,17 +165,17 @@ def build_timeline(
             )
             cur_time += 0.6
 
-        # Pop tin nhắn chuẩn 60fps: 0.30s = 18 sub-frames (~0.01667s/frame, scale 0.80 -> 1.0)
+        # Xuất hiện tin nhắn dịu 60fps: 0.40s (Cubic Ease-Out, scale 0.97 -> 1.0, slide +22px -> 0)
         states.append(
             TimelineState(
                 start_time=cur_time,
-                duration=0.30,
+                duration=0.40,
                 visible_count=idx + 1,
-                scale_last_msg=0.80,
+                scale_last_msg=0.97,
                 show_seen=False,
             )
         )
-        cur_time += 0.30
+        cur_time += 0.40
 
         # Đọc tin nhắn: wav_dur
         if wav_path.is_file():
@@ -226,17 +226,17 @@ def build_timeline(
                 )
                 cur_time += meme_dur
 
-        # Nghỉ giữa tin 0.25s (trừ tin cuối cùng)
+        # Nghỉ tự nhiên giữa 2 tin 0.34s (trừ tin cuối cùng)
         if idx < len(doc.messages) - 1:
             states.append(
                 TimelineState(
                     start_time=cur_time,
-                    duration=0.25,
+                    duration=0.34,
                     visible_count=idx + 1,
                     show_seen=True,
                 )
             )
-            cur_time += 0.25
+            cur_time += 0.34
 
     # Giữ màn hình cuối 1.5s
     states.append(

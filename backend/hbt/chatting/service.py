@@ -175,19 +175,21 @@ def run_chatting_auto_job(
         timings.update(llm_timings)
         chat_raw = sanitize_chat_raw(chat_raw)
 
-    # Khởi tạo ChatDoc (phân giọng khác nhau cho từng nhân vật trong Group Chat)
-    default_voices = ["Adam bựa", "Trúc Ly", "Thiện Minh", "Mai Anh", "Hải Đăng"]
+    # Khởi tạo ChatDoc (gán giọng VieNeu khớp giới tính nữ/nam cho từng nhân vật)
+    from hbt.chatting.voice import assign_character_voices
+
+    raw_chars_for_voice = [dict(c) for c in chat_raw.get("characters", [])]
+    assign_character_voices(raw_chars_for_voice, chat_raw.get("messages", []))
+
     characters: list[Character] = []
-    for idx, c in enumerate(chat_raw.get("characters", [])):
-        default_v = (
-            "Adam bựa" if c["side"] == "right" else default_voices[(idx + 1) % len(default_voices)]
-        )
+    for c in raw_chars_for_voice:
         characters.append(
             Character(
-                id=c["id"],
-                name=c["name"],
-                side=c["side"],
-                voice=c.get("voice") or default_v,
+                id=str(c["id"]),
+                name=str(c["name"]),
+                side=str(c["side"]),  # type: ignore[arg-type]
+                voice=str(c.get("voice") or "Adam bựa"),
+                gender=c.get("gender"),  # type: ignore[arg-type]
                 avatar=None,
             )
         )

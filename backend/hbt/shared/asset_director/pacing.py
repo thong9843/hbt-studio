@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from hbt.shared.asset_director.models import BeatCue, PacingPolicy
 
 ROLE_WEIGHTS: dict[str, int] = {
@@ -39,11 +37,24 @@ class PacingGovernor:
     def __init__(self, policy: PacingPolicy | None = None) -> None:
         self.policy = policy or PacingPolicy()
 
-    def effective_max_visual(self, total_beats: int) -> int:
+    def effective_max_visual(
+        self,
+        total_beats: int,
+        est_duration_sec: float | None = None,
+    ) -> int:
         if total_beats <= 0:
             return 0
-        ratio_cap = max(1, math.floor(total_beats * self.policy.visual_ratio_cap))
-        return min(self.policy.max_visual_memes, ratio_cap)
+        msg_cap = max(2, int(total_beats * self.policy.visual_ratio_cap))
+        if est_duration_sec is not None and est_duration_sec > 0:
+            dur_target = max(
+                2,
+                min(
+                    self.policy.max_visual_memes,
+                    round(est_duration_sec / max(8.0, self.policy.target_seconds_per_meme)),
+                ),
+            )
+            return min(dur_target, msg_cap, self.policy.max_visual_memes)
+        return min(self.policy.max_visual_memes, msg_cap)
 
     def _is_skipped_opening(self, cue: BeatCue) -> bool:
         if not self.policy.skip_opening_setup or cue.index != 0:
@@ -51,14 +62,34 @@ class PacingGovernor:
         role = (cue.beat_role or "setup").strip().lower()
         return role == "setup"
 
+    def _fits_gaps(
+        self,
+        cue: BeatCue,
+        t_cur: float,
+        kept: list[tuple[int, float]],
+    ) -> bool:
+        for k_idx, k_t in kept:
+            if self.policy.forbid_consecutive and abs(cue.index - k_idx) <= 1:
+                return False
+            if abs(cue.index - k_idx) < self.policy.min_gap_beats:
+                return False
+            if abs(t_cur - k_t) < self.policy.min_gap_seconds:
+                return False
+        return True
+
     def select_visual_beats(self, cues: list[BeatCue]) -> list[int]:
-        """Chọn tối đa `effective_max_visual` điểm rơi đắt giá nhất thỏa mọi ràng buộc."""
+        """Chọn tối đa `effective_max_visual` điểm rơi cân đối theo thời lượng (~1 meme/16s)."""
         n = len(cues)
-        limit = self.effective_max_visual(n)
-        if n == 0 or limit <= 0:
+        if n == 0:
             return []
 
         all_zero_t = all(c.est_time_s <= 0.0 for c in cues)
+        est_total_dur = (
+            (n * DEFAULT_BEAT_SECONDS) if all_zero_t else (max(c.est_time_s for c in cues) + 3.0)
+        )
+        limit = self.effective_max_visual(n, est_duration_sec=est_total_dur)
+        if limit <= 0:
+            return []
 
         primary: list[BeatCue] = [
             c
@@ -66,7 +97,7 @@ class PacingGovernor:
             if not self._is_skipped_opening(c) and _has_visual_signal(c) and c.intensity >= 4
         ]
 
-        # Hạ 1 bậc xuống đúng 1 câu intensity == 3 (punchline/twist) nếu cả video chưa có mức 4
+        # Hạ 1 bậc xuống intensity == 3 nếu cả video chưa có câu nào đạt mức 4
         if not primary:
             fallback = [
                 c
@@ -104,19 +135,40 @@ class PacingGovernor:
             if len(kept) >= limit:
                 break
             t_cur = _est_time(cue, all_zero_t)
-            ok = True
-            for k_idx, k_t in kept:
-                if self.policy.forbid_consecutive and abs(cue.index - k_idx) <= 1:
-                    ok = False
-                    break
-                if abs(cue.index - k_idx) < self.policy.min_gap_beats:
-                    ok = False
-                    break
-                if abs(t_cur - k_t) < self.policy.min_gap_seconds:
-                    ok = False
-                    break
-            if ok:
+            if self._fits_gaps(cue, t_cur, kept):
                 kept.append((cue.index, t_cur))
+
+        # Nếu chưa đạt mục tiêu thời lượng, bổ sung các tin intensity == 3 có meme_query đều nhịp
+        if len(kept) < limit:
+            kept_indices = {k_idx for k_idx, _ in kept}
+            secondary = [
+                c
+                for c in cues
+                if c.index not in kept_indices
+                and not self._is_skipped_opening(c)
+                and bool((c.meme_query or "").strip())
+                and c.intensity == 3
+            ]
+            while len(kept) < limit and secondary:
+                best_cand: BeatCue | None = None
+                best_key: tuple[float, int, float] = (-1.0, -1, -1.0)
+                for c in secondary:
+                    t_cur = _est_time(c, all_zero_t)
+                    if not self._fits_gaps(c, t_cur, kept):
+                        continue
+                    min_dist = min(abs(t_cur - k_t) for _, k_t in kept) if kept else est_total_dur
+                    key = (
+                        min_dist,
+                        ROLE_WEIGHTS.get((c.beat_role or "").strip().lower(), 1),
+                        -float(c.index),
+                    )
+                    if key > best_key:
+                        best_key = key
+                        best_cand = c
+                if best_cand is None:
+                    break
+                kept.append((best_cand.index, _est_time(best_cand, all_zero_t)))
+                secondary = [c for c in secondary if c.index != best_cand.index]
 
         return sorted(idx for idx, _ in kept)
 
