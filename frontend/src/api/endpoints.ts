@@ -87,15 +87,27 @@ export const api = {
     direct_script?: boolean;
     target_duration_s?: number | null;
     model?: string;
+    auto_fetch_online?: boolean;
   }) => apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
   getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
   getChattingJob: (slug: string) => apiGet<ChattingJobInfo>(`/chatting/${enc(slug)}/job`),
   updateChattingProject: (slug: string, doc: ChatDoc) =>
     apiRequest<{ ok: boolean; doc: ChatDoc }>('PUT', `/chatting/${enc(slug)}`, { json: doc }),
-  regenChattingProject: (slug: string) =>
+  regenChattingProject: (slug: string, opts?: { auto_fetch_online?: boolean }) =>
     apiRequest<{ ok: boolean; doc: ChatDoc; timings: Record<string, unknown> }>(
       'POST',
       `/chatting/${enc(slug)}/regen`,
+      opts ? { json: opts } : undefined,
+    ),
+  rerollChattingAsset: (
+    slug: string,
+    msgId: number,
+    body: { kind: 'meme' | 'sticker' | 'sfx'; auto_fetch_online?: boolean },
+  ) =>
+    apiRequest<{ ok: boolean; msg_id: number; message: ChatMessage; doc: ChatDoc }>(
+      'POST',
+      `/chatting/${enc(slug)}/messages/${msgId}/reroll-asset`,
+      { json: body },
     ),
   renderChattingProject: (slug: string, preview: boolean, aspect_mode?: 'fill' | 'fit') =>
     apiRequest<{ job_id: string; slug: string; preview: boolean }>(

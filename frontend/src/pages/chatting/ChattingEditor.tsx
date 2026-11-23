@@ -43,6 +43,7 @@ export function ChattingEditor() {
   const { slug } = useParams<{ slug: string }>();
   const [selectedMsgIndex, setSelectedMsgIndex] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRerolling, setIsRerolling] = useState<'meme' | 'sfx' | null>(null);
   const [isRendering, setIsRendering] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
@@ -286,7 +287,35 @@ export function ChattingEditor() {
 
   const handleStickerChange = (sticker: string | null) => {
     const newMsgs = [...doc.messages];
-    newMsgs[selectedMsgIndex] = { ...activeMsg, sticker };
+    newMsgs[selectedMsgIndex] = {
+      ...activeMsg,
+      sticker,
+      ...(sticker === null ? { meme_id: null, meme_query: null, asset_origin: null } : {}),
+    };
+    saveDoc({ ...doc, messages: newMsgs });
+  };
+
+  const handleRerollAsset = async (kind: 'meme' | 'sticker' | 'sfx') => {
+    if (!slug) return;
+    setIsRerolling(kind === 'sfx' ? 'sfx' : 'meme');
+    setNotice(null);
+    try {
+      await api.rerollChattingAsset(slug, selectedMsgIndex, {
+        kind,
+        auto_fetch_online: doc.auto_fetch_online ?? true,
+      });
+      await refetchProject();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(msg || 'Không đổi được tài nguyên.');
+    } finally {
+      setIsRerolling(null);
+    }
+  };
+
+  const handleClearSfx = () => {
+    const newMsgs = [...doc.messages];
+    newMsgs[selectedMsgIndex] = { ...activeMsg, sfx_id: null, sfx_query: null };
     saveDoc({ ...doc, messages: newMsgs });
   };
 
@@ -670,6 +699,82 @@ export function ChattingEditor() {
                 </p>
               )}
             </div>
+
+            {/* Thẻ tài nguyên Smart Asset Director (chỉ hiện khi tin nhắn có meme/sticker hoặc SFX) */}
+            {(activeMsg.meme_id || activeMsg.sticker || activeMsg.sfx_id) && (
+              <div className="mt-4 space-y-2 rounded-xl border border-line bg-soft-2 p-3">
+                {(activeMsg.meme_id || activeMsg.sticker) && (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2 text-tiny">
+                      <span className="font-semibold text-muted">
+                        {vi.chatting.assetMemeLabel}:
+                      </span>
+                      <span className="truncate font-mono font-bold text-text">
+                        {activeMsg.meme_id || activeMsg.sticker}
+                      </span>
+                      {activeMsg.asset_origin === 'online_fetched' && (
+                        <span className="rounded-full bg-tint-yel px-2 py-0.5 text-[10px] font-bold text-on-tint-yel">
+                          {vi.chatting.badgeNewlyFetched}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={isRerolling !== null}
+                        onClick={() => void handleRerollAsset(activeMsg.meme_id ? 'meme' : 'sticker')}
+                        className="rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80 disabled:opacity-50"
+                      >
+                        {isRerolling === 'meme'
+                          ? vi.chatting.rerollingAsset
+                          : vi.chatting.rerollAsset}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStickerChange(null)}
+                        title={vi.chatting.clearAsset}
+                        className="rounded-full bg-danger/15 px-2.5 py-1 text-tiny font-bold text-danger hover:bg-danger/25"
+                      >
+                        × {vi.chatting.clearAsset}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeMsg.sfx_id && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/50 pt-2">
+                    <div className="flex min-w-0 items-center gap-2 text-tiny">
+                      <span className="font-semibold text-muted">
+                        {vi.chatting.assetSfxLabel}:
+                      </span>
+                      <span className="truncate font-mono font-bold text-text">
+                        {activeMsg.sfx_id}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={isRerolling !== null}
+                        onClick={() => void handleRerollAsset('sfx')}
+                        className="rounded-full bg-soft px-3 py-1 text-tiny font-bold text-text hover:bg-soft/80 disabled:opacity-50"
+                      >
+                        {isRerolling === 'sfx'
+                          ? vi.chatting.rerollingAsset
+                          : vi.chatting.rerollAsset}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearSfx}
+                        title={vi.chatting.clearAsset}
+                        className="rounded-full bg-danger/15 px-2.5 py-1 text-tiny font-bold text-danger hover:bg-danger/25"
+                      >
+                        × {vi.chatting.clearAsset}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Chọn Sticker */}
             <div className="mt-4">

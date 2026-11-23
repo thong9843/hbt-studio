@@ -5,6 +5,7 @@ import { api } from '../../api/endpoints';
 import { StudioTopBar } from '../../components/studio/StudioTopBar';
 import { Button } from '../../components/ui/Button';
 import { StudioSelect } from '../../components/ui/StudioSelect';
+import { ToggleSwitch } from '../../components/ui/ToggleSwitch';
 import { FilmIcon, MessagesSquareIcon, TrashIcon } from '../../components/icons';
 import { useStudioWorkspace } from '../../hooks/studioWorkspace';
 import { vi } from '../../i18n/vi';
@@ -44,6 +45,7 @@ export function ChattingHome() {
   const [targetDuration, setTargetDuration] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const [isDirectScript, setIsDirectScript] = useState(false);
+  const [autoFetchOnline, setAutoFetchOnline] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -73,6 +75,7 @@ export function ChattingHome() {
         direct_script: isDirectScript,
         target_duration_s: targetDuration ? Number(targetDuration) : null,
         model: selectedModel,
+        auto_fetch_online: autoFetchOnline,
       });
       // Điều hướng ngay sang trang chi tiết để theo dõi tiến trình
       navigate(`/chatting/${res.slug}`);
@@ -252,7 +255,16 @@ export function ChattingHome() {
             </div>
           </div>
 
-          <div className="mt-4 flex justify-end border-t border-line pt-4">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <label className="flex items-center gap-2.5 text-tiny font-semibold text-text">
+              <ToggleSwitch
+                checked={autoFetchOnline}
+                onChange={setAutoFetchOnline}
+                label={vi.chatting.autoFetchOnline}
+                disabled={isSubmitting}
+              />
+              <span>{vi.chatting.autoFetchOnline}</span>
+            </label>
             <Button
               tone="chatting"
               size="lg"
