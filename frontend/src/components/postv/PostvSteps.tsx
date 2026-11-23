@@ -8,10 +8,12 @@ const PATHS = ['', 'pick', 'script', 'preview', 'export'] as const;
 interface Props {
   /** Bước đã xong (chỉ số từ 0): hiện dấu tích. */
   done: boolean[];
+  /** Lưu nhanh bản nháp trước khi chuyển bước. */
+  onStepClick?: () => void;
 }
 
 /** Thanh 5 bước nằm ngang ở đầu màn PostV (K-36). */
-export function PostvSteps({ done }: Props) {
+export function PostvSteps({ done, onStepClick }: Props) {
   const t = vi.postv;
   return (
     <nav aria-label={t.stepsLabel}>
@@ -21,6 +23,7 @@ export function PostvSteps({ done }: Props) {
             <NavLink
               to={PATHS[i]}
               end
+              onClick={onStepClick}
               className={({ isActive }) => cx('ui-step', isActive && 'ui-step-on')}
               aria-label={`${t.stepOf(i + 1)}: ${label}`}
             >

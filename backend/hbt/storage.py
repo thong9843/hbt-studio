@@ -338,7 +338,34 @@ class Storage:
             theme=Theme(**defaults.theme.model_dump()) if defaults else Theme(),
         )
         (self.projects_dir / slug / "images").mkdir(parents=True)
+        (self.projects_dir / slug / "media").mkdir(parents=True, exist_ok=True)
         return self._save_postv(slug, project)
+
+    def media_dir(self, slug: str) -> Path:
+        """Thư mục lưu ảnh đính kèm bài gốc và bình luận: `workspace/projects/<slug>/media/`."""
+        folder = self.project_dir(slug) / "media"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def save_postv_media(self, slug: str, filename: str, raw: bytes) -> str:
+        """Xác thực ảnh bằng Pillow, ghi xuống `media/<filename>` và trả đường dẫn tương đối."""
+        import io
+
+        if not raw:
+            raise BadRequest("File ảnh rỗng")
+        safe_name = Path(filename).name
+        if not safe_name or safe_name.startswith("."):
+            raise BadRequest("Tên file ảnh không hợp lệ")
+        try:
+            with Image.open(io.BytesIO(raw)) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise Unprocessable(f"File ảnh không hợp lệ: {exc}") from exc
+        target = self.media_dir(slug) / safe_name
+        tmp = target.with_name(f".{safe_name}.tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, target)
+        return f"media/{safe_name}"
 
     def save(self, slug: str, project: Project) -> Project:
         if project.slug != slug:

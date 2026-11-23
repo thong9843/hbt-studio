@@ -57,23 +57,24 @@ def _kill(proc: subprocess.Popen) -> None:
         pass  # đã tự kết thúc
 
 
-_current: CancelToken | None = None
+_thread_state = threading.local()
 
 
 def current() -> CancelToken | None:
-    return _current
+    return getattr(_thread_state, "current", None)
 
 
 def check_current() -> None:
-    if _current is not None:
-        _current.check()
+    tok = current()
+    if tok is not None:
+        tok.check()
 
 
 @contextmanager
 def use_token(token: CancelToken | None) -> Iterator[None]:
-    global _current
-    previous, _current = _current, token
+    previous = current()
+    _thread_state.current = token
     try:
         yield
     finally:
-        _current = previous
+        _thread_state.current = previous

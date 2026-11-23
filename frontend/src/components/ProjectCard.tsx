@@ -18,8 +18,14 @@ const TONE: Record<ProjectStatusKind, BadgeTone> = {
   broken: 'danger',
 };
 
-/** Ảnh thẻ; ảnh không tải được thì rơi về ô HBT đúng một lần (không thử lại). */
-export function CardImage({ src }: { src: string | null }) {
+/** Ảnh thẻ; ảnh không tải được hoặc chưa có ảnh bìa thì rơi về avatar kênh + nền nhẹ theo động cơ. */
+export function CardImage({
+  src,
+  fallbackKind = 'core',
+}: {
+  src: string | null;
+  fallbackKind?: 'core' | 'postv' | 'chatting';
+}) {
   const [failed, setFailed] = useState<string | null>(null);
   if (src && failed !== src) {
     return (
@@ -33,10 +39,21 @@ export function CardImage({ src }: { src: string | null }) {
       />
     );
   }
+  const bgMap = {
+    core: 'from-engine-core-soft via-card to-amber-50/40 dark:to-rose-950/30',
+    postv: 'from-engine-postv-soft via-card to-indigo-50/40 dark:to-indigo-950/30',
+    chatting: 'from-engine-chatting-soft via-card to-emerald-50/40 dark:to-emerald-950/30',
+  } as const;
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-      <img src="/brand/hbt-logo-mark.png" alt="" className="h-14 w-auto opacity-80" />
-      <span className="text-small font-semibold text-muted">{vi.projects.noImage}</span>
+    <div
+      className={`flex h-full w-full flex-col items-center justify-center gap-2.5 bg-gradient-to-br p-3 ${bgMap[fallbackKind]}`}
+    >
+      <img
+        src="/brand/hay-biet-tuot_avatar.png"
+        alt=""
+        className="h-14 w-14 rounded-full border-2 border-card object-cover shadow-sm"
+      />
+      <span className="text-center text-tiny font-semibold text-muted">{vi.projects.noImage}</span>
     </div>
   );
 }
@@ -60,7 +77,7 @@ export function ProjectCard({ project, onDuplicate, onDelete, busy, rendering }:
     <Card as="li" padded={false} className="ui-card-link">
       <Link to={href} aria-label={`${t.open}: ${project.title}`} className="block">
         <div className="aspect-[9/16] w-full overflow-hidden rounded-t-card bg-soft">
-          <CardImage src={image} />
+          <CardImage src={image} fallbackKind={project.kind === 'postv' ? 'postv' : 'core'} />
         </div>
       </Link>
       <div className="flex items-start gap-2 p-4">

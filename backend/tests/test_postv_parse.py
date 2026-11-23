@@ -225,3 +225,16 @@ def test_reply_to_a_reply_and_marker_on_the_first_block_are_flat_with_a_warning(
     assert r.post.text == "Bài gốc"
     assert [c.parent for c in r.comments] == [None, None, "c2", None]
     assert len([w for w in r.warnings if "'>'" in w or "quá 1 cấp" in w]) == 3
+
+
+def test_reply_to_handle_and_markdown_media_extraction():
+    raw = (
+        "tacgia\n1h\nBài gốc có ảnh đính kèm.\n![anh1](https://cdn.example.test/pic1.jpg)\n"
+        "binh_luan_1\n30m\nBình luận cha rất thu hút.\n"
+        "nguoi_rep\n10m\nTrả lời @binh_luan_1\nChuẩn không cần chỉnh luôn!\n"
+    )
+    r = parse_threads_text(raw)
+    assert r.media_urls == ["https://cdn.example.test/pic1.jpg"]
+    assert "pic1.jpg" not in r.post.text
+    assert r.comments[1].parent == "c1"
+    assert r.comments[1].text == "Chuẩn không cần chỉnh luôn!"

@@ -109,7 +109,13 @@ def _source(project: PostvProject, span: CardSpan) -> dict:
     if span.kind == "post":
         return project.post.model_dump()
     if span.kind == "comment":
-        return next(c.model_dump() for c in project.comments if c.id == span.ref)
+        comment = next(c for c in project.comments if c.id == span.ref)
+        data = comment.model_dump()
+        if comment.parent:
+            parent = next((c for c in project.comments if c.id == comment.parent), None)
+            if parent is not None:
+                data["_parent_card"] = parent.model_dump()
+        return data
     return {"hook": project.hook.model_dump(), "post": project.post.text}
 
 
@@ -138,6 +144,7 @@ def build_asset(
     count_up: bool,
     out_dir: Path,
     bounce: bool = False,
+    project_dir: Path | None = None,
 ) -> CardAsset:
     """Vẽ (hoặc dùng lại) các trạng thái PNG của thẻ; cache theo nội dung, không theo thời gian.
 
@@ -145,6 +152,8 @@ def build_asset(
     giữa một khung trong suốt cỡ cố định, vì ffmpeg không đổi cỡ khung giữa dòng được qua `fade`
     và `overlay`; mọi trạng thái cùng cỡ nên ghép bằng vị trí cố định."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    if project_dir is None and (out_dir.parent.parent / "project.json").is_file():
+        project_dir = out_dir.parent.parent
     source = _source(project, span)
     stats = [source.get(k) for k in ("likes", "replies", "reposts", "shares")]
     counting = count_up and span.kind != "hook" and any(stats)
@@ -164,7 +173,9 @@ def build_asset(
         data = json.loads(meta_path.read_text(encoding="utf-8"))
         if all((out_dir / n).is_file() for n, _ in data["states"]):
             return CardAsset([(out_dir / n, t) for n, t in data["states"]], *data["box"])
-    final = render_project_card(project, span.kind, span.ref, tpl, censor, censor_mode, 1.0)
+    final = render_project_card(
+        project, span.kind, span.ref, tpl, censor, censor_mode, 1.0, project_dir=project_dir
+    )
     box = final.getchannel("A").getbbox()
     if box is None:
         raise ValueError("Thẻ trống")
@@ -180,26 +191,47 @@ def build_asset(
             image = final
             if k_count < 1.0:
                 image = render_project_card(
-                    project, span.kind, span.ref, tpl, censor, censor_mode, k_count
+                    project,
+                    span.kind,
+                    span.ref,
+                    tpl,
+                    censor,
+                    censor_mode,
+                    k_count,
+                    project_dir=project_dir,
                 )
             by_scale[k_count] = image.crop(box)
+            if k_count < 1.0:
+                image.close()
         crop = by_scale[k_count]
+        resized: Image.Image | None = None
+        frame: Image.Image | None = None
+        to_save = crop
         if bounce:
             factor = bounce_scale(at, bcfg)
+            src_img = crop
             if factor != 1.0:
-                crop = crop.resize((round(w * factor), round(h * factor)), Image.LANCZOS)
+                resized = crop.resize((round(w * factor), round(h * factor)), Image.LANCZOS)
+                src_img = resized
             frame = Image.new("RGBA", canvas, (0, 0, 0, 0))
             frame.alpha_composite(
-                crop, ((canvas[0] - crop.width) // 2, (canvas[1] - crop.height) // 2)
+                src_img, ((canvas[0] - src_img.width) // 2, (canvas[1] - src_img.height) // 2)
             )
-            crop = frame
-        raw = crop.tobytes()
-        if raw == previous:  # giống trạng thái trước: gộp vào, không thêm
-            continue
-        previous = raw
-        name = f"{key[:10]}-{k:02d}.png"
-        crop.save(out_dir / name)
-        states.append((name, at))
+            to_save = frame
+        raw = to_save.tobytes()
+        if raw != previous:  # giống trạng thái trước: gộp vào, không thêm
+            previous = raw
+            name = f"{key[:10]}-{k:02d}.png"
+            to_save.save(out_dir / name)
+            states.append((name, at))
+        if resized is not None:
+            resized.close()
+        if frame is not None:
+            frame.close()
+    for cached_img in by_scale.values():
+        cached_img.close()
+    by_scale.clear()
+    final.close()
     if bounce:  # đặt khung cố định sao cho tâm trùng tâm thẻ gốc
         x, y = x + w // 2 - canvas[0] // 2, y + h // 2 - canvas[1] // 2
     box_xywh = [x, y, *canvas]
@@ -227,10 +259,10 @@ def card_timing(span: CardSpan, tpl: dict, mode: str, total: float) -> dict:
     anim = tpl["anim"]
     smooth, bounce = anim["smooth"], anim["bounce"]
     bounced = span.fresh and (mode == "bounce" or span.kind == "hook")
-    if not span.fresh:
-        in_d, slide = smooth["change"], 0.0
-    elif bounced:
+    if bounced:
         in_d, slide = bounce["duration"], 0.0
+    elif not span.fresh:
+        in_d, slide = smooth["change"], float(smooth["slide"])
     else:
         in_d, slide = smooth["in"], float(smooth["slide"])
     out_d = smooth["change"] if span.handoff else smooth["out"]
@@ -256,7 +288,7 @@ def card_chain(
     prev: str,
     out: str,
 ) -> list[str]:
-    """Các đoạn filtergraph đưa thẻ (input số `index`) lên `prev` → `out`."""
+    """Filtergraph đưa thẻ (input số `index`) lên `prev` → `out` với Fade + Slide-up mượt."""
     t_in, s = timing["in"], span.start
     chain = [f"[{index}:v]fps={fps},format=rgba"]
     if scale != 1.0:
@@ -265,7 +297,7 @@ def card_chain(
     if timing["slide"]:
         slide = timing["slide"] * scale
         pos = (
-            f"x={_num(x0)}:y='{_num(y0)}-{_num(slide)}*pow(max(1-(t-{_num(s)})/{_num(t_in)},0),3)'"
+            f"x={_num(x0)}:y='{_num(y0)}+{_num(slide)}*pow(max(1-(t-{_num(s)})/{_num(t_in)},0),3)'"
         )
     else:
         pos = f"x={_num(x0)}:y={_num(y0)}"
@@ -274,5 +306,5 @@ def card_chain(
     chain.append(f"setpts=PTS+{_num(s)}/TB[{label}]")
     return [
         ",".join(chain),
-        f"[{prev}][{label}]overlay={pos}:eval=frame:eof_action=pass:repeatlast=0[{out}]",
+        f"[{prev}][{label}]overlay={pos}:eval=frame:eof_action=pass:repeatlast=0:format=auto[{out}]",
     ]

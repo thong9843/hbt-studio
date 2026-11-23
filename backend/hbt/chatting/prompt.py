@@ -1,4 +1,4 @@
-"""Prompt cho Ollama sinh kịch bản Chatting theo §5 (SYSTEM_PROMPT nguyên văn)."""
+"""Prompt cho Gemini API sinh kịch bản Chatting theo §5."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ Luật:
 - 2 đến 8 nhân vật (hỗ trợ nhóm chat nhiều người). Nhân vật kể chuyện chính là "me" (bên phải).
 - 12 đến 60 tin nhắn tùy theo thời lượng mục tiêu. Mỗi tin ngắn gọn dễ đọc, tổng dưới 5000 ký tự.
 - Tin đầu tiên phải gây tò mò ngay. Có cao trào và một cú twist hoặc câu chốt hài ở cuối.
-- Gắn sticker/meme vào tin có cảm xúc mạnh. Chỉ dùng tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok.
+- TUYỆT ĐỐI KHÔNG gắn `sticker` sau mỗi câu thoại hay ở các câu hỏi/đáp thông thường. Chỉ gắn `sticker` (tối đa 1 đến 3 sticker cho TOÀN BỘ cuộc hội thoại, không bao giờ ở 2 tin liên tiếp) vào đúng những câu cao trào cảm xúc mạnh nhất, cú twist bất ngờ hoặc câu chốt hài hước (punchline). Chỉ dùng tag: soc, cuoi, khoc, gian, ngai, yeu, nghi, can, bat_luc, ok.
+- Có thể gợi ý `media_hint` (chuỗi tiếng Việt ngắn mô tả ảnh/clip minh họa, hoặc `null`) ở tối đa 1-2 tin nhắn cao trào/bằng chứng (vd: "Ảnh chụp màn hình chuyển khoản", "Clip phản ứng bất ngờ").
 - Không có: rượu bia, máu me, bạo lực, thuốc, chính trị, tình dục, chửi thề nặng, thông tin cá nhân thật.
 - Chỉ trả về JSON đúng schema."""
 
@@ -20,8 +21,9 @@ def build_user_prompt(
     comments: list[str] | None = None,
     platform: str = "messenger",
     target_duration_s: float | None = None,
+    memes_summary: list[dict[str, object]] | None = None,
 ) -> str:
-    """Tạo user prompt chuẩn cho Ollama."""
+    """Tạo user prompt chuẩn cho Gemini API."""
     comment_text = "\n".join(f"- {c}" for c in (comments or [])) if comments else "Không có"
     dur_hint = ""
     if target_duration_s:
@@ -29,8 +31,18 @@ def build_user_prompt(
         dur_hint = (
             f"\nThời lượng mục tiêu: ~{int(target_duration_s)} giây (khoảng {est_msgs} tin nhắn)."
         )
+    meme_hint = ""
+    if memes_summary:
+        lines = [
+            f"- {m.get('id')}: {m.get('title')} | tags={m.get('tags')} | topic={m.get('topic')}"
+            for m in memes_summary[:25]
+        ]
+        meme_hint = (
+            "\nKho Meme có sẵn (chỉ chọn `meme_id` tối đa 1-3 lần khi đúng câu cao trào khớp `topic`, "
+            "không chọn trùng):\n" + "\n".join(lines)
+        )
     return (
-        f"Nền tảng: {platform}{dur_hint}\n"
+        f"Nền tảng: {platform}{dur_hint}{meme_hint}\n"
         f"Tiêu đề gốc: {title}\n"
         f"Nội dung:\n{body}\n"
         f"Bình luận nổi bật:\n{comment_text}"

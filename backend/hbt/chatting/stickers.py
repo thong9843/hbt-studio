@@ -12,6 +12,7 @@ from PIL import Image
 
 from hbt.chatting.models import VALID_STICKER_TAGS
 from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.postv.memes import resolve_memes_dir
 
 logger = logging.getLogger(__name__)
 
@@ -34,31 +35,26 @@ EMOJI_TAG_MAP = {
 
 
 def get_memes_dir(library_dir: Path) -> Path:
-    memes_dir = Path(library_dir) / "memes"
-    if memes_dir.is_dir():
-        return memes_dir
-    # Fallback thư mục cũ nếu có
-    stickers_dir = Path(library_dir) / "stickers"
-    return stickers_dir if stickers_dir.is_dir() else memes_dir
+    return resolve_memes_dir(library_dir)
 
 
 def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
     """Đọc danh sách meme kèm metadata (file, tags, emojis, start_time, duration)."""
     memes_dir = get_memes_dir(library_dir)
     index_file = memes_dir / "index.json"
+    entries: list[dict[str, Any]] = []
     if index_file.is_file():
         try:
             data = json.loads(index_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and "memes" in data:
-                return data["memes"]
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
+            if isinstance(data, dict) and "memes" in data and isinstance(data["memes"], list):
+                entries = [m for m in data["memes"] if isinstance(m, dict)]
+            elif isinstance(data, list):
+                entries = [m for m in data if isinstance(m, dict)]
+            elif isinstance(data, dict):
                 # Legacy format: { "soc": ["cat.mp4"] }
-                converted = []
                 for tag, files in data.items():
                     for f in files:
-                        converted.append(
+                        entries.append(
                             {
                                 "file": f,
                                 "tags": [tag],
@@ -67,11 +63,26 @@ def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
                                 "duration": 3.5,
                             }
                         )
-                return converted
         except Exception as e:
             logger.warning("Không đọc được memes/index.json: %s", e)
 
-    return []
+    # Bổ sung mọi file video meme có thật trên đĩa dù chưa khai báo trong index.json
+    known_files = {str(item.get("file") or "") for item in entries}
+    if memes_dir.is_dir():
+        for path in sorted(memes_dir.iterdir(), key=lambda p: p.name.lower()):
+            if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTS:
+                if path.name not in known_files:
+                    entries.append(
+                        {
+                            "file": path.name,
+                            "tags": ["ok"],
+                            "emojis": [],
+                            "start_time": 0.0,
+                            "duration": 3.5,
+                        }
+                    )
+                    known_files.add(path.name)
+    return entries
 
 
 def get_meme_metadata(library_dir: Path, meme_file_or_name: Path | str) -> dict[str, Any]:
@@ -234,6 +245,8 @@ def extract_meme_audio(
         "-y",
         "-v",
         "error",
+        "-threads",
+        "2",
     ]
     if start_time > 0:
         cmd.extend(["-ss", f"{start_time:.2f}"])
@@ -276,7 +289,9 @@ def remove_green_screen(img: Image.Image) -> Image.Image:
             edge_alpha = max(0, int(a * (1.0 - (g - max(r, b)) / 60.0)))
             raw_bytes[i + 3] = edge_alpha
 
-    return Image.frombytes("RGBA", rgba.size, bytes(raw_bytes))
+    res = Image.frombytes("RGBA", rgba.size, bytes(raw_bytes))
+    rgba.close()
+    return res
 
 
 def load_sticker_or_meme_image(
@@ -313,6 +328,8 @@ def load_sticker_or_meme_image(
                         "-y",
                         "-v",
                         "error",
+                        "-threads",
+                        "2",
                         "-ss",
                         str(ss_pos),
                         "-i",
@@ -328,8 +345,8 @@ def load_sticker_or_meme_image(
 
         if frame_png.is_file():
             try:
-                raw_img = Image.open(frame_png)
-                return remove_green_screen(raw_img)
+                with Image.open(frame_png) as raw_img:
+                    return remove_green_screen(raw_img)
             except Exception as e:
                 logger.warning("Lỗi xử lý frame meme %s: %s", frame_png, e)
                 return None

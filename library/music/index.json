@@ -1,1 +1,102 @@
-[]
+[
+  {
+    "id": "drama-slow-burn-confession",
+    "file": "alex-morgan-drama-slow-burn-confession-578478.mp3",
+    "title": "Drama Slow Burn Confession",
+    "artist": "Alex Morgan",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["drama", "kịch tính", "căng thẳng"]
+  },
+  {
+    "id": "quirky-music-lumen",
+    "file": "echoes_of_lumen-quirky-music-584892.mp3",
+    "title": "Quirky Music",
+    "artist": "Echoes Of Lumen",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["quirky", "hài hước", "vui nhộn"]
+  },
+  {
+    "id": "lo-fi-chill",
+    "file": "kulakovka-lo-fi-chill-620585.mp3",
+    "title": "Lo-Fi Chill",
+    "artist": "Kulakovka",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["lofi", "chill", "thư giãn"]
+  },
+  {
+    "id": "drama-leberch",
+    "file": "leberch-drama-585273.mp3",
+    "title": "Drama",
+    "artist": "Leberch",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["drama", "kịch tính", "tâm trạng"]
+  },
+  {
+    "id": "quirky-sneaky",
+    "file": "leberch-quirky-sneaky-375264.mp3",
+    "title": "Quirky Sneaky",
+    "artist": "Leberch",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["quirky", "lén lút", "hài hước"]
+  },
+  {
+    "id": "whimsical-awkward-comic",
+    "file": "maksymmalko-whimsical-awkward-comic-music-291110.mp3",
+    "title": "Whimsical Awkward Comic",
+    "artist": "Maksym Malko",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["comic", "hài hước", "dí dỏm"]
+  },
+  {
+    "id": "the-wacky-sprint",
+    "file": "nkbloom-the-wacky-sprint-456137.mp3",
+    "title": "The Wacky Sprint",
+    "artist": "nkbloom",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["comic", "hài hước", "nhanh"]
+  },
+  {
+    "id": "quirky-sneaky-music",
+    "file": "viacheslavstarostin-quirky-sneaky-music-614988.mp3",
+    "title": "Quirky Sneaky Music",
+    "artist": "Viacheslav Starostin",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["quirky", "hài hước", "nhí nhảnh"]
+  },
+  {
+    "id": "chill-hop",
+    "file": "zephiramusic-chill-hop-603159.mp3",
+    "title": "Chill Hop",
+    "artist": "Zephira Music",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["chill", "lofi", "nhẹ nhàng"]
+  },
+  {
+    "id": "positive-chill-hop",
+    "file": "zephiramusic-positive-chill-hop-595886.mp3",
+    "title": "Positive Chill Hop",
+    "artist": "Zephira Music",
+    "source": "Pixabay",
+    "url": "",
+    "license": "Pixabay Content License",
+    "moods": ["chill", "tích cực", "tươi sáng"]
+  }
+]

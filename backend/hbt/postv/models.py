@@ -23,7 +23,7 @@ from hbt.models import (
 )
 
 POSTV_FPS = 60  # fps mặc định của PostV (K-11); khác `DEFAULT_FPS` của video HBT
-MAX_SEGMENTS = 40
+MAX_SEGMENTS = 120
 MAX_COMMENTS = 200
 COMMENT_ID = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
@@ -55,6 +55,8 @@ class PostvPost(PostvStats):
     age: str = ""
     text: str = ""
     card_text: str | None = None  # chữ hiện trên thẻ; None = lấy câu đầu của `text`
+    media: list[str] = Field(default_factory=list)  # đường dẫn tương đối tới ảnh trong media/
+    media_urls: list[str] = Field(default_factory=list)  # URL ảnh gốc đính kèm (nếu có)
 
 
 class PostvComment(PostvStats):
@@ -64,6 +66,8 @@ class PostvComment(PostvStats):
     text: str = ""
     parent: str | None = None
     picked: bool = True
+    media: list[str] = Field(default_factory=list)
+    media_urls: list[str] = Field(default_factory=list)
 
 
 class PostvSegment(_Model):
@@ -131,6 +135,7 @@ class PostvSettings(_Model):
     captions: bool = True
     aligner: Literal["auto", "whisper", "silence"] = "auto"
     outro: bool = True
+    aspect_mode: Literal["fill", "fit"] = "fit"
     card_animation: Literal["smooth", "bounce"] = "smooth"
     count_up: bool = True  # số like, bình luận, chia sẻ trên thẻ đếm từ 0 (D20)
     censor: Censor = Field(default_factory=Censor)
@@ -147,7 +152,7 @@ class PostvAutoOptions(_Model):
     """Tùy chọn ghi nhớ lần tạo tự động gần nhất (PVA)."""
 
     style: str = "ke-chuyen"
-    comments: int = Field(default=3, ge=2, le=5)
+    comments: int = Field(default=3, ge=2, le=30)
     voices: Literal["random", "manual"] = "random"
     seed: int = 1
 

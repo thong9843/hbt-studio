@@ -124,11 +124,15 @@ def test_stats_are_non_negative_integers():
 
 
 def test_limits_on_segments_and_comments():
-    segs = [{"role": "commentary", "voice": "x"}] * 41
+    from hbt.postv.models import MAX_COMMENTS, MAX_SEGMENTS
+
+    segs = [{"role": "commentary", "voice": "x"}] * (MAX_SEGMENTS + 1)
     with pytest.raises(ValidationError):
         PostvProject.model_validate(postv(segments=segs))
     with pytest.raises(ValidationError):
-        PostvProject.model_validate(postv(comments=[{"id": f"c{i}"} for i in range(201)]))
+        PostvProject.model_validate(
+            postv(comments=[{"id": f"c{i}"} for i in range(MAX_COMMENTS + 1)])
+        )
 
 
 def test_caption_color_and_voice_trim():

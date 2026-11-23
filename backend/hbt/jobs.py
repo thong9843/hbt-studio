@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import threading
 import time
@@ -21,7 +22,7 @@ from typing import Any
 
 from hbt.app_settings import AppSettingsStore
 from hbt.config import ALLOWED_FPS
-from hbt.gd2.voice import build_hbt_plan, spoken_chunks, synthesize_hbt
+from hbt.core.hbt_voice import build_hbt_plan, spoken_chunks, synthesize_hbt
 from hbt.library import MusicLibrary
 from hbt.models import Music, Project, Voice
 from hbt.pipeline import cancel
@@ -44,6 +45,7 @@ from hbt.postv.voice import (
     synthesize_plan,
 )
 from hbt.sensitive import SensitiveStore
+from hbt.shared.sse_manager import format_sse_progress
 from hbt.storage import Conflict, NotFound, ServiceUnavailable, Storage, Unprocessable
 
 log = logging.getLogger(__name__)
@@ -51,9 +53,20 @@ log = logging.getLogger(__name__)
 MAX_JOBS = 200  # giữ tối đa chừng này job (bỏ job đã xong cũ nhất)
 LOG_TAIL = 20
 CANCEL_WAIT = 5.0  # giây chờ job đang chạy dừng hẳn sau khi huỷ
+STALE_LOCK_SECONDS = 120.0  # quá hạn không heartbeat + không còn tiến trình con → tự mở khoá
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
 FINISHED = (DONE, FAILED, CANCELLED)
+
+
+def _has_alive_subprocess(job: Job) -> bool:
+    """Kiểm tra có tiến trình con (TTS/FFmpeg) nào của job đang thực sự sống không."""
+    token = getattr(job, "token", None)
+    if token is None:
+        return False
+    with token._lock:
+        procs = list(token._procs)
+    return any(p.poll() is None for p in procs)
 
 
 @dataclass
@@ -65,6 +78,7 @@ class Job:
     outro: bool | None
     allow_long_trim: bool
     preview_seconds: float | None = None
+    aspect_mode: str | None = None
     status: str = QUEUED
     progress: float = 0.0
     step: str = ""
@@ -75,12 +89,17 @@ class Job:
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
+    last_heartbeat: float = field(default_factory=time.time)
     token: CancelToken = field(default_factory=CancelToken)
     _log: deque = field(default_factory=lambda: deque(maxlen=200))
     _events: list = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _done: threading.Event = field(default_factory=threading.Event)
-    kind: str = "render"  # "render" (dựng video) | "voice" (sinh giọng PostV)
+    kind: str = "render"  # "render" | "voice" | "stickv" | ...
+    mode: str = ""  # "preview" | "final"
+    stage: str = ""
+    current_beat: int | None = None
+    total_beats: int | None = None
 
     @property
     def finished(self) -> bool:
@@ -99,16 +118,25 @@ class Job:
 
     def _emit(self, kind: str, data: dict) -> None:
         with self._lock:
+            self.last_heartbeat = time.time()
             self._events.append((kind, data))
 
-    def _progress(self, pct: float, step: str, message: str) -> None:
+    def _progress(self, pct: float, step: str, message: str, **extra: Any) -> None:
         with self._lock:
+            self.last_heartbeat = time.time()
             self.progress, self.step = pct, step
+            if "stage" in extra and isinstance(extra["stage"], str):
+                self.stage = extra["stage"]
+            elif step:
+                self.stage = step
+            if "current_beat" in extra:
+                self.current_beat = extra["current_beat"]
+            if "total_beats" in extra:
+                self.total_beats = extra["total_beats"]
             if message:
                 self._log.append(message)
-            self._events.append(
-                ("progress", {"progress": round(pct, 1), "step": step, "message": message})
-            )
+            payload = format_sse_progress(pct, step, message, **extra)
+            self._events.append(("progress", payload))
 
     def _finish_locked(self, status: str, **extra: Any) -> None:
         if self.status in FINISHED:  # chỉ kết thúc một lần
@@ -189,6 +217,7 @@ class JobManager:
         voice: VoiceProvider | None = None,
         postv_render_fn=render_postv,
         postv_words: CensorStore | None = None,
+        stale_timeout: float = STALE_LOCK_SECONDS,
     ):
         self.storage = storage
         self.library_dir = library_dir
@@ -200,9 +229,13 @@ class JobManager:
         self.sensitive = sensitive
         self.app_settings = app_settings
         self.voice = voice
+        self.stale_timeout = stale_timeout
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._active_workers: set[str] = set()
+        self.is_generating_voice: dict[str, bool] = {}
+        self.is_rendering: dict[str, bool] = {}
 
     # ---------------------------------------------------------------- tra cứu
     def get(self, job_id: str) -> Job:
@@ -212,15 +245,102 @@ class JobManager:
             raise NotFound(f"Không có job '{job_id}'")
         return job
 
-    def is_busy(self, slug: str) -> bool:
+    def cleanup_stale_locks(self, slug: str | None = None) -> list[str]:
+        """Kiểm tra heartbeat & tiến trình sống; tự mở khoá job treo không có TTS/FFmpeg thật."""
+        now = time.time()
+        stale_jobs: list[Job] = []
         with self._lock:
-            return any(j.slug == slug and not j.finished for j in self._jobs.values())
+            for j in self._jobs.values():
+                if slug is not None and j.slug != slug:
+                    continue
+                if j.finished or j.status != RUNNING:
+                    continue
+                if getattr(j, "status", None) == "waiting_pick":
+                    continue
+                has_proc = _has_alive_subprocess(j)
+                worker_dead = j.id not in self._active_workers
+                timed_out = (now - j.last_heartbeat) > self.stale_timeout
+                if not has_proc and (worker_dead or timed_out):
+                    stale_jobs.append(j)
+            if not stale_jobs:
+                # Đồng bộ cờ khoá nếu mọi job của slug đã kết thúc
+                target_slugs = (
+                    [slug]
+                    if slug is not None
+                    else list(set(self.is_generating_voice) | set(self.is_rendering))
+                )
+                for s in target_slugs:
+                    has_active = any(j.slug == s and not j.finished for j in self._jobs.values())
+                    if not has_active:
+                        self.is_generating_voice[s] = False
+                        self.is_rendering[s] = False
+
+        released: list[str] = []
+        for j in stale_jobs:
+            log.warning("[%s] Tự động mở khoá job treo cho dự án '%s'", j.id, j.slug)
+            j.token.cancel()
+            j._finish(
+                FAILED,
+                error=(
+                    "Tác vụ trước bị kẹt (không còn tiến trình TTS/FFmpeg hoạt động), "
+                    "đã tự mở khoá."
+                ),
+            )
+            released.append(j.id)
+        if stale_jobs:
+            with self._lock:
+                for j in stale_jobs:
+                    self._active_workers.discard(j.id)
+                    if not any(
+                        other.slug == j.slug and not other.finished for other in self._jobs.values()
+                    ):
+                        self.is_generating_voice[j.slug] = False
+                        self.is_rendering[j.slug] = False
+        return released
+
+    def is_busy(self, slug: str) -> bool:
+        self.cleanup_stale_locks(slug)
+        with self._lock:
+            has_job = any(j.slug == slug and not j.finished for j in self._jobs.values())
+            voice_lock = self.is_generating_voice.get(slug, False)
+            render_lock = self.is_rendering.get(slug, False)
+            return has_job or voice_lock or render_lock
+
+    def unlock_project(self, slug: str) -> dict[str, Any]:
+        """Huỷ mọi tác vụ đang chạy/kẹt và ép giải phóng toàn bộ cờ khoá của dự án."""
+        with self._lock:
+            targets = [j for j in self._jobs.values() if j.slug == slug and not j.finished]
+        for j in targets:
+            j.token.cancel()
+            if hasattr(j, "_pick_event"):
+                j._pick_event.set()
+            j._finish(CANCELLED, error="Đã huỷ tác vụ bị kẹt và mở khoá dự án.")
+        with self._lock:
+            for j in targets:
+                self._active_workers.discard(j.id)
+            self.is_generating_voice[slug] = False
+            self.is_rendering[slug] = False
+        return {"ok": True, "slug": slug, "unlocked": len(targets)}
 
     def active(self) -> list[Job]:
         """Job đang chạy hoặc đang chờ, cũ nhất trước (chỉ đọc)."""
         with self._lock:
             jobs = [j for j in self._jobs.values() if not j.finished]
         return sorted(jobs, key=lambda j: j.created_at)
+
+    def recent(self, limit: int = 15) -> list[Job]:
+        """Trả job đang chạy/chờ (cũ nhất trước) kèm tối đa `limit` job vừa hoàn tất gần nhất."""
+        with self._lock:
+            active_jobs = sorted(
+                (j for j in self._jobs.values() if not j.finished),
+                key=lambda j: j.created_at,
+            )
+            done_jobs = sorted(
+                (j for j in self._jobs.values() if j.finished),
+                key=lambda j: j.finished_at or j.created_at,
+                reverse=True,
+            )[: max(0, int(limit))]
+        return [*active_jobs, *done_jobs]
 
     # ---------------------------------------------------------------- tạo / huỷ
     def submit(
@@ -232,6 +352,7 @@ class JobManager:
         outro: bool | None = None,
         allow_long_trim: bool = False,
         preview_seconds: float | None = None,
+        aspect_mode: str | None = None,
     ) -> Job:
         project = self.storage.load_any(slug)  # NotFound / BadRequest nếu project hỏng
         if fps is not None and fps not in ALLOWED_FPS:
@@ -259,7 +380,14 @@ class JobManager:
         if self._tool_check is not None:
             self._tool_check()
         job = Job(
-            uuid.uuid4().hex[:12], slug, preview, fps, outro, allow_long_trim, preview_seconds
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            outro,
+            allow_long_trim,
+            preview_seconds,
+            aspect_mode=aspect_mode,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -379,6 +507,8 @@ class JobManager:
             job._pick_event.set()
         if not job._cancel_if_queued():
             job.wait(CANCEL_WAIT)  # đang chạy: chờ luồng dựng dừng hẳn
+            if not job.finished:
+                job._finish(CANCELLED)
         return job
 
     def shutdown(self) -> None:
@@ -404,94 +534,164 @@ class JobManager:
                 return
             job.status = RUNNING
             job.started_at = time.time()
-        if job.kind == "voice":
-            if getattr(job, "hbt_voice_id", None):
-                self._run_hbt_voice(job)
+            job.last_heartbeat = time.time()
+        with self._lock:
+            self._active_workers.add(job.id)
+            if job.kind == "voice":
+                self.is_generating_voice[job.slug] = True
             else:
-                self._run_voice(job)
-            return
-        if job.kind == "postv_auto":
-            self._run_postv_auto(job)
-            return
-        if job.kind == "postv_quick":
-            self._run_postv_quick(job)
-            return
-        if job.kind == "chatting_auto":
-            self._run_chatting_auto(job)
-            return
-        if job.kind == "chatting_render":
-            self._run_chatting_render(job)
-            return
-        folder = self.storage.project_dir(job.slug)
-        cfg = self.app_settings.load() if self.app_settings is not None else None
-        opts = RenderOptions(
-            preview=job.preview,
-            fps=job.fps,
-            outro=job.outro,
-            allow_long_trim=job.allow_long_trim,
-            preview_seconds=job.preview_seconds,
-            sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
-            library_dir=self.library_dir,
-            brand_dir=self.brand_dir,
-            whisper_model=cfg.whisper_model if cfg else None,
-            whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
-            job_id=job.id,
-        )
-        timing_before = _timing_mtime(folder)
+                self.is_rendering[job.slug] = True
         try:
-            if self.storage.kind_of(job.slug) == "postv":
-                words = self.postv_words.load() if self.postv_words is not None else None
-                result = self._render_postv(
-                    folder, opts, progress=job._progress, cancel_token=job.token,
-                    censor_words=words,
-                )  # fmt: skip
+            if job.kind == "voice":
+                if getattr(job, "hbt_voice_id", None):
+                    self._run_hbt_voice(job)
+                else:
+                    self._run_voice(job)
+                return
+            if job.kind == "postv_auto":
+                self._run_postv_auto(job)
+                return
+            if job.kind == "postv_quick":
+                self._run_postv_quick(job)
+                return
+            if job.kind == "chatting_auto":
+                self._run_chatting_auto(job)
+                return
+            if job.kind == "chatting_render":
+                self._run_chatting_render(job)
+                return
+            if job.kind == "hbt_core_auto":
+                self._run_hbt_core_auto(job)
+                return
+            if job.kind == "hbt_core_images":
+                self._run_hbt_core_images(job)
+                return
+            if job.kind == "hbt_core_prepare":
+                self._run_hbt_core_prepare(job)
+                return
+            if job.kind in ("stickv", "stickv_render"):
+                self._run_stickv_render(job)
+                return
+            folder = self.storage.project_dir(job.slug)
+            cfg = self.app_settings.load() if self.app_settings is not None else None
+            opts = RenderOptions(
+                preview=job.preview,
+                fps=job.fps,
+                outro=job.outro,
+                allow_long_trim=job.allow_long_trim,
+                preview_seconds=job.preview_seconds,
+                sensitive_words=self.sensitive.load() if self.sensitive is not None else None,
+                library_dir=self.library_dir,
+                brand_dir=self.brand_dir,
+                whisper_model=cfg.whisper_model if cfg else None,
+                whisper_timeout=cfg.whisper_timeout_seconds if cfg else None,
+                job_id=job.id,
+                aspect_mode=job.aspect_mode,
+            )
+            timing_before = _timing_mtime(folder)
+            try:
+                if self.storage.kind_of(job.slug) == "postv":
+                    words = self.postv_words.load() if self.postv_words is not None else None
+                    result = self._render_postv(
+                        folder, opts, progress=job._progress, cancel_token=job.token,
+                        censor_words=words,
+                    )  # fmt: skip
+                else:
+                    result = self._render(
+                        folder, opts, progress=job._progress, cancel_token=job.token
+                    )
+            except RenderCancelled:
+                job._finish(CANCELLED)
+            except TailTrimNeedsConfirmation as e:
+                cut = self.storage.rel(e.cut_file) if e.cut_file else None
+                job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
+            except BaseException as e:  # noqa: BLE001
+                log.exception("Lỗi job dựng '%s': %s", job.slug, e)
+                job._finish(FAILED, error=str(e) or e.__class__.__name__)
             else:
-                result = self._render(folder, opts, progress=job._progress, cancel_token=job.token)
-        except RenderCancelled:
-            job._finish(CANCELLED)
-        except TailTrimNeedsConfirmation as e:
-            cut = self.storage.rel(e.cut_file) if e.cut_file else None
-            job._finish(FAILED, error=str(e), needs_confirmation=True, cut_audio=cut)
-        except Exception as e:  # noqa: BLE001
-            job._finish(FAILED, error=str(e) or e.__class__.__name__)
-        else:
-            rel = self.storage.rel
-            output = {
-                "video": rel(result.video),
-                "publish": rel(result.publish),
-                "log": rel(result.log),
-                "srt": rel(result.srt) if result.srt else None,
-                "cover": rel(result.cover) if result.cover else None,
-                "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
-                "fps": result.fps,
-                "width": result.width,
-                "height": result.height,
-                "duration": round(result.duration, 3),
-                "lufs": round(result.lufs, 2) if result.lufs is not None else None,
-                "preview_seconds": result.preview_seconds,
-                "aligner": result.aligner,
-                "aligner_info": result.aligner_info,
-                "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
-                "trimmed_tail_seconds": (
-                    round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
-                ),
-                "seconds": round(result.seconds, 1),
-                "warnings": result.warnings,
-            }
-            # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
-            align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
-            write_run_stats(result.job_dir, result.seconds, align_cached)
-            job._finish(DONE, output=output)
+                rel = self.storage.rel
+                output = {
+                    "video": rel(result.video),
+                    "publish": rel(result.publish),
+                    "log": rel(result.log),
+                    "srt": rel(result.srt) if result.srt else None,
+                    "cover": rel(result.cover) if result.cover else None,
+                    "youtube_cover": rel(result.youtube_cover) if result.youtube_cover else None,
+                    "fps": result.fps,
+                    "width": result.width,
+                    "height": result.height,
+                    "duration": round(result.duration, 3),
+                    "lufs": round(result.lufs, 2) if result.lufs is not None else None,
+                    "preview_seconds": result.preview_seconds,
+                    "aligner": result.aligner,
+                    "aligner_info": result.aligner_info,
+                    "trimmed_tail": rel(result.trimmed_tail) if result.trimmed_tail else None,
+                    "trimmed_tail_seconds": (
+                        round(result.trimmed_tail_seconds, 2) if result.trimmed_tail else None
+                    ),
+                    "seconds": round(result.seconds, 1),
+                    "warnings": result.warnings,
+                }
+                # căn chữ dùng lại bản có sẵn: timing.json có trước job và không bị ghi lại
+                align_cached = timing_before is not None and timing_before == _timing_mtime(folder)
+                write_run_stats(result.job_dir, result.seconds, align_cached)
+                eng = "postv" if self.storage.kind_of(job.slug) == "postv" else "core"
+                try:
+                    proj_title = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    proj_title = job.slug
+                self._upsert_render_index(
+                    engine=eng,
+                    slug=job.slug,
+                    title=proj_title,
+                    video_path=result.video,
+                    cover_path=result.cover or "",
+                    duration_sec=result.duration,
+                    publish_path=result.publish,
+                )
+                job._finish(DONE, output=output)
+        finally:
+            if not job.finished:
+                job._finish(FAILED, error="Tác vụ dừng đột ngột, đã tự động mở khoá dự án.")
+            with self._lock:
+                self._active_workers.discard(job.id)
+                self.is_generating_voice[job.slug] = False
+                self.is_rendering[job.slug] = False
 
     def _run_voice(self, job: Job) -> None:
         """Sinh giọng từng đoạn (tiến trình con VieNeu), nối thành `voice.wav`, ghi vào project."""
+        with self._lock:
+            self.is_generating_voice[job.slug] = True
         try:
             with cancel.use_token(job.token):
                 project = self.storage.load_any(job.slug)
                 job._progress(1, "voice", "Đang nạp danh sách giọng")
                 plan, cast = build_plan(project, self.voice.list_voices())
+
+                def on_detail(detail: dict[str, Any]) -> None:
+                    job._progress(
+                        float(detail.get("percent", 0)),
+                        "voice",
+                        str(detail.get("message", "")),
+                        current=detail.get("current", 0),
+                        total=detail.get("total", 0),
+                        percent=detail.get("percent", 0),
+                    )
+
+                from hbt.postv.timeline import estimate_meme_pause_slots
+
+                post_gaps = estimate_meme_pause_slots(
+                    [s for s in project.segments if s.voice.strip()],
+                    self.library_dir,
+                )
                 result = synthesize_plan(
-                    plan, self.storage.project_dir(job.slug), self.voice, cast, job._progress
+                    plan,
+                    self.storage.project_dir(job.slug),
+                    self.voice,
+                    cast,
+                    job._progress,
+                    post_gaps=post_gaps,
+                    on_detail=on_detail,
                 )
             latest = self.storage.load_any(
                 job.slug
@@ -500,7 +700,14 @@ class JobManager:
                 update={"engine": "vieneu", "file": "voice.wav", "trim_end": None}
             )
             self.storage.save_any(job.slug, latest)
-            job._progress(100, "voice", "Đã sinh xong giọng")
+            job._progress(
+                100,
+                "voice",
+                "Đã sinh xong giọng",
+                current=result.segments,
+                total=result.segments,
+                percent=100,
+            )
             job._finish(
                 DONE,
                 output={
@@ -518,6 +725,9 @@ class JobManager:
             job._finish(FAILED, error=str(e))
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
+        finally:
+            with self._lock:
+                self.is_generating_voice[job.slug] = False
 
     def _run_hbt_voice(self, job: Job) -> None:
         """Sinh giọng HBT theo cảnh (đã xử lý {} và |), nối thành voice.wav."""
@@ -675,11 +885,21 @@ class JobManager:
                 )
 
                 rel = self.storage.rel
+                loaded_proj = self.storage.load_any(job.slug)
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=loaded_proj.title,
+                    video_path=render_res.video,
+                    cover_path=getattr(render_res, "cover", None) or "",
+                    duration_sec=float(getattr(render_res, "duration", 0.0) or 0.0),
+                    publish_path=render_res.publish,
+                )
                 output = {
                     "video": rel(render_res.video),
                     "publish": rel(render_res.publish),
                     "preview_seconds": 10.0,
-                    "project": self.storage.load_any(job.slug).model_dump(mode="json"),
+                    "project": loaded_proj.model_dump(mode="json"),
                 }
                 job._finish(DONE, output=output)
         except RenderCancelled:
@@ -689,11 +909,64 @@ class JobManager:
         except Exception as e:  # noqa: BLE001
             job._finish(FAILED, error=str(e) or e.__class__.__name__)
 
+    def _upsert_render_index(
+        self,
+        *,
+        engine: str,
+        slug: str,
+        title: str,
+        video_path: Path,
+        cover_path: Path | str | None = "",
+        duration_sec: float = 0.0,
+        publish_path: Path | None = None,
+        source_credit: str = "",
+    ) -> None:
+        """Ghi nhận thành phẩm vừa xuất vào workspace/studio.db."""
+        try:
+            from hbt.shared.db.media_index import upsert_render
+
+            ws = self.storage.workspace_dir
+            pub_text = source_credit
+            if not pub_text and publish_path is not None and publish_path.is_file():
+                pub_text = publish_path.read_text(encoding="utf-8", errors="ignore").strip()
+            render_id = f"{engine}:{slug}:{video_path.parent.name}:{video_path.name}"
+            upsert_render(
+                render_id=render_id,
+                slug=slug,
+                title=title or slug,
+                engine=engine,
+                file_path=video_path,
+                cover_path=cover_path or "",
+                duration_sec=float(duration_sec or 0.0),
+                source_credit=pub_text,
+                db_path=ws / "studio.db",
+                base_dir=ws.parent,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Không thể ghi studio.db cho %s/%s: %s", engine, slug, exc)
+
     def _run_postv_quick(self, job: Job) -> None:
         """Chạy chuỗi tự động 6 bước của PostV (PV9)."""
         from hbt.postv.auto import run_auto_job
 
         run_auto_job(self, job)
+        if job.status == DONE and isinstance(job.output, dict) and job.output.get("video"):
+            vrel = str(job.output["video"]).lstrip("/")
+            vpath = self.storage.workspace_dir / vrel
+            if not vpath.is_file():
+                vpath = self.storage.project_dir(job.slug) / vrel
+            if vpath.is_file():
+                try:
+                    ptitle = self.storage.load_any(job.slug).title
+                except Exception:  # noqa: BLE001
+                    ptitle = job.slug
+                self._upsert_render_index(
+                    engine="postv",
+                    slug=job.slug,
+                    title=ptitle,
+                    video_path=vpath,
+                    duration_sec=float(job.output.get("duration") or 0.0),
+                )
 
     def submit_chatting_auto(
         self,
@@ -722,11 +995,21 @@ class JobManager:
         self,
         slug: str,
         preview: bool = False,
+        aspect_mode: str | None = None,
     ) -> Job:
         """Job dựng video Chatting (preview hoặc full)."""
         if self.is_busy(slug):
             raise Conflict("Dự án đang bận (đang dựng), hãy đợi xong hoặc huỷ")
-        job = Job(uuid.uuid4().hex[:12], slug, preview, None, None, False, kind="chatting_render")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="chatting_render",
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -750,11 +1033,7 @@ class JobManager:
             library_dir = self.library_dir
             brand_dir = self.brand_dir
             voice_provider = self.voice
-            chatting_model = (
-                self.app_settings.load().whisper_model  # fallback if needed
-                if False
-                else os.environ.get("CHATTING_MODEL", "qwen2.5:3b-instruct")
-            )
+            chatting_model = os.environ.get("CHATTING_MODEL", "gemini-3.8-flash")
 
             direct_script = getattr(job, "chatting_direct_script", False)
             target_duration_s = getattr(job, "chatting_target_duration_s", None)
@@ -823,8 +1102,17 @@ class JobManager:
                 brand_dir=brand_dir,
                 preview=job.preview,
                 progress=on_progress,
+                aspect_mode=getattr(job, "aspect_mode", None),
             )
 
+            chat_title = getattr(doc, "title", None) or job.slug
+            self._upsert_render_index(
+                engine="chatting",
+                slug=job.slug,
+                title=chat_title,
+                video_path=video_path,
+                source_credit=f"{chat_title}\n#HayBietTuot #Chatting #Shorts",
+            )
             output = {
                 "slug": job.slug,
                 "video": f"/api/chatting/{job.slug}/renders/{video_path.name}",
@@ -835,4 +1123,805 @@ class JobManager:
             job._finish(CANCELLED)
         except Exception as e:  # noqa: BLE001
             log.exception("Lỗi job chatting_render: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_auto(
+        self,
+        slug: str,
+        script: Any,
+        *,
+        voice_id: str | None = None,
+        fps: int = 60,
+        preview: bool = False,
+        aspect_mode: str = "fill",
+    ) -> Job:
+        """Job chạy chuỗi tự động HBT Core (V1 Bán tự động / V2 1-Click Prompt)."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            fps,
+            None,
+            False,
+            aspect_mode=aspect_mode,
+            kind="hbt_core_auto",
+        )
+        job.core_script = script  # type: ignore[attr-defined]
+        job.core_voice_id = voice_id  # type: ignore[attr-defined]
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_auto(self, job: Job) -> None:
+        """Thực thi chuỗi tự động HBT Core: VieNeu-TTS -> BGM acrossfade -> SFX -> Render FFmpeg."""
+        from hbt.core.render import render_hbt_core_auto
+
+        folder = self.storage.project_dir(job.slug)
+        script = getattr(job, "core_script", None)
+        voice_id = getattr(job, "core_voice_id", None)
+
+        try:
+            result = render_hbt_core_auto(
+                project_dir=folder,
+                script=script,
+                voice_provider=self.voice,
+                voice_id=voice_id,
+                library_dir=self.library_dir,
+                brand_dir=self.brand_dir,
+                fps=job.fps or 60,
+                preview=job.preview,
+                aspect_mode=getattr(job, "aspect_mode", None) or "fill",
+                job_id=job.id,
+                progress=job._progress,
+                cancel_token=job.token,
+            )
+            rel = self.storage.rel
+            output = {
+                "video": rel(result.video),
+                "publish": rel(result.publish),
+                "log": rel(result.log),
+                "srt": None,
+                "cover": None,
+                "youtube_cover": None,
+                "fps": result.fps,
+                "width": result.width,
+                "height": result.height,
+                "duration": round(result.duration, 3),
+                "lufs": -14.0,
+                "preview_seconds": None,
+                "aligner": "vieneu_microsecond",
+                "seconds": round(result.seconds, 1),
+                "warnings": result.warnings,
+                "bgm_tracks": result.bgm_tracks,
+                "sfx_used": result.sfx_used,
+                "timings": [t.model_dump(mode="json") for t in result.timings],
+            }
+            write_run_stats(result.job_dir, result.seconds, False)
+            self._upsert_render_index(
+                engine="core",
+                slug=job.slug,
+                title=getattr(script, "title", None) or job.slug,
+                video_path=result.video,
+                duration_sec=result.duration,
+                publish_path=result.publish,
+            )
+            job._finish(DONE, output=output)
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_auto: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_images(
+        self,
+        slug: str,
+        *,
+        overwrite: bool = False,
+        economy_mode: bool = False,
+    ) -> Job:
+        """Job nền sinh tuần tự toàn bộ ảnh 2D cho các cảnh HBT Core qua Cloudflare Workers AI."""
+        project = self.storage.load(slug)
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang bận, hãy đợi xong hoặc huỷ job hiện tại")
+        total = len(project.scenes)
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="hbt_core_images",
+            stage="Tự vẽ ảnh 2D",
+            current_beat=0,
+            total_beats=total,
+        )
+        job.core_images_overwrite = overwrite  # type: ignore[attr-defined]
+        job.core_images_economy = economy_mode  # type: ignore[attr-defined]
+        job._progress(
+            2.0,
+            "images",
+            f"Chuẩn bị vẽ {total} ảnh 2D...",
+            stage="Tự vẽ ảnh 2D",
+            current_beat=0,
+            total_beats=total,
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_images(self, job: Job) -> None:
+        """Thực thi job sinh ảnh tuần tự 1/N -> N/N cho HBT Core và cập nhật `project.json`."""
+        from hbt.app_settings import resolve_cloudflare_config
+        from hbt.shared.image_gen.cloudflare_flux import (
+            CloudflareImageError,
+            derive_project_seed,
+            generate_scene_image,
+        )
+
+        overwrite = bool(getattr(job, "core_images_overwrite", False))
+        economy_mode = bool(getattr(job, "core_images_economy", False))
+
+        try:
+            account_id, api_token, model = resolve_cloudflare_config(self.storage.workspace_dir)
+            if not account_id or not api_token:
+                raise CloudflareImageError(
+                    "Chưa cấu hình Cloudflare Account ID hoặc API Token. Vào Cài đặt để nhập khóa.",
+                    code="missing_cloudflare_key",
+                )
+
+            project = self.storage.load(job.slug)
+            folder = self.storage.project_dir(job.slug)
+            images_dir = folder / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+
+            core_script_path = folder / "core_script.json"
+            core_script_data: dict[str, Any] | None = None
+            prompt_by_index: list[str] = []
+            if core_script_path.is_file():
+                try:
+                    raw = json.loads(core_script_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict) and isinstance(raw.get("segments"), list):
+                        core_script_data = raw
+                        prompt_by_index = [
+                            str(seg.get("image_prompt") or "").strip()
+                            if isinstance(seg, dict)
+                            else ""
+                            for seg in raw["segments"]
+                        ]
+                except Exception:  # noqa: BLE001
+                    core_script_data = None
+
+            total = len(project.scenes)
+            seed = derive_project_seed(job.slug)
+            generated = 0
+            skipped = 0
+            saved_images: list[str] = []
+            scene1_ref: Path | None = None
+            if project.scenes and project.scenes[0].image:
+                cand_ref = folder / project.scenes[0].image
+                if cand_ref.is_file():
+                    scene1_ref = cand_ref
+
+            for idx, scene in enumerate(project.scenes, start=1):
+                job.token.check()
+                rel_img = f"images/scene-{idx:02d}.png"
+                dest = images_dir / f"scene-{idx:02d}.png"
+                existing_file = folder / scene.image if scene.image else dest
+
+                if not overwrite and existing_file.is_file() and scene.image:
+                    skipped += 1
+                    saved_images.append(scene.image)
+                    if idx == 1:
+                        scene1_ref = existing_file
+                    pct = round((idx / max(1, total)) * 98.0, 1)
+                    job._progress(
+                        pct,
+                        "images",
+                        f"Giữ ảnh có sẵn cảnh {idx}/{total}",
+                        stage="Tự vẽ ảnh 2D",
+                        current_beat=idx,
+                        total_beats=total,
+                    )
+                    continue
+
+                pct_start = round(((idx - 1) / max(1, total)) * 96.0 + 2.0, 1)
+                job._progress(
+                    pct_start,
+                    "images",
+                    f"Đang vẽ ảnh cảnh {idx}/{total}",
+                    stage="Tự vẽ ảnh 2D",
+                    current_beat=idx,
+                    total_beats=total,
+                )
+
+                raw_prompt = prompt_by_index[idx - 1] if idx - 1 < len(prompt_by_index) else ""
+                card_text = " ".join(ln.text for ln in scene.card.lines).strip()
+                fallback_ctx = f"{card_text}. {scene.voice}".strip(". ")
+                fallback_ref = images_dir / "scene-01.png"
+                reference_image = (
+                    (scene1_ref if scene1_ref and scene1_ref.is_file() else fallback_ref)
+                    if idx > 1
+                    else None
+                )
+                if reference_image is not None and not reference_image.is_file():
+                    reference_image = None
+
+                generate_scene_image(
+                    raw_prompt,
+                    dest,
+                    account_id=account_id,
+                    api_token=api_token,
+                    model=model,
+                    seed=seed,
+                    reference_image=reference_image,
+                    economy_mode=economy_mode,
+                    fallback_context=fallback_ctx,
+                )
+                generated += 1
+
+                latest = self.storage.load(job.slug)
+                actual_rel = rel_img
+                if idx - 1 < len(latest.scenes):
+                    latest.scenes[idx - 1].image = rel_img
+                    self.storage.save(job.slug, latest)
+                    reloaded = self.storage.load(job.slug)
+                    actual_rel = reloaded.scenes[idx - 1].image or rel_img
+                    if idx == 1:
+                        cand1 = folder / actual_rel
+                        if cand1.is_file():
+                            scene1_ref = cand1
+                saved_images.append(actual_rel)
+                if core_script_data is not None and idx - 1 < len(core_script_data["segments"]):
+                    if isinstance(core_script_data["segments"][idx - 1], dict):
+                        core_script_data["segments"][idx - 1]["image"] = actual_rel
+                        core_script_path.write_text(
+                            json.dumps(core_script_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+
+                pct_done = round((idx / max(1, total)) * 98.0, 1)
+                job._progress(
+                    pct_done,
+                    "images",
+                    f"Đã vẽ xong cảnh {idx}/{total}",
+                    stage="Tự vẽ ảnh 2D",
+                    current_beat=idx,
+                    total_beats=total,
+                )
+
+            job._progress(
+                100.0,
+                "images",
+                f"Hoàn tất {total}/{total} ảnh 2D",
+                stage="Tự vẽ ảnh 2D",
+                current_beat=total,
+                total_beats=total,
+            )
+            job._finish(
+                DONE,
+                output={
+                    "slug": job.slug,
+                    "generated": generated,
+                    "skipped": skipped,
+                    "total": total,
+                    "images": saved_images,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except CloudflareImageError as e:
+            job._finish(FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_images: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    def submit_hbt_core_prepare(
+        self,
+        slug: str,
+        *,
+        prompt: str = "",
+        topic: str | None = None,
+        model_name: str | None = None,
+        script: Any = None,
+        voice_id: str | None = None,
+        economy_mode: bool = False,
+        overwrite_images: bool = False,
+    ) -> Job:
+        """Đưa job chuẩn bị 3 pha (Kịch bản -> Giọng VieNeu -> Ảnh 2D Cloudflare) vào hàng đợi."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án đang chạy tác vụ khác, hãy đợi xong hoặc huỷ")
+        total = (
+            len(script.segments) if script is not None and getattr(script, "segments", None) else 0
+        )
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="hbt_core_prepare",
+            stage="Tạo kịch bản",
+            current_beat=0,
+            total_beats=total or None,
+        )
+        job.core_prepare_options = {  # type: ignore[attr-defined]
+            "prompt": prompt,
+            "topic": topic,
+            "model_name": model_name,
+            "script": script,
+            "voice_id": voice_id,
+            "economy_mode": economy_mode,
+            "overwrite_images": overwrite_images,
+        }
+        job._progress(
+            2.0,
+            "script",
+            "Bắt đầu chuẩn bị nội dung 3 pha",
+            stage="Tạo kịch bản",
+            current_beat=0,
+            total_beats=total or None,
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_hbt_core_prepare(self, job: Job) -> None:
+        """Thực thi chuỗi 3 pha HBT Core:
+        Pha 1 (0-25%): Gemini tạo kịch bản (bỏ qua nếu người dùng đã dán JSON).
+        Pha 2 (25-55%): VieNeu-TTS sinh giọng từng cảnh & lưu cache.
+        Pha 3 (55-100%): Cloudflare Flux vẽ ảnh 2D (nếu thiếu key thì kết thúc gọn kèm cảnh báo).
+        """
+        from hbt.app_settings import resolve_cloudflare_config
+        from hbt.core.gemini_client import GeminiClientError, generate_script_from_prompt
+        from hbt.core.render import sync_script_to_project
+        from hbt.core.tts_pipeline import sync_wavs_to_audio_folder
+        from hbt.core.voice import synthesize_core_segments
+        from hbt.shared.image_gen.cloudflare_flux import (
+            CloudflareImageError,
+            derive_project_seed,
+            generate_scene_image,
+        )
+
+        opts: dict[str, Any] = getattr(job, "core_prepare_options", {})
+        prompt_text = str(opts.get("prompt") or "").strip()
+        topic_hint = opts.get("topic")
+        model_name = opts.get("model_name")
+        script = opts.get("script")
+        voice_id = opts.get("voice_id")
+        economy_mode = bool(opts.get("economy_mode", False))
+        overwrite_images = bool(opts.get("overwrite_images", False))
+        warnings: list[str] = []
+
+        try:
+            with cancel.use_token(job.token):
+                folder = self.storage.project_dir(job.slug)
+
+                # Pha 1 (0 -> 25%): Kịch bản
+                if script is None:
+                    job._progress(
+                        8.0,
+                        "script",
+                        "Pha 1/3: Đang tạo kịch bản bằng Gemini",
+                        stage="Tạo kịch bản",
+                    )
+                    script = generate_script_from_prompt(
+                        prompt_text,
+                        topic_hint=topic_hint,
+                        model_name=model_name,
+                    )
+                    project = self.storage.load(job.slug)
+                    project = sync_script_to_project(project, folder, script)
+                    self.storage.save(job.slug, project)
+                else:
+                    project = self.storage.load(job.slug)
+                    project = sync_script_to_project(project, folder, script)
+                    self.storage.save(job.slug, project)
+
+                total = len(script.segments)
+                job.total_beats = total
+                job._progress(
+                    25.0,
+                    "script",
+                    f"Pha 1/3: Hoàn tất kịch bản {total} cảnh",
+                    stage="Tạo kịch bản",
+                    current_beat=total,
+                    total_beats=total,
+                )
+
+                # Pha 2 (25 -> 55%): Sinh giọng VieNeu-TTS trước để nghe thử & tái dùng khi xuất
+                job.token.check()
+                job._progress(
+                    27.0,
+                    "voice",
+                    f"Pha 2/3: Đang sinh giọng đọc cho {total} cảnh",
+                    stage="Sinh giọng đọc",
+                    current_beat=0,
+                    total_beats=total,
+                )
+
+                def _on_voice_sse(ev: dict[str, Any]) -> None:
+                    v_pct = float(ev.get("percent", 0))
+                    pct = round(25.0 + v_pct * 0.30, 1)
+                    job._progress(
+                        pct,
+                        "voice",
+                        str(ev.get("message", "Đang sinh giọng VieNeu-TTS")),
+                        stage="Sinh giọng đọc",
+                        current_beat=int(ev.get("current", 0)),
+                        total_beats=int(ev.get("total", total)),
+                    )
+
+                _, timings = synthesize_core_segments(
+                    script.segments,
+                    folder,
+                    voice_provider=self.voice,
+                    voice_id=voice_id,
+                    on_sse_event=_on_voice_sse,
+                )
+                sync_wavs_to_audio_folder(
+                    [(t.order, Path(t.wav_path)) for t in timings],
+                    folder,
+                )
+                latest_p = self.storage.load(job.slug)
+                latest_p.voice = Voice(file="voice.wav")
+                self.storage.save(job.slug, latest_p)
+
+                core_script_path = folder / "core_script.json"
+                script_dict = script.model_dump(mode="json")
+                for idx_t, t in enumerate(timings):
+                    if idx_t < len(script_dict["segments"]):
+                        seg_d = script_dict["segments"][idx_t]
+                        seg_d["duration"] = round(float(t.duration_s), 2)
+                        seg_d["audio_path"] = f"audio/scene_{t.order:02d}.wav"
+                        seg_d["start_time"] = round(float(t.start_s), 3)
+                        seg_d["end_time"] = round(float(t.end_s), 3)
+                core_script_path.write_text(
+                    json.dumps(script_dict, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                job._progress(
+                    55.0,
+                    "voice",
+                    f"Pha 2/3: Đã sinh xong giọng đọc {total}/{total} cảnh",
+                    stage="Sinh giọng đọc",
+                    current_beat=total,
+                    total_beats=total,
+                )
+
+                # Pha 3 (55 -> 100%): Tự vẽ ảnh 2D Cloudflare Workers AI
+                job.token.check()
+                account_id, api_token, cf_model = resolve_cloudflare_config(
+                    self.storage.workspace_dir
+                )
+                if not account_id or not api_token:
+                    warn_msg = (
+                        "Chưa cấu hình Cloudflare Account ID hoặc API Token. "
+                        "Đã xong kịch bản và giọng đọc; vào Cài đặt để bật tự vẽ ảnh 2D."
+                    )
+                    warnings.append(warn_msg)
+                    job._progress(
+                        100.0,
+                        "done",
+                        warn_msg,
+                        stage="Hoàn tất",
+                        current_beat=total,
+                        total_beats=total,
+                    )
+                    job._finish(
+                        DONE,
+                        output={
+                            "slug": job.slug,
+                            "script": script_dict,
+                            "generated_images": 0,
+                            "total": total,
+                            "missing_cloudflare_key": True,
+                            "warning": warn_msg,
+                            "warnings": warnings,
+                        },
+                    )
+                    return
+
+                images_dir = folder / "images"
+                images_dir.mkdir(parents=True, exist_ok=True)
+                seed = derive_project_seed(job.slug)
+                scene1_ref: Path | None = None
+                generated_images = 0
+
+                for idx_i, seg_d in enumerate(script_dict["segments"], start=1):
+                    job.token.check()
+                    rel_img = f"images/scene-{idx_i:02d}.png"
+                    dest = images_dir / f"scene-{idx_i:02d}.png"
+                    cur_img_rel = str(seg_d.get("image") or "")
+                    existing_f = folder / cur_img_rel if cur_img_rel else dest
+
+                    if not overwrite_images and existing_f.is_file() and cur_img_rel:
+                        if idx_i == 1:
+                            scene1_ref = existing_f
+                        pct = round(55.0 + (idx_i / max(1, total)) * 43.0, 1)
+                        job._progress(
+                            pct,
+                            "images",
+                            f"Pha 3/3: Giữ ảnh có sẵn cảnh {idx_i}/{total}",
+                            stage="Vẽ ảnh 2D",
+                            current_beat=idx_i,
+                            total_beats=total,
+                        )
+                        continue
+
+                    pct_s = round(55.0 + ((idx_i - 1) / max(1, total)) * 43.0, 1)
+                    job._progress(
+                        pct_s,
+                        "images",
+                        f"Pha 3/3: Đang vẽ ảnh cảnh {idx_i}/{total}",
+                        stage="Vẽ ảnh 2D",
+                        current_beat=idx_i,
+                        total_beats=total,
+                    )
+
+                    fallback_ref = images_dir / "scene-01.png"
+                    ref_img = (
+                        (scene1_ref if scene1_ref and scene1_ref.is_file() else fallback_ref)
+                        if idx_i > 1
+                        else None
+                    )
+                    if ref_img is not None and not ref_img.is_file():
+                        ref_img = None
+
+                    raw_prompt = str(seg_d.get("image_prompt") or "").strip()
+                    fallback_ctx = f"{seg_d.get('title') or ''}. {seg_d.get('text') or ''}".strip(
+                        ". "
+                    )
+                    try:
+                        generate_scene_image(
+                            raw_prompt,
+                            dest,
+                            account_id=account_id,
+                            api_token=api_token,
+                            model=cf_model,
+                            seed=seed,
+                            reference_image=ref_img,
+                            economy_mode=economy_mode,
+                            fallback_context=fallback_ctx,
+                        )
+                        generated_images += 1
+                    except CloudflareImageError as exc:
+                        w = f"Vẽ ảnh cảnh {idx_i} lỗi: {exc}"
+                        warnings.append(w)
+                        log.warning(w)
+                        continue
+
+                    latest = self.storage.load(job.slug)
+                    actual_rel = rel_img
+                    if idx_i - 1 < len(latest.scenes):
+                        latest.scenes[idx_i - 1].image = rel_img
+                        self.storage.save(job.slug, latest)
+                        reloaded = self.storage.load(job.slug)
+                        actual_rel = reloaded.scenes[idx_i - 1].image or rel_img
+                        if idx_i == 1:
+                            cand1 = folder / actual_rel
+                            if cand1.is_file():
+                                scene1_ref = cand1
+                    seg_d["image"] = actual_rel
+                    core_script_path.write_text(
+                        json.dumps(script_dict, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+
+                    pct_e = round(55.0 + (idx_i / max(1, total)) * 43.0, 1)
+                    job._progress(
+                        pct_e,
+                        "images",
+                        f"Pha 3/3: Đã vẽ xong cảnh {idx_i}/{total}",
+                        stage="Vẽ ảnh 2D",
+                        current_beat=idx_i,
+                        total_beats=total,
+                    )
+
+                job._progress(
+                    100.0,
+                    "done",
+                    f"Hoàn tất chuẩn bị {total} cảnh (kịch bản, giọng đọc, ảnh 2D)",
+                    stage="Hoàn tất",
+                    current_beat=total,
+                    total_beats=total,
+                )
+                job._finish(
+                    DONE,
+                    output={
+                        "slug": job.slug,
+                        "script": script_dict,
+                        "generated_images": generated_images,
+                        "total": total,
+                        "missing_cloudflare_key": False,
+                        "warnings": warnings,
+                    },
+                )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except GeminiClientError as e:
+            job._finish(FAILED, error=e.message)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Lỗi job hbt_core_prepare: %s", e)
+            job._finish(FAILED, error=str(e) or e.__class__.__name__)
+
+    @staticmethod
+    def _resolve_stickv_stage(
+        pct: float,
+        msg: str,
+        *,
+        total_beats: int | None = None,
+    ) -> tuple[str, int | None, int | None]:
+        """Chuẩn hóa pha tiến độ StickV tiếng Việt và trích chỉ số beat/cụm."""
+        low = (msg or "").lower()
+        cur_b: int | None = None
+        tot_b: int | None = total_beats
+        m = re.search(r"(?:beat|cụm|cảnh)\s+(\d+)\s*/\s*(\d+)", low)
+        if m:
+            cur_b = int(m.group(1))
+            tot_b = int(m.group(2))
+
+        if "giọng" in low or "vieneu" in low or pct < 20.0:
+            return "Sinh giọng VieNeu-TTS", cur_b, tot_b
+        if "căn chỉnh" in low or "kiểm định" in low or "preflight" in low:
+            return "Căn chỉnh & Kiểm định", cur_b, tot_b
+        if "trộn" in low or "lufs" in low or "sfx" in low or pct < 34.0:
+            return "Trộn âm thanh -14 LUFS", cur_b, tot_b
+        if "outro" in low or "watermark" in low or "nối" in low or "hoàn tất" in low or pct >= 85.0:
+            return "Ghép Outro & Hoàn tất", cur_b, tot_b
+        return "Dựng khung hình", cur_b, tot_b
+
+    def submit_stickv_render(self, slug: str, *, preview: bool = False) -> Job:
+        """Đưa job dựng video StickV vào hàng đợi 1 luồng chung kèm đầy đủ metadata."""
+        if self.is_busy(slug):
+            raise Conflict("Dự án StickV đang bận, hãy đợi xong hoặc huỷ")
+        if self._tool_check is not None:
+            self._tool_check()
+        total_beats: int | None = None
+        try:
+            from hbt.stickv.storage import load_stickv_project
+
+            proj = load_stickv_project(self.storage.workspace_dir, slug)
+            total_beats = len(proj.beats[:3] if preview else proj.beats)
+        except Exception:
+            total_beats = None
+
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            preview,
+            None,
+            None,
+            False,
+            kind="stickv",
+            mode="preview" if preview else "final",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
+        )
+        job._progress(
+            2.0,
+            "Sinh giọng VieNeu-TTS",
+            "Đã đưa vào hàng đợi dựng StickV...",
+            stage="Sinh giọng VieNeu-TTS",
+            current_beat=0 if total_beats else None,
+            total_beats=total_beats,
+            percent=2.0,
+            text="Đã đưa vào hàng đợi dựng StickV...",
+        )
+        with self._lock:
+            self._jobs[job.id] = job
+            self._prune()
+        self._pool.submit(self._run, job)
+        return job
+
+    def _run_stickv_render(self, job: Job) -> None:
+        """Thực thi job stickv và ghi chỉ mục vào workspace/studio.db."""
+        from hbt.stickv.render import render_stickv
+        from hbt.stickv.storage import (
+            load_stickv_project,
+            save_stickv_project,
+            stickv_project_dir,
+        )
+
+        def on_progress(pct: float, msg: str) -> None:
+            stage_lbl, cur_b, tot_b = self._resolve_stickv_stage(
+                pct, msg, total_beats=job.total_beats
+            )
+            job._progress(
+                pct,
+                stage_lbl,
+                msg,
+                stage=stage_lbl,
+                current_beat=cur_b,
+                total_beats=tot_b,
+                percent=round(float(pct), 1),
+                text=msg,
+            )
+
+        try:
+            ws = self.storage.workspace_dir
+            assets_dir = ws.parent / "assets"
+            proj = load_stickv_project(ws, job.slug)
+            job.total_beats = len(proj.beats[:3] if job.preview else proj.beats)
+            pdir = stickv_project_dir(ws, job.slug)
+            wm = self.app_settings.load().watermark if self.app_settings is not None else None
+
+            active_voice = self.voice
+            if active_voice is not None:
+                try:
+                    v_status = active_voice.status()
+                    if not getattr(v_status, "ok", False):
+                        log.warning(
+                            "VieNeu-TTS chưa sẵn sàng (%s) -> dùng âm thanh dự phòng cho '%s'",
+                            getattr(v_status, "note", ""),
+                            job.slug,
+                        )
+                        active_voice = None
+                except Exception:
+                    active_voice = None
+
+            res = render_stickv(
+                proj,
+                pdir,
+                library_dir=self.library_dir,
+                assets_dir=assets_dir,
+                brand_dir=self.brand_dir,
+                voice_provider=active_voice,
+                watermark=wm,
+                preview=job.preview,
+                cancel=job.token,
+                on_progress=on_progress,
+            )
+
+            out_path = Path(res["file_path"])
+            video_url = f"/api/stickv/{job.slug}/renders/{out_path.name}"
+            proj = proj.model_copy(
+                update={
+                    "last_render": {
+                        "video_url": video_url,
+                        "duration_sec": res["duration_sec"],
+                        "size_mb": res["size_mb"],
+                        "aspect": res["aspect"],
+                        "preview": job.preview,
+                    }
+                }
+            )
+            save_stickv_project(ws, proj)
+
+            self._upsert_render_index(
+                engine="stickv",
+                slug=job.slug,
+                title=proj.title,
+                video_path=out_path,
+                duration_sec=float(res["duration_sec"] or 0.0),
+            )
+
+            job.stage = "Ghép Outro & Hoàn tất"
+            job.progress = 100.0
+            job._finish(
+                DONE,
+                output={
+                    "slug": job.slug,
+                    "video": video_url,
+                    "duration": res["duration_sec"],
+                    "aspect": res["aspect"],
+                    "preview": job.preview,
+                },
+            )
+        except RenderCancelled:
+            job._finish(CANCELLED)
+        except BaseException as e:  # noqa: BLE001
+            log.exception("Lỗi job stickv: %s", e)
             job._finish(FAILED, error=str(e) or e.__class__.__name__)

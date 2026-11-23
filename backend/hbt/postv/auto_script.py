@@ -168,11 +168,11 @@ def shorten_comment(text: str, max_chars: int = 220) -> str:
 
 def filter_comments(
     comments: Sequence[PostvComment],
-    max_comments: int = 3,
-    max_seconds: float = 100.0,
+    max_comments: int = 30,
+    max_seconds: float = 180.0,
 ) -> list[PostvComment]:
     """Lọc và sắp xếp bình luận theo ưu tiên like, bỏ rác/trùng, giới hạn thời lượng."""
-    max_comments = max(2, min(max_comments, 5))
+    max_comments = max(2, min(max_comments, 30))
     valid: list[PostvComment] = []
     seen_texts: set[str] = set()
 

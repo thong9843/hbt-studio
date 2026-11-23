@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,21 @@ const defaultVoices = {
   ],
 };
 
+const defaultMusic = [
+  {
+    id: 'lo-fi-chill',
+    file: 'kulakovka-lo-fi-chill-620585.mp3',
+    title: 'Lo-Fi Chill',
+    artist: 'Kulakovka',
+    source: 'Pixabay',
+    url: '',
+    license: 'Pixabay Content License',
+    moods: ['lofi', 'chill'],
+    bpm: null,
+    credit: 'Lo-Fi Chill – Kulakovka (Pixabay)',
+  },
+];
+
 function page() {
   return renderWithProviders(
     <Routes>
@@ -53,6 +68,7 @@ describe('PostvQuickPage', () => {
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
@@ -71,17 +87,27 @@ describe('PostvQuickPage', () => {
 
     // Hàng chip tuỳ chọn
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
+      expect(voiceSelect).toHaveAttribute('data-value', 'adam-bua');
+      const bgmSelect = screen.getByRole('combobox', { name: 'Nhạc nền' });
+      expect(bgmSelect).toHaveAttribute('data-value', 'lo-fi-chill');
     });
+    const durationSelect = screen.getByRole('combobox', { name: 'Thời lượng' });
+    expect(durationSelect).toHaveAttribute('data-value', '90');
+    fireEvent.click(durationSelect);
+    expect(screen.getByRole('option', { name: '1m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '1m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2m30s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '3m' })).toBeInTheDocument();
+    fireEvent.keyDown(durationSelect, { key: 'Escape' });
+
     expect(screen.getByText(/Bình luận: Tự động/)).toBeInTheDocument();
-    expect(screen.getByText('75 s')).toBeInTheDocument();
-    expect(screen.getByText('Nhạc: Tự chọn')).toBeInTheDocument();
     expect(screen.getByText('60 fps')).toBeInTheDocument();
     expect(screen.getByText('Outro: Bật')).toBeInTheDocument();
 
-    // Cột trái video gần đây
-    expect(await screen.findByText('Bài cũ Threads')).toBeInTheDocument();
+    // Khu vực Video gần đây đã được chuyển sang Asset Hub
+    expect(screen.queryByText('Video gần đây')).toBeNull();
   });
 
   it('enables submit button upon typing, submits on Enter and sends options', async () => {
@@ -89,13 +115,14 @@ describe('PostvQuickPage', () => {
     const sent = {
       body: null as {
         url?: string;
-        options?: { fps?: number; target_seconds?: number; pick_mode?: string };
+        options?: { fps?: number; target_seconds?: number; pick_mode?: string; music_id?: string };
       } | null,
     };
 
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
@@ -114,6 +141,18 @@ describe('PostvQuickPage', () => {
     const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
     const submitBtn = screen.getByRole('button', { name: 'Tạo video' });
 
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Nhạc nền' })).toHaveAttribute(
+        'data-value',
+        'lo-fi-chill',
+      );
+    });
+
+    // Đổi thời lượng sang 3m (180s)
+    const durationSelect = screen.getByRole('combobox', { name: 'Thời lượng' });
+    await user.click(durationSelect);
+    await user.click(screen.getByRole('option', { name: '3m' }));
+
     // Gõ link vào
     await user.type(textarea, 'https://www.threads.net/@user/post/xyz');
     expect(submitBtn).toBeEnabled();
@@ -126,8 +165,9 @@ describe('PostvQuickPage', () => {
     });
     expect(sent.body?.url).toBe('https://www.threads.net/@user/post/xyz');
     expect(sent.body?.options?.fps).toBe(60);
-    expect(sent.body?.options?.target_seconds).toBe(75);
+    expect(sent.body?.options?.target_seconds).toBe(180);
     expect(sent.body?.options?.pick_mode).toBe('auto');
+    expect(sent.body?.options?.music_id).toBe('lo-fi-chill');
   });
 
   it('detects existing link and shows duplicate dialog, with open existing or force new', async () => {
@@ -421,14 +461,15 @@ describe('PostvQuickPage', () => {
     page();
 
     await waitFor(() => {
-      const select = screen.getByRole('combobox');
-      expect(select).toHaveValue('adam-bua');
+      const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
+      expect(voiceSelect).toHaveAttribute('data-value', 'adam-bua');
     });
-    const voiceSelect = screen.getByRole('combobox');
+    const voiceSelect = screen.getByRole('combobox', { name: 'Giọng' });
 
     // Đổi giọng sang Mai Anh
-    await user.selectOptions(voiceSelect, 'mai-anh');
-    expect(voiceSelect).toHaveValue('mai-anh');
+    await user.click(voiceSelect);
+    await user.click(screen.getByRole('option', { name: 'Mai Anh' }));
+    expect(voiceSelect).toHaveAttribute('data-value', 'mai-anh');
 
     await waitFor(() => {
       expect(settingsSent.body).not.toBeNull();
@@ -440,46 +481,131 @@ describe('PostvQuickPage', () => {
     expect(previewBtn).toBeInTheDocument();
   });
 
-  it('provides three-dot menu on recent video cards with Open, Download and Delete confirmation', async () => {
-    const user = userEvent.setup();
-    let deleteCalled = false;
-
+  it('omits recent videos sidebar because history is centralized in Asset Hub', async () => {
     stubFetch({
       'GET /api/projects': defaultProjects,
       'GET /api/voices': defaultVoices,
       'GET /api/postv/settings': { voice_id: 'adam-bua' },
       'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
       'GET /api/jobs': [],
-      'DELETE /api/postv/bai-cu': () => {
-        deleteCalled = true;
-        return json({ ok: true });
+    });
+
+    page();
+
+    expect(await screen.findByText('Tạo video Threads')).toBeInTheDocument();
+    expect(screen.queryByText('Video gần đây')).toBeNull();
+    expect(screen.queryByText('Bài cũ Threads')).toBeNull();
+  });
+
+  it('shows immediate warning banner when fetched post has fewer than 10 comments', async () => {
+    const user = userEvent.setup();
+    stubFetch({
+      'GET /api/projects': defaultProjects,
+      'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
+      'GET /api/postv/settings': { voice_id: 'adam-bua' },
+      'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
+      'GET /api/jobs': [],
+      'POST /api/postv/auto': () =>
+        json({
+          project_slug: 'postv-low-cmt',
+          job_id: 'job-low-1',
+          existing_slug: null,
+        }),
+    });
+
+    page();
+
+    const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
+    await user.type(textarea, 'https://www.threads.net/@author/post/LOW99');
+    await user.click(screen.getByRole('button', { name: 'Tạo video' }));
+
+    expect(await screen.findByText('Tiến trình tạo video')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+
+    const es = FakeEventSource.instances[0];
+    act(() => {
+      es.emit('progress', {
+        stage: 'pick',
+        status: 'done',
+        progress: 30,
+        message: 'Đã chọn 4/4 bình luận',
+        data: {
+          handle: 'author',
+          snippet: 'Bài viết ít bình luận',
+          picked_count: 4,
+          total_comments: 4,
+          target_seconds: 120,
+          estimated_seconds: 28,
+          low_comments_warning:
+            'Bài viết gốc chỉ có 4 bình luận (< 10), video có thể ngắn hơn mục tiêu.',
+        },
+      });
+    });
+
+    expect(await screen.findByText(/chỉ có 4 bình luận \(< 10\)/i)).toBeInTheDocument();
+  });
+
+  it('shows Step 3 VieNeu voice progress bar and unlock button on 409 lock error', async () => {
+    const user = userEvent.setup();
+    let unlockedSlug = '';
+    stubFetch({
+      'GET /api/projects': defaultProjects,
+      'GET /api/voices': defaultVoices,
+      'GET /api/music': defaultMusic,
+      'GET /api/postv/settings': { voice_id: 'adam-bua' },
+      'GET /api/gd2/voice/preferences': { voice_id: 'adam-bua' },
+      'GET /api/jobs': [],
+      'POST /api/postv/auto': () =>
+        json({
+          project_slug: 'bai-cu',
+          job_id: 'job-voice-prog',
+          existing_slug: null,
+        }),
+      'POST /api/projects/bai-cu/unlock': () => {
+        unlockedSlug = 'bai-cu';
+        return json({ ok: true, slug: 'bai-cu', unlocked: 1 });
       },
     });
 
     page();
 
-    expect(await screen.findByText('Bài cũ Threads')).toBeInTheDocument();
+    const textarea = await screen.findByPlaceholderText('Dán link bài Threads hoặc dán chữ bài…');
+    await user.type(textarea, 'Bài test tiến trình giọng');
+    await user.click(screen.getByRole('button', { name: 'Tạo video' }));
 
-    // Bấm nút ⋮ (ba chấm dọc)
-    const moreBtn = screen.getByTitle('Tuỳ chọn');
-    await user.click(moreBtn);
-
-    // Menu bung ra
-    expect(await screen.findByRole('menuitem', { name: 'Mở' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Tải video' })).toBeInTheDocument();
-    const deleteBtn = screen.getByRole('menuitem', { name: 'Xoá' });
-    expect(deleteBtn).toBeInTheDocument();
-
-    // Bấm Xoá
-    await user.click(deleteBtn);
-
-    // Hộp xác nhận mở ra
-    expect(await screen.findByText('Xoá video này?')).toBeInTheDocument();
-    const confirmDeleteBtn = screen.getByRole('button', { name: 'Xoá' });
-    await user.click(confirmDeleteBtn);
-
-    await waitFor(() => {
-      expect(deleteCalled).toBe(true);
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    const es = FakeEventSource.instances[0];
+    act(() => {
+      es.emit('progress', {
+        stage: 'voice',
+        step: 'voice',
+        status: 'running',
+        progress: 53,
+        current: 2,
+        total: 5,
+        percent: 40,
+        message: 'Đang sinh giọng bình luận 2/5...',
+      });
     });
+
+    expect(
+      await screen.findByRole('progressbar', { name: 'Tiến độ sinh giọng VieNeu' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Đang sinh giọng bình luận 2\/5\.\.\. \(40%\)/)).toBeInTheDocument();
+
+    // Khi gặp lỗi khoá dự án 409, hiện nút Huỷ tác vụ bị kẹt / Mở khoá dự án
+    act(() => {
+      es.emit('end', {
+        status: 'failed',
+        error: 'Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job',
+      });
+    });
+
+    const unlockBtn = await screen.findByRole('button', {
+      name: /Huỷ tác vụ bị kẹt \/ Mở khoá dự án/i,
+    });
+    await user.click(unlockBtn);
+    await waitFor(() => expect(unlockedSlug).toBe('bai-cu'));
   });
 });

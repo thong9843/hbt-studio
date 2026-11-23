@@ -43,7 +43,20 @@ import type {
   ChatDoc,
   ChatProjectDetail,
   ChatProjectSummary,
+  UnifiedRenderItem,
   ChattingJobInfo,
+  HbtCoreAssetsInfo,
+  HbtCoreGeminiModel,
+  HbtCoreRenderResponse,
+  HbtCoreScript,
+  AssetHubCategory,
+  AssetHubItem,
+  OnlineGiphyItem,
+  OnlineGreenMemeItem,
+  OnlinePixabayItem,
+  OnlineTunaItem,
+  PuppetSlotKey,
+  PuppetStatusResponse,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -59,9 +72,10 @@ export const api = {
   listProjects: () => apiGet<ProjectSummary[]>('/projects'),
   getChattingStatus: () =>
     apiGet<{
-      ollama_running: boolean;
+      gemini_configured: boolean;
       model_available: boolean;
       model_name: string;
+      models?: { id: string; name: string }[];
       stickers: Record<string, number>;
       total_stickers: number;
     }>('/chatting/status'),
@@ -72,6 +86,7 @@ export const api = {
     background: string;
     direct_script?: boolean;
     target_duration_s?: number | null;
+    model?: string;
   }) => apiRequest<{ slug: string; job_id: string }>('POST', '/chatting', { json: input }),
   getChattingProject: (slug: string) => apiGet<ChatProjectDetail>(`/chatting/${enc(slug)}`),
   getChattingJob: (slug: string) => apiGet<ChattingJobInfo>(`/chatting/${enc(slug)}/job`),
@@ -82,12 +97,12 @@ export const api = {
       'POST',
       `/chatting/${enc(slug)}/regen`,
     ),
-  renderChattingProject: (slug: string, preview: boolean) =>
+  renderChattingProject: (slug: string, preview: boolean, aspect_mode?: 'fill' | 'fit') =>
     apiRequest<{ job_id: string; slug: string; preview: boolean }>(
       'POST',
       `/chatting/${enc(slug)}/render`,
       {
-        json: { preview },
+        json: { preview, ...(aspect_mode ? { aspect_mode } : {}) },
       },
     ),
   deleteChattingProject: (slug: string) =>
@@ -103,6 +118,15 @@ export const api = {
     apiRequest<PostvParseResult>('POST', '/postv/parse', { json: { text } }),
   fetchThreads: (url: string) =>
     apiRequest<PostvParseResult>('POST', '/postv/fetch-threads', { json: { url } }),
+  unlockProject: (slug: string) =>
+    apiRequest<{ ok: boolean; slug: string; unlocked: number }>(
+      'POST',
+      `/projects/${enc(slug)}/unlock`,
+    ),
+  openPostvFolder: (slug: string) =>
+    apiRequest<{ ok: boolean; path: string }>('POST', `/postv/${enc(slug)}/open-folder`, {
+      json: {},
+    }),
   searchMemes: (q: string, count = 12) =>
     apiGet<MemeEntry[]>(`/memes/search?q=${enc(q)}&count=${count}`),
   listMemeLibrary: () => apiGet<MemeEntry[]>('/memes/library'),
@@ -306,6 +330,8 @@ export const api = {
       json: { voice_id: voiceId },
     }),
   listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
+  listJobs: (opts?: { includeRecent?: boolean }) =>
+    apiGet<ActiveJob[]>(opts?.includeRecent ? '/jobs?include_recent=true' : '/jobs'),
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
   startPostvQuick: (body: {
@@ -341,4 +367,202 @@ export const api = {
   getSensitiveWords: () => apiGet<SensitiveWords>('/settings/sensitive-words'),
   saveSensitiveWords: (words: SensitiveWords) =>
     apiRequest<SensitiveWords>('PUT', '/settings/sensitive-words', { json: words }),
+
+  getHbtCoreModels: () =>
+    apiGet<{ models: HbtCoreGeminiModel[]; default: string }>('/hbt/core/models'),
+  getHbtCoreAssets: (slug?: string) =>
+    apiGet<HbtCoreAssetsInfo>(`/hbt-core/assets${slug ? `?slug=${enc(slug)}` : ''}`),
+  getProjectCoreScript: (slug: string) =>
+    apiGet<{ slug: string; script: HbtCoreScript }>(`/projects/${enc(slug)}/core-script`),
+  checkHbtCoreV1: (script: string | HbtCoreScript) =>
+    apiRequest<{ ok: boolean; script: HbtCoreScript; segments_count: number }>(
+      'POST',
+      '/hbt-core/v1/check',
+      { json: { script } },
+    ),
+  renderHbtCoreV1: (body: {
+    script: string | HbtCoreScript;
+    slug?: string | null;
+    voice_id?: string | null;
+    fps?: number;
+    preview?: boolean;
+    aspect_mode?: 'fill' | 'fit';
+  }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v1/render', { json: body }),
+  promptHbtCoreV2: (body: {
+    prompt: string;
+    topic?: string | null;
+    selectedModel?: string | null;
+    model_name?: string | null;
+    slug?: string | null;
+    voice_id?: string | null;
+    fps?: number;
+    preview?: boolean;
+    aspect_mode?: 'fill' | 'fit';
+    auto_render?: boolean;
+  }) => apiRequest<HbtCoreRenderResponse>('POST', '/hbt-core/v2/prompt', { json: body }),
+  generateHbtCoreImages: (
+    slug: string,
+    body?: { overwrite?: boolean; economy_mode?: boolean; script?: HbtCoreScript },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; job_id: string; total?: number }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/generate-images`,
+      { json: body ?? {} },
+    ),
+  prepareHbtCore: (
+    slug: string,
+    body: {
+      prompt?: string;
+      topic?: string | null;
+      selectedModel?: string | null;
+      script?: HbtCoreScript | null;
+      voice_id?: string | null;
+      economy_mode?: boolean;
+      overwrite_images?: boolean;
+    },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; job_id: string; total?: number }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/prepare`,
+      { json: body },
+    ),
+  generateHbtCoreSceneImage: (
+    slug: string,
+    sceneIndex: number,
+    body?: { image_prompt?: string; economy_mode?: boolean; script?: HbtCoreScript },
+  ) =>
+    apiRequest<{ ok: boolean; slug: string; scene_index: number; image: string; url: string }>(
+      'POST',
+      `/hbt-core/${enc(slug)}/scenes/${sceneIndex}/generate-image`,
+      { json: body ?? {} },
+    ),
+
+  listAssetHub: (category: AssetHubCategory) =>
+    apiGet<{ category: AssetHubCategory; items: AssetHubItem[] }>(`/asset-hub/${enc(category)}`),
+  uploadAssetHub: (
+    category: AssetHubCategory,
+    file: File,
+    animGroup?: 'pose' | 'oneshot' | 'loop',
+  ) => {
+    const form = new FormData();
+    form.set('file', file);
+    if (animGroup && category === 'stickman') {
+      form.set('anim_group', animGroup);
+    }
+    return apiRequest<{ ok: boolean; item: AssetHubItem }>('POST', `/asset-hub/${enc(category)}`, {
+      form,
+    });
+  },
+  deleteAssetHub: (category: AssetHubCategory, filename: string, source?: string) => {
+    const q = source ? `?source=${enc(source)}` : '';
+    return apiRequest<{ ok: boolean; deleted: string }>(
+      'DELETE',
+      `/asset-hub/${enc(category)}/${enc(filename)}${q}`,
+    );
+  },
+  listUnifiedRenders: (engine?: string) =>
+    apiGet<{ items: UnifiedRenderItem[] }>(
+      engine && engine !== 'all' ? `/renders?engine=${enc(engine)}` : '/renders',
+    ),
+  deleteUnifiedRender: (renderId: string) =>
+    apiRequest<{ ok: boolean; deleted: string }>('DELETE', `/renders/${enc(renderId)}`),
+
+  searchOnlineAssets: (category: 'music' | 'sfx' | 'memes' | 'stickers', q: string, source = '') =>
+    apiGet<{
+      items: Record<string, unknown>[];
+      missing_key?: boolean;
+      source?: string;
+      error?: string;
+      cached?: boolean;
+    }>(
+      `/asset-hub/online/search?category=${enc(category)}&q=${enc(q)}${
+        source ? `&source=${enc(source)}` : ''
+      }`,
+    ),
+  searchPixabayOnline: (q: string, kind: 'music' | 'sfx' = 'music') =>
+    apiGet<{ items: OnlinePixabayItem[]; missing_key?: boolean }>(
+      `/asset-hub/online/pixabay?q=${enc(q)}&kind=${enc(kind)}`,
+    ),
+  searchTunaSfxOnline: (q: string) =>
+    apiGet<{ items: OnlineTunaItem[]; missing_key?: boolean; source: string }>(
+      `/asset-hub/online/pixabay?q=${enc(q)}&kind=sfx&source=tuna`,
+    ),
+  importTunaSfxOnline: (body: {
+    item_id: string;
+    title: string;
+    preview_url: string;
+    tags: string[];
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/tuna/import', { json: body }),
+  importPixabayOnline: (body: {
+    item_id: string;
+    title: string;
+    artist: string;
+    download_url: string;
+    kind: 'music' | 'sfx';
+    tags: string[];
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/pixabay/import', { json: body }),
+  importFreesoundOnline: (body: {
+    item_id: string;
+    title: string;
+    artist: string;
+    download_url: string;
+    kind: 'music' | 'sfx';
+    tags: string[];
+    license_url?: string;
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/freesound/import', { json: body }),
+
+  searchGreenMemeOnline: (q: string) =>
+    apiGet<{ items: OnlineGreenMemeItem[] }>(`/asset-hub/online/greenmeme?q=${enc(q)}`),
+  importGreenMemeOnline: (body: {
+    meme_id: string;
+    title: string;
+    video_url: string;
+    poster_url?: string;
+  }) => apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/greenmeme/import', { json: body }),
+
+  searchGiphyOnline: (q: string) =>
+    apiGet<{ items: OnlineGiphyItem[]; missing_key?: boolean }>(
+      `/asset-hub/online/giphy?q=${enc(q)}`,
+    ),
+  importGiphyOnline: (body: { sticker_id: string; title: string; download_url: string }) =>
+    apiRequest<{ ok: boolean }>('POST', '/asset-hub/online/giphy/import', { json: body }),
+
+  importSigStickOnline: (url: string) =>
+    apiRequest<{ ok: boolean; pack_slug: string; count: number }>(
+      'POST',
+      '/asset-hub/online/sigstick/import',
+      { json: { url } },
+    ),
+
+  autoTagMemes: () =>
+    apiRequest<{ ok: boolean; total: number; updated: number }>(
+      'POST',
+      '/asset-hub/memes/auto-tag',
+    ),
+  patchMemeMetadata: (memeId: string, body: { tags?: string[]; topic?: string; title?: string }) =>
+    apiRequest<{ ok: boolean }>('PATCH', `/asset-hub/memes/${enc(memeId)}`, { json: body }),
+
+  removeStickmanBg: (filename: string, source?: string) =>
+    apiRequest<{ ok: boolean; removed: boolean; item: AssetHubItem }>(
+      'POST',
+      `/asset-hub/stickman/${enc(filename)}/remove-bg${source ? `?source=${enc(source)}` : ''}`,
+    ),
+
+  setDefaultStickman: (filename: string) =>
+    apiRequest<{ ok: boolean; item: AssetHubItem }>(
+      'POST',
+      `/asset-hub/stickman/${enc(filename)}/set-default`,
+    ),
+
+  getStickmanPuppetStatus: () => apiGet<PuppetStatusResponse>('/asset-hub/stickman/puppet'),
+  uploadStickmanPuppetSlot: (slot: PuppetSlotKey, file: File) => {
+    const form = new FormData();
+    form.set('file', file);
+    return apiRequest<{
+      ok: boolean;
+      slot: PuppetSlotKey;
+      segmented: boolean;
+      status: PuppetStatusResponse;
+    }>('POST', `/asset-hub/stickman/puppet/${enc(slot)}`, { form });
+  },
 };

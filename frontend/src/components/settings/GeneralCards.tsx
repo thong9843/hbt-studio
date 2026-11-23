@@ -1,5 +1,7 @@
-import type { AppSettings, Fps } from '../../api/types';
+import { Link } from 'react-router-dom';
+import type { AppSettings, CloudflareImageModel, Fps } from '../../api/types';
 import { vi } from '../../i18n/vi';
+import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { Chip } from '../ui/Chip';
 import { Input } from '../ui/Field';
@@ -154,6 +156,181 @@ export function AdvancedModeCard({ value, onChange }: Props) {
         >
           {isAdvanced ? vi.common.yes : vi.common.no}
         </Chip>
+      </div>
+    </Card>
+  );
+}
+
+/** Thẻ Cấu hình Động cơ AI & Thư viện (Gemini API, VieNeu-TTS, Sticker/BGM) trong Settings. */
+export function StudioEnginesCard({ health }: { health: { vieneu?: boolean } | undefined }) {
+  const E = S.studioEnginesCard;
+  const vieneuOk = Boolean(health?.vieneu);
+  return (
+    <Card as="section" aria-label={E.title} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-h2 font-bold">{E.title}</h2>
+        <Link to="/core" className="ui-btn ui-btn-soft ui-btn-sm">
+          {E.openCoreBtn}
+        </Link>
+      </div>
+      <p className="text-small text-muted">{E.help}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5 rounded-inner border border-line bg-soft p-3.5">
+          <p className="text-small font-bold">{E.geminiLabel}</p>
+          <p className="text-tiny text-muted">
+            Hỗ trợ Gemini 3.8 Flash / 3.5 Flash Lite &amp; Chế độ V1 Offline 0-Token
+          </p>
+        </div>
+        <div className="space-y-1.5 rounded-inner border border-line bg-soft p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-small font-bold">{E.vieneuLabel}</p>
+            <Badge tone={vieneuOk ? 'ok' : 'neutral'}>
+              {vieneuOk ? E.vieneuReady : E.vieneuMissing}
+            </Badge>
+          </div>
+          <p className="text-tiny text-muted">{E.stickerPresets}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ApiKeyStatusBadge({ configured }: { configured: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-bold ${
+        configured ? 'bg-tint-grn text-on-tint-grn' : 'bg-soft text-muted'
+      }`}
+    >
+      {configured ? 'Đã cấu hình' : 'Chưa cấu hình'}
+    </span>
+  );
+}
+
+/** Thẻ nhập khóa API cho Kho Tài Nguyên Trực Tuyến (Voicemod Tuna, Freesound, Pixabay, Giphy). */
+export function OnlineApiKeysCard({ value, onChange }: Props) {
+  const hasTuna = (value.voicemod_tuna_api_key ?? '').trim().length > 0;
+  const hasFreesound = (value.freesound_api_key ?? '').trim().length > 0;
+  const hasPixabay = (value.pixabay_api_key ?? '').trim().length > 0;
+  const hasGiphy = (value.giphy_api_key ?? '').trim().length > 0;
+
+  return (
+    <Card as="section" aria-label="API Kho Tài Nguyên Trực Tuyến" className="space-y-4">
+      <div>
+        <h2 className="text-h2 font-bold">API Kho Tài Nguyên Trực Tuyến</h2>
+        <p className="mt-1 text-small text-muted">
+          Tùy chọn điền khóa cá nhân (hoặc đặt trong file <code>.env</code>) để tìm Meme SFX
+          Voicemod Tuna, nhạc nền & SFX Freesound, Giphy Stickers ngay trong Thư viện. Thay đổi có
+          hiệu lực ngay sau khi bấm Lưu.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Voicemod Tuna</span>
+            <ApiKeyStatusBadge configured={hasTuna} />
+          </div>
+          <Input
+            label="VOICEMOD_TUNA_API_KEY (Meme SFX)"
+            type="password"
+            placeholder="Nhập Voicemod Tuna API Key (tùy chọn)..."
+            value={value.voicemod_tuna_api_key ?? ''}
+            onChange={(e) => onChange({ voicemod_tuna_api_key: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Freesound</span>
+            <ApiKeyStatusBadge configured={hasFreesound} />
+          </div>
+          <Input
+            label="FREESOUND_API_KEY (Nhạc nền, Ambience & SFX CC0)"
+            type="password"
+            placeholder="Nhập Freesound API Key (freesound.org/apiv2/apply)..."
+            value={value.freesound_api_key ?? ''}
+            onChange={(e) => onChange({ freesound_api_key: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Pixabay</span>
+            <ApiKeyStatusBadge configured={hasPixabay} />
+          </div>
+          <Input
+            label="PIXABAY_API_KEY (Kho ảnh / media Pixabay)"
+            type="password"
+            placeholder="Nhập Pixabay API Key..."
+            value={value.pixabay_api_key ?? ''}
+            onChange={(e) => onChange({ pixabay_api_key: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-tiny font-bold text-muted">Trạng thái Giphy</span>
+            <ApiKeyStatusBadge configured={hasGiphy} />
+          </div>
+          <Input
+            label="GIPHY_API_KEY (Giphy Stickers)"
+            type="password"
+            placeholder="Nhập Giphy API Key..."
+            value={value.giphy_api_key ?? ''}
+            onChange={(e) => onChange({ giphy_api_key: e.target.value })}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const CF_MODELS: { id: CloudflareImageModel; label: string }[] = [
+  { id: '@cf/black-forest-labs/flux-2-klein-4b', label: S.cloudflareCard.modelKlein },
+  { id: '@cf/black-forest-labs/flux-1-schnell', label: S.cloudflareCard.modelSchnell },
+];
+
+/** Thẻ cấu hình Cloudflare Workers AI (Account ID, API Token, mô hình Flux) cho HBT Core. */
+export function CloudflareAiCard({ value, onChange }: Props) {
+  const C = S.cloudflareCard;
+  const accountId = value.cloudflare_account_id ?? '';
+  const apiToken = value.cloudflare_api_token ?? '';
+  const activeModel: CloudflareImageModel =
+    value.cloudflare_image_model ?? '@cf/black-forest-labs/flux-2-klein-4b';
+  const configured = accountId.trim().length > 0 && apiToken.trim().length > 0;
+
+  return (
+    <Card as="section" aria-label={C.title} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-h2 font-bold">{C.title}</h2>
+        <ApiKeyStatusBadge configured={configured} />
+      </div>
+      <p className="text-small text-muted">{C.help}</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label={C.accountIdLabel}
+          placeholder={C.accountIdPlaceholder}
+          value={accountId}
+          onChange={(e) => onChange({ cloudflare_account_id: e.target.value })}
+        />
+        <Input
+          label={C.apiTokenLabel}
+          type="password"
+          placeholder={C.apiTokenPlaceholder}
+          value={apiToken}
+          onChange={(e) => onChange({ cloudflare_api_token: e.target.value })}
+        />
+      </div>
+      <div className="space-y-2">
+        <p className="ui-label !mb-0">{C.modelLabel}</p>
+        <div role="group" aria-label={C.modelLabel} className="flex flex-wrap gap-2">
+          {CF_MODELS.map((m) => (
+            <Chip
+              key={m.id}
+              selected={activeModel === m.id}
+              onClick={() => onChange({ cloudflare_image_model: m.id })}
+            >
+              {m.label}
+            </Chip>
+          ))}
+        </div>
       </div>
     </Card>
   );

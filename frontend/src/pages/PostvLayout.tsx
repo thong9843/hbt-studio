@@ -80,7 +80,12 @@ function PostvEditorProvider({ initial }: { initial: PostvProject }) {
           <Badge>{t.badge}</Badge>
           <SaveIndicator status={status} error={error} />
         </header>
-        <PostvSteps done={done} />
+        <PostvSteps
+          done={done}
+          onStepClick={() => {
+            void flush();
+          }}
+        />
         <Outlet />
       </main>
     </PostvEditorContext.Provider>

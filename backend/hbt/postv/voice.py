@@ -20,7 +20,7 @@ import wave
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from hbt.pipeline import cancel
 from hbt.postv.models import PostvProject
@@ -422,10 +422,13 @@ def wav_seconds(path: Path) -> float:
 
 
 def join_wavs(
-    parts: Sequence[Path], out: Path, gap: float = GAP_SECONDS
+    parts: Sequence[Path],
+    out: Path,
+    gap: float = GAP_SECONDS,
+    post_gaps: Sequence[float] | None = None,
 ) -> list[tuple[float, float]]:
-    """Nối các WAV cùng định dạng, giữa hai đoạn chèn `gap` giây im lặng. Trả (bắt đầu, kết thúc)
-    của từng đoạn (giây) trong file nối; mốc lấy từ độ dài từng file nên không cần căn chữ."""
+    """Nối các WAV cùng định dạng, giữa hai đoạn chèn khoảng lặng (`post_gaps` cho meme cut-in).
+    Trả (bắt đầu, kết thúc) của từng đoạn (giây) trong file nối."""
     spans: list[tuple[float, float]] = []
     tmp = out.with_name(out.name + ".tmp")
     with wave.open(str(tmp), "wb") as dst:
@@ -439,14 +442,24 @@ def join_wavs(
                 ):  # fmt: skip
                     raise VoiceError("Các đoạn giọng khác định dạng, không nối được")
                 if i > 0:
-                    pad = int(gap * dst.getframerate())
-                    dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
-                    t += pad / dst.getframerate()
+                    seg_gap = (
+                        float(post_gaps[i - 1]) if post_gaps and i - 1 < len(post_gaps) else gap
+                    )
+                    pad = max(0, int(seg_gap * dst.getframerate()))
+                    if pad:
+                        dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
+                        t += pad / dst.getframerate()
                 frames = src.readframes(src.getnframes())
                 dst.writeframes(frames)
                 dur = src.getnframes() / src.getframerate()
             spans.append((round(t, 3), round(t + dur, 3)))
             t += dur
+        if parts and post_gaps and len(post_gaps) >= len(parts):
+            tail_gap = float(post_gaps[len(parts) - 1])
+            if tail_gap > gap:
+                pad = int(tail_gap * dst.getframerate())
+                if pad > 0:
+                    dst.writeframes(b"\x00" * pad * dst.getsampwidth() * dst.getnchannels())
     os.replace(tmp, out)
     return spans
 
@@ -475,6 +488,7 @@ class VoiceResult:
 
 
 Progress = Callable[[float, str, str], None]
+DetailProgress = Callable[[dict[str, Any]], None]
 
 
 def plan_signature(plan: Sequence[VoicePlanItem]) -> str:
@@ -487,6 +501,8 @@ def synthesize_plan(
     provider: VoiceProvider,
     cast: dict[str, str],
     progress: Progress | None = None,
+    post_gaps: Sequence[float] | None = None,
+    on_detail: DetailProgress | None = None,
 ) -> VoiceResult:
     """Sinh (bỏ qua đoạn đã có trong cache) rồi nối thành `voice.wav` ở thư mục dự án.
 
@@ -494,6 +510,21 @@ def synthesize_plan(
     total = len(plan)
     cache = folder / "build" / "voice"
     cache.mkdir(parents=True, exist_ok=True)
+
+    def emit_detail(current: int, msg: str) -> None:
+        if on_detail is None:
+            return
+        safe_total = max(total, 1)
+        cur = min(max(current, 0), safe_total)
+        on_detail(
+            {
+                "step": "voice",
+                "current": cur,
+                "total": safe_total,
+                "percent": round(cur / safe_total * 100),
+                "message": msg,
+            }
+        )
 
     def report(done: int, msg: str) -> None:
         if progress:
@@ -503,25 +534,35 @@ def synthesize_plan(
     todo = [k for k, path in enumerate(paths) if not path.is_file()]
     cached = total - len(todo)
     if cached:
-        report(cached, f"Dùng lại {cached}/{total} đoạn đã có")
+        msg = f"Dùng lại {cached}/{total} đoạn đã có"
+        report(cached, msg)
+        emit_detail(cached, f"Đang đọc đoạn {cached}/{total}...")
     if todo:
         items = [SynthItem(plan[k].text, plan[k].voice_id, paths[k]) for k in todo]
 
         def on_item(i: int, state: str) -> None:
-            n = cached + i + (1 if state == "done" else 0)
+            idx_1 = min(total, cached + i + 1)
             if state == "begin":
-                report(n, f"Đang đọc đoạn {n + 1}/{total}")
+                n = cached + i
+                msg = f"Đang đọc đoạn {n + 1}/{total}"
+                report(n, msg)
+                emit_detail(idx_1, f"Đang đọc đoạn {idx_1}/{total}...")
             else:
-                report(n, f"Xong đoạn {n}/{total}")
+                n = cached + i + 1
+                msg = f"Xong đoạn {n}/{total}"
+                report(n, msg)
+                emit_detail(n, msg)
 
         provider.synthesize_many(items, on_item)
+    elif total:
+        emit_detail(total, f"Xong đoạn {total}/{total}")
     if progress:
         progress(96, "voice", "Đang nối các đoạn")
     out = folder / "voice.wav"
     for old in folder.glob("voice.*"):  # bản cũ khác đuôi (mp3…) không còn đúng
         if old.is_file() and old.name != "voice.wav":
             old.unlink()
-    spans = join_wavs(paths, out)
+    spans = join_wavs(paths, out, post_gaps=post_gaps)
     segments = [
         {"index": p.index, "speaker": p.speaker, "voice_id": p.voice_id, "start": a, "end": b}
         for p, (a, b) in zip(plan, spans, strict=True)

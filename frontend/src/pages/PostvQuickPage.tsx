@@ -2,6 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fileUrl } from '../api/endpoints';
+import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
+import { StudioTopBar } from '../components/studio/StudioTopBar';
+import { WatermarkControl } from '../components/WatermarkControl';
 import type {
   PostvPickComment,
   PostvPickData,
@@ -17,7 +20,6 @@ import {
   FolderIcon,
   GripIcon,
   PlayIcon,
-  PlusIcon,
   StopIcon,
   UploadIcon,
 } from '../components/icons';
@@ -25,10 +27,8 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Chip } from '../components/ui/Chip';
-import { Dialog } from '../components/ui/Dialog';
-import { Menu } from '../components/ui/Menu';
 import { Progress } from '../components/ui/Progress';
-import { Select } from '../components/ui/Select';
+import { StudioSelect } from '../components/ui/StudioSelect';
 import { cx } from '../components/ui/cx';
 import { vi } from '../i18n/vi';
 
@@ -36,12 +36,21 @@ const T = vi.postvQuick;
 
 const STAGE_ORDER: PostvStage[] = ['fetch', 'pick', 'script', 'voice', 'render', 'done'];
 
+const DURATION_CHOICES = [
+  { value: 60, label: T.options.duration60 },
+  { value: 90, label: T.options.duration90 },
+  { value: 120, label: T.options.duration120 },
+  { value: 150, label: T.options.duration150 },
+  { value: 180, label: T.options.duration180 },
+] as const;
+
 interface PickSnippetData {
   handle?: string;
   snippet?: string;
   picked_count?: number;
   total_comments?: number;
   estimated_seconds?: number;
+  low_comments_warning?: string | null;
 }
 
 interface CompletedOutput {
@@ -61,6 +70,7 @@ interface CompletedOutput {
 
 export function PostvQuickPage() {
   const navigate = useNavigate();
+  const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
 
   // Danh sách các dự án để hiện ở cột trái
   const { data: projectsData, refetch: refetchProjects } = useQuery({
@@ -86,17 +96,31 @@ export function PostvQuickPage() {
     queryFn: api.getVoicePreference,
     staleTime: 60_000,
   });
+  const { data: musicList } = useQuery({
+    queryKey: ['music'],
+    queryFn: api.listMusic,
+    staleTime: 60_000,
+  });
 
   // Trạng thái nhập liệu & tuỳ chọn
   const [input, setInput] = useState('');
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null);
-  const [duration, setDuration] = useState<number>(75);
+  const [duration, setDuration] = useState<number>(90);
   const [music, setMusic] = useState<'auto' | 'none'>('auto');
+  const [selectedMusicId, setSelectedMusicId] = useState<string>('');
   const [fps, setFps] = useState<30 | 60>(60);
   const [outro, setOutro] = useState<boolean>(true);
   const [pickMode, setPickMode] = useState<'auto' | 'manual'>(() => {
     return (localStorage.getItem('hbt_postv_pick_mode') as 'auto' | 'manual') || 'auto';
   });
+
+  // Tự động chọn ngẫu nhiên 1 bài BGM mặc định khi mở trang nếu người dùng chưa chọn thủ công
+  useEffect(() => {
+    if (music !== 'none' && !selectedMusicId && musicList && musicList.length > 0) {
+      const idx = Math.floor(Math.random() * musicList.length);
+      setSelectedMusicId(musicList[idx].id);
+    }
+  }, [music, selectedMusicId, musicList]);
 
   // Trạng thái nghe thử giọng
   const [isPlayingSample, setIsPlayingSample] = useState(false);
@@ -161,9 +185,6 @@ export function PostvQuickPage() {
   const [expandedCommentIds, setExpandedCommentIds] = useState<Set<string>>(new Set());
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
-  // Trạng thái xoá video gần đây
-  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
-
   // Tiến trình SSE
   const [currentStage, setCurrentStage] = useState<PostvStage>('fetch');
   const [stageStatuses, setStageStatuses] = useState<
@@ -180,12 +201,17 @@ export function PostvQuickPage() {
   const [stageMessage, setStageMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pickData, setPickData] = useState<PickSnippetData | null>(null);
+  const [lowCommentsWarning, setLowCommentsWarning] = useState<string | null>(null);
+  const [voiceProgress, setVoiceProgress] = useState<{
+    current: number;
+    total: number;
+    percent: number;
+    message: string;
+  } | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const [output, setOutput] = useState<CompletedOutput | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const [copiedPublish, setCopiedPublish] = useState(false);
-
-  // Drawer ngăn kéo cột trái trên màn hình nhỏ (< 1024 px)
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -232,9 +258,43 @@ export function PostvQuickPage() {
           if (payload.message) {
             setStageMessage(payload.message);
           }
+          if (payload.stage === 'voice' || payload.step === 'voice') {
+            const cur = payload.current ?? payload.data?.current;
+            const tot = payload.total ?? payload.data?.total;
+            const pct = payload.percent ?? payload.data?.percent;
+            const msg = payload.data?.message || payload.message || '';
+            if (typeof cur === 'number' || typeof pct === 'number') {
+              setVoiceProgress({
+                current: typeof cur === 'number' ? cur : 0,
+                total: typeof tot === 'number' && tot > 0 ? tot : 1,
+                percent:
+                  typeof pct === 'number'
+                    ? pct
+                    : typeof cur === 'number' && typeof tot === 'number' && tot > 0
+                      ? Math.round((cur / tot) * 100)
+                      : 0,
+                message: msg,
+              });
+            }
+          }
           if (payload.data) {
-            if (payload.stage === 'pick') {
+            if (payload.stage === 'fetch') {
+              const total = payload.data.total_comments;
+              if (payload.data.low_comments_warning) {
+                setLowCommentsWarning(payload.data.low_comments_warning);
+              } else if (typeof total === 'number' && total < 10) {
+                setLowCommentsWarning(T.result.lowCommentsWarning(total));
+              }
+            } else if (payload.stage === 'pick') {
               setPickData(payload.data);
+              const total = payload.data.total_comments;
+              if (payload.data.low_comments_warning) {
+                setLowCommentsWarning(payload.data.low_comments_warning);
+              } else if (typeof total === 'number' && total < 10) {
+                setLowCommentsWarning(T.result.lowCommentsWarning(total));
+              } else if (typeof total === 'number' && total >= 10) {
+                setLowCommentsWarning(null);
+              }
               if (payload.status === 'waiting_pick') {
                 setIsWaitingPick(true);
                 setManualPickData(payload.data as unknown as PostvPickData);
@@ -386,6 +446,10 @@ export function PostvQuickPage() {
       voice_id: selectedVoice,
       target_seconds: duration,
       music,
+      music_id:
+        music !== 'none' && selectedMusicId && selectedMusicId !== 'auto'
+          ? selectedMusicId
+          : undefined,
       fps,
       outro,
       pick_mode: pickMode,
@@ -413,6 +477,8 @@ export function PostvQuickPage() {
         setIsWaitingPick(false);
         setOutput(null);
         setPickData(null);
+        setLowCommentsWarning(null);
+        setVoiceProgress(null);
         setStageStatuses({
           fetch: 'running',
           pick: 'waiting',
@@ -429,6 +495,32 @@ export function PostvQuickPage() {
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Huỷ tác vụ bị kẹt và mở khoá dự án khi gặp lỗi deadlock / 409
+  const isLockedError = Boolean(
+    errorMessage && /đang được dựng|đang sinh giọng|đang bận|\b409\b/i.test(errorMessage),
+  );
+  const unlockTargetSlug = projectSlug || duplicateSlug || postvProjects[0]?.slug || null;
+  const handleUnlockProject = async () => {
+    if (!unlockTargetSlug) return;
+    setIsUnlocking(true);
+    try {
+      await api.unlockProject(unlockTargetSlug);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+      setErrorMessage(null);
+      setIsWaitingPick(false);
+      setJobId(null);
+      setVoiceProgress(null);
+      void refetchProjects();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -468,12 +560,15 @@ export function PostvQuickPage() {
     }
   };
 
-  // Người dùng xác nhận danh sách bình luận đã tự chọn
+  // Người dùng xác nhận danh sách bình luận đã tự chọn (giữ đúng thứ tự kéo thả trong orderedComments)
   const handleConfirmPick = async () => {
     if (!jobId) return;
     setIsSubmitting(true);
     try {
-      const res = await api.submitPostvPick(jobId, checkedCommentIds);
+      const checkedSet = new Set(checkedCommentIds);
+      const orderedIds = orderedComments.filter((c) => checkedSet.has(c.id)).map((c) => c.id);
+      const finalIds = orderedIds.length > 0 ? orderedIds : checkedCommentIds;
+      const res = await api.submitPostvPick(jobId, finalIds);
       setIsWaitingPick(false);
       if (res.job_id && res.job_id !== jobId) {
         setJobId(res.job_id);
@@ -554,6 +649,8 @@ export function PostvQuickPage() {
     setIsWaitingPick(false);
     setOutput(null);
     setPickData(null);
+    setLowCommentsWarning(null);
+    setVoiceProgress(null);
     setErrorMessage(null);
     setDuplicateSlug(null);
     setProgressPct(0);
@@ -581,178 +678,41 @@ export function PostvQuickPage() {
   // Thời gian ước tính còn lại (ETA)
   const remainingEta = Math.max(5, Math.round(((100 - progressPct) / 100) * duration * 0.8));
 
-  // Cột trái: Danh sách Video gần đây
-  const RecentVideosList = (
-    <div className="flex h-full flex-col p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-body font-bold text-ink">{T.recentVideos}</h2>
-        <Button size="sm" tone="brand" onClick={handleReset}>
-          {T.newVideo}
-        </Button>
-      </div>
-
-      <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-        {postvProjects.length === 0 ? (
-          <p className="py-6 text-center text-small text-muted">{T.noRecent}</p>
-        ) : (
-          postvProjects.map((p) => {
-            const hasVideo = Boolean(p.last_final || p.last_render);
-            const isBusy = Boolean(
-              activeJobs?.some((j) => j.slug === p.slug && j.status === 'running'),
-            );
-            return (
-              <div
-                key={p.slug}
-                className={cx(
-                  'group relative flex items-center justify-between rounded-xl border border-line bg-card p-2.5 transition-all hover:border-brand/60 hover:shadow-sm',
-                  projectSlug === p.slug && 'border-brand bg-brand/5',
-                )}
-              >
-                <div
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    navigate(`/postv/${p.slug}`);
-                  }}
-                  className="flex flex-1 cursor-pointer items-center gap-3 min-w-0"
-                >
-                  <div className="relative h-14 w-9 shrink-0 overflow-hidden rounded-md bg-subtle">
-                    <img
-                      src={`/api/projects/${p.slug}/postv/preview.png?w=90`}
-                      alt=""
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-small font-semibold text-ink group-hover:text-brand">
-                      {p.title || p.slug}
-                    </p>
-                    <p className="text-tiny text-muted">{hasVideo ? 'Đã hoàn tất' : 'Bản nháp'}</p>
-                  </div>
-                </div>
-
-                {/* Nút ⋮ mở menu: Mở · Tải video · Xoá */}
-                <div className="shrink-0 pl-1" onClick={(e) => e.stopPropagation()}>
-                  <Menu
-                    label="Tuỳ chọn"
-                    icon={
-                      <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor">
-                        <circle cx="12" cy="5" r="1.5" />
-                        <circle cx="12" cy="12" r="1.5" />
-                        <circle cx="12" cy="19" r="1.5" />
-                      </svg>
-                    }
-                    items={[
-                      {
-                        key: 'open',
-                        label: T.recentMenu.open,
-                        onSelect: () => {
-                          setDrawerOpen(false);
-                          navigate(`/postv/${p.slug}`);
-                        },
-                      },
-                      {
-                        key: 'download',
-                        label: T.recentMenu.download,
-                        disabled: !hasVideo,
-                        onSelect: () => {
-                          window.open(`/api/projects/${p.slug}/postv/video.mp4`, '_blank');
-                        },
-                      },
-                      {
-                        key: 'delete',
-                        label: T.recentMenu.delete,
-                        danger: true,
-                        disabled: isBusy,
-                        reason: isBusy ? T.recentMenu.busy : undefined,
-                        onSelect: () => setDeletingSlug(p.slug),
-                      },
-                    ]}
-                  />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-
   return (
-    <div className="flex min-h-[calc(100vh-64px)] w-full overflow-hidden bg-bg">
-      {/* Cột trái: Hiện thẳng trên desktop (>= 1024px) */}
-      <aside className="hidden w-72 shrink-0 border-r border-line bg-nav lg:block">
-        {RecentVideosList}
-      </aside>
-
-      {/* Nút mở ngăn kéo cột trái trên thiết bị nhỏ (< 1024px) */}
-      <div className="fixed bottom-4 left-4 z-40 lg:hidden">
-        <Button tone="soft" size="sm" onClick={() => setDrawerOpen(true)}>
-          <FolderIcon size={16} />
-          {T.recentVideos}
-        </Button>
-      </div>
-
-      {/* Drawer ngăn kéo di động */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="relative w-80 max-w-[85vw] bg-nav shadow-2xl">{RecentVideosList}</div>
-        </div>
-      )}
-
-      {/* Hộp xác nhận xoá video gần đây */}
-      {deletingSlug && (
-        <Dialog
-          open={true}
-          onClose={() => setDeletingSlug(null)}
-          title={T.recentMenu.deleteConfirmTitle}
-          role="alertdialog"
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button size="sm" tone="soft" onClick={() => setDeletingSlug(null)}>
-                {T.recentMenu.cancel}
-              </Button>
-              <Button
-                size="sm"
-                tone="danger"
-                onClick={async () => {
-                  const slug = deletingSlug;
-                  setDeletingSlug(null);
-                  try {
-                    await api.deletePostvProject(slug);
-                    void refetchProjects();
-                  } catch (e) {
-                    setErrorMessage(String(e));
-                  }
-                }}
-              >
-                {T.recentMenu.confirm}
-              </Button>
-            </div>
-          }
-        >
-          <p className="text-small text-muted">{T.recentMenu.deleteConfirmDesc}</p>
-        </Dialog>
-      )}
-
+    <div className="flex min-h-screen w-full flex-col overflow-hidden bg-bg">
+      <StudioTopBar
+        engineBadge="PostV"
+        exportProps={
+          jobId
+            ? {
+                aspect: '9:16',
+                outroEnabled: outro,
+                onOutroChange: setOutro,
+                showWatermarkControl: true,
+                onExportFinal: () => handleStartAuto(false),
+                finalLabel: isSubmitting ? T.creatingBtn : T.createBtn,
+                disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
+                isSubmitting,
+                isRendering: Boolean(jobId && !isFinished),
+                progressPct,
+                progressStage: stageMessage || currentStage,
+                onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
+              }
+            : undefined
+        }
+      />
       {/* Khu vực giữa chính */}
-      <main className="flex flex-1 flex-col items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-2xl">
+      <main className="flex flex-1 flex-col items-center justify-center p-6 lg:p-8">
+        <div className="w-full max-w-4xl">
           {/* TRƯỜNG HỢP 1: TRẠNG THÁI TRỐNG HOẶC ĐANG NHẬP */}
           {!jobId && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="space-y-5">
               <div className="text-center">
-                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-                  <PlusIcon size={28} />
+                <div className="mb-2 flex justify-center">
+                  <Badge tone="postv">PostV · 60fps</Badge>
                 </div>
-                <h1 className="text-h1 font-extrabold text-ink">{T.greeting}</h1>
-                <p className="mx-auto mt-2 max-w-md text-small text-muted">{T.greetingSub}</p>
+                <h1 className="text-h1 font-bold tracking-tight text-text">{T.greeting}</h1>
+                <p className="mx-auto mt-1.5 max-w-md text-small text-muted">{T.greetingSub}</p>
               </div>
 
               {/* Thông báo trùng link đã tạo */}
@@ -787,15 +747,27 @@ export function PostvQuickPage() {
               {/* Lỗi nếu có */}
               {errorMessage && (
                 <Card className="border-danger/40 bg-danger/5 p-4 text-small text-danger">
-                  <div className="flex items-center gap-2 font-medium">
-                    <AlertIcon size={18} />
-                    <span>{errorMessage}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-3 font-medium">
+                    <div className="flex items-center gap-2">
+                      <AlertIcon size={18} />
+                      <span>{errorMessage}</span>
+                    </div>
+                    {isLockedError && unlockTargetSlug && (
+                      <Button
+                        size="sm"
+                        tone="soft"
+                        disabled={isUnlocking}
+                        onClick={handleUnlockProject}
+                      >
+                        {isUnlocking ? T.progress.unlocking : T.progress.unlock}
+                      </Button>
+                    )}
                   </div>
                 </Card>
               )}
 
               {/* Khung nhập liệu kiểu Chat */}
-              <div className="rounded-2xl border-2 border-line bg-card p-3 shadow-md transition-all focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <div className="rounded-card border-2 border-line bg-card p-3.5 shadow-card transition-all focus-within:border-engine-postv focus-within:ring-2 focus-within:ring-engine-postv/20">
                 <textarea
                   ref={textareaRef}
                   value={input}
@@ -830,26 +802,24 @@ export function PostvQuickPage() {
                   </Chip>
 
                   {/* Dropdown Giọng (VieNeu) & Nút ▶ nghe thử */}
-                  <div className="flex items-center gap-1.5 rounded-full border border-line bg-card pl-3 pr-1.5 py-0.5 text-tiny text-ink shadow-sm">
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
                     <span className="shrink-0">🎙️ {T.voice.label}:</span>
-                    <Select
+                    <StudioSelect
                       aria-label={T.voice.label}
                       variant="compact"
                       autoWidth
                       value={selectedVoice || ''}
-                      onChange={(e) => handleVoiceChange(e.target.value)}
-                      className="border-0 bg-transparent min-h-[28px] max-w-[140px] truncate"
-                    >
-                      {voiceList?.voices && voiceList.voices.length > 0 ? (
-                        voiceList.voices.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.label || v.id}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">{T.voice.defaultOption}</option>
-                      )}
-                    </Select>
+                      onChange={(val) => handleVoiceChange(val)}
+                      triggerClassName="border-0 bg-transparent min-h-[28px] max-w-[180px]"
+                      options={
+                        voiceList?.voices && voiceList.voices.length > 0
+                          ? voiceList.voices.map((v) => ({
+                              value: v.id,
+                              label: (v.label || v.id).split(/\s*[–—-]\s*/)[0].trim(),
+                            }))
+                          : [{ value: '', label: T.voice.defaultOption }]
+                      }
+                    />
                     {selectedVoice && (
                       <button
                         type="button"
@@ -857,7 +827,7 @@ export function PostvQuickPage() {
                         onClick={handleToggleSample}
                         className={cx(
                           'ml-0.5 rounded-full p-1 text-muted hover:text-brand transition-colors',
-                          isPlayingSample && 'text-brand animate-pulse',
+                          isPlayingSample && 'text-brand',
                         )}
                       >
                         {isPlayingSample ? <StopIcon size={12} /> : <PlayIcon size={12} />}
@@ -865,32 +835,48 @@ export function PostvQuickPage() {
                     )}
                   </div>
 
-                  {/* Độ dài */}
-                  <div className="flex items-center gap-1 rounded-full bg-subtle p-0.5">
-                    {[60, 75, 90].map((sec) => (
-                      <button
-                        key={sec}
-                        type="button"
-                        onClick={() => setDuration(sec)}
-                        className={cx(
-                          'rounded-full px-2.5 py-0.5 text-tiny font-semibold transition-all',
-                          duration === sec
-                            ? 'bg-card text-ink shadow-sm'
-                            : 'text-muted hover:text-ink',
-                        )}
-                      >
-                        {sec} s
-                      </button>
-                    ))}
+                  {/* Dropdown Thời lượng (1m - 3m) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
+                    <span className="shrink-0">⏱️ {T.options.duration}:</span>
+                    <StudioSelect
+                      aria-label={T.options.duration}
+                      variant="compact"
+                      autoWidth
+                      value={String(duration)}
+                      onChange={(val) => setDuration(Number(val))}
+                      triggerClassName="border-0 bg-transparent min-h-[28px]"
+                      options={DURATION_CHOICES.map((opt) => ({
+                        value: String(opt.value),
+                        label: opt.label,
+                      }))}
+                    />
                   </div>
 
-                  {/* Nhạc */}
-                  <Chip
-                    selected={music === 'auto'}
-                    onClick={() => setMusic((m) => (m === 'auto' ? 'none' : 'auto'))}
-                  >
-                    {music === 'auto' ? T.options.musicAuto : T.options.musicNone}
-                  </Chip>
+                  {/* Nhạc nền BGM (mặc định tự chọn 1 bài từ library/music/ + Playlist acrossfade) */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface-card pl-3 pr-1.5 py-0.5 text-tiny text-text shadow-sm">
+                    <span className="shrink-0">🎵 {T.options.musicLabel}:</span>
+                    <StudioSelect
+                      aria-label={T.options.musicLabel}
+                      variant="compact"
+                      autoWidth
+                      value={music === 'none' ? 'none' : selectedMusicId || 'auto'}
+                      onChange={(val) => {
+                        if (val === 'none') {
+                          setMusic('none');
+                        } else {
+                          setMusic('auto');
+                          setSelectedMusicId(val);
+                        }
+                      }}
+                      triggerClassName="border-0 bg-transparent min-h-[28px] min-w-[140px] max-w-[220px]"
+                      options={[
+                        ...(musicList && musicList.length > 0
+                          ? musicList.map((m) => ({ value: m.id, label: m.title }))
+                          : [{ value: 'auto', label: T.options.musicAuto }]),
+                        { value: 'none', label: T.options.musicNone },
+                      ]}
+                    />
+                  </div>
 
                   {/* 60 fps */}
                   <Chip selected={fps === 60} onClick={() => setFps((f) => (f === 60 ? 30 : 60))}>
@@ -904,8 +890,9 @@ export function PostvQuickPage() {
                 </div>
               </div>
 
-              {/* Nút Tạo Video chính */}
-              <div className="flex justify-end">
+              {/* Watermark bản quyền & Nút Tạo Video chính */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <WatermarkControl />
                 <Button
                   size="lg"
                   tone="brand"
@@ -969,6 +956,16 @@ export function PostvQuickPage() {
                 </div>
               </div>
 
+              {/* Cảnh báo khi bài viết gốc có dưới 10 bình luận */}
+              {(lowCommentsWarning || orderedComments.length < 10) && (
+                <div className="mb-4 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-tiny font-medium text-accent">
+                  <AlertIcon size={16} className="shrink-0 text-accent" />
+                  <span>
+                    {lowCommentsWarning || T.result.lowCommentsWarning(orderedComments.length)}
+                  </span>
+                </div>
+              )}
+
               {/* Danh sách TẤT CẢ bình luận */}
               <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
                 {orderedComments.map((c, index) => {
@@ -984,6 +981,7 @@ export function PostvQuickPage() {
                       onDrop={(e) => handleDrop(e, index)}
                       className={cx(
                         'group flex items-start gap-3 rounded-xl border p-3 transition-all',
+                        c.parent && 'ml-6 border-l-2 border-l-brand/50',
                         isChecked ? 'border-line bg-card' : 'border-line/60 bg-card/50',
                         hasReason && 'opacity-60 bg-subtle/30 border-dashed',
                       )}
@@ -1025,6 +1023,7 @@ export function PostvQuickPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-small text-ink">@{c.handle}</span>
+                          {c.parent && <Badge tone="neutral">{T.manualPick.replyBadge}</Badge>}
                           {c.likes != null && c.likes > 0 && (
                             <span className="text-tiny text-muted">
                               ❤️ {T.manualPick.likes(c.likes)}
@@ -1153,6 +1152,20 @@ export function PostvQuickPage() {
                             </div>
                           )}
 
+                          {/* Thanh tiến trình sinh giọng VieNeu Bước 3 */}
+                          {stg === 'voice' && isCurrent && (
+                            <div className="mt-2 space-y-1">
+                              <Progress
+                                value={voiceProgress?.percent ?? 0}
+                                label="Tiến độ sinh giọng VieNeu"
+                              />
+                              <p className="text-tiny font-medium text-brand">
+                                {voiceProgress?.message || stageMessage || 'Đang sinh giọng…'} (
+                                {voiceProgress?.percent ?? 0}%)
+                              </p>
+                            </div>
+                          )}
+
                           {/* Thanh % ở bước dựng render */}
                           {stg === 'render' && isCurrent && (
                             <div className="mt-2">
@@ -1170,10 +1183,30 @@ export function PostvQuickPage() {
                   <p className="mt-4 text-center text-tiny text-muted">{stageMessage}</p>
                 )}
 
+                {/* Cảnh báo rõ nếu bài viết gốc có quá ít bình luận (< 10) */}
+                {lowCommentsWarning && !errorMessage && (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-tiny font-medium text-accent">
+                    <AlertIcon size={16} className="shrink-0 text-accent" />
+                    <span>{lowCommentsWarning}</span>
+                  </div>
+                )}
+
                 {/* Báo lỗi nếu có */}
                 {errorMessage && (
                   <div className="mt-4 rounded-xl border border-danger/40 bg-danger/5 p-3 text-small text-danger">
                     <p className="font-semibold">{errorMessage}</p>
+                    {isLockedError && unlockTargetSlug && (
+                      <div className="mt-2">
+                        <Button
+                          size="sm"
+                          tone="soft"
+                          disabled={isUnlocking}
+                          onClick={handleUnlockProject}
+                        >
+                          {isUnlocking ? T.progress.unlocking : T.progress.unlock}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1207,25 +1240,34 @@ export function PostvQuickPage() {
                     Math.round(output.duration ?? 0),
                   )}
                 </p>
-                {/* Cảnh báo nếu thời lượng thực tế hụt so với mục tiêu */}
+                {/* Cảnh báo nếu thời lượng thực tế hụt so với mục tiêu hoặc ít bình luận (< 10) */}
                 {(output.warning ||
+                  lowCommentsWarning ||
+                  (output.total_comments !== undefined && output.total_comments < 10) ||
                   (output.target_seconds &&
                     (output.duration ?? 0) < output.target_seconds - 5)) && (
                   <div className="mx-auto mt-2 flex max-w-md items-center justify-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-tiny font-medium text-accent">
                     <AlertIcon size={16} className="text-accent shrink-0" />
                     <span>
                       {output.warning ||
-                        T.result.durationWarning?.(
-                          output.target_seconds ?? 75,
-                          Math.round(output.duration ?? 0),
-                        )}
+                        lowCommentsWarning ||
+                        (output.total_comments !== undefined && output.total_comments < 10
+                          ? T.result.lowCommentsWarning(output.total_comments)
+                          : T.result.durationWarning?.(
+                              output.target_seconds ?? 75,
+                              Math.round(output.duration ?? 0),
+                            ))}
                     </span>
                   </div>
                 )}
               </div>
 
-              {/* Trình phát video 9:16 */}
-              <div className="mx-auto max-w-[360px] overflow-hidden rounded-2xl border border-line bg-black shadow-2xl">
+              {/* Trình phát video 9:16 nhỏ gọn đặt trung tâm */}
+              <div className="mb-2 flex justify-center">
+                <SafeZoneToolbar platform={safeZone} onChange={setSafeZone} />
+              </div>
+              <div className="relative mx-auto w-full max-w-[240px] sm:max-w-[260px] overflow-hidden rounded-2xl border border-line bg-black shadow-xl">
+                <SafeZoneOverlay platform={safeZone} />
                 {output.video ? (
                   <video
                     src={fileUrl(output.video)}
@@ -1240,18 +1282,46 @@ export function PostvQuickPage() {
                 )}
               </div>
 
-              {/* Các nút hành động chính */}
+              {/* Các nút thao tác chính: Tải video, Mở thư mục, Render lại */}
               <div className="space-y-3">
-                {output.video && (
-                  <a
-                    href={fileUrl(output.video)}
-                    download
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-body font-bold text-ink shadow-md transition-all hover:brightness-105 active:scale-[0.99]"
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  {output.video && (
+                    <a
+                      href={fileUrl(output.video)}
+                      download
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-small font-bold text-ink shadow-md transition-all hover:brightness-105 active:scale-[0.99]"
+                    >
+                      <DownloadIcon size={18} />
+                      {T.result.downloadVideo}
+                    </a>
+                  )}
+                  {(output.project_slug || projectSlug) && (
+                    <Button
+                      size="md"
+                      tone="soft"
+                      onClick={() => {
+                        const targetSlug = output.project_slug || projectSlug;
+                        if (targetSlug) {
+                          void api
+                            .openPostvFolder(targetSlug)
+                            .catch((e) => setErrorMessage(String(e)));
+                        }
+                      }}
+                    >
+                      <FolderIcon size={16} />
+                      {T.result.openFolder}
+                    </Button>
+                  )}
+                  <Button
+                    size="md"
+                    tone="soft"
+                    disabled={isSubmitting || !submittedInput.trim()}
+                    onClick={() => void handleStartAuto(true)}
                   >
-                    <DownloadIcon size={20} />
-                    {T.result.downloadVideo}
-                  </a>
-                )}
+                    <PlayIcon size={16} />
+                    {T.result.reRender}
+                  </Button>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {output.publish && (

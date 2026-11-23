@@ -152,7 +152,7 @@ describe('VieNeuCard — giọng VieNeu cho HBT', () => {
   it('warns "Sẽ thay giọng hiện có" when a voice file already exists', async () => {
     open(info({ voice_id: 'Adam bựa', has_file: true, file: 'voice.mp3' }));
     expect(await screen.findByText('Sẽ thay giọng hiện có')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Tạo lại giọng' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tạo lại giọng' })).toBeInTheDocument();
   });
 
   it('tells when the text changed after the voice was made (no auto regenerate)', async () => {

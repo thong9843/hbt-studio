@@ -1355,3 +1355,37 @@ Mỗi tin nhắn trải qua các pha thời gian chuẩn:
   - Header: Thanh đỉnh 120 px với avatar đối phương, chấm xanh Active `#31A24C`, trạng thái "Đang hoạt động", cùng bộ icon gọi thoại, gọi video và xem thông tin chuẩn màu `#0084FF`.
   - Grouped bubble: Bo góc bất đối xứng (các tin nhắn liền kề cùng người gửi thu hẹp bán kính góc tiếp giáp về 8 px). Nền tin nhắn đối phương xám `#E4E6EB`, nền tin nhắn gửi đi xanh Messenger `#0084FF`. Avatar bên trái chỉ hiển thị ở tin nhắn cuối cùng trong nhóm.
 
+### 15.12 Chuyển đổi Chatting từ Ollama sang Gemini API (Mốc v2.2.0)
+
+- **Shared LLM (`hbt/shared/llm/__init__.py`):** Tái sử dụng `gemini_client.py` (`GEMINI_API_KEY`, fallback `MODELS`) qua `generate_structured_json()` với `responseMimeType: "application/json"`.
+- **Loại bỏ Ollama:** Xóa `OllamaClient` (`127.0.0.1:11434`, `qwen2.5:3b-instruct`, `keep_alive: 0`) thay bằng `GeminiChatClient`; `GET /api/chatting/status` trả về `gemini_configured`; giữ nguyên `sanitize_chat_raw` và `CHATTING_FAKE_LLM=1`.
+
+### 15.13 HBT Signature UI, Tự động 9:16, Watermark bản quyền & Kho Video hợp nhất (Mốc v4.0.0)
+
+- **Giao diện HBT Signature (`tokens.css`, `ui.css`, `HomePage.tsx`):** Bảng màu 4 sắc thái nhận diện thương hiệu Đen Carbon (`#0B0D12` / `#131720`), Trắng Tinh Khôi (`#FFFFFF` / `#F8FAFC`), Đỏ HBT Chủ Đạo (`#D9232E` $\to$ `#B91C1C`) và Vàng HBT Điểm Nhấn (`#FACC15` $\to$ `#F59E0B`, chữ `#0B0D12`); 3 thẻ Bento Động cơ trên Trang chủ (HBT Core Đỏ-Đen, PostV Trắng-Đỏ-Đen, Chatting Vàng-Đen).
+- **Tự động hóa 9:16 theo động cơ (`shared/pipeline/aspect.py`):** Loại bỏ công tắc Fill/Fit thủ công trên giao diện; áp cứng `HBT Core = fill` (full-bleed 1080×1920) và `PostV / Chatting = fit` (Smart Fit Blur `boxblur=40:5` giữ trọn khung hình gốc).
+- **Watermark bản quyền (`shared/pipeline/watermark.py`, `WatermarkControl.tsx`):** Vẽ lớp PNG 1080×1920 trong suốt bằng Pillow với bóng đổ mềm (`mode`: `both` / `text` / `logo`, mặc định `@HayBietTuot` + `brand/hbt-logo-mark.png`, góc `top-right` trong vùng an toàn Safe-Zone, `opacity: 0.35`, tự động ẩn ở 4 giây outro cuối), lưu trong `workspace/settings/app.json` và nối vào cả 3 động cơ (`core/render.py`, `postv/render.py`, `chatting/render.py`).
+- **Hợp nhất Kho Video đã xuất & Tinh gọn `/library` (`api/asset_hub.py`, `media_index.py`, `HomePage.tsx`, `AssetHubPage.tsx`):** Quét hợp nhất mọi thành phẩm `.mp4` cùng `publish.txt` từ cả 3 động cơ hiển thị trực tiếp tại mục **Video đã xuất gần đây** trên Trang chủ (`/`) kèm bộ lọc động cơ và Modal 9:16 Player (Xem video, Sao chép `publish.txt` 1 chạm, Tải `.mp4`, Xóa có xác nhận); trang `/library` giữ đúng 4 tab nguyên liệu đầu vào (`Nhạc nền`, `Video nền Gameplay`, `Sticker & Meme`, `Logo Watermark`).
+
+### 15.14 Creator Workstation v5.0, Chatting iOS, Watermark `bottom-right` & Kho Trực Tuyến (Mốc v5.0.0)
+
+- **Giao diện Creator Workstation v5.0 (`tokens.css`, `Sidebar.tsx`, `HomePage.tsx`, `PhonePreviewStage.tsx`):** Hệ thống Dual-Theme Daylight Studio & Midnight Aurora, màu định danh 3 động cơ, `QuickCreateDrawer`, `GlobalJobDock` (SSE toàn cục), khung `main` full-width và `PhonePreviewStage` Xanh Chàm Hoàng Gia.
+- **Watermark trong suốt vùng an toàn dưới (`watermark.py`, `WatermarkControl.tsx`):** Mặc định `bottom-right` (cách đáy `260px`, lề phải `48px`), không nền hộp, đồng bộ lớp phủ xem trước trực tiếp trên `PhonePreviewStage`.
+- **Chatting iOS (`templates/messenger_ios.html`, `instagram_ios.html`, `draw.py`, `timeline.py`, `llm.py`):** 2 theme iOS (`messenger`, `instagram`, tương thích ngược `zalo`), phân trang Fill & Reset không khoảng trắng thừa, siết tối đa 3 meme/video cách nhau $\ge 3$ tin và thời lượng linh hoạt `< 5.0s`.
+- **Kho Tài nguyên Trực tuyến & Smart Meme Tagging (`shared/online_sources/`, `AssetHubPage.tsx`, `OnlineAssetDrawer.tsx`):** Tìm & tải Pixabay Music/SFX, GreenScreenMemes, Giphy Stickers & SigStick Pack; tự gắn `tags`/`topic` cho meme và chọn `meme_id` khớp ngữ cảnh.
+
+### 16. StickV — Động cơ Người que 2D/2.5D & Nâng cấp v6.1 (Mốc v6.1.0)
+
+- **Kiến trúc & Tái sử dụng (`backend/hbt/stickv/`, `api/stickv.py`):** Dùng chung `shared/llm` (mặc định `gemini-3.1-flash-lite`, 500 RPD, chia lô chương cho video 5–15 phút), `shared/tts_client.py` (VieNeu-TTS batch, mặc định `"Thanh Bình"`, tự ánh xạ giọng khả dụng từ `list_voices()`), `shared/ffmpeg_utils.py` (`FFMPEG_RESOURCE_CLAMP`, `FFMPEG_ENCODE_CLAMP`), `core/audio.py` (`build_topic_bgm_playlist`), `shared/pipeline/watermark.py`, `pipeline/audio.py` (`build_outro_audio`) và `workspace/studio.db`.
+- **3 Chế độ Kịch bản (`StickvPage.tsx`, `stickv/llm.py`):** (1) Tạo tự động Gemini API cấu trúc 5 chặng, (2) Dán JSON từ Web Gemini Pro (0 Token + Copy Prompt Đạo diễn), (3) Dán lời thoại có sẵn (tự tách beat + gắn pose/bảng).
+- **Sân khấu & Chất lượng v6.1 (`stage.py`, `render.py`, `poses_init.py`):** Hỗ trợ `9:16` (`1080×1920`) và `16:9` (`1920×1080`), 2 theme (`#FAF7F0` / `#111827`), bảng minh họa co giãn theo nội dung (`bullets`, `big_number`, `comparison` có huy hiệu `VS`, `flow_steps`, `takeaway`), phụ đề Karaoke `#FFD43B` vùng giữa, tách nền trắng 4 cạnh biên tự động (`remove_white_background`), quét động toàn bộ pose mới (`GET /api/stickv/poses`), Video Pose `.mp4`/`.webm`/`.mov` khớp thời lượng lời thoại, và **Outro 4s HBT** (`xfade` + `acrossfade` 0.5s; nền `#B22228` cho `16:9`).
+- **Voicemod Tuna Meme SFX & Tìm kiếm Online Thống nhất (`shared/online_sources/tuna_sfx.py`, `asset_hub.py`, `OnlineAssetDrawer.tsx`):** Cổng `GET /api/asset-hub/online/search` kèm In-Memory TTL Cache 10 phút, timeout 4.5s/5s, mặc định `tuna` cho SFX (chuẩn hóa `-16 LUFS` khi tải về `library/sfx/`), thanh Search Online đồng bộ giữa Nhạc nền, SFX và Meme/Sticker.
+
+### 17. Tối ưu Nhịp đọc StickV & Đồng bộ 4 Động cơ vào `studio.db` (Mốc v6.1.1)
+
+- **Nhịp đọc tự nhiên & khóa Karaoke (`stickv/audio.py`, `models.py`, `llm.py`, `render.py`):** Tách câu con trong beat (`split_beat_sentences`), ghép khoảng lặng `0.10s` đầu beat, `0.30s` giữa các câu và `0.25s`/`0.45s` cuối beat (nhân theo `pause_scale`); dùng `align_silence()` khóa phụ đề Karaoke và `extract_wav_rms_envelope()` gọn trong vùng nói thực tế.
+- **Đồng bộ 4 động cơ vào `workspace/studio.db` (`shared/db/media_index.py`, `main.py`, `jobs.py`, `api/asset_hub.py`, `HomePage.tsx`):** `sync_renders_from_disk()` quét đệ quy cả 4 nguồn (`workspace/projects/*/renders/`, `workspace/chatting/*/renders/`, `workspace/stickv/*/renders/`, `assets/renders/`) với đường dẫn POSIX tương đối, tự khử trùng lặp `UNIQUE(file_path)` khi `upsert_render`, chạy tự động trong `lifespan` của FastAPI và ngay sau mỗi job render ở cả 4 động cơ.
+
+
+
+

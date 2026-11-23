@@ -32,8 +32,16 @@ class Settings:
     whisper_model: str
     whisper_device: str
     default_fps: int
-    chatting_model: str = "qwen2.5:3b-instruct"
+    chatting_model: str = "gemini-3.8-flash"
     models_dir: Path = REPO_ROOT / "models"  # model Whisper tải về đây (đã ignore)
+    assets_dir: Path = (
+        REPO_ROOT / "assets"
+    )  # kho tài nguyên Asset Hub (stickers, memes, backgrounds, renders)
+    freesound_api_key: str = ""
+    voicemod_tuna_api_key: str = ""
+    cloudflare_account_id: str = ""
+    cloudflare_api_token: str = ""
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-2-klein-4b"
 
 
 WHISPER_MODELS = ("auto", "small", "medium", "large-v3")
@@ -64,8 +72,16 @@ def load_settings(env_file: Path | None = None) -> Settings:
         whisper_model=model,
         whisper_device=device,
         default_fps=fps,
-        chatting_model=env.get("CHATTING_MODEL", "qwen2.5:3b-instruct"),
+        chatting_model=env.get("CHATTING_MODEL", "gemini-3.8-flash"),
         models_dir=path("MODELS_DIR", "./models"),
+        assets_dir=path("ASSETS_DIR", "./assets"),
+        freesound_api_key=env.get("FREESOUND_API_KEY", ""),
+        voicemod_tuna_api_key=env.get("VOICEMOD_TUNA_API_KEY", ""),
+        cloudflare_account_id=env.get("CLOUDFLARE_ACCOUNT_ID", ""),
+        cloudflare_api_token=env.get("CLOUDFLARE_API_TOKEN", ""),
+        cloudflare_image_model=env.get(
+            "CLOUDFLARE_IMAGE_MODEL", "@cf/black-forest-labs/flux-2-klein-4b"
+        ),
     )
 
 
@@ -76,5 +92,11 @@ _KEYS = (
     "WHISPER_DEVICE",
     "DEFAULT_FPS",
     "MODELS_DIR",
+    "ASSETS_DIR",
     "CHATTING_MODEL",
+    "FREESOUND_API_KEY",
+    "VOICEMOD_TUNA_API_KEY",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_IMAGE_MODEL",
 )

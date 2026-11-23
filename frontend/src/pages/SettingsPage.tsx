@@ -8,8 +8,11 @@ import { ErrorNote } from '../components/ErrorNote';
 import { LeaveGuard } from '../components/settings/LeaveGuard';
 import {
   AdvancedModeCard,
+  CloudflareAiCard,
   FpsCard,
   HEX,
+  OnlineApiKeysCard,
+  StudioEnginesCard,
   ThemeCard,
   WhisperCard,
 } from '../components/settings/GeneralCards';
@@ -96,6 +99,9 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         <FpsCard value={value} onChange={change} />
         <ThemeCard value={value} onChange={change} />
       </div>
+      <StudioEnginesCard health={health.data} />
+      <CloudflareAiCard value={value} onChange={change} />
+      <OnlineApiKeysCard value={value} onChange={change} />
       <AdvancedModeCard value={value} onChange={change} />
       <WhisperCard value={value} onChange={change} health={health.data} />
       <WordsCard
@@ -145,16 +151,42 @@ export function SettingsPage() {
   }, [app.data, words.data]);
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 px-6 py-8">
-      <h1 className="text-h1 font-extrabold uppercase">{S.title}</h1>
-      <ErrorNote error={app.error ?? words.error} />
-      {!ready && !app.error && !words.error && (
-        <div role="status" aria-label={vi.common.loading} className="space-y-4">
-          <Skeleton height={96} />
-          <Skeleton height={160} />
+    <main className="mx-auto max-w-[940px] space-y-6 px-6 py-8">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+        <div>
+          <h1 className="text-h1 font-bold tracking-tight text-text uppercase">{S.title}</h1>
+          <p className="mt-1 text-small text-muted">
+            Quản lý tốc độ khung hình, khóa API trực tuyến, mô hình Whisper và bộ lọc từ nhạy cảm.
+          </p>
         </div>
-      )}
-      {ready && app.data && words.data && <SettingsForm app={app.data} words={words.data} />}
+      </header>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[190px_1fr]">
+        <aside aria-label="Danh mục cài đặt" className="space-y-1">
+          <div className="rounded-card border border-line bg-card p-2 text-tiny font-bold text-text-2">
+            <p className="px-2.5 py-1.5 text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Danh mục
+            </p>
+            <p className="rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-[var(--on-accent-soft)]">
+              Khung hình & Giao diện
+            </p>
+            <p className="px-2.5 py-1.5 text-muted">Động cơ & Phần cứng</p>
+            <p className="px-2.5 py-1.5 text-muted">API Keys Online</p>
+            <p className="px-2.5 py-1.5 text-muted">Whisper & Từ nhạy cảm</p>
+          </div>
+        </aside>
+
+        <div className="min-w-0 max-w-[700px] space-y-4">
+          <ErrorNote error={app.error ?? words.error} />
+          {!ready && !app.error && !words.error && (
+            <div role="status" aria-label={vi.common.loading} className="space-y-4">
+              <Skeleton height={96} />
+              <Skeleton height={160} />
+            </div>
+          )}
+          {ready && app.data && words.data && <SettingsForm app={app.data} words={words.data} />}
+        </div>
+      </div>
     </main>
   );
 }

@@ -36,6 +36,10 @@ class Message(BaseModel):
     display_text: str | None = None
     spoken_text: str | None = None
     sticker: str | None = None
+    meme_id: str | None = None
+    media_type: Literal["none", "image", "video"] = "none"
+    media_path: str | None = None
+    media_hint: str | None = None
 
     @model_validator(mode="after")
     def populate_display_and_spoken(self) -> Message:
@@ -69,9 +73,21 @@ class BackgroundInfo(BaseModel):
 class ChatDoc(BaseModel):
     hbt_chat: Literal[1] = 1
     title: str = Field(min_length=1, max_length=200)
-    platform: Literal["messenger", "zalo"] = "messenger"
+    platform: Literal["messenger", "instagram"] = "messenger"
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def normalize_platform(cls, v: object) -> str:
+        s = str(v or "messenger").strip().lower()
+        if s == "zalo":
+            return "messenger"
+        if s in ("messenger", "instagram"):
+            return s
+        return str(v)
+
     source: SourceInfo = Field(default_factory=SourceInfo)
     background: BackgroundInfo = Field(default_factory=BackgroundInfo)
+    aspect_mode: Literal["fill", "fit"] = "fit"
     music: str | None = "chill_02"
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
     characters: list[Character]

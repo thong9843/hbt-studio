@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { fetchHealth } from '../api/client';
 import { api, projectFileUrl } from '../api/endpoints';
 import type { Fps, Job, RenderOptions, RenderRecord } from '../api/types';
+import { WatermarkControl } from '../components/WatermarkControl';
 import { ImagesReminder } from '../components/draft/ImagesReminder';
 import { ChecksCard } from '../components/export/ChecksCard';
 import { CleanCard } from '../components/export/CleanCard';
@@ -270,6 +271,7 @@ export function ExportTab() {
               }
             />
           </div>
+          <WatermarkControl />
           <div className="space-y-2">
             <Button
               tone="ink"

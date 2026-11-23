@@ -1,7 +1,7 @@
 import type { AlignerInfo } from '../../api/types';
 import { vi } from '../../i18n/vi';
 import { alignerLabel, alignerNotes } from '../../utils/aligner';
-import { formatDuration } from '../../utils/format';
+import { formatDuration, safeFixed } from '../../utils/format';
 import { AlertIcon } from '../icons';
 import { Card } from '../ui/Card';
 
@@ -24,11 +24,27 @@ export interface ResultInfo {
 /** Thẻ Kết quả: độ dài, LUFS, căn chữ + tỉ lệ khớp, thời gian dựng, cắt đuôi + Nghe. */
 export function ResultCard({ info }: { info: ResultInfo }) {
   const stats: [string, string][] = [
-    [R.duration, info.duration === null ? '—' : formatDuration(info.duration)],
-    [R.lufs, info.lufs === null ? '—' : `${info.lufs.toFixed(1)} LUFS`],
+    [
+      R.duration,
+      typeof info.duration === 'number' && Number.isFinite(info.duration)
+        ? formatDuration(info.duration)
+        : '—',
+    ],
+    [
+      R.lufs,
+      typeof info.lufs === 'number' && Number.isFinite(info.lufs)
+        ? `${safeFixed(info.lufs, 1)} LUFS`
+        : '—',
+    ],
     [R.aligner, info.aligner ? alignerLabel(info.aligner, info.aligner_info) : '—'],
-    [R.seconds, info.seconds === null ? '—' : `${info.seconds} ${vi.common.seconds}`],
+    [
+      R.seconds,
+      typeof info.seconds === 'number' && Number.isFinite(info.seconds)
+        ? `${info.seconds} ${vi.common.seconds}`
+        : '—',
+    ],
   ];
+  const warnings = Array.isArray(info.warnings) ? info.warnings : [];
   return (
     <Card as="section" aria-label={R.title} className="space-y-4">
       <h2 className="text-h2 font-bold">{R.title}</h2>
@@ -43,7 +59,7 @@ export function ResultCard({ info }: { info: ResultInfo }) {
       {info.trimmed_tail && (
         <div className="space-y-2 text-small">
           <p className="text-muted">
-            {R.trimmedTail((info.trimmed_tail_seconds ?? 0).toFixed(1).replace('.', ','))}
+            {R.trimmedTail(safeFixed(info.trimmed_tail_seconds, 1).replace('.', ','))}
           </p>
           <audio controls aria-label={R.trimmedTailPlayer} src={info.trimmed_tail} />
         </div>
@@ -54,14 +70,14 @@ export function ResultCard({ info }: { info: ResultInfo }) {
             {note}
           </p>
         ))}
-      {info.warnings.length > 0 && (
+      {warnings.length > 0 && (
         <div className="ui-note-yel p-4 text-small">
           <b className="flex items-center gap-2">
             <AlertIcon size={18} />
             {R.warnings}
           </b>
           <ul className="mt-1 list-disc pl-5">
-            {info.warnings.map((w) => (
+            {warnings.map((w) => (
               <li key={w}>{w}</li>
             ))}
           </ul>

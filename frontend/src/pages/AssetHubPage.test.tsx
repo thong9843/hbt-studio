@@ -1,0 +1,165 @@
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../components/Toast';
+import { stubFetch } from '../test/fakes';
+import { renderWithProviders } from '../test/render';
+import { AssetHubPage } from './AssetHubPage';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('AssetHubPage (Thư viện tài nguyên)', () => {
+  it('switches between resource tabs and renders tab, lists real items, and deletes a file', async () => {
+    let stickers = [
+      {
+        name: 'shock.png',
+        category: 'stickers',
+        kind: 'image',
+        size: 2048,
+        modified_at: '2026-11-12T08:00:00Z',
+        url: '/api/asset-hub/files/stickers/shock.png',
+        source: 'assets',
+      },
+    ];
+    const music = [
+      {
+        name: 'chill-bgm.mp3',
+        category: 'music',
+        kind: 'audio',
+        size: 102400,
+        modified_at: '2026-11-12T08:00:00Z',
+        url: '/api/asset-hub/file/library/music/chill-bgm.mp3',
+        title: 'Lo-Fi Chill',
+        artist: 'Kulakovka',
+        moods: ['chill'],
+        source: 'library',
+      },
+    ];
+    const renders = [
+      {
+        id: 'core:demo:job1:video.mp4',
+        slug: 'demo',
+        title: 'Video Demo 9:16',
+        engine: 'core',
+        duration_sec: 42,
+        size_mb: 3.5,
+        publish_text: 'Caption test #HBT',
+        created_at: '2026-11-15T10:00:00Z',
+        video_url: '/api/renders/media/core1?kind=video',
+        cover_url: null,
+      },
+    ];
+
+    stubFetch({
+      'GET /api/asset-hub/music': () =>
+        new Response(JSON.stringify({ category: 'music', items: music }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      'GET /api/asset-hub/stickers': () =>
+        new Response(JSON.stringify({ category: 'stickers', items: stickers }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      'GET /api/asset-hub/stickman': () =>
+        new Response(
+          JSON.stringify({
+            category: 'stickman',
+            items: [
+              {
+                name: 'explain.png',
+                category: 'stickman',
+                kind: 'image',
+                size: 1024,
+                modified_at: '2026-11-17T08:00:00Z',
+                url: '/api/asset-hub/file/library/stickman/poses/explain.png',
+                source: 'library',
+                title: 'Giải thích / Chỉ bảng',
+              },
+            ],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+      'GET /api/asset-hub/backgrounds': { category: 'backgrounds', items: [] },
+      'GET /api/asset-hub/memes': { category: 'memes', items: [] },
+      'GET /api/asset-hub/watermarks': { category: 'watermarks', items: [] },
+      'GET /api/asset-hub/stickman/puppet': {
+        ready: true,
+        present_count: 7,
+        total: 7,
+        slots: {
+          base_character: { found: true, name: 'base_character.png', source: 'library', url: null },
+          eyes_neutral: { found: true, name: 'eyes_neutral.png', source: 'library', url: null },
+          eyes_happy: { found: true, name: 'eyes_happy.png', source: 'library', url: null },
+          eyes_shock: { found: true, name: 'eyes_shock.png', source: 'library', url: null },
+          eyes_angry: { found: true, name: 'eyes_angry.png', source: 'library', url: null },
+          mouth_closed: { found: true, name: 'mouth_closed.png', source: 'library', url: null },
+          mouth_open: { found: true, name: 'mouth_open.png', source: 'library', url: null },
+        },
+      },
+      'GET /api/renders': { items: renders },
+      'DELETE /api/asset-hub/stickers/shock.png': () => {
+        stickers = [];
+        return new Response(JSON.stringify({ ok: true, deleted: 'shock.png' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+      'GET /api/asset-hub/online/search': () =>
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 't1',
+                title: 'Vine Boom',
+                duration_sec: 1.5,
+                preview_url: 'https://cdn.voicemod.net/boom.mp3',
+                source: 'tuna',
+                tags: ['meme'],
+              },
+            ],
+            missing_key: false,
+            source: 'tuna',
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ToastProvider>
+        <AssetHubPage />
+      </ToastProvider>,
+    );
+
+    // Mặc định mở tab Video đã xuất, kiểm tra có Video Demo 9:16
+    const section = await screen.findByRole('region', { name: 'Video đã xuất trên hệ thống' });
+    expect(await within(section).findByText('Video Demo 9:16')).toBeVisible();
+
+    // Chuyển tab Nhạc nền dạng danh sách
+    await user.click(screen.getByRole('tab', { name: /Nhạc nền/ }));
+    expect(await screen.findByText('Lo-Fi Chill')).toBeVisible();
+    expect(screen.getByText('Kulakovka')).toBeVisible();
+
+    // Chuyển tab Sticker và xoá tệp
+    await user.click(screen.getByRole('tab', { name: /Sticker/ }));
+    expect(await screen.findByText('shock.png')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Xóa shock.png' }));
+    await waitFor(() => expect(screen.queryByText('shock.png')).toBeNull());
+    expect(screen.getByText('Chưa có tệp nào trong mục này.')).toBeVisible();
+    // Chuyển sang tab Nhạc nền và mở drawer Tìm & Tải Online (đồng bộ Tuna SFX + Pixabay)
+    await user.click(screen.getByRole('tab', { name: /Nhạc nền/i }));
+    await user.click(screen.getByRole('button', { name: /Tìm & Tải Online/i }));
+    expect(await screen.findByText('Vine Boom')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Voicemod Tuna' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Freesound SFX' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pixabay SFX' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    // Chuyển sang tab Nhân vật Stickman và kiểm tra thẻ Puppet 2D + nút Tách nền trắng
+    await user.click(screen.getByRole('tab', { name: /Nhân vật Stickman/i }));
+    expect(await screen.findByText('Bộ Linh Kiện Puppet 2D (7 mảnh)')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Sẵn sàng diễn hoạt tự động \(7\/7 mảnh\)/i),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('explain.png')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tách nền trắng explain.png/i })).toBeInTheDocument();
+  });
+});

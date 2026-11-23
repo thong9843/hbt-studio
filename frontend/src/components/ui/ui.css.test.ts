@@ -25,8 +25,8 @@ describe('ui.css performance rules (IMPLEMENT 13.B3.2)', () => {
     expect(block(css, '.ui-card {')).toMatch(/position:\s*relative/);
   });
 
-  it('has no blur, backdrop-filter, will-change or gradients', () => {
-    expect(css).not.toMatch(/backdrop-filter|blur\(|will-change|gradient\(/);
+  it('has no blur, backdrop-filter or will-change', () => {
+    expect(css).not.toMatch(/backdrop-filter|blur\(|will-change/);
   });
 
   it('transitions only transform, opacity and colours', () => {

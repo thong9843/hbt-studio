@@ -226,6 +226,8 @@ def get_postv_quick_pick_data(job_id: str, state: State):
                 "age": c.age,
                 "text": c.text,
                 "likes": c.likes if c.likes is not None else 0,
+                "replies": c.replies if c.replies is not None else 0,
+                "parent": c.parent,
                 "picked": c.picked,
                 "filter_reason": reason,
             }
@@ -239,7 +241,7 @@ def get_postv_quick_pick_data(job_id: str, state: State):
         "comments": comments_data,
         "picked_count": len([c for c in project.comments if c.picked]),
         "total_comments": len(project.comments),
-        "target_seconds": float(getattr(job, "auto_options", {}).get("target_seconds", 75)),
+        "target_seconds": float(getattr(job, "auto_options", {}).get("target_seconds", 90)),
         "estimated_seconds": current_sec,
     }
 
@@ -274,6 +276,12 @@ def delete_postv_project(slug: str, state: State):
         raise Conflict("Dự án đang bận (đang dựng), không thể xoá")
     state.storage.delete(slug)
     return Response(status_code=204)
+
+
+@router.post("/postv/{slug}/unlock")
+def unlock_postv_project(slug: str, state: State):
+    """Huỷ tác vụ bị kẹt và mở khoá dự án PostV."""
+    return state.jobs.unlock_project(slug)
 
 
 @router.post("/projects/{slug}/postv/script/check")
@@ -369,7 +377,9 @@ def card_png(
             raise Unprocessable("Cần `ref` (id bình luận) cho thẻ bình luận")
         if not any(c.id == ref for c in project.comments):
             raise NotFound(f"Không có bình luận '{ref}'")
-    image = render_project_card(project, kind, ref, tpl, censor, cfg.text)
+    image = render_project_card(
+        project, kind, ref, tpl, censor, cfg.text, project_dir=state.storage.project_dir(slug)
+    )
     out = image if layer else composite_preview(image, _preview_background(project, state))
     if w and w < out.width:
         out = out.resize((w, round(out.height * w / out.width)), Image.LANCZOS)
@@ -442,11 +452,11 @@ def postv_preview_png(
     )
     tpl = load_template(project.template)
 
-    # Chọn loại thẻ
+    # Chọn loại thẻ: mặc định mở đầu thẳng bằng thẻ Bài Gốc (chỉ hiện hook nếu đoạn đầu là hook)
     actual_kind: Literal["hook", "post", "comment"]
     if kind is not None:
         actual_kind = kind
-    elif project.hook.text.strip():
+    elif project.segments and project.segments[0].role == "hook" and project.hook.text.strip():
         actual_kind = "hook"
     else:
         actual_kind = "post"
@@ -460,7 +470,15 @@ def postv_preview_png(
         elif not any(c.id == ref for c in project.comments):
             raise NotFound(f"Không có bình luận '{ref}'")
 
-    card_img = render_project_card(project, actual_kind, ref, tpl, censor, cfg.text)
+    card_img = render_project_card(
+        project,
+        actual_kind,
+        ref,
+        tpl,
+        censor,
+        cfg.text,
+        project_dir=state.storage.project_dir(slug),
+    )
     bg = _preview_background(project, state, t=t)
     out = composite_preview(card_img, bg)
 
@@ -814,3 +832,20 @@ def delete_postv_source(slug: str, state: State) -> None:
         c.text = ""
     project.source.url = ""
     state.storage.save_any(slug, project)
+
+
+@router.post("/postv/{slug}/open-folder")
+def open_postv_folder(slug: str, state: State) -> dict[str, Any]:
+    """Mở thư mục chứa video/dự án PostV trên máy local."""
+    import os
+    import sys
+
+    project_dir = state.storage.project_dir(slug)
+    renders_dir = project_dir / "renders"
+    target = renders_dir if renders_dir.is_dir() else project_dir
+    if sys.platform == "win32" and hasattr(os, "startfile"):
+        try:
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        except OSError:
+            pass
+    return {"ok": True, "path": str(target)}

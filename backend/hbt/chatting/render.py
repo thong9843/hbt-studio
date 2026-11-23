@@ -21,6 +21,7 @@ from PIL import Image
 
 from hbt.chatting.audio import mix_voice_and_bgm_playlist
 from hbt.chatting.draw import ChatFrameRenderer
+from hbt.chatting.html_renderer import HtmlChatSession
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.sources import is_scene_transition
 from hbt.chatting.stickers import (
@@ -35,6 +36,7 @@ from hbt.chatting.timeline import MAX_VIDEO_DURATION_S, build_timeline
 from hbt.chatting.voice import synthesize_chat_voices
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
 from hbt.postv.voice import VoiceProvider
+from hbt.shared.pipeline.aspect import AspectMode, build_aspect_filter
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,8 @@ def assemble_voice_track(
                         "-y",
                         "-v",
                         "error",
+                        "-threads",
+                        "2",
                         "-i",
                         str(audio_path),
                         "-ac",
@@ -219,8 +223,10 @@ def render_chat_video(
     brand_dir: Path,
     preview: bool = False,
     progress: ProgressCallback | None = None,
+    aspect_mode: AspectMode | None = None,
 ) -> Path:
     """Dựng video Chatting (preview 540x960 30fps hoặc full 1080x1920 60fps)."""
+    effective_aspect: AspectMode = "fit" if aspect_mode is None else aspect_mode
 
     def tick(pct: int, msg: str) -> None:
         if progress:
@@ -275,8 +281,24 @@ def render_chat_video(
                 except Exception:
                     pass
 
-    renderer = ChatFrameRenderer(theme, doc.characters, avatar_images)
-    content_area_h = renderer.theme.frame_max_height - renderer.theme.header_height
+    renderer = ChatFrameRenderer(theme, doc.characters, avatar_images, project_dir=project_dir)
+    video_media_spans: dict[int, list[tuple[float, float, Path, int, int, int, int]]] = {}
+    coord_scale = width / 1080.0
+
+    from hbt.app_settings import AppSettingsStore
+    from hbt.shared.pipeline.watermark import render_watermark_png
+
+    wm_cfg = AppSettingsStore(workspace_dir).load().watermark
+    wm_img: Image.Image | None = None
+    if wm_cfg.enabled:
+        wm_png = build_dir / "watermark_1080.png"
+        render_watermark_png(wm_png, wm_cfg, width=1080, height=1920, brand_dir=brand_dir)
+        if wm_png.is_file():
+            try:
+                with Image.open(wm_png) as raw_wm:
+                    wm_img = raw_wm.convert("RGBA")
+            except Exception:
+                wm_img = None
 
     active_states = [s for s in timeline.states if s.start_time < target_duration]
     total_states = max(1, len(active_states))
@@ -310,6 +332,9 @@ def render_chat_video(
     last_chunk_fname = ""
     spring_scales = spring_scale_curve(18)
 
+    html_session = HtmlChatSession(doc.platform)
+    html_session.start()
+
     def save_subframe(
         v_msgs: list[Message],
         s_typing: bool = False,
@@ -324,22 +349,46 @@ def render_chat_video(
         dur: float = 0.05,
     ) -> None:
         nonlocal frame_counter, last_chunk_fname
-        img = renderer.render_chat_view(
-            visible_messages=v_msgs,
-            show_typing=s_typing,
-            typing_char_id=t_char_id,
-            typing_pulse_step=t_pulse,
-            active_sticker_img=s_img,
-            sticker_from_right=s_right,
-            scale_last_msg=scale_msg,
-            show_seen=s_seen,
-            scroll_offset_override=s_scroll,
-            is_meme_cutin=is_cutin,
-        )
         fname = f"frame_{frame_counter:05d}.png"
         fpath = frames_dir / fname
-        img.save(fpath, format="PNG", compress_level=1)
-        img.close()
+
+        used_html = False
+        if html_session.active and not is_cutin and s_img is None:
+            state = renderer.build_html_state(
+                visible_messages=v_msgs,
+                show_typing=s_typing,
+                typing_pulse_step=t_pulse,
+                scale_last_msg=scale_msg,
+                show_seen=s_seen,
+                scroll_offset_override=s_scroll,
+            )
+            used_html = html_session.render_frame(state, fpath)
+
+        if used_html:
+            if wm_img is not None and not is_cutin:
+                with Image.open(fpath) as rendered:
+                    rgba = rendered.convert("RGBA")
+                    rgba.alpha_composite(wm_img)
+                    rgba.save(fpath, format="PNG", compress_level=1)
+                    rgba.close()
+        else:
+            img = renderer.render_chat_view(
+                visible_messages=v_msgs,
+                show_typing=s_typing,
+                typing_char_id=t_char_id,
+                typing_pulse_step=t_pulse,
+                active_sticker_img=s_img,
+                sticker_from_right=s_right,
+                scale_last_msg=scale_msg,
+                show_seen=s_seen,
+                scroll_offset_override=s_scroll,
+                is_meme_cutin=is_cutin,
+            )
+            if wm_img is not None and not is_cutin:
+                img.alpha_composite(wm_img)
+            img.save(fpath, format="PNG", compress_level=1)
+            img.close()
+
         chunk_pngs.append(fpath)
         chunk_concat_lines.append(f"file '{fname}'\n")
         chunk_concat_lines.append(f"duration {dur:.4f}\n")
@@ -366,17 +415,27 @@ def render_chat_video(
                     except Exception:
                         pass
 
-            visible_msgs = doc.messages[: state.visible_count]
-            frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
-            chunk_total_dur += frame_dur
-
-            total_content_h = renderer.get_content_height(
-                visible_msgs,
+            visible_msgs = renderer.paginate_messages(
+                doc.messages[: state.visible_count],
                 show_typing=state.show_typing,
                 active_sticker_img=stk_img,
                 show_seen=state.show_seen,
             )
-            target_scroll_y = float(max(0, total_content_h - content_area_h))
+            frame_dur = min(state.duration, max(0.01, target_duration - state.start_time))
+            chunk_total_dur += frame_dur
+            target_scroll_y = 0.0
+
+            if not state.show_typing:
+                for m_idx, m_path, cx, cy, mw, mh in renderer.compute_video_media_rects(
+                    visible_msgs, 0.0
+                ):
+                    sx = int(round(cx * coord_scale))
+                    sy = int(round(cy * coord_scale))
+                    sw = max(16, (int(round(mw * coord_scale)) // 2) * 2)
+                    sh = max(16, (int(round(mh * coord_scale)) // 2) * 2)
+                    video_media_spans.setdefault(m_idx, []).append(
+                        (state.start_time, state.start_time + frame_dur, m_path, sx, sy, sw, sh)
+                    )
 
             # 1. Typing 60fps: 18 sub-frames + Cubic Ease-Out cuộn dạng float
             if state.show_typing:
@@ -483,6 +542,8 @@ def render_chat_video(
 
             pct = 35 + int(25 * (global_i + 1) / total_states)
             tick(pct, f"Vẽ & nén phân đoạn {global_i + 1}/{total_states}")
+            if stk_img is not None:
+                stk_img.close()
 
         # Kết thúc chunk concat
         if last_chunk_fname:
@@ -491,7 +552,17 @@ def render_chat_video(
         chunk_concat_file.write_text("".join(chunk_concat_lines), encoding="utf-8")
 
         chunk_mp4 = frames_dir / f"chunk_{chunk_idx // chunk_size:03d}.mp4"
-        chunk_cmd: list[str] = ["-y", "-v", "error"]
+        chunk_cmd: list[str] = [
+            "-y",
+            "-v",
+            "error",
+            "-threads",
+            "2",
+            "-filter_threads",
+            "2",
+            "-filter_complex_threads",
+            "2",
+        ]
         if bg_file and bg_file.is_file():
             bg_offset = (chunk_start_time % bg_dur) if (bg_dur and bg_dur > 0) else 0.0
             chunk_cmd.extend(["-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-i", str(bg_file)])
@@ -499,9 +570,16 @@ def render_chat_video(
             chunk_cmd.extend(["-f", "lavfi", "-i", f"color=c=#1A1A24:s={width}x{height}:r={fps}"])
 
         chunk_cmd.extend(["-f", "concat", "-safe", "0", "-i", str(chunk_concat_file)])
+        bg_aspect = build_aspect_filter(
+            effective_aspect,
+            width=width,
+            height=height,
+            input_label="0:v",
+            output_label="bg_norm",
+        )
         chunk_filter = (
-            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setsar=1,fps={fps}[bg];"
+            f"{bg_aspect};"
+            f"[bg_norm]fps={fps}[bg];"
             f"[1:v]scale={width}:{height}[fg];"
             "[bg][fg]overlay=0:0[v]"
         )
@@ -514,11 +592,13 @@ def render_chat_video(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "fast",
+                "veryfast",
                 "-crf",
-                "18",
+                "22",
                 "-pix_fmt",
                 "yuv420p",
+                "-max_muxing_queue_size",
+                "512",
                 "-an",
                 "-t",
                 f"{chunk_total_dur:.3f}",
@@ -533,6 +613,8 @@ def render_chat_video(
             p.unlink(missing_ok=True)
         chunk_concat_file.unlink(missing_ok=True)
         gc.collect()
+
+    html_session.close()
 
     chunks_concat = frames_dir / "chunks.ffconcat"
     chunks_concat.write_text(
@@ -625,31 +707,66 @@ def render_chat_video(
         str(final_audio),
     ]
 
-    if meme_clips:
-        meme_input_start = 2
-        for m_path, _m_start, m_dur, ss_start in meme_clips:
-            cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
-
+    if meme_clips or video_media_spans:
+        next_inp_idx = 2
         filter_parts: list[str] = ["[0:v]null[v_base]"]
         prev_v = "v_base"
-        m_w = 720 if not preview else 360
 
-        for k, (_m_path, m_start, m_dur, _ss_start) in enumerate(meme_clips):
-            inp_idx = meme_input_start + k
+        if meme_clips:
+            m_w = 720 if not preview else 360
+            for k, (m_path, m_start, m_dur, ss_start) in enumerate(meme_clips):
+                cmd.extend(["-ss", f"{ss_start:.2f}", "-t", f"{m_dur:.2f}", "-i", str(m_path)])
+                inp_idx = next_inp_idx
+                next_inp_idx += 1
+                filter_parts.append(
+                    f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
+                    f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+                )
+                next_v = f"v_meme{k}"
+                filter_parts.append(
+                    f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
+                    f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})'"
+                    f":eof_action=pass[{next_v}]"
+                )
+                prev_v = next_v
+
+        for v_idx, (_msg_idx, spans) in enumerate(sorted(video_media_spans.items())):
+            first_t = spans[0][0]
+            last_t = spans[-1][1]
+            m_path = spans[0][2]
+            sx, sw, sh = spans[0][3], spans[0][5], spans[0][6]
+            vis_dur = max(0.2, last_t - first_t)
+            cmd.extend(["-stream_loop", "-1", "-t", f"{vis_dur:.3f}", "-i", str(m_path)])
+            inp_idx = next_inp_idx
+            next_inp_idx += 1
             filter_parts.append(
-                f"[{inp_idx}:v]colorkey=0x00FF00:0.3:0.1,scale={m_w}:-2:flags=lanczos,"
-                f"setpts=PTS-STARTPTS+{m_start:.4f}/TB[m{k}]"
+                f"[{inp_idx}:v]scale={sw}:{sh}:flags=lanczos,setsar=1,"
+                f"setpts=PTS-STARTPTS+{first_t:.4f}/TB[vm{v_idx}]"
             )
-            next_v = f"v_meme{k}"
+            distinct_ys = list(dict.fromkeys(sp[4] for sp in spans))
+            if len(distinct_ys) == 1:
+                y_expr = str(distinct_ys[0])
+            else:
+                y_expr = str(spans[-1][4])
+                for s_t, e_t, _p, _x, sy, _w, _h in reversed(spans[:-1]):
+                    y_expr = f"if(between(t,{s_t:.4f},{e_t:.4f}),{sy},{y_expr})"
+            enable_expr = "+".join(f"between(t,{s_t:.4f},{e_t:.4f})" for s_t, e_t, *_ in spans)
+            next_v = f"v_media{v_idx}"
             filter_parts.append(
-                f"[{prev_v}][m{k}]overlay=x=(W-w)/2:y=(H-h)/2:"
-                f"enable='between(t,{m_start:.4f},{m_start + m_dur:.4f})':eof_action=pass[{next_v}]"
+                f"[{prev_v}][vm{v_idx}]overlay=x={sx}:y='{y_expr}':"
+                f"enable='{enable_expr}':eof_action=pass[{next_v}]"
             )
             prev_v = next_v
 
         filter_complex = ";".join(filter_parts)
         cmd.extend(
             [
+                "-threads",
+                "2",
+                "-filter_threads",
+                "2",
+                "-filter_complex_threads",
+                "2",
                 "-filter_complex",
                 filter_complex,
                 "-map",
@@ -659,11 +776,13 @@ def render_chat_video(
                 "-c:v",
                 "libx264",
                 "-preset",
-                "fast",
+                "veryfast",
                 "-crf",
                 "22",
                 "-pix_fmt",
                 "yuv420p",
+                "-max_muxing_queue_size",
+                "512",
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -677,6 +796,8 @@ def render_chat_video(
         # Không có meme overlay: nối thẳng stream video (-c:v copy) tiết kiệm tối đa CPU/RAM
         cmd.extend(
             [
+                "-threads",
+                "2",
                 "-map",
                 "0:v",
                 "-map",
@@ -687,6 +808,8 @@ def render_chat_video(
                 "aac",
                 "-b:a",
                 "192k",
+                "-max_muxing_queue_size",
+                "512",
                 "-t",
                 f"{target_duration:.3f}",
                 str(out_mp4),
@@ -699,8 +822,13 @@ def render_chat_video(
     for cf in chunk_files:
         cf.unlink(missing_ok=True)
     chunks_concat.unlink(missing_ok=True)
+    voice_mix_wav.unlink(missing_ok=True)
+    final_audio.unlink(missing_ok=True)
     for av in avatar_images.values():
         av.close()
+    avatar_images.clear()
+    if wm_img is not None:
+        wm_img.close()
     gc.collect()
 
     # Lưu metadata của lần render

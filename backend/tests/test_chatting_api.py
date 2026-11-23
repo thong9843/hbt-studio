@@ -22,7 +22,7 @@ def test_get_chatting_status(client):
     res = client.get("/api/chatting/status")
     assert res.status_code == 200
     data = res.json()
-    assert "ollama_running" in data
+    assert "gemini_configured" in data
     assert "stickers" in data
     assert isinstance(data["stickers"], dict)
 

@@ -117,10 +117,23 @@ export function PostvSourcePage() {
   const setPost = (patch: Partial<PostvProject['post']>) =>
     update((p) => ({ ...p, post: { ...p.post, ...patch } }));
   const setComment = (id: string, patch: Partial<PostvComment>) =>
-    update((p) => ({
-      ...p,
-      comments: p.comments.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    }));
+    update((p) => {
+      const prevComment = p.comments.find((c) => c.id === id);
+      const nextComments = p.comments.map((c) => (c.id === id ? { ...c, ...patch } : c));
+      const nextText = patch.text !== undefined ? patch.text.trim() : null;
+      const nextSegments =
+        nextText !== null && p.segments.length > 0
+          ? p.segments.map((s) => {
+              if (s.role !== 'comment' || s.ref !== id) return s;
+              const prevTrim = prevComment?.text.trim() ?? '';
+              if (!s.voice.trim() || s.voice.trim() === prevTrim) {
+                return { ...s, voice: nextText };
+              }
+              return s;
+            })
+          : p.segments;
+      return { ...p, comments: nextComments, segments: nextSegments };
+    });
   const removeComment = (id: string) =>
     update((p) =>
       withSegments({
@@ -143,7 +156,7 @@ export function PostvSourcePage() {
             age: '',
             text: '',
             parent: null,
-            picked: false,
+            picked: p.segments.length > 0,
             ...NO_STATS,
           },
         ],

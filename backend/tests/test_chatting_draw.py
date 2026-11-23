@@ -115,3 +115,115 @@ def test_grouped_bubbles_and_content_height():
         scroll_offset_override=50,
     )
     assert img.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
+    img.close()
+
+
+def test_draw_message_with_image_and_video_media(tmp_path):
+    from PIL import Image
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir(parents=True)
+    img_path = media_dir / "photo.png"
+    # Tạo ảnh ngang 1200x600 -> phải thu về rộng tối đa 560px, cao 280px (tỉ lệ 2:1)
+    Image.new("RGB", (1200, 600), (220, 40, 80)).save(img_path)
+
+    vid_path = media_dir / "clip.mp4"
+    vid_path.write_bytes(b"dummy-mp4")
+
+    chars = [
+        Character(id="me", name="Nam", side="right"),
+        Character(id="other", name="Lan", side="left"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars, project_dir=tmp_path)
+
+    msg_img = Message(
+        from_="other",
+        text="Xem ảnh này đi",
+        media_type="image",
+        media_path="media/photo.png",
+    )
+    msg_vid = Message(
+        from_="me",
+        text="Còn đây là clip",
+        media_type="video",
+        media_path="media/clip.mp4",
+    )
+
+    img_size = renderer.resolve_message_media_size(msg_img)
+    assert img_size == (560, 280)
+
+    bw_img, bh_img, _ = renderer.measure_message(msg_img)
+    assert bw_img >= 560 + 32
+    assert bh_img > 280
+
+    rects = renderer.compute_video_media_rects([msg_img, msg_vid], scroll_offset=0.0)
+    assert len(rects) == 1
+    m_idx, m_p, cx, cy, mw, mh = rects[0]
+    assert m_idx == 1
+    assert m_p == vid_path
+    assert mw <= 560 and mh > 0 and cx >= 0 and cy >= 0
+
+    frame = renderer.render_chat_view([msg_img, msg_vid])
+    assert frame.size == (CANVAS_WIDTH, CANVAS_HEIGHT)
+    frame.close()
+
+
+def test_ios_templates_and_html_state():
+    from hbt.chatting.html_renderer import TEMPLATES_DIR
+
+    assert (TEMPLATES_DIR / "messenger_ios.html").is_file()
+    assert (TEMPLATES_DIR / "instagram_ios.html").is_file()
+
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    ig_theme = get_theme("instagram")
+    assert ig_theme.name == "instagram"
+    assert ig_theme.bubble_right_bg == "#833AB4"
+
+    renderer = ChatFrameRenderer(ig_theme, chars)
+    state = renderer.build_html_state(
+        visible_messages=[Message(from_="a", text="Chào bạn"), Message(from_="me", text="Ok nhé")],
+        show_typing=True,
+        show_seen=True,
+    )
+    assert state["header"]["name"] == "Linh"
+    assert len(state["messages"]) == 2
+    assert state["showTyping"] is True
+    assert state["seenText"] == "Đã xem"
+
+
+def test_paginate_messages_fill_and_reset():
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars)
+    # Tạo 20 tin nhắn dài để vượt quá 1 trang
+    long_msgs = [
+        Message(
+            from_="a" if i % 2 == 0 else "me",
+            text=(
+                f"Tin nhắn số {i + 1} khá dài để kiểm tra phân trang "
+                "lấp đầy khung chat rồi tự reset."
+            ),
+        )
+        for i in range(20)
+    ]
+    page_msgs = renderer.paginate_messages(long_msgs)
+    assert 1 <= len(page_msgs) < len(long_msgs)
+    assert page_msgs[-1].text == long_msgs[-1].text
+
+
+def test_meme_duration_always_under_5s(tmp_path: Path):
+    from hbt.chatting.timeline import compute_meme_duration
+
+    static_png = tmp_path / "stk.png"
+    static_png.write_bytes(b"png")
+    d_static = compute_meme_duration(static_png, seed=7, msg_idx=2)
+    assert 0.9 <= d_static <= 1.8
+    assert d_static < 5.0
+
+    d_fallback = compute_meme_duration(None)
+    assert 1.0 <= d_fallback < 5.0

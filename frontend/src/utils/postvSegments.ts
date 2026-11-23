@@ -22,19 +22,25 @@ export function syncSegments(p: PostvProject): PostvSegment[] {
   const old = p.segments;
   const find = (role: PostvSegment['role'], ref: string | null) =>
     old.find((s) => s.role === role && (s.ref ?? null) === ref);
+  const oldPost = find('post', null);
   const out: PostvSegment[] = [
     find('hook', null) ?? { role: 'hook', card: 'hook', voice: '', ref: null },
-    find('post', null) ?? { role: 'post', card: 'post', voice: p.post.text.trim(), ref: null },
+    oldPost
+      ? { ...oldPost, voice: oldPost.voice.trim() ? oldPost.voice : p.post.text.trim() }
+      : { role: 'post', card: 'post', voice: p.post.text.trim(), ref: null },
   ];
   for (const c of p.comments) {
     if (!c.picked) continue;
+    const prev = find('comment', c.id);
     out.push(
-      find('comment', c.id) ?? {
-        role: 'comment',
-        card: 'comment',
-        voice: c.text.trim(),
-        ref: c.id,
-      },
+      prev
+        ? { ...prev, voice: prev.voice.trim() ? prev.voice : c.text.trim() }
+        : {
+            role: 'comment',
+            card: 'comment',
+            voice: c.text.trim(),
+            ref: c.id,
+          },
     );
   }
   const commentary = old.filter((s) => s.role === 'commentary');

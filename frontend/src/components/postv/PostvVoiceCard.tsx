@@ -146,6 +146,20 @@ export function PostvVoiceCard() {
     },
   });
 
+  const unlockMutation = useMutation({
+    mutationFn: () => api.unlockProject(slug),
+    onSuccess: () => {
+      start.reset();
+      setOutcome(null);
+      setJobId(null);
+      void queryClient.invalidateQueries({ queryKey: ['active-jobs'] });
+    },
+  });
+
+  const startErrorText =
+    start.error instanceof Error ? start.error.message : start.error ? String(start.error) : '';
+  const hasLockError = /đang được dựng|đang sinh giọng|đang bận|\b409\b/i.test(startErrorText);
+
   const upload = useMutation({
     mutationFn: async (f: File) => {
       await flush();
@@ -260,9 +274,10 @@ export function PostvVoiceCard() {
               <p className="text-small text-muted">{T.slowNote}</p>
               {running && (
                 <div className="space-y-1">
-                  <Progress value={progress.progress} label={T.progress} />
+                  <Progress value={progress.percent ?? progress.progress} label={T.progress} />
                   <p className="text-small font-semibold" aria-live="polite">
                     {progress.message || T.starting}
+                    {typeof progress.percent === 'number' ? ` (${progress.percent}%)` : ''}
                   </p>
                 </div>
               )}
@@ -282,6 +297,18 @@ export function PostvVoiceCard() {
                 </p>
               )}
               <ErrorNote error={start.error} />
+              {hasLockError && (
+                <div>
+                  <Button
+                    tone="soft"
+                    size="sm"
+                    busy={unlockMutation.isPending}
+                    onClick={() => unlockMutation.mutate()}
+                  >
+                    {vi.postvQuick.progress.unlock}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 

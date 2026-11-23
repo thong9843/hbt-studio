@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatDateTime, formatDuration } from './format';
+import { formatBytes, formatDateTime, formatDuration, safeFixed } from './format';
 
 describe('format', () => {
   it('formats durations as m:ss', () => {
     expect(formatDuration(0)).toBe('0:00');
     expect(formatDuration(83.4)).toBe('1:23');
     expect(formatDuration(-5)).toBe('0:00');
+    expect(formatDuration(undefined as unknown as number)).toBe('0:00');
   });
 
-  it('formats sizes', () => {
+  it('formats sizes and safeFixed without crashing on undefined/NaN', () => {
     expect(formatBytes(100)).toBe('1 KB');
     expect(formatBytes(2048)).toBe('2 KB');
     expect(formatBytes(5.5 * 1024 * 1024)).toBe('5.5 MB');
+    expect(safeFixed(undefined, 1)).toBe('0');
+    expect(safeFixed(Number.NaN, 1, '—')).toBe('—');
+    expect(safeFixed(-14.23, 1)).toBe('-14.2');
   });
 
   it('formats a local date time and leaves junk alone', () => {

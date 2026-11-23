@@ -11,7 +11,10 @@ export function renderWithProviders(
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[route]}>
+      <MemoryRouter
+        initialEntries={[route]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <RenderJobProvider>{ui}</RenderJobProvider>
       </MemoryRouter>
     </QueryClientProvider>,

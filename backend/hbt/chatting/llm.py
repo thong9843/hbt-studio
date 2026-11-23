@@ -1,8 +1,7 @@
-"""Giao tiếp với Ollama local (POST /api/chat) theo §1, §5.
+"""Giao tiếp với Gemini API (Structured Outputs) cho phân hệ Chatting.
 
-- keep_alive: 0 (giải phóng RAM ngay)
-- format: JSON schema
-- Đo timings (llm_s, llm_tokens, llm_retry)
+- Dùng chung gemini_client & GEMINI_API_KEY với HBT Core qua hbt.shared.llm
+- Đo timings (llm_s, llm_tokens, llm_retry, model)
 - CHATTING_FAKE_LLM=1 cho e2e/test
 """
 
@@ -10,15 +9,19 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from typing import Any
 
-import httpx
-
 from hbt.chatting.prompt import SYSTEM_PROMPT, build_user_prompt
+from hbt.shared.llm import (
+    AVAILABLE_GEMINI_MODELS,
+    GEMINI_MODEL,
+    generate_structured_json,
+    is_valid_gemini_api_key,
+    load_gemini_api_key,
+    normalize_model_name,
+)
 
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-DEFAULT_MODEL = "qwen2.5:3b-instruct"
+DEFAULT_MODEL = GEMINI_MODEL
 
 CHAT_JSON_SCHEMA = {
     "type": "object",
@@ -165,6 +168,12 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             msg_entry["display_text"] = str(m["display_text"])
         if m.get("spoken_text") is not None:
             msg_entry["spoken_text"] = str(m["spoken_text"])
+        if m.get("media_type") in ("none", "image", "video"):
+            msg_entry["media_type"] = m["media_type"]
+        if m.get("media_path"):
+            msg_entry["media_path"] = str(m["media_path"])
+        if m.get("media_hint"):
+            msg_entry["media_hint"] = str(m["media_hint"])[:120]
         clean_msgs.append(msg_entry)
 
     cut_msgs_count = 0
@@ -209,11 +218,45 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
                     clean_msgs[idx]["text"] = clean_msgs[idx]["text"][: cur_len - cut].rstrip()
                     total_chars -= cut
 
-    # 3. Giữ nguyên mọi sticker/meme hợp lệ của kịch bản (không giới hạn cứng)
-    for m in clean_msgs:
-        if m.get("sticker") is not None:
-            st = str(m.get("sticker")).strip().lower()
-            m["sticker"] = st if st in VALID_STICKER_TAGS else None
+    # 3. Siết mật độ sticker/meme: tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    MAX_STICKERS = 3
+    MIN_STICKER_GAP = 4  # cách nhau ít nhất 3 tin ở giữa (idx_b - idx_a >= 4)
+    candidates: list[tuple[float, int]] = []
+    n_msgs = len(clean_msgs)
+    for idx, m in enumerate(clean_msgs):
+        raw_st = m.get("sticker")
+        if raw_st is None:
+            continue
+        st = str(raw_st).strip().lower()
+        if st not in VALID_STICKER_TAGS:
+            m["sticker"] = None
+            continue
+        m["sticker"] = st
+        txt = str(m.get("text", ""))
+        # Ưu tiên tin cao trào/twist/punchline (nửa sau, có dấu cảm xúc)
+        score = (idx / max(1, n_msgs)) * 2.0
+        if "!" in txt or "?" in txt:
+            score += 1.0
+        if st in ("soc", "cuoi", "gian", "khoc"):
+            score += 0.5
+        if idx >= n_msgs - 2:
+            score += 1.0
+        candidates.append((score, idx))
+
+    # Chọn tối đa 3 vị trí điểm cao nhất mà vẫn cách nhau >= MIN_STICKER_GAP
+    chosen_indices: list[int] = []
+    for _score, idx in sorted(candidates, key=lambda x: (-x[0], x[1])):
+        if len(chosen_indices) >= MAX_STICKERS:
+            break
+        if all(abs(idx - prev) >= MIN_STICKER_GAP for prev in chosen_indices):
+            chosen_indices.append(idx)
+
+    chosen_set = set(chosen_indices)
+    dropped_stickers = 0
+    for idx, m in enumerate(clean_msgs):
+        if m.get("sticker") is not None and idx not in chosen_set:
+            m["sticker"] = None
+            dropped_stickers += 1
 
     # 4. Tạo cảnh báo (warnings)
     if cut_msgs_count > 0:
@@ -221,51 +264,80 @@ def sanitize_chat_raw(parsed: dict[str, Any]) -> dict[str, Any]:
             f"Đã cắt bớt {cut_msgs_count} tin nhắn ở giữa (giữ tin đầu và 2 tin cuối) "
             "để kịch bản không vượt quá 5.000 ký tự."
         )
+    if dropped_stickers > 0:
+        warnings.append(
+            f"Đã lược bỏ {dropped_stickers} sticker/meme thừa "
+            f"để giữ tối đa {MAX_STICKERS} điểm cao trào."
+        )
 
     data["messages"] = clean_msgs
     data["warnings"] = warnings
     return data
 
 
-class OllamaClient:
+def select_memes_for_chat(
+    messages: list[dict[str, Any]],
+    memes_index: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Chọn/chuẩn hóa `meme_id` khớp ngữ cảnh cho kịch bản Chatting (tối đa 3 meme, không trùng)."""
+    if not memes_index:
+        return messages
+    from hbt.shared.online_sources.meme_tagging import match_meme_by_context
+
+    valid_ids = {str(it.get("id") or it.get("file") or "") for it in memes_index}
+    used_ids: set[str] = set()
+    assigned = 0
+
+    for m in messages:
+        if assigned >= 3:
+            m["meme_id"] = None
+            continue
+        raw_mid = str(m.get("meme_id") or "").strip()
+        if raw_mid and raw_mid in valid_ids and raw_mid not in used_ids:
+            used_ids.add(raw_mid)
+            assigned += 1
+            continue
+        if m.get("sticker"):
+            matched = match_meme_by_context(
+                str(m.get("text") or ""), memes_index, used_ids=used_ids
+            )
+            if matched:
+                mid = str(matched.get("id") or matched.get("file") or "")
+                if mid:
+                    m["meme_id"] = mid
+                    used_ids.add(mid)
+                    assigned += 1
+                    continue
+        m["meme_id"] = None
+
+    return messages
+
+
+class GeminiChatClient:
+    """Client sinh kịch bản Chatting bằng Gemini API dùng chung cấu hình HBT Core."""
+
     def __init__(
         self,
-        base_url: str = OLLAMA_BASE_URL,
         model: str | None = None,
-        timeout: float = 600.0,
+        timeout: float = 60.0,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model or os.environ.get("CHATTING_MODEL", DEFAULT_MODEL)
+        raw_model = model or os.environ.get("CHATTING_MODEL") or DEFAULT_MODEL
+        if not str(raw_model).strip().lower().startswith("gemini-"):
+            raw_model = DEFAULT_MODEL
+        self.model = normalize_model_name(raw_model)
         self.timeout = timeout
 
     def check_status(self) -> dict[str, Any]:
-        """Kiểm tra Ollama có đang chạy và model đã tải chưa (không lỗi 500 nếu Ollama tắt)."""
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get(f"{self.base_url}/api/tags")
-                if resp.status_code != 200:
-                    return {
-                        "ollama_running": False,
-                        "model_available": False,
-                        "model_name": self.model,
-                    }
-                data = resp.json()
-                models = [m.get("name", "") for m in data.get("models", [])]
-                # Kiểm tra model có trong danh sách (khớp tên chính xác hoặc tiền tố)
-                is_available = any(
-                    m == self.model
-                    or m.startswith(f"{self.model}:")
-                    or self.model.startswith(f"{m}:")
-                    for m in models
-                )
-                return {
-                    "ollama_running": True,
-                    "model_available": is_available,
-                    "model_name": self.model,
-                    "available_models": models,
-                }
-        except Exception:
-            return {"ollama_running": False, "model_available": False, "model_name": self.model}
+        """Kiểm tra GEMINI_API_KEY dùng chung với HBT Core (không lỗi 500)."""
+        api_key = load_gemini_api_key()
+        has_key = is_valid_gemini_api_key(api_key)
+        return {
+            "gemini_configured": has_key,
+            "model_available": has_key,
+            "model_name": self.model,
+            "available_models": [m["id"] for m in AVAILABLE_GEMINI_MODELS],
+            "models": AVAILABLE_GEMINI_MODELS,
+        }
 
     def generate_chat(
         self,
@@ -275,10 +347,9 @@ class OllamaClient:
         platform: str = "messenger",
         target_duration_s: float | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Sinh đoạn chat từ nội dung đầu vào.
+        """Sinh đoạn chat từ nội dung đầu vào qua Gemini API.
         Trả về: (chat_data, timings_dict)
         """
-        # Nếu đang ở chế độ fake LLM (test / e2e)
         if os.environ.get("CHATTING_FAKE_LLM") == "1":
             mock = json.loads(json.dumps(MOCK_CHAT_RESPONSE))
             mock["title"] = title or mock["title"]
@@ -294,77 +365,21 @@ class OllamaClient:
         user_content = build_user_prompt(
             title, body, comments, platform, target_duration_s=target_duration_s
         )
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        parsed, timings = generate_structured_json(
+            SYSTEM_PROMPT,
+            user_content,
+            model=self.model,
+            timeout=self.timeout,
+        )
+        if (
+            not isinstance(parsed, dict)
+            or "title" not in parsed
+            or not isinstance(parsed.get("characters"), list)
+            or not isinstance(parsed.get("messages"), list)
+        ):
+            raise RuntimeError(
+                "Gemini trả về JSON thiếu trường bắt buộc title, characters, messages"
+            )
 
-        t0 = time.perf_counter()
-        retries = 0
-        total_eval_tokens = 0
-
-        while retries <= 1:
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-                "format": CHAT_JSON_SCHEMA,
-                "keep_alive": 0,  # BẮT BUỘC để giải phóng RAM ngay
-                "options": {
-                    "temperature": 0.8,
-                    "num_ctx": 8192,
-                },
-            }
-
-            try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(f"{self.base_url}/api/chat", json=payload)
-                    resp.raise_for_status()
-                    data = resp.json()
-            except Exception as e:
-                raise RuntimeError(f"Lỗi kết nối Ollama: {e}") from e
-
-            eval_count = data.get("eval_count", 0)
-            total_eval_tokens += eval_count
-            raw_msg = data.get("message", {}).get("content", "").strip()
-
-            try:
-                parsed = json.loads(raw_msg)
-                # Kiểm tra sơ bộ các trường bắt buộc
-                if (
-                    isinstance(parsed, dict)
-                    and "title" in parsed
-                    and isinstance(parsed.get("characters"), list)
-                    and isinstance(parsed.get("messages"), list)
-                ):
-                    parsed = sanitize_chat_raw(parsed)
-                    elapsed_s = round(time.perf_counter() - t0, 3)
-                    timings = {
-                        "llm_s": elapsed_s,
-                        "llm_tokens": total_eval_tokens,
-                        "llm_retry": retries,
-                        "model": self.model,
-                    }
-                    return parsed, timings
-                else:
-                    raise ValueError("JSON thiếu các trường bắt buộc title, characters, messages")
-            except Exception as err:
-                retries += 1
-                if retries > 1:
-                    raise RuntimeError(
-                        f"Ollama trả về JSON không hợp lệ sau 1 lần thử lại: {err}\n"
-                        f"Nội dung: {raw_msg}"
-                    ) from err
-                # Thử lại: gửi lỗi lại cho LLM
-                messages.append({"role": "assistant", "content": raw_msg})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"JSON của bạn bị lỗi cấu trúc: {err}. "
-                            "Hãy sửa lại và chỉ trả về đúng JSON theo schema."
-                        ),
-                    }
-                )
-
-        raise RuntimeError("Không thể tạo kịch bản từ Ollama")
+        sanitized = sanitize_chat_raw(parsed)
+        return sanitized, timings

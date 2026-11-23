@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from hbt.api.deps import State
-from hbt.chatting.llm import OllamaClient, sanitize_chat_raw
+from hbt.chatting.llm import DEFAULT_MODEL, GeminiChatClient, sanitize_chat_raw
 from hbt.chatting.models import ChatDoc, Message
 from hbt.chatting.stickers import count_stickers_per_tag
 from hbt.chatting.store import (
@@ -33,29 +33,30 @@ router = APIRouter(tags=["chatting"])
 
 class CreateChatBody(BaseModel):
     input: str = Field(min_length=1, max_length=20000)
-    platform: Literal["messenger", "zalo"] = "messenger"
+    platform: Literal["messenger", "instagram", "zalo"] = "messenger"
     background: str = "minecraft4-1080p60"
     direct_script: bool = False
     target_duration_s: float | None = Field(default=None, ge=30.0, le=300.0)
+    model: str | None = Field(default=None)
 
 
 class RenderChatBody(BaseModel):
     preview: bool = False
+    aspect_mode: Literal["fill", "fit"] | None = None
 
 
 @router.get("/chatting/status")
 def get_chatting_status(state: State) -> dict[str, Any]:
-    """Kiểm tra trạng thái Ollama và thư viện sticker (không bao giờ trả về lỗi 500)."""
-    default_m = "qwen2.5:3b-instruct"
+    """Kiểm tra trạng thái Gemini API Key và thư viện sticker (không bao giờ trả về lỗi 500)."""
     model_name = os.environ.get(
-        "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+        "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
     )
-    client = OllamaClient(model=model_name)
-    ollama_info = client.check_status()
+    client = GeminiChatClient(model=model_name)
+    llm_info = client.check_status()
     sticker_counts = count_stickers_per_tag(state.settings.library_dir)
 
     return {
-        **ollama_info,
+        **llm_info,
         "stickers": sticker_counts,
         "total_stickers": sum(sticker_counts.values()),
     }
@@ -72,20 +73,19 @@ def create_chatting_project(body: CreateChatBody, state: State) -> dict[str, Any
     """Tạo dự án Chatting và khởi động job chatting_auto 4 pha."""
     raw_input = body.input.strip()
 
-    # 1. Kiểm tra Ollama nếu dùng chế độ viết AI
+    # 1. Kiểm tra Gemini API Key nếu dùng chế độ viết AI
     if not body.direct_script:
-        default_m = "qwen2.5:3b-instruct"
-        model_name = os.environ.get(
-            "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+        model_name = body.model or os.environ.get(
+            "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
         )
-        client = OllamaClient(model=model_name)
+        client = GeminiChatClient(model=model_name)
         status = client.check_status()
 
         is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
-        if not is_fake_llm and not status["ollama_running"]:
+        if not is_fake_llm and not status["gemini_configured"]:
             raise HTTPException(
                 status_code=503,
-                detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.",
+                detail="Chưa cấu hình GEMINI_API_KEY. Thêm khoá vào .env rồi thử lại.",
             )
 
     # 2. Khởi tạo slug và ghi job.json ban đầu
@@ -266,17 +266,19 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
         )
 
     doc = load_chat(state.settings.workspace_dir, slug)
-    default_m = "qwen2.5:3b-instruct"
     model_name = os.environ.get(
-        "CHATTING_MODEL", getattr(state.settings, "chatting_model", default_m)
+        "CHATTING_MODEL", getattr(state.settings, "chatting_model", DEFAULT_MODEL)
     )
-    client = OllamaClient(model=model_name)
+    client = GeminiChatClient(model=model_name)
 
     is_fake_llm = os.environ.get("CHATTING_FAKE_LLM") == "1"
     if not is_fake_llm:
         st = client.check_status()
-        if not st["ollama_running"]:
-            raise HTTPException(status_code=503, detail="Chưa thấy Ollama. Mở Ollama rồi thử lại.")
+        if not st["gemini_configured"]:
+            raise HTTPException(
+                status_code=503,
+                detail="Chưa cấu hình GEMINI_API_KEY. Thêm khoá vào .env rồi thử lại.",
+            )
 
     try:
         chat_raw, llm_timings = client.generate_chat(
@@ -287,7 +289,7 @@ def regen_chatting_project(slug: str, state: State) -> dict[str, Any]:
         )
         chat_raw = sanitize_chat_raw(chat_raw)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi sinh kịch bản Ollama: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Lỗi sinh kịch bản Gemini: {e}") from e
 
     # Cập nhật messages, warnings và title (khớp người gửi với doc.characters hiện tại)
     char_map: dict[str, str] = {}
@@ -341,7 +343,9 @@ def render_chatting_project_api(slug: str, body: RenderChatBody, state: State) -
         raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
 
     try:
-        job = state.jobs.submit_chatting_render(slug=slug, preview=body.preview)
+        job = state.jobs.submit_chatting_render(
+            slug=slug, preview=body.preview, aspect_mode=body.aspect_mode
+        )
     except Exception as e:
         raise HTTPException(status_code=409, detail=f"Không thể bắt đầu dựng: {e}") from e
 
@@ -388,3 +392,37 @@ def serve_chatting_preview(slug: str, state: State):
     if not p_path.is_file():
         raise HTTPException(status_code=404, detail="Chưa có video xem nhanh")
     return FileResponse(str(p_path), media_type="video/mp4")
+
+
+@router.post("/chatting/{slug}/media")
+async def upload_chatting_media(
+    slug: str,
+    file: Annotated[UploadFile, File()],
+    state: State,
+) -> dict[str, Any]:
+    """Tải ảnh hoặc video minh họa vào workspace/chatting/<slug>/media/."""
+    from pathlib import Path
+
+    project_dir = get_project_dir(state.settings.workspace_dir, slug)
+    if not project_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy dự án {slug}")
+
+    ext = Path(file.filename or "media.png").suffix.lower()
+    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+        media_type = "image"
+    elif ext in (".mp4", ".mov", ".gif"):
+        media_type = "video"
+    else:
+        raise HTTPException(status_code=422, detail=f"Định dạng media không hỗ trợ: {ext}")
+
+    media_dir = project_dir / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    target_name = f"{uuid.uuid4().hex[:8]}{ext}"
+    target_path = media_dir / target_name
+    content = await file.read()
+    target_path.write_bytes(content)
+
+    return {
+        "media_type": media_type,
+        "media_path": f"media/{target_name}",
+    }
