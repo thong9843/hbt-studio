@@ -12,7 +12,7 @@ from typing import Any
 
 from PIL import Image
 
-from hbt.app_settings import load_app_settings
+from hbt.app_settings import AppSettingsStore
 from hbt.config import Settings
 from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import build_outro_audio
@@ -595,7 +595,9 @@ def _stream_chunk_frames_to_ffmpeg(
                 else None
             )
             eff_dur_b = tl_entry.duration_s if tl_entry is not None else dur_b
-            target_end_s = tl_entry.beat_end_s if tl_entry is not None else (cur_audio_t + eff_dur_b)
+            target_end_s = (
+                tl_entry.beat_end_s if tl_entry is not None else (cur_audio_t + eff_dur_b)
+            )
             target_total_frames = max(cur_frame_offset + 1, int(round(target_end_s * fps)))
             n_frames_beat = target_total_frames - cur_frame_offset
 
@@ -690,7 +692,12 @@ def _stream_chunk_frames_to_ffmpeg(
                 photo_path: Path | None = None
                 if beat.media_path:
                     cand_m = project_dir / beat.media_path
-                    if cand_m.is_file() and cand_m.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                    if cand_m.is_file() and cand_m.suffix.lower() in {
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".webp",
+                    }:
                         photo_path = cand_m
                 if photo_path is None:
                     ref_q = raw_prop_q or beat.board_title or infer_auto_prop_query(beat.narration)
@@ -1026,7 +1033,7 @@ def render_stickv(
         eff_whisper_cfg = whisper_cfg
         if eff_whisper_cfg is None and not os.environ.get("PYTEST_CURRENT_TEST"):
             try:
-                app_cfg = load_app_settings(project_dir.parent.parent)
+                app_cfg = AppSettingsStore(project_dir.parent.parent).load()
                 s = Settings()
                 eff_whisper_cfg = WhisperConfig(
                     model=_whisper.effective_model(app_cfg.whisper_model, s.whisper_model),

@@ -278,7 +278,9 @@ def generate_beat_ai_photo(
         raise BadRequest("Vui lòng nhập mô tả hình minh họa")
 
     pdir = stickv_project_dir(ws_dir, slug)
-    digest = hashlib.sha1(f"{beat_id}:{prompt_txt}".encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+    digest = hashlib.sha1(f"{beat_id}:{prompt_txt}".encode(), usedforsecurity=False).hexdigest()[
+        :10
+    ]
     dest = pdir / "media" / f"{beat_id}_ai_{digest}.jpg"
     try:
         generate_illustration_image(

@@ -374,7 +374,7 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
         resolve_stickv_emotion,
     )
 
-    assert SEG_CACHE_VERSION == "v3_expressive"
+    assert SEG_CACHE_VERSION == "v4_hybrid_ik"
     assert len(POSE_PRESETS) == 24
     assert len(VALID_EMOTIONS) == 10
     assert normalize_stickv_pose("explain") == "present_board"
@@ -583,7 +583,7 @@ def test_stickv_60fps_matches_30fps_realtime_motion_and_blink(tmp_path: Path) ->
 
 
 def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path) -> None:
-    """2-Bone IK hội tụ chính xác, kẹp giải phẫu chống gãy/chéo tay, 4 hand_shape & diễn hoạt 3 pha."""
+    """2-Bone IK hội tụ chính xác, kẹp giải phẫu chống gãy tay, 4 hand_shape & 3-phase."""
     import math
 
     from hbt.stickv.puppet import (
@@ -609,9 +609,13 @@ def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path
     assert math.hypot(wrist_far[0] - root[0], wrist_far[1] - root[1]) <= 0.98 * (l1 + l2) + 0.5
 
     # 2. Khóa giải phẫu: tay trái không vắt chéo sâu sang phải (trừ arms_crossed / think_chin)
-    clamped_l = clamp_arm_target("left", (80.0, 100.0), (220.0, 130.0), 100.0, 60.0, l1, l2, pose="present_board")
+    clamped_l = clamp_arm_target(
+        "left", (80.0, 100.0), (220.0, 130.0), 100.0, 60.0, l1, l2, pose="present_board"
+    )
     assert clamped_l[0] <= 100.0 + 60.0 * 0.14 + 0.5
-    crossed_l = clamp_arm_target("left", (80.0, 100.0), (145.0, 130.0), 100.0, 60.0, l1, l2, pose="arms_crossed")
+    crossed_l = clamp_arm_target(
+        "left", (80.0, 100.0), (145.0, 130.0), 100.0, 60.0, l1, l2, pose="arms_crossed"
+    )
     assert crossed_l[0] > 115.0
 
     # 3. Đủ 4 hand_shape & ánh xạ đúng theo pose

@@ -272,7 +272,7 @@ def test_stickv_reference_images_api_search_and_apply(tmp_path: Path, monkeypatc
 
 
 def test_resolve_reference_image_3tier_cloudflare_fallback_and_budget(tmp_path: Path) -> None:
-    """Wikimedia/Pixabay rỗng -> rơi sang Cloudflare Flux (768x512, cache .jpg, tôn trọng budget)."""
+    """Wikimedia/Pixabay rỗng -> rơi sang Cloudflare Flux (768x512, cache .jpg, budget)."""
     clear_reference_image_cache()
     lib = tmp_path / "library"
     cf_calls: list[dict] = []

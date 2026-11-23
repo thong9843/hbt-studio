@@ -287,7 +287,7 @@ def resolve_reference_image(
     clean_q = (query or "").strip()
     clean_prompt = (illustration_prompt or "").strip()
     digest = hashlib.sha1(
-        f"{clean_q.lower()}|{clean_prompt.lower()}".encode("utf-8"),
+        f"{clean_q.lower()}|{clean_prompt.lower()}".encode(),
         usedforsecurity=False,
     ).hexdigest()[:16]
     cached_jpg = ref_dir / f"{digest}.jpg"

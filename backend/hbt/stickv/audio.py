@@ -20,7 +20,7 @@ from hbt.app_settings import resolve_online_api_key
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.ffutil import run_ffmpeg
 from hbt.pipeline.render import whisper_alignment
-from hbt.pipeline.script import parse_voice
+from hbt.pipeline.text import parse_voice
 from hbt.pipeline.whisper import WhisperConfig, WhisperFailed
 from hbt.postv.voice import SynthItem, VoiceProvider
 from hbt.shared.ffmpeg_utils import (
@@ -60,6 +60,7 @@ class BeatTimelineEntry:
     @property
     def duration_s(self) -> float:
         return max(0.0, self.beat_end_s - self.beat_start_s)
+
 
 DEFAULT_PRE_ROLL_MS = 35
 DEFAULT_POST_ROLL_MS = 75
@@ -1016,7 +1017,7 @@ def _fallback_rms_beat_karaoke(
     beat_wav_path: Path | None = None,
     lead_offset_s: float = KARAOKE_LEAD_OFFSET_S,
 ) -> list[tuple[str, float, float]]:
-    """Fallback căn chữ RMS 20ms + trọng số âm tiết tiếng Việt trong `[speech_start_s, speech_end_s]`."""
+    """Fallback căn chữ RMS 20ms + trọng số âm tiết tiếng Việt trong vùng tiếng nói."""
     segs = load_beat_spoken_segments(beat_wav_path) if beat_wav_path is not None else []
     raw_global: list[tuple[str, float, float]] = []
     if segs:
@@ -1073,13 +1074,13 @@ def _compute_timing_cache_key(
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
     for b in beats:
-        h.update(f"|{b.id}:{b.narration}".encode("utf-8"))
+        h.update(f"|{b.id}:{b.narration}".encode())
     cfg_sig = (
         f"whisper:{whisper_cfg.model}:{whisper_cfg.device}:{whisper_cfg.timeout}"
         if whisper_cfg is not None
         else "rms20_vn"
     )
-    h.update(f"|{cfg_sig}|{lead_offset_s:.4f}".encode("utf-8"))
+    h.update(f"|{cfg_sig}|{lead_offset_s:.4f}".encode())
     return h.hexdigest()
 
 
@@ -1095,7 +1096,7 @@ def align_stickv_master_karaoke(
     beat_wavs: list[tuple[Path, float]] | None = None,
     log: Callable[[str], None] | None = None,
 ) -> tuple[dict[int, list[tuple[str, float, float]]], dict[str, Any]]:
-    """Căn mốc từng từ trực tiếp trên `stickv_voice_full.wav` (Whisper ưu tiên + cache + fallback RMS 20ms)."""
+    """Căn mốc từng từ trên `stickv_voice_full.wav` (Whisper ưu tiên + cache + RMS 20ms)."""
     cache_key = _compute_timing_cache_key(voice_full_wav, beats, whisper_cfg, lead_offset_s)
     if cache_file is not None and cache_file.is_file():
         try:
@@ -1236,7 +1237,7 @@ def mix_stickv_audio(
     voice_full_wav: Path | None = None,
     beat_timeline: list[BeatTimelineEntry] | None = None,
 ) -> Path:
-    """Trộn song song `stickv_voice_full.wav` bất biến + SFX (-16 LUFS) + BGM (-27 LUFS, duck 25/220ms)."""
+    """Trộn song song `stickv_voice_full.wav` bất biến + SFX (-16 LUFS) + BGM (-27 LUFS)."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     own_master_wav: Path | None = None
     master_wav = voice_full_wav
@@ -1246,8 +1247,10 @@ def mix_stickv_audio(
         own_master_wav = out_wav.with_name(f"{out_wav.stem}_master_voice.tmp.wav")
         master_wav, timeline, total_dur = build_master_voice_wav(beat_wavs, own_master_wav)
     else:
-        total_dur = round(timeline[-1].beat_end_s, 4) if timeline else round(
-            sum(d for _, d in beat_wavs), 4
+        total_dur = (
+            round(timeline[-1].beat_end_s, 4)
+            if timeline
+            else round(sum(d for _, d in beat_wavs), 4)
         )
 
     if total_dur <= 0:

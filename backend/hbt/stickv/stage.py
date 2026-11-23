@@ -836,9 +836,11 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
-    takeaway = format_unwrapped_text(
-        getattr(beat, "takeaway", "") or data.get("takeaway") or ""
-    ).replace("**", "").strip()
+    takeaway = (
+        format_unwrapped_text(getattr(beat, "takeaway", "") or data.get("takeaway") or "")
+        .replace("**", "")
+        .strip()
+    )
     hl_fill = _highlight_color_for_card(pal)
 
     tmp_draw = ImageDraw.Draw(canvas)
@@ -853,7 +855,11 @@ def _draw_smart_board_content(
         est_h += max(58, th + 16)
 
     if eff_btype in ("none", "bullets", "list", "card"):
-        items = [format_unwrapped_text(it) for it in (data.get("items") or []) if format_unwrapped_text(it)][:3]
+        items = [
+            format_unwrapped_text(it)
+            for it in (data.get("items") or [])
+            if format_unwrapped_text(it)
+        ][:3]
         if not items:
             clauses = [
                 c.strip()
@@ -877,8 +883,16 @@ def _draw_smart_board_content(
         )
         est_h += max(140, qh + 64)
     elif eff_btype == "comparison":
-        left_items = [format_unwrapped_text(x) for x in (data.get("left_items") or []) if format_unwrapped_text(x)][:4]
-        right_items = [format_unwrapped_text(x) for x in (data.get("right_items") or []) if format_unwrapped_text(x)][:4]
+        left_items = [
+            format_unwrapped_text(x)
+            for x in (data.get("left_items") or [])
+            if format_unwrapped_text(x)
+        ][:4]
+        right_items = [
+            format_unwrapped_text(x)
+            for x in (data.get("right_items") or [])
+            if format_unwrapped_text(x)
+        ][:4]
         col_w_px = max(140, (bw - 120) // 2)
         lh = sum(
             _measure_rich_wrapped_height(
@@ -962,7 +976,11 @@ def _draw_smart_board_content(
         raw_chap = (beat.chapter_title or "").strip()
         if total_chapters <= 1:
             raw_chap = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_chap).strip()
-        chap_txt = f"CHƯƠNG {beat.chapter}" if total_chapters > 1 else (raw_chap or "KIẾN THỨC")[:18].upper()
+        chap_txt = (
+            f"CHƯƠNG {beat.chapter}"
+            if total_chapters > 1
+            else (raw_chap or "KIẾN THỨC")[:18].upper()
+        )
         cbb = shell_draw.textbbox((0, 0), chap_txt, font=f_badge)
         cw_pill = (cbb[2] - cbb[0]) + 28
         shell_draw.rounded_rectangle(
@@ -1021,7 +1039,11 @@ def _draw_smart_board_content(
 
         if eff_btype in ("none", "bullets", "list", "card"):
             # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & auto-fit vừa khít `content_bottom`
-            items = [format_unwrapped_text(it) for it in (data.get("items") or []) if format_unwrapped_text(it)][:3]
+            items = [
+                format_unwrapped_text(it)
+                for it in (data.get("items") or [])
+                if format_unwrapped_text(it)
+            ][:3]
             if not items:
                 clauses = [
                     c.strip()
@@ -1105,7 +1127,8 @@ def _draw_smart_board_content(
                 cur_y = cy1 + 12
 
         elif eff_btype == "quote":
-            q_txt = format_unwrapped_text(data.get("quote") or data.get("text") or beat.narration or "")
+            q_raw = data.get("quote") or data.get("text") or beat.narration or ""
+            q_txt = format_unwrapped_text(q_raw)
             draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
             _draw_rich_autofit_text(
                 draw,
@@ -1290,8 +1313,16 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            left_list = [format_unwrapped_text(x) for x in (data.get("left_items") or [])[:4] if format_unwrapped_text(x)]
-            right_list = [format_unwrapped_text(x) for x in (data.get("right_items") or [])[:4] if format_unwrapped_text(x)]
+            left_list = [
+                format_unwrapped_text(x)
+                for x in (data.get("left_items") or [])[:4]
+                if format_unwrapped_text(x)
+            ]
+            right_list = [
+                format_unwrapped_text(x)
+                for x in (data.get("right_items") or [])[:4]
+                if format_unwrapped_text(x)
+            ]
             l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
             r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
             for item in left_list:
@@ -1398,12 +1429,12 @@ def _draw_smart_board_content(
             events: list[tuple[str, str]] = []
             for idx, ev in enumerate(raw_ev[:4]):
                 if isinstance(ev, dict):
+                    raw_yr = ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"
+                    raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
                     events.append(
                         (
-                            strip_rich_markup(
-                                format_unwrapped_text(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}")
-                            ),
-                            format_unwrapped_text(ev.get("title") or ev.get("label") or ev.get("text") or ""),
+                            strip_rich_markup(format_unwrapped_text(raw_yr)),
+                            format_unwrapped_text(raw_tt),
                         )
                     )
                 else:
@@ -1504,9 +1535,15 @@ def _draw_smart_board_content(
             )
 
         elif eff_btype == "myth_vs_fact":
-            myth_title = format_unwrapped_text(data.get("myth_title") or "").replace("**", "").strip()
-            fact_title = format_unwrapped_text(data.get("fact_title") or "").replace("**", "").strip()
-            m_t, m_b = unwrap_board_text(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
+            myth_title = (
+                format_unwrapped_text(data.get("myth_title") or "").replace("**", "").strip()
+            )
+            fact_title = (
+                format_unwrapped_text(data.get("fact_title") or "").replace("**", "").strip()
+            )
+            m_t, m_b = unwrap_board_text(
+                data.get("myth") or data.get("left") or "Lầm tưởng phổ biến"
+            )
             f_t, f_b = unwrap_board_text(
                 data.get("fact") or data.get("right") or beat.narration or "Sự thật khoa học"
             )
@@ -2476,8 +2513,13 @@ def render_animated_beat_frame(
     pal = resolve_stage_palette(domain, theme)
     interaction = getattr(beat, "interaction", "none") or "none"
     camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
-    # Giữ nguyên thẻ recap_card ổn định ở beat CTA cuối (không ẩn bảng sang closeup_react rỗng)
-    if beat.board_type == "recap_card" and camera_shot == "closeup_react":
+    # Giữ nguyên thẻ recap_card ổn định ở beat CTA cuối khi beat liền trước đã là recap_card
+    if (
+        beat.board_type == "recap_card"
+        and camera_shot == "closeup_react"
+        and prev_stage_state is not None
+        and getattr(prev_stage_state, "last_board_type", "") == "recap_card"
+    ):
         camera_shot = "wide_stage"
     cam_layout = compute_layered_camera_layout(
         camera_shot,

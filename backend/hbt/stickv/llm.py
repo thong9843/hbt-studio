@@ -166,7 +166,10 @@ def unwrap_board_text(value: Any) -> tuple[str, str]:
     obj: Any = value
     if isinstance(obj, str):
         s = obj.strip()
-        if s.startswith("{") and ("'title'" in s or '"title"' in s or "'text'" in s or '"text"' in s):
+        is_dict_str = s.startswith("{") and any(
+            k in s for k in ("'title'", '"title"', "'text'", '"text"')
+        )
+        if is_dict_str:
             for parser in (json.loads, ast.literal_eval):
                 try:
                     parsed = parser(s)
@@ -236,14 +239,16 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
             res["takeaway"] = takeaway
         return res
     if board_type == "comparison":
+        lt_clean = format_unwrapped_text(raw.get("left_title") or "Trước").replace("**", "")[:40]
+        rt_clean = format_unwrapped_text(raw.get("right_title") or "Sau").replace("**", "")[:40]
         res = {
-            "left_title": format_unwrapped_text(raw.get("left_title") or "Trước").replace("**", "")[:40],
+            "left_title": lt_clean,
             "left_items": [
                 format_unwrapped_text(x)[:130]
                 for x in (raw.get("left_items") or [])
                 if format_unwrapped_text(x)
             ][:4],
-            "right_title": format_unwrapped_text(raw.get("right_title") or "Sau").replace("**", "")[:40],
+            "right_title": rt_clean,
             "right_items": [
                 format_unwrapped_text(x)[:130]
                 for x in (raw.get("right_items") or [])
@@ -288,11 +293,14 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
         clean_events: list[dict[str, str]] = []
         for idx, ev in enumerate((raw.get("events") or raw.get("items") or [])[:4]):
             if isinstance(ev, dict):
-                yr = format_unwrapped_text(ev.get("year") or ev.get("era") or f"Mốc {idx + 1}").replace("**", "")
-                tt = format_unwrapped_text(ev.get("title") or ev.get("label") or ev.get("text") or "")
+                raw_yr = ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"
+                yr = format_unwrapped_text(raw_yr).replace("**", "")
+                raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
+                tt = format_unwrapped_text(raw_tt)
                 clean_events.append({"year": yr[:30], "title": tt[:120]})
             else:
-                clean_events.append({"year": f"Mốc {idx + 1}", "title": format_unwrapped_text(ev)[:120]})
+                ev_t = format_unwrapped_text(ev)[:120]
+                clean_events.append({"year": f"Mốc {idx + 1}", "title": ev_t})
         res = {"events": clean_events}
         if takeaway:
             res["takeaway"] = takeaway
@@ -303,9 +311,10 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
             res["takeaway"] = takeaway
         return res
     if board_type == "pinned_photo":
+        pin_raw = str(raw.get("pin_style") or "").strip().lower()
         res = {
             "caption": format_unwrapped_text(raw.get("caption") or "").replace("**", "")[:80],
-            "pin_style": "tape" if str(raw.get("pin_style") or "").strip().lower() == "tape" else "pin",
+            "pin_style": "tape" if pin_raw == "tape" else "pin",
         }
         if takeaway:
             res["takeaway"] = takeaway
@@ -714,7 +723,8 @@ def sanitize_beats(
             camera_shot = "wide_stage"
         anim_oneshot = str(item.get("anim_oneshot") or "").strip() or None
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
-        prop_query = str(item.get("prop_query") or item.get("image_query") or "").strip()[:80] or None
+        raw_pq = item.get("prop_query") or item.get("image_query") or ""
+        prop_query = str(raw_pq).strip()[:80] or None
         image_prompt = str(item.get("image_prompt") or "").strip()[:320] or None
         raw_vdata = item.get("visual_data")
         vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}

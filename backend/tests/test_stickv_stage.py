@@ -1088,7 +1088,11 @@ def test_stickv_karaoke_sync_trims_silence_to_active_speech(tmp_path: Path) -> N
 
 def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> None:
     """Không lọt dict Python thô, CHỐT LẠI 2 dòng, ẩn CHƯƠNG 1 ở CTA & không vẽ Polaroid rỗng."""
-    from hbt.stickv.llm import _sanitize_board_data, format_unwrapped_text, parse_stickv_json_payload
+    from hbt.stickv.llm import (
+        _sanitize_board_data,
+        format_unwrapped_text,
+        parse_stickv_json_payload,
+    )
     from hbt.stickv.stage import _draw_smart_board_content, resolve_stage_palette
 
     # 1. Giải mã sạch cả dict thật lẫn chuỗi bị str(dict) hóa
@@ -1115,7 +1119,8 @@ def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> N
         '{"narration":"Cầu thủ không cần quá đô con.","board_type":"myth_vs_fact",'
         '"board_data":{"myth":{"title":"Lầm tưởng","text":"To mới khỏe"},"fact":"Bền mới thắng"}},'
         '{"narration":"Hãy đăng ký kênh và bình luận ý kiến của bạn nhé!",'
-        '"camera_shot":"closeup_react","board_type":"recap_card","board_title":"TÓM TẮT 3 Ý CỐT LÕI"}'
+        '"camera_shot":"closeup_react","board_type":"recap_card",'
+        '"board_title":"TÓM TẮT 3 Ý CỐT LÕI"}'
         "]}"
     )
     _, parsed_beats = parse_stickv_json_payload(payload)

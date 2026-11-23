@@ -353,7 +353,7 @@ def generate_illustration_image(
     timeout: float = REQUEST_TIMEOUT,
     client: httpx.Client | None = None,
 ) -> Path:
-    """Sinh 1 ảnh minh họa 2D ngang (768x512, flux-1-schnell) cho StickV Polaroid, không phóng 9:16."""
+    """Sinh 1 ảnh minh họa 2D ngang (768x512, flux-1-schnell) cho StickV Polaroid."""
     clean_account = (account_id or "").strip()
     clean_token = (api_token or "").strip()
     if not clean_account or not clean_token:
