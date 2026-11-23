@@ -626,7 +626,7 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
         aspect="9:16",
         w=1080,
         h=1920,
-        t_sec=0.60,
+        t_sec=0.72,
         prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
     )
     assert lay_close_done.board_alpha == pytest.approx(0.0, abs=0.01)

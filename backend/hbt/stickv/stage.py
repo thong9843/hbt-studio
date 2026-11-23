@@ -1950,6 +1950,9 @@ def draw_karaoke_strip(
         )
         return
 
+    if t_sec > filtered_timings[-1][2] + 0.04:
+        return
+
     active_idx = 0
     for idx, (_w, st, et) in enumerate(filtered_timings):
         if st <= t_sec <= et:
@@ -1998,6 +2001,12 @@ def draw_karaoke_strip(
 def _ease_in_out(t: float) -> float:
     t = max(0.0, min(1.0, t))
     return t * t * (3.0 - 2.0 * t)
+
+
+def _cosine_ease_in_out(t: float) -> float:
+    """Đường cong Cosine Ease-In-Out êm ái cho chuyển góc máy & dịch chuyển nhân vật."""
+    u = max(0.0, min(1.0, float(t)))
+    return 0.5 * (1.0 - math.cos(math.pi * u))
 
 
 @dataclass(frozen=True)
@@ -2087,7 +2096,7 @@ def _target_layered_shot_params(
                 clamp,
                 (w * 0.5, 118.0 * sy),
                 0.82,
-                0.36 * w,
+                0.42 * w,
                 0.91 * h,
             )
         if shot_key == "closeup_react":
@@ -2160,9 +2169,9 @@ def compute_layered_camera_layout(
     h: int,
     t_sec: float,
     prev_stage_state: BeatStageState | None = None,
-    transition_dur: float = 0.55,
+    transition_dur: float = 0.70,
 ) -> LayeredCameraLayout:
-    """Tính tách lớp camera kẹp biên an toàn (mờ bảng mượt 0.30s ở closeup_react)."""
+    """Tính tách lớp camera kẹp biên an toàn (Cosine Ease-In-Out 0.70s chống giật cảnh)."""
     shot_key = (camera_shot or "wide_stage").strip().lower()
     box, t_bscale, t_balpha, clamp, anchor, t_cscale, t_cx, t_fy = _target_layered_shot_params(
         shot_key, aspect=aspect, w=w, h=h
@@ -2185,7 +2194,7 @@ def compute_layered_camera_layout(
     )
     p_balpha = float(getattr(prev_stage_state, "board_alpha", 1.0))
 
-    u = _ease_in_out(min(1.0, t_sec / transition_dur))
+    u = _cosine_ease_in_out(min(1.0, t_sec / transition_dur))
     # Riêng độ mờ bảng khi closeup_react (9:16) hạ về 0.0 mượt trong 0.30s đầu
     alpha_u = (
         _ease_out_cubic(min(1.0, t_sec / 0.30))
@@ -2499,7 +2508,7 @@ def render_animated_beat_frame(
     draw_board: bool = False,
     extra_dy: float = 0.0,
     prev_stage_state: BeatStageState | None = None,
-    tween_dur: float = 0.40,
+    tween_dur: float = 0.70,
     spoken_segments: list[tuple[float, float, str]] | None = None,
     is_puppet: bool = False,
     total_chapters: int = 1,
@@ -2539,7 +2548,7 @@ def render_animated_beat_frame(
             can_prebake = (
                 board_cache is not None
                 and beat.board_type not in _ANIMATED_BOARD_TYPES
-                and t_sec >= 0.56
+                and t_sec >= 0.72
             )
             if can_prebake and board_cache is not None:
                 baked = board_cache.get("static_board")
@@ -2613,7 +2622,7 @@ def render_animated_beat_frame(
                 camera_shot=camera_shot,
             )
             if prev_stage_state is not None and tween_dur > 0 and t_sec < tween_dur:
-                p = _ease_in_out(t_sec / tween_dur)
+                p = _cosine_ease_in_out(t_sec / tween_dur)
                 base_x = prev_stage_state.x + (target_x - prev_stage_state.x) * p
                 base_y = prev_stage_state.y + (target_y - prev_stage_state.y) * p
                 cur_scale = prev_stage_state.scale + (target_scale - prev_stage_state.scale) * p

@@ -103,8 +103,8 @@ def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, float, 
             camera_shot=getattr(b, "camera_shot", "wide_stage") or "wide_stage",
         )
         if prev_x is not None:
-            # Trong tween 0.40s @ 60fps = 24 frame -> bước nhảy tối đa mỗi frame (ease-in-out peak ~1.5x)
-            per_frame = abs(tx - prev_x) * (1.5 / 24.0)
+            # Trong tween Cosine Ease-In-Out 0.70s @ 60fps = 42 frame -> tốc độ đỉnh (pi/2)/42
+            per_frame = abs(tx - prev_x) * (math.pi * 0.5 / 42.0)
             max_jump_px = max(max_jump_px, per_frame)
         prev_x = tx
 

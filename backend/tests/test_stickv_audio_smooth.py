@@ -329,3 +329,28 @@ def test_master_voice_clock_zero_drift_whisper_cache_and_lead_offset(tmp_path: P
     planned_dur = sum(allocate_beat_frame_counts([e.duration_s for e in timeline], fps)) / fps
     drift = verify_zero_drift_timeline(timeline, planned_dur, total_dur, timings1)
     assert drift <= 0.03
+
+    # Kiểm tra cắt tạp âm micro-burst 120ms (<= 140ms) sau >= 220ms im lặng cuối câu VieNeu
+    burst_sig = np.concatenate(
+        [
+            _zeros(80, sr=sr),
+            _tone(420, freq=260.0, amp=0.5, sr=sr),
+            _zeros(250, sr=sr),
+            _tone(120, freq=480.0, amp=0.35, sr=sr),
+            _zeros(60, sr=sr),
+        ]
+    )
+    b_src = _write_pcm_wav(tmp_path / "burst120.wav", burst_sig, sr=sr)
+    b_stats = clean_tts_wav(b_src, tmp_path / "burst120_clean.wav")
+    assert b_stats["ghosts_removed"] == 1
+
+    # Kiểm tra không nuốt lỗi Whisper: fallback_reason được ghi rõ vào metadata
+    _, meta_err = align_stickv_master_karaoke(
+        beats,
+        timeline,
+        master_wav,
+        whisper_cfg=None,
+        whisper_init_error="test-init-error",
+    )
+    assert meta_err["method"] == "rms20_vn"
+    assert meta_err["whisper_fallback_reason"] == "test-init-error"

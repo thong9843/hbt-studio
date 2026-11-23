@@ -64,7 +64,7 @@ class BeatTimelineEntry:
 
 DEFAULT_PRE_ROLL_MS = 35
 DEFAULT_POST_ROLL_MS = 75
-DEFAULT_GHOST_MAX_MS = 80
+DEFAULT_GHOST_MAX_MS = 140
 DEFAULT_GHOST_GAP_MS = 220
 DEFAULT_FADE_IN_MS = 18
 DEFAULT_FADE_OUT_MS = 25
@@ -1091,6 +1091,7 @@ def align_stickv_master_karaoke(
     *,
     cache_file: Path | None = None,
     whisper_cfg: WhisperConfig | None = None,
+    whisper_init_error: str = "",
     lead_offset_s: float = KARAOKE_LEAD_OFFSET_S,
     cancel: Any | None = None,
     beat_wavs: list[tuple[Path, float]] | None = None,
@@ -1118,6 +1119,8 @@ def align_stickv_master_karaoke(
 
     method = "rms20_vn"
     info: dict[str, Any] = {}
+    if whisper_init_error:
+        info["whisper_fallback_reason"] = whisper_init_error
     timings_by_beat: dict[int, list[tuple[str, float, float]]] = {}
 
     # 1. Ưu tiên Whisper thật (tiến trình con hbt.pipeline.whisper_worker, KHÔNG initial_prompt)
@@ -1160,7 +1163,7 @@ def align_stickv_master_karaoke(
                     method = "whisper"
                     info = dict(aligned.info or {})
             except (WhisperFailed, RuntimeError, ImportError, OSError) as exc:
-                logger.info("Whisper StickV fallback sang RMS 20ms + âm tiết: %s", exc)
+                logger.warning("Whisper StickV fallback sang RMS 20ms + âm tiết: %s", exc)
                 info["whisper_fallback_reason"] = str(exc)
 
     # 2. Fallback an toàn: năng lượng RMS khung 20ms + trọng số âm tiết tiếng Việt
@@ -1319,11 +1322,13 @@ def mix_stickv_audio(
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
             "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck];"
             "[fg_mix][bgm_duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-            f"loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,atrim=0:{total_dur:.4f}[aout]"
+            "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
     else:
         filter_parts.append(
-            f"[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,atrim=0:{total_dur:.4f}[aout]"
+            "[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
 
     fc_text = ";\n".join(filter_parts) + "\n"

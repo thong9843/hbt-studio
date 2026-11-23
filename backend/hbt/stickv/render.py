@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import shutil
 import subprocess
@@ -13,7 +14,7 @@ from typing import Any
 from PIL import Image
 
 from hbt.app_settings import AppSettingsStore
-from hbt.config import Settings
+from hbt.config import load_settings
 from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import build_outro_audio
 from hbt.pipeline.cancel import CancelToken
@@ -59,6 +60,8 @@ from hbt.stickv.stage import (
     render_animated_beat_frame,
     render_beat_layers,
 )
+
+logger = logging.getLogger(__name__)
 
 # Chuẩn mã hóa tương thích tuyệt đối với Windows Media Player & mọi thiết bị di động
 STICKV_MP4_COMPAT_FLAGS: tuple[str, ...] = (
@@ -1031,17 +1034,33 @@ def render_stickv(
         beat_wavs = anchored_beat_wavs
 
         eff_whisper_cfg = whisper_cfg
+        whisper_init_err = ""
         if eff_whisper_cfg is None and not os.environ.get("PYTEST_CURRENT_TEST"):
             try:
                 app_cfg = AppSettingsStore(project_dir.parent.parent).load()
-                s = Settings()
+                s = load_settings()
                 eff_whisper_cfg = WhisperConfig(
                     model=_whisper.effective_model(app_cfg.whisper_model, s.whisper_model),
                     device=s.whisper_device,
                     timeout=app_cfg.whisper_timeout_seconds or _whisper.DEFAULT_TIMEOUT,
+                    models_dir=s.models_dir,
                 )
-            except Exception:
-                eff_whisper_cfg = None
+            except Exception as exc:
+                whisper_init_err = f"Khởi tạo AppSettings/Settings lỗi ({exc}); thử mặc định auto"
+                logger.warning("StickV WhisperConfig init warning: %s", exc)
+                try:
+                    s_fb = load_settings()
+                    eff_whisper_cfg = WhisperConfig(
+                        model=_whisper.effective_model("auto", s_fb.whisper_model),
+                        device=s_fb.whisper_device,
+                        timeout=_whisper.DEFAULT_TIMEOUT,
+                        models_dir=s_fb.models_dir,
+                    )
+                    whisper_init_err = ""
+                except Exception as exc2:
+                    whisper_init_err = f"Không tạo được WhisperConfig: {exc2}"
+                    logger.warning("StickV WhisperConfig fallback failed: %s", exc2)
+                    eff_whisper_cfg = None
 
         master_word_timings, _align_meta = align_stickv_master_karaoke(
             beats,
@@ -1049,6 +1068,7 @@ def render_stickv(
             voice_full_wav,
             cache_file=build_dir / "stickv_timing.json",
             whisper_cfg=eff_whisper_cfg,
+            whisper_init_error=whisper_init_err,
             cancel=cancel,
             beat_wavs=beat_wavs,
         )
