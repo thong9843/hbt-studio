@@ -8,6 +8,7 @@ import { ErrorNote } from '../components/ErrorNote';
 import { LeaveGuard } from '../components/settings/LeaveGuard';
 import {
   AdvancedModeCard,
+  CloudflareAiCard,
   FpsCard,
   HEX,
   OnlineApiKeysCard,
@@ -99,6 +100,7 @@ function SettingsForm({ app, words }: { app: AppSettings; words: SensitiveWords 
         <ThemeCard value={value} onChange={change} />
       </div>
       <StudioEnginesCard health={health.data} />
+      <CloudflareAiCard value={value} onChange={change} />
       <OnlineApiKeysCard value={value} onChange={change} />
       <AdvancedModeCard value={value} onChange={change} />
       <WhisperCard value={value} onChange={change} health={health.data} />

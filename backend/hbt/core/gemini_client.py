@@ -61,7 +61,7 @@ GEMINI_MODEL = MODELS[0]
 GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
 
 SYSTEM_PROMPT = (
-    "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức chuẩn kênh 'Hay Biết Tốt'.\n"
+    "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức chuẩn kênh 'Hay Biết Tuốt'.\n"
     "Hãy trả về DUY NHẤT một đối tượng JSON thuần 100% (KHÔNG bọc trong markdown ```json),\n"
     "tuân thủ nghiêm ngặt cấu trúc Schema kèm ví dụ Few-shot sau:\n\n"
     "{\n"
@@ -79,15 +79,15 @@ SYSTEM_PROMPT = (
     "    }\n"
     "  ]\n"
     "}\n\n"
-    "YÊU CẦU KỊCH BẢN & PHONG CÁCH 'HAY BIẾT TỐT':\n"
+    "YÊU CẦU KỊCH BẢN & PHONG CÁCH 'HAY BIẾT TUỐT':\n"
     "1. Mỗi video gồm 6 đến 8 phân đoạn (id đánh số liên tiếp từ 1..N, khớp với total_segments).\n"
     "2. KHÔNG GIỚI HẠN SỐ TỪ (hệ thống dùng VieNeu-TTS cục bộ không giới hạn): viết tự nhiên,\n"
     "   đầy đủ chiều sâu, không cần cắt gọt gượng ép theo mốc 750 từ.\n"
-    "3. Nhịp điệu kể chuyện chuẩn Hay Biết Tốt:\n"
+    "3. Nhịp điệu kể chuyện chuẩn Hay Biết Tuốt:\n"
     "   - Đoạn 1: Hook mở đầu giật gân, đặt nghịch lý hoặc câu hỏi khơi gợi tò mò.\n"
     '   - Các đoạn thân (2..N-1): Giải thích cơ chế, lật lại các lầm tưởng ("Nhưng khoan đã...").\n'
     "   - Đoạn cuối (N): Đặt câu hỏi kích thích bình luận + kết đúng câu chốt:\n"
-    '     "Theo dõi Hay Biết Tốt trên TikTok và YouTube nhé".\n'
+    '     "Theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé".\n'
     '4. Trường "title": Tiêu đề thẻ kem ngắn gọn, súc tích IN HOA (3-7 từ) nổi bật trên video.\n'
     '5. Trường "sticker": Chọn loại biểu cảm phù hợp: '
     "question | shock | laugh | think | check | warning.\n"

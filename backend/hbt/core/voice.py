@@ -19,33 +19,69 @@ from pathlib import Path
 from typing import Any
 
 from hbt.core.models import HbtCoreSegment, SegmentVoiceTiming
-from hbt.pipeline.text import parse_voice
+from hbt.pipeline.text import RAW_TOKEN_RE, TOKEN_RE
 from hbt.postv.voice import DEFAULT_NARRATOR as DEFAULT_VOICE
 from hbt.postv.voice import SynthItem, VoiceProvider
+from hbt.shared.tts_client import resolve_voice_id as _resolve_voice_id
 
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 24_000
-SEGMENT_GAP_US = 220_000  # 0.22 giây khoảng nghỉ tự nhiên giữa các phân đoạn
-TAIL_PAD_US = 300_000  # 0.30 giây đuôi cuối file giọng
+LEAD_PAD_US = 150_000  # 0.15 giây đệm đầu trước phân đoạn 1
+SEGMENT_GAP_US = 450_000  # 0.45 giây khoảng nghỉ tự nhiên giữa các phân đoạn
+TAIL_PAD_US = 1_000_000  # 1.00 giây đuôi cuối để không bao giờ cắt cụt âm tiết cuối
+_TARGET_SEG_RMS = 0.14  # ~ -17 dBFS trước khi loudnorm tổng -14 LUFS
+
+
+def _normalize_pcm_rms(pcm: bytes) -> bytes:
+    """Cân đều độ lớn giữa các đoạn giọng VieNeu trước khi ghép tổng (giữ đỉnh <= 0.95)."""
+    if len(pcm) < 4:
+        return pcm
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    n = len(samples)
+    if n == 0:
+        return pcm
+    peak = max(abs(min(samples)), abs(max(samples)))
+    if peak < 150:
+        return pcm
+    sq_sum = sum(s * s for s in samples)
+    rms = math.sqrt(sq_sum / n) / 32768.0
+    if rms <= 1e-4:
+        return pcm
+    gain = min(_TARGET_SEG_RMS / rms, (0.95 * 32767.0) / peak, 3.0)
+    if 0.92 <= gain <= 1.08:
+        return pcm
+    out = array.array("h", (max(-32767, min(32767, int(round(s * gain)))) for s in samples))
+    return out.tobytes()
 
 
 def spoken_text_for_segment(raw_text: str) -> str:
     """Chuyển lời thoại có thể chứa `{cách đọc}` hoặc `|` sang văn bản đọc cho VieNeu-TTS."""
-    tokens = parse_voice(raw_text or "")
-    if not tokens:
-        return (raw_text or "").replace("|", " ").strip()
+    raw = (raw_text or "").strip()
+    if not raw:
+        return ""
     parts: list[str] = []
-    for i, tok in enumerate(tokens):
-        if (
-            i > 0
-            and tok.get("chunk_start")
-            and parts
-            and not parts[-1].endswith((",", ".", "!", "?", ";", ":"))
-        ):
+    pending_break = False
+    for token in RAW_TOKEN_RE.findall(raw):
+        if token == "|":
+            pending_break = True
+            continue
+        m = TOKEN_RE.match(token)
+        if m:
+            spoken = (m.group("spoken") or "").strip() or (m.group("disp") or "").strip()
+            word = f"{spoken}{m.group('punct') or ''}".strip()
+        else:
+            word = token.strip()
+        if not word:
+            continue
+        if pending_break and parts and not parts[-1].endswith((",", ".", "!", "?", ";", ":", "…")):
             parts[-1] = parts[-1] + ","
-        parts.append(str(tok.get("spoken", "")).strip())
-    return " ".join(p for p in parts if p).strip()
+        parts.append(word)
+        pending_break = False
+    return " ".join(parts).strip()
 
 
 def _segment_hash(voice_id: str, spoken: str) -> str:
@@ -103,6 +139,90 @@ def wav_duration_us(wav_path: Path) -> int:
     return int(round((frames * 1_000_000) / rate))
 
 
+def trim_wav_speech_bounds(wav_path: Path, frame_ms: int = 20) -> tuple[float, float]:
+    """Đo ngưỡng RMS từng cửa sổ 20ms để tìm mốc bắt đầu/kết thúc tiếng nói thật `[lo, hi]`
+    bên trong file WAV (loại bỏ khoảng lặng đầu/cuối của VieNeu-TTS)."""
+    try:
+        pcm = _read_mono_16bit_pcm(wav_path, SAMPLE_RATE)
+    except Exception:
+        dur = wav_duration_us(wav_path) / 1_000_000 if wav_path.is_file() else 1.0
+        return 0.0, max(0.2, dur)
+
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    n = len(samples)
+    total_s = n / SAMPLE_RATE if n else 0.0
+    if n == 0:
+        return 0.0, 0.2
+
+    peak = max(abs(min(samples)), abs(max(samples)))
+    if peak < 150:
+        return 0.0, max(0.2, total_s)
+
+    step = max(1, int(SAMPLE_RATE * frame_ms / 1000))
+    thresh = max(220.0, peak * 0.05)
+    first_active: int | None = None
+    last_active: int | None = None
+    for i in range(0, n, step):
+        chunk = samples[i : i + step]
+        if not chunk:
+            continue
+        rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
+        if rms >= thresh:
+            if first_active is None:
+                first_active = i
+            last_active = min(n, i + step)
+
+    if first_active is None or last_active is None:
+        return 0.0, max(0.2, total_s)
+
+    lo = max(0.0, (first_active / SAMPLE_RATE) - 0.02)
+    hi = min(total_s, (last_active / SAMPLE_RATE) + 0.04)
+    if hi - lo < 0.15:
+        return 0.0, max(0.2, total_s)
+    return round(lo, 4), round(hi, 4)
+
+
+def build_core_voice_full_wav(
+    timings: list[SegmentVoiceTiming],
+    scene_starts: list[float],
+    total_duration_s: float,
+    dest_wav: Path,
+    *,
+    lead_pad_s: float = LEAD_PAD_US / 1_000_000,
+) -> Path:
+    """Ghép toàn bộ giọng từng cảnh đúng theo mốc `scene_starts` của trục video `xfade` thành
+    `core_voice_full.wav` (16-bit mono 24kHz) để Whisper căn chữ và bộ trộn dùng chung 1 trục."""
+    dest_wav.parent.mkdir(parents=True, exist_ok=True)
+    total_frames = max(1, int(round(max(total_duration_s, 0.5) * SAMPLE_RATE)))
+    buf = bytearray(total_frames * 2)
+
+    for idx, (timing, start_s) in enumerate(zip(timings, scene_starts, strict=False)):
+        seg_wav = Path(timing.wav_path)
+        if not seg_wav.is_file():
+            continue
+        pcm = _normalize_pcm_rms(_read_mono_16bit_pcm(seg_wav, SAMPLE_RATE))
+        place_s = max(0.0, float(start_s) + (lead_pad_s if idx == 0 else 0.0))
+        start_f = int(round(place_s * SAMPLE_RATE))
+        if start_f >= total_frames:
+            continue
+        max_bytes = (total_frames - start_f) * 2
+        chunk = pcm[:max_bytes]
+        byte_off = start_f * 2
+        buf[byte_off : byte_off + len(chunk)] = chunk
+
+    tmp_wav = dest_wav.with_name(dest_wav.name + ".tmp")
+    with wave.open(str(tmp_wav), "wb") as out_wf:
+        out_wf.setnchannels(1)
+        out_wf.setsampwidth(2)
+        out_wf.setframerate(SAMPLE_RATE)
+        out_wf.writeframes(bytes(buf))
+    tmp_wav.replace(dest_wav)
+    return dest_wav
+
+
 def _read_mono_16bit_pcm(wav_path: Path, target_rate: int = SAMPLE_RATE) -> bytes:
     """Đọc dữ liệu PCM 16-bit mono từ file WAV để ghép nối thành voice.wav tổng."""
     with wave.open(str(wav_path), "rb") as wf:
@@ -150,55 +270,104 @@ def synthesize_core_segments(
         raise ValueError("Không có phân đoạn nào để sinh giọng đọc")
 
     tts_ok = False
+    available_voice_ids: list[str] | None = None
     if voice_provider is not None and hasattr(voice_provider, "status"):
         try:
             st = voice_provider.status()
             tts_ok = bool(st and st.ok)
+            if tts_ok and hasattr(voice_provider, "list_voices"):
+                available_voice_ids = [v.id for v in voice_provider.list_voices()]
         except Exception:
             tts_ok = False
+
+    if tts_ok and available_voice_ids:
+        chosen_voice = _resolve_voice_id(
+            chosen_voice, DEFAULT_VOICE, available_voices=available_voice_ids
+        )
 
     if strict_tts and not tts_ok:
         raise RuntimeError("VieNeu-TTS (.venv-tts) chưa sẵn sàng trên máy")
 
-    segment_wavs: list[tuple[HbtCoreSegment, Path, bool]] = []
-
+    segment_entries: list[tuple[int, HbtCoreSegment, str, Path, bool]] = []
+    pending_items: list[tuple[int, SynthItem]] = []
     for idx, seg in enumerate(segments, start=1):
         spoken = spoken_text_for_segment(seg.text)
         h = _segment_hash(chosen_voice, spoken or f"empty_{idx}")
         seg_wav = cache_dir / f"seg_{idx:02d}_{h}.wav"
-        was_cached = seg_wav.is_file() and seg_wav.stat().st_size > 44
+        was_cached = (
+            seg_wav.is_file()
+            and seg_wav.stat().st_size > 44
+            and wav_duration_us(seg_wav) >= 100_000
+        )
+        segment_entries.append((idx, seg, spoken, seg_wav, was_cached))
+        if not was_cached and tts_ok and voice_provider is not None and spoken:
+            pending_items.append((idx, SynthItem(text=spoken, voice_id=chosen_voice, out=seg_wav)))
 
-        if not was_cached:
-            if tts_ok and voice_provider is not None and spoken:
-                try:
-                    voice_provider.synthesize_many(
-                        [SynthItem(text=spoken, voice_id=chosen_voice, out=seg_wav)]
-                    )
-                except Exception as exc:
-                    if strict_tts:
-                        raise
-                    logger.warning(
-                        "VieNeu-TTS lỗi ở phân đoạn %d (%s), dùng WAV dự phòng: %s",
-                        idx,
-                        chosen_voice,
-                        exc,
-                    )
-                    create_fallback_speech_wav(seg_wav, spoken)
-            else:
-                create_fallback_speech_wav(seg_wav, spoken or "phân đoạn")
+    # Gọi VieNeu-TTS theo 1 lô duy nhất (nạp mô hình 1 lần thay vì lặp lại từng phân đoạn)
+    if pending_items and voice_provider is not None:
+        batch_items = [item for _, item in pending_items]
+        done_count = sum(1 for _, _, _, _, c in segment_entries if c)
+
+        def _on_item(batch_idx: int, state: str) -> None:
+            nonlocal done_count
+            if state != "done" or on_sse_event is None:
+                return
+            done_count = min(total, done_count + 1)
+            pct = int(round((done_count / total) * 100))
+            on_sse_event(
+                {
+                    "step": "voice",
+                    "current": done_count,
+                    "total": total,
+                    "percent": pct,
+                    "message": f"Đã sinh giọng đọc phân đoạn {done_count}/{total} ({pct}%)",
+                }
+            )
+
+        try:
+            try:
+                voice_provider.synthesize_many(batch_items, on_item=_on_item)
+            except TypeError:
+                voice_provider.synthesize_many(batch_items)
+        except Exception as exc:
+            if strict_tts:
+                raise
+            logger.warning(
+                "VieNeu-TTS lỗi khi sinh lô giọng (%s), rơi về WAV dự phòng: %s",
+                chosen_voice,
+                exc,
+            )
+
+    segment_wavs: list[tuple[HbtCoreSegment, Path, bool]] = []
+    for idx, seg, spoken, seg_wav, was_cached in segment_entries:
+        valid_wav = (
+            seg_wav.is_file()
+            and seg_wav.stat().st_size > 44
+            and wav_duration_us(seg_wav) >= 100_000
+        )
+        if not valid_wav:
+            if tts_ok and spoken:
+                logger.warning(
+                    "VieNeu-TTS không tạo WAV hợp lệ phân đoạn %d (size=%s), dùng WAV dự phòng",
+                    idx,
+                    seg_wav.stat().st_size if seg_wav.is_file() else 0,
+                )
+            create_fallback_speech_wav(seg_wav, spoken or "phân đoạn")
 
         segment_wavs.append((seg, seg_wav, was_cached))
 
-        percent = int(round((idx / total) * 100))
-        event_payload = {
-            "step": "voice",
-            "current": idx,
-            "total": total,
-            "percent": percent,
-            "message": f"Đã sinh giọng đọc phân đoạn {idx}/{total} ({percent}%)",
-        }
-        if on_sse_event is not None:
-            on_sse_event(event_payload)
+        if not pending_items or was_cached:
+            percent = int(round((idx / total) * 100))
+            if on_sse_event is not None:
+                on_sse_event(
+                    {
+                        "step": "voice",
+                        "current": idx,
+                        "total": total,
+                        "percent": percent,
+                        "message": f"Đã sinh giọng đọc phân đoạn {idx}/{total} ({percent}%)",
+                    }
+                )
 
     # Ghép nối tất cả segment WAV thành project_dir / "voice.wav" và tính mốc micro-giây chính xác
     combined_wav = project_dir / "voice.wav"
@@ -206,8 +375,10 @@ def synthesize_core_segments(
     timings: list[SegmentVoiceTiming] = []
 
     cursor_us = 0
+    lead_frames = int(round((LEAD_PAD_US / 1_000_000) * SAMPLE_RATE))
     gap_frames = int(round((SEGMENT_GAP_US / 1_000_000) * SAMPLE_RATE))
     tail_frames = int(round((TAIL_PAD_US / 1_000_000) * SAMPLE_RATE))
+    silence_lead_bytes = b"\x00\x00" * lead_frames
     silence_gap_bytes = b"\x00\x00" * gap_frames
     silence_tail_bytes = b"\x00\x00" * tail_frames
 
@@ -216,8 +387,12 @@ def synthesize_core_segments(
         out_wf.setsampwidth(2)
         out_wf.setframerate(SAMPLE_RATE)
 
+        if lead_frames > 0:
+            out_wf.writeframes(silence_lead_bytes)
+            cursor_us += int(round((lead_frames * 1_000_000) / SAMPLE_RATE))
+
         for i, (seg, seg_wav, was_cached) in enumerate(segment_wavs):
-            pcm = _read_mono_16bit_pcm(seg_wav, SAMPLE_RATE)
+            pcm = _normalize_pcm_rms(_read_mono_16bit_pcm(seg_wav, SAMPLE_RATE))
             num_frames = len(pcm) // 2
             dur_us = int(round((num_frames * 1_000_000) / SAMPLE_RATE))
             start_us = cursor_us

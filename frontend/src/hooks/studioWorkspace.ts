@@ -31,8 +31,8 @@ export const SAMPLE_V1_SCRIPT: HbtCoreScript = {
     {
       id: 3,
       order: 3,
-      title: 'THEO DÕI HAY BIẾT TỐT',
-      text: 'Theo bạn công trình cổ đại nào bền bỉ nhất? Hãy bình luận bên dưới và theo dõi Hay Biết Tốt trên TikTok và YouTube nhé!',
+      title: 'THEO DÕI HAY BIẾT TUỐT',
+      text: 'Theo bạn công trình cổ đại nào bền bỉ nhất? Hãy bình luận bên dưới và theo dõi Hay Biết Tuốt trên TikTok và YouTube nhé!',
       sticker: 'question',
       image_prompt:
         'Wide aerial twilight shot of illuminated Roman Colosseum with starry sky, epic atmosphere, ultra detailed, 9:16 vertical framing',

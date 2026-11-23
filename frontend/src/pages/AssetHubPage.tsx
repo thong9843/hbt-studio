@@ -68,9 +68,10 @@ const ENGINE_LABELS: Record<'all' | 'core' | 'postv' | 'chatting' | 'stickv', st
 };
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const safe = typeof bytes === 'number' && Number.isFinite(bytes) ? bytes : 0;
+  if (safe < 1024) return `${safe} B`;
+  if (safe < 1024 * 1024) return `${(safe / 1024).toFixed(1)} KB`;
+  return `${(safe / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const MEME_TAG_FILTERS = [
@@ -928,17 +929,32 @@ export function AssetHubPage() {
                   >
                     {activeTab === 'stickman' && animGroup === 'oneshot' && (
                       <span className="absolute left-2 top-2 z-10 rounded-pill bg-red-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                        ONE-SHOT{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                        ONE-SHOT
+                        {typeof item.duration_sec === 'number' &&
+                        Number.isFinite(item.duration_sec) &&
+                        item.duration_sec > 0
+                          ? ` · ${item.duration_sec.toFixed(1)}s`
+                          : ''}
                       </span>
                     )}
                     {activeTab === 'stickman' && animGroup === 'loop' && (
                       <span className="absolute left-2 top-2 z-10 rounded-pill bg-amber-400 px-2 py-0.5 text-[10px] font-extrabold text-black">
-                        LOOP{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                        LOOP
+                        {typeof item.duration_sec === 'number' &&
+                        Number.isFinite(item.duration_sec) &&
+                        item.duration_sec > 0
+                          ? ` · ${item.duration_sec.toFixed(1)}s`
+                          : ''}
                       </span>
                     )}
                     {isVideo && animGroup !== 'oneshot' && animGroup !== 'loop' && (
                       <span className="absolute left-2 top-2 z-10 rounded-pill bg-black/75 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                        VIDEO{item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
+                        VIDEO
+                        {typeof item.duration_sec === 'number' &&
+                        Number.isFinite(item.duration_sec) &&
+                        item.duration_sec > 0
+                          ? ` · ${item.duration_sec.toFixed(1)}s`
+                          : ''}
                       </span>
                     )}
                     {isVideo ? (
