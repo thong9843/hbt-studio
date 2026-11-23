@@ -12,9 +12,13 @@ from typing import Any
 
 from PIL import Image
 
+from hbt.app_settings import load_app_settings
+from hbt.config import Settings
+from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import build_outro_audio
 from hbt.pipeline.cancel import CancelToken
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, run_ffmpeg
+from hbt.pipeline.whisper import WhisperConfig
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_ENCODE_CLAMP,
@@ -32,12 +36,16 @@ from hbt.stickv.animator import StickmanAnimator
 from hbt.stickv.audio import (
     GLOBAL_LEAD_SILENCE_S,
     LEAD_IN_SILENCE_S,
+    BeatTimelineEntry,
     align_beat_karaoke,
+    align_stickv_master_karaoke,
+    build_master_voice_wav,
     compute_pause_after,
     extract_wav_rms_envelope,
     load_beat_spoken_segments,
     mix_stickv_audio,
     synth_stickv_beats_audio,
+    verify_zero_drift_timeline,
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
@@ -507,6 +515,8 @@ def _stream_chunk_frames_to_ffmpeg(
     prev_stage_state: BeatStageState | None,
     backdrop_renderer: BackdropRenderer,
     on_progress: Callable[[float, str], None] | None = None,
+    master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
+    beat_timeline: list[BeatTimelineEntry] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -578,7 +588,14 @@ def _stream_chunk_frames_to_ffmpeg(
                         f"(Chương {beat.chapter})..."
                     ),
                 )
-            target_total_frames = max(cur_frame_offset + 1, int(round((cur_audio_t + dur_b) * fps)))
+            tl_entry = (
+                beat_timeline[g_idx]
+                if (beat_timeline is not None and 0 <= g_idx < len(beat_timeline))
+                else None
+            )
+            eff_dur_b = tl_entry.duration_s if tl_entry is not None else dur_b
+            target_end_s = tl_entry.beat_end_s if tl_entry is not None else (cur_audio_t + eff_dur_b)
+            target_total_frames = max(cur_frame_offset + 1, int(round(target_end_s * fps)))
             n_frames_beat = target_total_frames - cur_frame_offset
 
             bg_png, char_png = render_beat_layers(
@@ -603,24 +620,35 @@ def _stream_chunk_frames_to_ffmpeg(
                 else int(h * (0.48 if aspect == "9:16" else 0.64))
             )
             interaction = getattr(beat, "interaction", "none") or "none"
-            rms_env = extract_wav_rms_envelope(wav_p, fps, dur_b)
+            rms_env = extract_wav_rms_envelope(wav_p, fps, eff_dur_b)
             pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
             lead_in = GLOBAL_LEAD_SILENCE_S if g_idx == 0 else (LEAD_IN_SILENCE_S * pause_scale)
             spoken_segs = load_beat_spoken_segments(wav_p)
-            speech_start = spoken_segs[0][0] if spoken_segs else lead_in
+            speech_start = (
+                max(0.0, tl_entry.speech_start_s - tl_entry.beat_start_s)
+                if tl_entry is not None
+                else (spoken_segs[0][0] if spoken_segs else lead_in)
+            )
             speech_end = (
-                min(dur_b, spoken_segs[-1][1])
-                if spoken_segs
-                else max(lead_in + 0.3, dur_b - pause_after)
+                min(eff_dur_b, max(speech_start, tl_entry.speech_end_s - tl_entry.beat_start_s))
+                if tl_entry is not None
+                else (
+                    min(eff_dur_b, spoken_segs[-1][1])
+                    if spoken_segs
+                    else max(lead_in + 0.3, eff_dur_b - pause_after)
+                )
             )
-            word_timings = align_beat_karaoke(
-                beat.narration,
-                wav_p,
-                dur_b,
-                lead_in_s=speech_start,
-                pause_after_s=pause_after,
-                spoken_segments=spoken_segs,
-            )
+            if master_word_timings is not None and g_idx in master_word_timings:
+                word_timings = master_word_timings[g_idx]
+            else:
+                word_timings = align_beat_karaoke(
+                    beat.narration,
+                    wav_p,
+                    eff_dur_b,
+                    lead_in_s=speech_start,
+                    pause_after_s=pause_after,
+                    spoken_segments=spoken_segs,
+                )
 
             camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
             eff_pose = beat.pose
@@ -637,7 +665,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 anim_oneshot=getattr(beat, "anim_oneshot", None),
                 anim_loop=getattr(beat, "anim_loop", None),
                 facing=beat.facing,
-                duration_sec=dur_b,
+                duration_sec=eff_dur_b,
                 speech_start=speech_start,
                 speech_end=speech_end,
                 fps=fps,
@@ -695,7 +723,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     global_t = (cur_frame_offset + f_idx) / fps
                     mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
                     if interaction == "versus_split":
-                        animator.facing = "left" if t_sec < dur_b * 0.5 else "right"
+                        animator.facing = "left" if t_sec < eff_dur_b * 0.5 else "right"
                     bg_frame = backdrop_renderer.render_frame(global_t)
                     anim_char, motion = animator.frame_at(f_idx, t_sec)
                     if anim_char is not None:
@@ -712,7 +740,7 @@ def _stream_chunk_frames_to_ffmpeg(
                             prop_img=prop_img,
                             domain=norm_domain,
                             theme=theme,
-                            duration_sec=dur_b,
+                            duration_sec=eff_dur_b,
                             draw_board=True,
                             extra_dy=motion.dy if motion.used_fallback else 0.0,
                             prev_stage_state=cur_state,
@@ -785,7 +813,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     char_png.unlink(missing_ok=True)
 
             cur_frame_offset += n_frames_beat
-            cur_audio_t += dur_b
+            cur_audio_t = target_end_s
             gc.collect()
 
         if proc.stdin is not None:
@@ -907,6 +935,7 @@ def render_stickv(
     preview: bool = False,
     cancel: CancelToken | None = None,
     on_progress: Callable[[float, str], None] | None = None,
+    whisper_cfg: WhisperConfig | None = None,
 ) -> dict[str, Any]:
     """Dựng video StickV hoàn chỉnh theo từng chương và dọn sạch tệp tạm sau khi nối."""
     if not project.beats:
@@ -947,6 +976,48 @@ def render_stickv(
             cancel=cancel,
         )
 
+        emit(24.0, "Đang chốt trục âm thanh chủ (48kHz) & căn mốc Karaoke Whisper...")
+        check_cancel()
+        build_dir = project_dir / "build"
+        voice_full_wav, beat_timeline, voice_full_dur = build_master_voice_wav(
+            beat_wavs, build_dir / "stickv_voice_full.wav"
+        )
+        anchored_beat_wavs: list[tuple[Path, float]] = []
+        for beat, (wav_p, _), entry in zip(beats, beat_wavs, beat_timeline, strict=True):
+            beat.duration_sec = round(entry.duration_s, 4)
+            anchored_beat_wavs.append((wav_p, entry.duration_s))
+        beat_wavs = anchored_beat_wavs
+
+        eff_whisper_cfg = whisper_cfg
+        if eff_whisper_cfg is None and not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                app_cfg = load_app_settings(project_dir.parent.parent)
+                s = Settings()
+                eff_whisper_cfg = WhisperConfig(
+                    model=_whisper.effective_model(app_cfg.whisper_model, s.whisper_model),
+                    device=s.whisper_device,
+                    timeout=app_cfg.whisper_timeout_seconds or _whisper.DEFAULT_TIMEOUT,
+                )
+            except Exception:
+                eff_whisper_cfg = None
+
+        master_word_timings, _align_meta = align_stickv_master_karaoke(
+            beats,
+            beat_timeline,
+            voice_full_wav,
+            cache_file=build_dir / "stickv_timing.json",
+            whisper_cfg=eff_whisper_cfg,
+            cancel=cancel,
+            beat_wavs=beat_wavs,
+        )
+        planned_frames = sum(allocate_beat_frame_counts([e.duration_s for e in beat_timeline], fps))
+        verify_zero_drift_timeline(
+            beat_timeline,
+            planned_frames / float(fps),
+            voice_full_dur,
+            master_word_timings,
+        )
+
         emit(28.0, "Đang trộn SFX & nhạc nền (-14 LUFS)...")
         check_cancel()
         mixed_wav = chunks_dir / "mixed.wav"
@@ -959,6 +1030,8 @@ def render_stickv(
             out_wav=mixed_wav,
             music_mood=project.music_mood,
             workspace_dir=project_dir.parent.parent,
+            voice_full_wav=voice_full_wav,
+            beat_timeline=beat_timeline,
         )
 
         chunks = group_beats_into_chunks(
@@ -1058,6 +1131,8 @@ def render_stickv(
                             prev_stage_state=prev_stage_state,
                             backdrop_renderer=shared_backdrop,
                             on_progress=on_progress,
+                            master_word_timings=master_word_timings,
+                            beat_timeline=beat_timeline,
                         )
                     )
                 chunk_clips.append(chunk_mp4)

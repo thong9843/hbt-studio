@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import wave
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,9 @@ import numpy as np
 from hbt.app_settings import resolve_online_api_key
 from hbt.core.audio import build_topic_bgm_playlist
 from hbt.pipeline.ffutil import run_ffmpeg
+from hbt.pipeline.render import whisper_alignment
+from hbt.pipeline.script import parse_voice
+from hbt.pipeline.whisper import WhisperConfig, WhisperFailed
 from hbt.postv.voice import SynthItem, VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_RESOURCE_CLAMP,
@@ -32,12 +37,29 @@ from hbt.stickv.models import StickvBeat
 
 logger = logging.getLogger(__name__)
 
-# Chuẩn nhịp thở & chống AAC priming nuốt chữ đầu video (GĐ9)
+# Chuẩn nhịp thở & chống AAC priming nuốt chữ đầu video (GĐ9-v10)
+MASTER_SAMPLE_RATE = 48000
+KARAOKE_LEAD_OFFSET_S = -0.025
 GLOBAL_LEAD_SILENCE_S = 0.18
 LEAD_IN_SILENCE_S = 0.04
 SENTENCE_GAP_S = 0.20
 PAUSE_END_SENTENCE_S = 0.24
 PAUSE_MID_CLAUSE_S = 0.20
+
+
+@dataclass(frozen=True)
+class BeatTimelineEntry:
+    """Mốc thời gian tuyệt đối theo mẫu PCM của từng beat trên `stickv_voice_full.wav`."""
+
+    beat_idx: int
+    beat_start_s: float
+    beat_end_s: float
+    speech_start_s: float
+    speech_end_s: float
+
+    @property
+    def duration_s(self) -> float:
+        return max(0.0, self.beat_end_s - self.beat_start_s)
 
 DEFAULT_PRE_ROLL_MS = 35
 DEFAULT_POST_ROLL_MS = 75
@@ -810,6 +832,396 @@ def auto_resolve_mood_bgm(
         return []
 
 
+def _vn_word_weight(word: str) -> float:
+    """Trọng số phát âm âm tiết tiếng Việt (từ dài/số/ngắt câu chiếm thời lượng lâu hơn)."""
+    clean = re.sub(r"[^\w\d]", "", (word or "").strip())
+    if not clean:
+        return 0.6
+    if any(ch.isdigit() for ch in clean):
+        return max(1.6, 0.7 * len(clean))
+    base = 1.0 + 0.14 * max(0, len(clean) - 2)
+    if (word or "").rstrip().endswith((".", "?", "!", "…")):
+        base += 0.35
+    elif (word or "").rstrip().endswith((",", ";", ":")):
+        base += 0.18
+    return base
+
+
+def _resample_mono_pcm(samples: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
+    """Chuyển tần số lấy mẫu PCM mono bằng nội suy tuyến tính chuẩn xác số mẫu."""
+    if src_sr <= 0 or dst_sr <= 0 or len(samples) == 0 or src_sr == dst_sr:
+        return samples.astype(np.float32, copy=False)
+    n_out = max(1, int(round(len(samples) * (dst_sr / float(src_sr)))))
+    x_old = np.linspace(0.0, 1.0, num=len(samples), endpoint=False, dtype=np.float64)
+    x_new = np.linspace(0.0, 1.0, num=n_out, endpoint=False, dtype=np.float64)
+    return np.interp(x_new, x_old, samples.astype(np.float32)).astype(np.float32)
+
+
+def _read_wav_mono_float(wav_path: Path) -> tuple[int, np.ndarray]:
+    with wave.open(str(wav_path), "rb") as wf:
+        sr = wf.getframerate()
+        ch = wf.getnchannels()
+        sw = wf.getsampwidth()
+        raw = wf.readframes(wf.getnframes())
+    if sw != 2 or sr <= 0 or not raw:
+        return 0, np.zeros(0, dtype=np.float32)
+    pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if ch > 1:
+        pcm = pcm.reshape(-1, ch).mean(axis=1)
+    return sr, pcm
+
+
+def build_master_voice_wav(
+    beat_wavs: list[tuple[Path, float]],
+    out_wav: Path,
+    *,
+    target_sr: int = MASTER_SAMPLE_RATE,
+) -> tuple[Path, list[BeatTimelineEntry], float]:
+    """Ghép chuẩn từng mẫu PCM (48kHz) thành `stickv_voice_full.wav` bất biến & bảng mốc beat."""
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    sr = max(8000, int(target_sr))
+    chunks: list[np.ndarray] = []
+    timeline: list[BeatTimelineEntry] = []
+    acc_samples = 0
+
+    for idx, (wav_p, fallback_dur) in enumerate(beat_wavs):
+        pcm = np.zeros(0, dtype=np.float32)
+        src_sr = 0
+        if wav_p.is_file() and wav_p.stat().st_size > 44:
+            try:
+                src_sr, pcm = _read_wav_mono_float(wav_p)
+            except (wave.Error, EOFError, OSError):
+                pcm = np.zeros(0, dtype=np.float32)
+
+        if len(pcm) > 0 and src_sr > 0:
+            beat_pcm = _resample_mono_pcm(pcm, src_sr, sr)
+        else:
+            n_fb = max(1, int(round(max(0.5, float(fallback_dur or 1.0)) * sr)))
+            beat_pcm = np.zeros(n_fb, dtype=np.float32)
+
+        beat_start_s = acc_samples / float(sr)
+        n_beat = len(beat_pcm)
+        beat_end_s = (acc_samples + n_beat) / float(sr)
+        beat_dur = beat_end_s - beat_start_s
+
+        spoken_segs = load_beat_spoken_segments(wav_p)
+        if spoken_segs:
+            sp_lo = max(0.0, min(beat_dur, float(spoken_segs[0][0])))
+            sp_hi = max(sp_lo, min(beat_dur, float(spoken_segs[-1][1])))
+        else:
+            sp_lo, sp_hi = _active_speech_bounds(wav_p, 0.0, beat_dur)
+            sp_lo = max(0.0, min(beat_dur, sp_lo))
+            sp_hi = max(sp_lo, min(beat_dur, sp_hi))
+
+        timeline.append(
+            BeatTimelineEntry(
+                beat_idx=idx,
+                beat_start_s=round(beat_start_s, 6),
+                beat_end_s=round(beat_end_s, 6),
+                speech_start_s=round(beat_start_s + sp_lo, 6),
+                speech_end_s=round(beat_start_s + sp_hi, 6),
+            )
+        )
+        chunks.append(beat_pcm)
+        acc_samples += n_beat
+
+    if chunks:
+        full_f = np.concatenate(chunks, axis=0)
+    else:
+        full_f = np.zeros(sr, dtype=np.float32)
+        acc_samples = sr
+
+    full_pcm = np.clip(np.round(full_f * 32767.0), -32768, 32767).astype(np.int16)
+    _atomic_write_pcm_wav(out_wav, full_pcm, sr=sr, ch=1)
+    total_dur = round(acc_samples / float(sr), 6)
+    return out_wav, timeline, total_dur
+
+
+def _clamp_monotonic_beat_timings(
+    raw_items: list[tuple[str, float, float]],
+    *,
+    beat_start_s: float,
+    beat_end_s: float,
+    lead_offset_s: float = KARAOKE_LEAD_OFFSET_S,
+) -> list[tuple[str, float, float]]:
+    """Áp bù trễ `lead_offset_s`, quy về thời gian cục bộ `[0, beat_dur]` đơn điệu không chồng."""
+    beat_dur = max(0.05, float(beat_end_s) - float(beat_start_s))
+    out: list[tuple[str, float, float]] = []
+    prev_end = 0.0
+    for word, g_st, g_en in raw_items:
+        loc_st = max(0.0, min(beat_dur - 0.01, (float(g_st) + lead_offset_s) - beat_start_s))
+        if loc_st < prev_end:
+            loc_st = min(beat_dur - 0.01, prev_end)
+        loc_en = max(loc_st + 0.01, min(beat_dur, (float(g_en) + lead_offset_s) - beat_start_s))
+        out.append((word, round(loc_st, 4), round(loc_en, 4)))
+        prev_end = loc_en
+    return out
+
+
+def _rms_20ms_speech_bounds(
+    wav_path: Path,
+    start_s: float,
+    end_s: float,
+    *,
+    rms_thresh: float = 0.012,
+) -> tuple[float, float]:
+    """Thu hẹp `[start_s, end_s]` trên file WAV tổng bằng cửa sổ năng lượng RMS 20ms."""
+    lo = max(0.0, float(start_s))
+    hi = max(lo, float(end_s))
+    if hi - lo <= 0.12 or not wav_path.is_file():
+        return lo, hi
+    try:
+        with wave.open(str(wav_path), "rb") as wf:
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            n_total = wf.getnframes()
+            if sw != 2 or sr <= 0 or n_total <= 0:
+                return lo, hi
+            s0 = min(n_total, max(0, int(round(lo * sr))))
+            s1 = min(n_total, max(s0, int(round(hi * sr))))
+            if s1 - s0 < int(sr * 0.04):
+                return lo, hi
+            wf.setpos(s0)
+            raw = wf.readframes(s1 - s0)
+        pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        if ch > 1:
+            pcm = pcm.reshape(-1, ch).mean(axis=1)
+        win = max(1, int(round(sr * 0.02)))  # 20ms
+        n_win = len(pcm) // win
+        if n_win < 2:
+            return lo, hi
+        frames = pcm[: n_win * win].reshape(n_win, win)
+        rms = np.sqrt(np.mean(frames * frames, axis=1))
+        peak = float(np.max(rms)) if len(rms) else 0.0
+        if peak < 1e-4:
+            return lo, hi
+        active_idx = np.flatnonzero(rms >= max(rms_thresh, peak * 0.08))
+        if len(active_idx) == 0:
+            return lo, hi
+        act_lo = lo + (int(active_idx[0]) * win) / sr
+        act_hi = lo + ((int(active_idx[-1]) + 1) * win) / sr
+        if act_hi - act_lo < 0.10:
+            return lo, hi
+        return round(max(lo, act_lo), 4), round(min(hi, act_hi), 4)
+    except Exception:
+        return lo, hi
+
+
+def _fallback_rms_beat_karaoke(
+    beat: StickvBeat,
+    entry: BeatTimelineEntry,
+    voice_full_wav: Path,
+    *,
+    beat_wav_path: Path | None = None,
+    lead_offset_s: float = KARAOKE_LEAD_OFFSET_S,
+) -> list[tuple[str, float, float]]:
+    """Fallback căn chữ RMS 20ms + trọng số âm tiết tiếng Việt trong `[speech_start_s, speech_end_s]`."""
+    segs = load_beat_spoken_segments(beat_wav_path) if beat_wav_path is not None else []
+    raw_global: list[tuple[str, float, float]] = []
+    if segs:
+        for seg_st, seg_en, seg_txt in segs:
+            words = [w for w in seg_txt.split() if w]
+            if not words:
+                continue
+            g_lo = entry.beat_start_s + float(seg_st)
+            g_hi = min(entry.beat_end_s, entry.beat_start_s + float(seg_en))
+            act_lo, act_hi = _rms_20ms_speech_bounds(voice_full_wav, g_lo, g_hi)
+            span = max(0.12, act_hi - act_lo)
+            weights = [_vn_word_weight(w) for w in words]
+            total_w = sum(weights) or 1.0
+            cur = act_lo
+            for w, wt in zip(words, weights, strict=True):
+                d = span * (wt / total_w)
+                raw_global.append((w, cur, min(act_hi, cur + d)))
+                cur += d
+    if not raw_global:
+        words = [w for w in (beat.narration or "").split() if w]
+        if not words:
+            return []
+        act_lo, act_hi = _rms_20ms_speech_bounds(
+            voice_full_wav, entry.speech_start_s, entry.speech_end_s
+        )
+        if act_hi - act_lo < 0.10:
+            act_lo, act_hi = entry.beat_start_s, entry.beat_end_s
+        span = max(0.12, act_hi - act_lo)
+        weights = [_vn_word_weight(w) for w in words]
+        total_w = sum(weights) or 1.0
+        cur = act_lo
+        for w, wt in zip(words, weights, strict=True):
+            d = span * (wt / total_w)
+            raw_global.append((w, cur, min(act_hi, cur + d)))
+            cur += d
+
+    return _clamp_monotonic_beat_timings(
+        raw_global,
+        beat_start_s=entry.beat_start_s,
+        beat_end_s=entry.beat_end_s,
+        lead_offset_s=lead_offset_s,
+    )
+
+
+def _compute_timing_cache_key(
+    voice_full_wav: Path,
+    beats: list[StickvBeat],
+    whisper_cfg: WhisperConfig | None,
+    lead_offset_s: float,
+) -> str:
+    h = hashlib.sha256()
+    if voice_full_wav.is_file():
+        with voice_full_wav.open("rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    for b in beats:
+        h.update(f"|{b.id}:{b.narration}".encode("utf-8"))
+    cfg_sig = (
+        f"whisper:{whisper_cfg.model}:{whisper_cfg.device}:{whisper_cfg.timeout}"
+        if whisper_cfg is not None
+        else "rms20_vn"
+    )
+    h.update(f"|{cfg_sig}|{lead_offset_s:.4f}".encode("utf-8"))
+    return h.hexdigest()
+
+
+def align_stickv_master_karaoke(
+    beats: list[StickvBeat],
+    beat_timeline: list[BeatTimelineEntry],
+    voice_full_wav: Path,
+    *,
+    cache_file: Path | None = None,
+    whisper_cfg: WhisperConfig | None = None,
+    lead_offset_s: float = KARAOKE_LEAD_OFFSET_S,
+    cancel: Any | None = None,
+    beat_wavs: list[tuple[Path, float]] | None = None,
+    log: Callable[[str], None] | None = None,
+) -> tuple[dict[int, list[tuple[str, float, float]]], dict[str, Any]]:
+    """Căn mốc từng từ trực tiếp trên `stickv_voice_full.wav` (Whisper ưu tiên + cache + fallback RMS 20ms)."""
+    cache_key = _compute_timing_cache_key(voice_full_wav, beats, whisper_cfg, lead_offset_s)
+    if cache_file is not None and cache_file.is_file():
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+            if isinstance(cached, dict) and cached.get("cache_key") == cache_key:
+                raw_beats = cached.get("beats") or {}
+                loaded: dict[int, list[tuple[str, float, float]]] = {}
+                for idx in range(len(beats)):
+                    rows = raw_beats.get(str(idx), [])
+                    loaded[idx] = [(str(w), float(st), float(et)) for w, st, et in rows]
+                meta = dict(cached.get("meta") or {})
+                meta["cache_hit"] = True
+                return loaded, meta
+        except Exception:
+            pass
+
+    if cancel is not None and hasattr(cancel, "check"):
+        cancel.check()
+
+    method = "rms20_vn"
+    info: dict[str, Any] = {}
+    timings_by_beat: dict[int, list[tuple[str, float, float]]] = {}
+
+    # 1. Ưu tiên Whisper thật (tiến trình con hbt.pipeline.whisper_worker, KHÔNG initial_prompt)
+    if whisper_cfg is not None and voice_full_wav.is_file():
+        all_tokens: list[Any] = []
+        all_beat_idxs: list[int] = []
+        for idx, beat in enumerate(beats):
+            toks = parse_voice(beat.narration or "")
+            if not toks:
+                continue
+            all_tokens.extend(toks)
+            all_beat_idxs.extend([idx] * len(toks))
+
+        if all_tokens:
+            try:
+                aligned = whisper_alignment(
+                    all_tokens,
+                    all_beat_idxs,
+                    voice_full_wav,
+                    whisper_cfg,
+                    log or (lambda _m: None),
+                )
+                if len(aligned.times) == len(all_tokens):
+                    per_beat_raw: dict[int, list[tuple[str, float, float]]] = {
+                        i: [] for i in range(len(beats))
+                    }
+                    for tok, b_idx, (t_st, t_en) in zip(
+                        all_tokens, all_beat_idxs, aligned.times, strict=True
+                    ):
+                        w_txt = str(getattr(tok, "text", tok)).strip()
+                        if w_txt:
+                            per_beat_raw[b_idx].append((w_txt, float(t_st), float(t_en)))
+                    for idx, entry in enumerate(beat_timeline):
+                        timings_by_beat[idx] = _clamp_monotonic_beat_timings(
+                            per_beat_raw.get(idx, []),
+                            beat_start_s=entry.beat_start_s,
+                            beat_end_s=entry.beat_end_s,
+                            lead_offset_s=lead_offset_s,
+                        )
+                    method = "whisper"
+                    info = dict(aligned.info or {})
+            except (WhisperFailed, RuntimeError, ImportError, OSError) as exc:
+                logger.info("Whisper StickV fallback sang RMS 20ms + âm tiết: %s", exc)
+                info["whisper_fallback_reason"] = str(exc)
+
+    # 2. Fallback an toàn: năng lượng RMS khung 20ms + trọng số âm tiết tiếng Việt
+    if method != "whisper":
+        for idx, (beat, entry) in enumerate(zip(beats, beat_timeline, strict=True)):
+            bw_path = beat_wavs[idx][0] if (beat_wavs and idx < len(beat_wavs)) else None
+            timings_by_beat[idx] = _fallback_rms_beat_karaoke(
+                beat,
+                entry,
+                voice_full_wav,
+                beat_wav_path=bw_path,
+                lead_offset_s=lead_offset_s,
+            )
+
+    meta = {"method": method, "lead_offset_s": lead_offset_s, "cache_hit": False, **info}
+    if cache_file is not None:
+        payload = {
+            "cache_key": cache_key,
+            "meta": meta,
+            "beats": {
+                str(idx): [[w, st, et] for w, st, et in rows]
+                for idx, rows in timings_by_beat.items()
+            },
+        }
+        _atomic_write_text(cache_file, json.dumps(payload, ensure_ascii=False, indent=2))
+    return timings_by_beat, meta
+
+
+def verify_zero_drift_timeline(
+    beat_timeline: list[BeatTimelineEntry],
+    total_video_duration_s: float,
+    voice_full_duration_s: float,
+    word_timings_by_beat: dict[int, list[tuple[str, float, float]]],
+    *,
+    max_drift_s: float = 0.03,
+) -> float:
+    """Kiểm toán Zero-Drift: sai lệch hình-tiếng <= 0.03s & mốc từ đơn điệu, kẹp chặt trong beat."""
+    drift = abs(float(total_video_duration_s) - float(voice_full_duration_s))
+    if drift > max_drift_s:
+        raise ValueError(
+            f"Zero-Drift check thất bại: lệch {drift:.4f}s > {max_drift_s:.3f}s "
+            f"(video={total_video_duration_s:.3f}s, voice={voice_full_duration_s:.3f}s)"
+        )
+    for entry in beat_timeline:
+        rows = word_timings_by_beat.get(entry.beat_idx, [])
+        beat_dur = entry.duration_s
+        prev_st = -1e-6
+        prev_en = 0.0
+        for _w, st, et in rows:
+            if st < -1e-4 or et > beat_dur + 0.005:
+                raise ValueError(
+                    f"Từ Karaoke beat {entry.beat_idx} vượt biên [0, {beat_dur:.3f}]: ({st}, {et})"
+                )
+            if st < prev_st - 1e-4 or st < prev_en - 1e-4 or et < st - 1e-4:
+                raise ValueError(
+                    f"Từ Karaoke beat {entry.beat_idx} không đơn điệu/chồng lấn: ({st}, {et})"
+                )
+            prev_st = st
+            prev_en = et
+    return round(drift, 5)
+
+
 def mix_stickv_audio(
     *,
     beats: list[StickvBeat],
@@ -821,48 +1233,42 @@ def mix_stickv_audio(
     bgm_volume: float = 0.16,
     music_mood: str = "",
     workspace_dir: Path | None = None,
+    voice_full_wav: Path | None = None,
+    beat_timeline: list[BeatTimelineEntry] | None = None,
 ) -> Path:
-    """Ghép giọng đọc + SFX (-16 LUFS) + BGM liên tục (-27 LUFS, duck 25/220ms) + -14 LUFS."""
+    """Trộn song song `stickv_voice_full.wav` bất biến + SFX (-16 LUFS) + BGM (-27 LUFS, duck 25/220ms)."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
-    total_dur = round(sum(d for _, d in beat_wavs), 3)
+    own_master_wav: Path | None = None
+    master_wav = voice_full_wav
+    timeline = beat_timeline
+
+    if master_wav is None or not master_wav.is_file() or timeline is None:
+        own_master_wav = out_wav.with_name(f"{out_wav.stem}_master_voice.tmp.wav")
+        master_wav, timeline, total_dur = build_master_voice_wav(beat_wavs, own_master_wav)
+    else:
+        total_dur = round(timeline[-1].beat_end_s, 4) if timeline else round(
+            sum(d for _, d in beat_wavs), 4
+        )
+
     if total_dur <= 0:
+        if own_master_wav is not None:
+            own_master_wav.unlink(missing_ok=True)
         _write_fallback_wav(out_wav, "empty")
         return out_wav
 
-    inputs: list[str] = []
-    filter_parts: list[str] = []
+    inputs: list[str] = ["-i", str(master_wav)]
+    filter_parts: list[str] = [
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f},asetpts=PTS-STARTPTS[voice_bus]"
+    ]
 
-    cur_t = 0.0
-    voice_labels: list[str] = []
     sfx_events: list[tuple[float, Path]] = []
-
-    for i, (beat, (wav_p, dur)) in enumerate(zip(beats, beat_wavs, strict=False)):
-        inputs.extend(["-i", str(wav_p)])
-        delay_ms = int(round(cur_t * 1000))
-        lbl = f"[v{i}]"
-        delay_part = f",adelay={delay_ms}|{delay_ms}" if delay_ms > 0 else ""
-        filter_parts.append(
-            f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
-            f"{delay_part}{lbl}"
-        )
-        voice_labels.append(lbl)
+    for i, beat in enumerate(beats):
         sfx_path = resolve_sfx_file(beat.sfx_tag, library_dir, assets_dir)
-        if sfx_path is not None:
-            sfx_events.append((cur_t, sfx_path))
-        cur_t += dur
+        if sfx_path is not None and i < len(timeline):
+            sfx_events.append((timeline[i].beat_start_s, sfx_path))
 
-    if len(voice_labels) == 1:
-        filter_parts.append(
-            f"{voice_labels[0]}apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice_bus]"
-        )
-    else:
-        filter_parts.append(
-            f"{''.join(voice_labels)}amix=inputs={len(voice_labels)}:duration=longest:"
-            f"dropout_transition=0:normalize=0,"
-            f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice_bus]"
-        )
-
-    next_idx = len(beat_wavs)
+    next_idx = 1
     sfx_labels: list[str] = []
     for s_i, (s_t, s_path) in enumerate(sfx_events[:40]):
         inputs.extend(["-i", str(s_path)])
@@ -905,15 +1311,17 @@ def mix_stickv_audio(
         filter_parts.append(bgm_fc)
         filter_parts.append(
             f"{bgm_lbl}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS,"
+            f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f},asetpts=PTS-STARTPTS,"
             f"loudnorm=I=-27:TP=-2.0:LRA=11,volume={bgm_volume:.2f}[bgm_low];"
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
             "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck];"
             "[fg_mix][bgm_duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-            f"loudnorm=I=-14:TP=-1.5:LRA=11,atrim=0:{total_dur:.3f}[aout]"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,atrim=0:{total_dur:.4f}[aout]"
         )
     else:
-        filter_parts.append(f"[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,atrim=0:{total_dur:.3f}[aout]")
+        filter_parts.append(
+            f"[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,atrim=0:{total_dur:.4f}[aout]"
+        )
 
     fc_text = ";\n".join(filter_parts) + "\n"
     script_path = out_wav.with_name(f"{out_wav.stem}_filtergraph.txt")
@@ -931,7 +1339,7 @@ def mix_stickv_audio(
         "-map",
         "[aout]",
         "-t",
-        f"{total_dur:.3f}",
+        f"{total_dur:.4f}",
         "-c:a",
         "pcm_s16le",
         "-ar",
@@ -946,5 +1354,7 @@ def mix_stickv_audio(
     finally:
         if tmp_wav.exists():
             tmp_wav.unlink(missing_ok=True)
+        if own_master_wav is not None and own_master_wav.exists():
+            own_master_wav.unlink(missing_ok=True)
         script_path.unlink(missing_ok=True)
     return out_wav

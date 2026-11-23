@@ -1669,25 +1669,15 @@ def _composite_transitioned_board(
         )
         return
 
-    enter_t = 0.35 if beat.board_type == "pinned_photo" else 0.30
-    exit_t = 0.35 if beat.board_type == "pinned_photo" else 0.22
+    enter_t = 0.22
     scale = float(cam_board_scale)
     dy_px = 0.0
     alpha = float(cam_board_alpha)
-    if not same_title:
-        if t_sec < enter_t:
-            u = _ease_out_cubic(t_sec / enter_t)
-            scale *= 0.96 + 0.04 * u
-            dy_px = 18.0 * (1.0 - u)
-            alpha *= u
-        elif (
-            has_next_diff_title
-            and duration_sec > (enter_t + exit_t)
-            and t_sec > (duration_sec - exit_t)
-        ):
-            u = _ease_in_cubic((t_sec - (duration_sec - exit_t)) / exit_t)
-            dy_px = -14.0 * u
-            alpha *= 1.0 - u
+    if not same_title and t_sec < enter_t:
+        u = _ease_out_cubic(t_sec / enter_t)
+        scale *= 0.96 + 0.04 * u
+        dy_px = 14.0 * (1.0 - u)
+        alpha *= u
 
     if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
         _draw_smart_board_content(
@@ -1861,7 +1851,7 @@ def draw_karaoke_strip(
     if spoken_segments:
         active_seg: tuple[float, float, str] | None = None
         for st, et, txt in spoken_segments:
-            if st <= t_sec <= et:
+            if (st - 0.035) <= t_sec <= (et + 0.015):
                 active_seg = (st, et, txt)
                 break
         if active_seg is None:
@@ -1878,7 +1868,7 @@ def draw_karaoke_strip(
             seg_words = [
                 (wd, wst, wet)
                 for (wd, wst, wet) in word_timings
-                if wst >= (seg_st - 0.01) and wet <= (seg_et + 0.01)
+                if wst >= (seg_st - 0.04) and wet <= (seg_et + 0.02)
             ]
             if seg_words:
                 filtered_timings = seg_words
