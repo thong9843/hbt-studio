@@ -611,22 +611,27 @@ def test_v5_a_stance_legs_and_arm_ik_choreography(tmp_path: Path) -> None:
     _, wrist_far = solve_2bone_ik(root, (900.0, 900.0), l1, l2, bend_dir=1)
     assert math.hypot(wrist_far[0] - root[0], wrist_far[1] - root[1]) <= 0.98 * (l1 + l2) + 0.5
 
-    # 2. Khóa giải phẫu tay trái không vắt chéo sâu sang phải (trừ arms_crossed / think_chin)
+    # 2. Khóa Silhouette Lock: cấm CẢ 2 tay vắt chéo qua trục cà vạt đỏ (kể cả arms_crossed)
     clamped_l = clamp_arm_target(
         "left", (80.0, 100.0), (220.0, 130.0), 100.0, 60.0, l1, l2, pose="present_board"
     )
-    assert clamped_l[0] <= 100.0 + 60.0 * 0.14 + 0.5
+    assert clamped_l[0] <= 100.0 - 60.0 * 0.14 + 0.5
     crossed_l = clamp_arm_target(
         "left", (80.0, 100.0), (145.0, 130.0), 100.0, 60.0, l1, l2, pose="arms_crossed"
     )
-    assert crossed_l[0] > 115.0
+    assert crossed_l[0] <= 100.0 - 60.0 * 0.14 + 0.5
+    clamped_r = clamp_arm_target(
+        "right", (120.0, 100.0), (40.0, 130.0), 100.0, 60.0, l1, l2, pose="think_chin"
+    )
+    assert clamped_r[0] >= 100.0 + 60.0 * 0.14 - 0.5
 
-    # 3. Đủ 4 hand_shape & ánh xạ đúng theo pose
-    assert set(VALID_HAND_SHAPES) == {"open_palm", "point_index", "fist_punch", "count_fingers"}
+    # 3. Đủ 4 dáng găng tay bo tròn liền khối (thay thế count_fingers bằng thumb_up)
+    assert set(VALID_HAND_SHAPES) == {"open_palm", "point_index", "fist_punch", "thumb_up"}
     assert resolve_hand_shape("point_up", "right") == "point_index"
     assert resolve_hand_shape("emphatic_chop", "right") == "fist_punch"
-    assert resolve_hand_shape("count_points", "right") == "count_fingers"
+    assert resolve_hand_shape("count_points", "right") == "thumb_up"
     assert resolve_hand_shape("present_board", "left") == "open_palm"
+    assert resolve_hand_shape("welcome_open", "right", board_type="recap_card") == "thumb_up"
 
     # 4. body_torso giữ nguyên chiều dài 2 chân chữ A xuống tận đáy ảnh gốc (không cắt ngang hông)
     fps = 30
