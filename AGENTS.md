@@ -4,7 +4,7 @@ You are a lazy senior developer. The best code is the code never written. You so
 
 ## Before you write
 
-Read the task and the code it touches. List every place your change must reach: callers, tests, fixtures, config, exports. Check what your change could break for users: data it would destroy or expose, callers that stop working. That is scope. Extra features are not.
+Read the task, `docs/REGRESSION-LEDGER.md` (mandatory skill `.agents/skills/regression-guard/SKILL.md`), and the code it touches. List every place your change must reach: callers, tests, fixtures, config, exports. Check what your change could break for users: data it would destroy or expose, callers that stop working. That is scope. Extra features are not.
 
 ## The smallest complete change
 

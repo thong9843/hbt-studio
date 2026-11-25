@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import math
 import re
@@ -79,6 +80,15 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "(4-7 từ) + 1 câu giải thích cơ chế/số liệu cụ thể (10-18 từ), không viết 3 chữ cụt lủn.\n"
         "- `bullets` / `flow_steps`: đủ 3 ý (8-15 từ/ý) dạng `**Thuật ngữ/Con số:** cơ chế "
         "hoặc tác động cụ thể`, kèm `takeaway` ở đáy thẻ.\n"
+        "- `takeaway` (CHỐT LẠI): BẮT BUỘC ngắn gọn tối đa 10-13 từ để đọc lướt trong 1 giây, "
+        "không bao giờ viết dài lê thê.\n"
+        "- CÂN BẰNG ẢNH MINH HỌA (50%-60% BEAT): Bố trí 50%-60% số beat dùng "
+        "`board_type='pinned_photo'` xen kẽ nhịp nhàng với các bảng phân tích (`myth_vs_fact`, "
+        "`comparison`, `counter_grow`, `flow_steps`, `timeline_era`, `recap_card`). "
+        "Trên mỗi beat `pinned_photo`, ghi `prop_query` gồm 2-4 từ khóa tiếng Anh cụ thể nhìn "
+        "thấy ngoài đời thật (vd: 'soccer player sprint', 'marathon runner legs'), CẤM từ trừu "
+        "tượng; kèm `image_prompt` 1 câu tiếng Anh ngắn mô tả tranh 2D minh họa nếu là khái niệm "
+        "khoa học/trừu tượng.\n"
         "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
         "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
         "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
@@ -149,64 +159,171 @@ def build_director_prompt(
     )
 
 
+def unwrap_board_text(value: Any) -> tuple[str, str]:
+    """Tách sạch `(title, body)` từ dict hoặc chuỗi bị `str(dict)` hóa; cấm lọt `{`/`'title':`."""
+    if value is None:
+        return "", ""
+    obj: Any = value
+    if isinstance(obj, str):
+        s = obj.strip()
+        is_dict_str = s.startswith("{") and any(
+            k in s for k in ("'title'", '"title"', "'text'", '"text"')
+        )
+        if is_dict_str:
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(s)
+                    if isinstance(parsed, dict):
+                        obj = parsed
+                        break
+                except Exception:
+                    continue
+        if isinstance(obj, str):
+            return "", obj.strip()
+    if isinstance(obj, dict):
+        title = str(obj.get("title") or obj.get("heading") or obj.get("label") or "").strip()
+        body = str(
+            obj.get("text")
+            or obj.get("body")
+            or obj.get("desc")
+            or obj.get("description")
+            or obj.get("content")
+            or obj.get("value")
+            or ""
+        ).strip()
+        if not title and not body:
+            parts = [str(v).strip() for v in obj.values() if str(v).strip()]
+            return "", " — ".join(parts[:2])
+        return title, body
+    return "", str(obj).strip()
+
+
+def format_unwrapped_text(value: Any) -> str:
+    """Chuyển giá trị bảng (dict/str) thành 1 chuỗi sạch giàu định dạng `**Tiêu đề:** nội dung`."""
+    title, body = unwrap_board_text(value)
+    if title and body:
+        t_clean = title.replace("**", "").rstrip(": ")
+        return f"**{t_clean}:** {body}"
+    return (title or body).strip()
+
+
+def _trim_takeaway_words(text: str, max_words: int = 13) -> str:
+    clean = format_unwrapped_text(text).replace("**", "").strip()
+    words = clean.split()
+    if len(words) <= max_words:
+        return clean
+    return " ".join(words[:max_words]).rstrip(",;:-–— ")
+
+
 def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
-    takeaway = str(raw.get("takeaway") or "").strip()[:90]
-    if board_type == "bullets":
-        items = [str(x).strip()[:130] for x in (raw.get("items") or []) if str(x).strip()][:5]
+    takeaway = _trim_takeaway_words(raw.get("takeaway") or "", max_words=13)
+    if board_type in ("bullets", "list", "card"):
+        items = [
+            format_unwrapped_text(x)[:140]
+            for x in (raw.get("items") or [])
+            if format_unwrapped_text(x)
+        ][:5]
         res: dict[str, Any] = {"items": items or ["Điểm chính cần nhớ"]}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "big_number":
         res = {
-            "value": str(raw.get("value") or "100%").strip()[:24],
-            "label": str(raw.get("label") or "").strip()[:80],
-            "sub": str(raw.get("sub") or "").strip()[:120],
+            "value": format_unwrapped_text(raw.get("value") or "100%").replace("**", "")[:24],
+            "label": format_unwrapped_text(raw.get("label") or "")[:90],
+            "sub": format_unwrapped_text(raw.get("sub") or "")[:120],
         }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "comparison":
+        lt_clean = format_unwrapped_text(raw.get("left_title") or "Trước").replace("**", "")[:40]
+        rt_clean = format_unwrapped_text(raw.get("right_title") or "Sau").replace("**", "")[:40]
         res = {
-            "left_title": str(raw.get("left_title") or "Trước").strip()[:40],
+            "left_title": lt_clean,
             "left_items": [
-                str(x).strip()[:120] for x in (raw.get("left_items") or []) if str(x).strip()
+                format_unwrapped_text(x)[:130]
+                for x in (raw.get("left_items") or [])
+                if format_unwrapped_text(x)
             ][:4],
-            "right_title": str(raw.get("right_title") or "Sau").strip()[:40],
+            "right_title": rt_clean,
             "right_items": [
-                str(x).strip()[:120] for x in (raw.get("right_items") or []) if str(x).strip()
+                format_unwrapped_text(x)[:130]
+                for x in (raw.get("right_items") or [])
+                if format_unwrapped_text(x)
             ][:4],
         }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "flow_steps":
-        steps = [str(x).strip()[:120] for x in (raw.get("steps") or []) if str(x).strip()][:4]
+        steps = [
+            format_unwrapped_text(x)[:130]
+            for x in (raw.get("steps") or raw.get("items") or [])
+            if format_unwrapped_text(x)
+        ][:4]
         res = {"steps": steps or ["Bước 1", "Bước 2"]}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "recap_card":
         raw_items = raw.get("items") or raw.get("bullets") or []
-        items = [str(x).strip()[:120] for x in raw_items if str(x).strip()][:3]
+        items = [format_unwrapped_text(x)[:130] for x in raw_items if format_unwrapped_text(x)][:3]
         res = {"items": items or ["Ghi nhớ cơ chế cốt lõi"]}
         if takeaway:
             res["takeaway"] = takeaway
         return res
-    if board_type in (
-        "bar_compare",
-        "counter_grow",
-        "card",
-        "quote",
-        "list",
-        "timeline_era",
-        "location_map",
-        "myth_vs_fact",
-        "pinned_photo",
-    ):
-        return dict(raw)
+    if board_type == "myth_vs_fact":
+        myth_t, myth_b = unwrap_board_text(raw.get("myth") or raw.get("left") or "")
+        fact_t, fact_b = unwrap_board_text(raw.get("fact") or raw.get("right") or "")
+        res = {
+            "myth": f"**{myth_t}:** {myth_b}" if (myth_t and myth_b) else (myth_t or myth_b),
+            "fact": f"**{fact_t}:** {fact_b}" if (fact_t and fact_b) else (fact_t or fact_b),
+        }
+        if raw.get("myth_title"):
+            res["myth_title"] = format_unwrapped_text(raw.get("myth_title")).replace("**", "")[:60]
+        if raw.get("fact_title"):
+            res["fact_title"] = format_unwrapped_text(raw.get("fact_title")).replace("**", "")[:60]
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
+    if board_type == "timeline_era":
+        clean_events: list[dict[str, str]] = []
+        for idx, ev in enumerate((raw.get("events") or raw.get("items") or [])[:4]):
+            if isinstance(ev, dict):
+                raw_yr = ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"
+                yr = format_unwrapped_text(raw_yr).replace("**", "")
+                raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
+                tt = format_unwrapped_text(raw_tt)
+                clean_events.append({"year": yr[:30], "title": tt[:120]})
+            else:
+                ev_t = format_unwrapped_text(ev)[:120]
+                clean_events.append({"year": f"Mốc {idx + 1}", "title": ev_t})
+        res = {"events": clean_events}
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
+    if board_type == "quote":
+        res = {"quote": format_unwrapped_text(raw.get("quote") or raw.get("text") or "")[:180]}
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
+    if board_type == "pinned_photo":
+        pin_raw = str(raw.get("pin_style") or "").strip().lower()
+        res = {
+            "caption": format_unwrapped_text(raw.get("caption") or "").replace("**", "")[:80],
+            "pin_style": "tape" if pin_raw == "tape" else "pin",
+        }
+        if takeaway:
+            res["takeaway"] = takeaway
+        return res
+    if board_type in ("bar_compare", "counter_grow", "location_map"):
+        out_d = dict(raw)
+        if takeaway:
+            out_d["takeaway"] = takeaway
+        return out_d
     return {}
 
 
@@ -327,8 +444,8 @@ def _enrich_myth_vs_fact(
 ) -> dict[str, Any]:
     """Đảm bảo thẻ `myth_vs_fact` có tiêu đề ngắn + giải thích cơ chế cụ thể (không cụt 3 chữ)."""
     updated = dict(bdata)
-    myth = str(updated.get("myth") or updated.get("left") or "").strip()
-    fact = str(updated.get("fact") or updated.get("right") or "").strip()
+    myth = format_unwrapped_text(updated.get("myth") or updated.get("left") or "").strip()
+    fact = format_unwrapped_text(updated.get("fact") or updated.get("right") or "").strip()
 
     myth_plain = myth.replace("**", "").strip(" .,:;")
     if not myth_plain:
@@ -458,6 +575,7 @@ def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
                         "board_items": list(recap_pts),
                         "takeaway": recap_tk,
                         "board_data": recap_data,
+                        "camera_shot": "wide_stage",
                     }
                 )
             )
@@ -605,7 +723,9 @@ def sanitize_beats(
             camera_shot = "wide_stage"
         anim_oneshot = str(item.get("anim_oneshot") or "").strip() or None
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
-        prop_query = str(item.get("prop_query") or "").strip()[:80] or None
+        raw_pq = item.get("prop_query") or item.get("image_query") or ""
+        prop_query = str(raw_pq).strip()[:80] or None
+        image_prompt = str(item.get("image_prompt") or "").strip()[:320] or None
         raw_vdata = item.get("visual_data")
         vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}
 
@@ -641,6 +761,7 @@ def sanitize_beats(
                 interaction=interaction,  # type: ignore[arg-type]
                 camera_shot=camera_shot,  # type: ignore[arg-type]
                 prop_query=prop_query,
+                image_prompt=image_prompt,
                 facing=facing,
                 motion=motion,  # type: ignore[arg-type]
                 sfx_tag=sfx,  # type: ignore[arg-type]

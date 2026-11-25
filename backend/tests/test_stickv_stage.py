@@ -609,7 +609,7 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
     assert lay_focus.clamp_bounds is not None
     assert lay_focus.clamp_bounds[1] >= 115
     assert lay_focus.clamp_bounds[3] <= 865
-    assert lay_focus.char_scale == pytest.approx(0.82)
+    assert lay_focus.char_scale == pytest.approx(0.92)
 
     lay_close_fade = compute_layered_camera_layout(
         "closeup_react",
@@ -626,11 +626,11 @@ def test_v9_layered_camera_clamping_2tier_board_and_recap_card() -> None:
         aspect="9:16",
         w=1080,
         h=1920,
-        t_sec=0.60,
+        t_sec=0.72,
         prev_stage_state=BeatStageState(x=500.0, y=1200.0, board_alpha=1.0),
     )
     assert lay_close_done.board_alpha == pytest.approx(0.0, abs=0.01)
-    assert lay_close_done.char_scale == pytest.approx(1.22)
+    assert lay_close_done.char_scale == pytest.approx(1.06)
 
     # 2. Kiểm tra focus_board không đẩy chữ lên sát mép y < 110 và closeup_react ẩn bảng lớn
     bg = Image.new("RGB", (540, 960), (250, 247, 240))
@@ -1084,3 +1084,83 @@ def test_stickv_karaoke_sync_trims_silence_to_active_speech(tmp_path: Path) -> N
     assert len(timings) == 6
     assert timings[0][1] >= 0.28  # Không bắt đầu trong đoạn im lặng 0.00..0.30s
     assert timings[-1][2] <= 1.15  # Không kéo dài sang đoạn im lặng 1.10..1.50s
+
+
+def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> None:
+    """Không lọt dict Python thô, CHỐT LẠI 2 dòng, ẩn CHƯƠNG 1 ở CTA & không vẽ Polaroid rỗng."""
+    from hbt.stickv.llm import (
+        _sanitize_board_data,
+        format_unwrapped_text,
+        parse_stickv_json_payload,
+    )
+    from hbt.stickv.stage import _draw_smart_board_content, resolve_stage_palette
+
+    # 1. Giải mã sạch cả dict thật lẫn chuỗi bị str(dict) hóa
+    raw_dict_str = "{'title': 'LẦM TƯỞNG CƠ BẮP', 'text': 'Cơ càng to thì chạy càng nhanh.'}"
+    cleaned = format_unwrapped_text(raw_dict_str)
+    assert "{" not in cleaned and "'title'" not in cleaned
+    assert "LẦM TƯỞNG CƠ BẮP" in cleaned
+    assert "Cơ càng to" in cleaned
+
+    sanitized = _sanitize_board_data(
+        "myth_vs_fact",
+        {
+            "myth": {"title": "Lầm tưởng", "text": "Chạy nhanh cần cơ bắp khổng lồ"},
+            "fact": raw_dict_str,
+            "takeaway": "Sức bền và tỷ lệ công suất trên trọng lượng mới là yếu tố quyết định",
+        },
+    )
+    assert "{" not in sanitized["myth"] and "{" not in sanitized["fact"]
+    assert len(sanitized["takeaway"].split()) <= 13
+
+    # 2. Beat CTA cuối khóa wide_stage (không chuyển closeup_react làm ẩn recap_card)
+    payload = (
+        '{"title":"Nghịch lý cầu thủ","beats":['
+        '{"narration":"Cầu thủ không cần quá đô con.","board_type":"myth_vs_fact",'
+        '"board_data":{"myth":{"title":"Lầm tưởng","text":"To mới khỏe"},"fact":"Bền mới thắng"}},'
+        '{"narration":"Hãy đăng ký kênh và bình luận ý kiến của bạn nhé!",'
+        '"camera_shot":"closeup_react","board_type":"recap_card",'
+        '"board_title":"TÓM TẮT 3 Ý CỐT LÕI"}'
+        "]}"
+    )
+    _, parsed_beats = parse_stickv_json_payload(payload)
+    assert parsed_beats[-1].board_type == "recap_card"
+    assert parsed_beats[-1].camera_shot == "wide_stage"
+
+    # 3. pinned_photo khi prop_img=None tự rơi mềm sang thẻ bullets (không vẽ Polaroid rỗng)
+    pal = resolve_stage_palette("paper_classic", "cream")
+    canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    try:
+        b_empty_photo = StickvBeat(
+            id="b_photo",
+            narration="Sợi cơ bền bỉ giúp vận động viên duy trì nhịp chạy suốt trận.",
+            board_type="pinned_photo",
+            board_title="Sợi cơ bền bỉ",
+            takeaway="Cân bằng giữa sức bền hiếu khí và tốc độ bứt phá",
+        )
+        box = _draw_smart_board_content(
+            canvas,
+            b_empty_photo,
+            (56, 125, 1024, 830),
+            pal,
+            prop_img=None,
+            total_chapters=1,
+        )
+        assert box[2] - box[0] > 800
+    finally:
+        canvas.close()
+
+    # 4. Guard cứng trong draw_karaoke_strip: từ chứa dict thô phải ném ValueError ngay
+    from hbt.stickv.stage import draw_karaoke_strip
+
+    bad_frame = Image.new("RGBA", (540, 960), (0, 0, 0, 255))
+    try:
+        with pytest.raises(ValueError, match="dict"):
+            draw_karaoke_strip(
+                bad_frame,
+                [("{'disp': 'tượng', 'syl': ['tuong']}", 0.0, 0.5)],
+                0.2,
+                aspect="9:16",
+            )
+    finally:
+        bad_frame.close()

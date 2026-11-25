@@ -13,6 +13,10 @@ import httpx
 from PIL import Image
 
 from hbt.app_settings import resolve_online_api_key
+from hbt.shared.image_gen.cloudflare_flux import (
+    CloudflareImageError,
+    generate_illustration_image,
+)
 from hbt.shared.online_sources.iconify_props import resolve_prop_png
 
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
@@ -248,6 +252,19 @@ def download_reference_image_url(
             http.close()
 
 
+_QUERY_STOPWORDS = frozenset({"the", "a", "an", "of", "in", "on", "at", "for", "with", "and", "to"})
+
+
+def _shorten_query(query: str) -> str:
+    """Rút gọn truy vấn dài xuống 2 từ cốt lõi tiếng Anh để tăng tỷ lệ tìm thấy ảnh thật."""
+    tokens = [w for w in re.findall(r"[a-zA-Z0-9]+", (query or "").lower()) if w]
+    core = [w for w in tokens if w not in _QUERY_STOPWORDS]
+    chosen = core if len(core) >= 2 else tokens
+    if len(chosen) <= 2:
+        return ""
+    return " ".join(chosen[:2])
+
+
 def resolve_reference_image(
     query: str,
     library_dir: Path,
@@ -256,22 +273,62 @@ def resolve_reference_image(
     pixabay_key: str = "",
     accent_color: tuple[int, int, int, int] = (217, 35, 46, 255),
     client: httpx.Client | None = None,
+    illustration_prompt: str = "",
+    allow_ai_fallback: bool = True,
+    cf_account_id: str = "",
+    cf_api_token: str = "",
+    ai_budget: list[int] | None = None,
 ) -> tuple[Path, str]:
-    """Tải & cache ảnh tư liệu về `library/reference_images/` (Wikimedia -> Pixabay -> Iconify)."""
+    """Tải & cache ảnh 3 tầng về `library/reference_images/<sha1>.jpg`:
+    Wikimedia (đầy đủ -> 2 từ) -> Pixabay -> Cloudflare Flux -> Iconify.
+    """
     ref_dir = Path(library_dir) / "reference_images"
     ref_dir.mkdir(parents=True, exist_ok=True)
-    slug = _safe_slug(query)
-    cached = ref_dir / f"{slug}.png"
-    if cached.is_file() and cached.stat().st_size > 0:
-        return cached, "cache"
+    clean_q = (query or "").strip()
+    clean_prompt = (illustration_prompt or "").strip()
+    digest = hashlib.sha1(
+        f"{clean_q.lower()}|{clean_prompt.lower()}".encode(),
+        usedforsecurity=False,
+    ).hexdigest()[:16]
+    cached_jpg = ref_dir / f"{digest}.jpg"
+    if cached_jpg.is_file() and cached_jpg.stat().st_size > 0:
+        return cached_jpg, "cache"
+    legacy_png = ref_dir / f"{_safe_slug(clean_q)}.png"
+    if legacy_png.is_file() and legacy_png.stat().st_size > 0:
+        return legacy_png, "cache"
 
-    candidates = search_reference_images(
-        query,
-        limit=6,
-        workspace_dir=workspace_dir,
-        pixabay_key=pixabay_key,
-        client=client,
-    )
+    short_q = _shorten_query(clean_q)
+    query_variants = [q for q in (clean_q, short_q) if q]
+
+    candidates: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    # Tầng 1: Wikimedia Commons (đầy đủ -> rút gọn 2 từ)
+    for qv in query_variants:
+        hits = search_wikimedia_images(qv, limit=6, client=client)
+        for it in hits:
+            if it["url"] not in seen_urls:
+                candidates.append(it)
+                seen_urls.add(it["url"])
+        if candidates:
+            break
+
+    # Tầng 2: Pixabay (đầy đủ -> rút gọn 2 từ)
+    if not candidates:
+        for qv in query_variants:
+            hits = search_pixabay_images(
+                qv,
+                api_key=pixabay_key,
+                workspace_dir=workspace_dir,
+                limit=6,
+                client=client,
+            )
+            for it in hits:
+                if it["url"] not in seen_urls:
+                    candidates.append(it)
+                    seen_urls.add(it["url"])
+            if candidates:
+                break
+
     own_client = client is None
     http = client if client is not None else httpx.Client(timeout=8.0, follow_redirects=True)
     try:
@@ -285,15 +342,41 @@ def resolve_reference_image(
                     rgb = raw.convert("RGB")
                     try:
                         rgb.thumbnail((1080, 1080), Image.Resampling.LANCZOS)
-                        rgb.save(cached, format="PNG")
+                        rgb.save(cached_jpg, format="JPEG", quality=90)
                     finally:
                         rgb.close()
-                return cached, str(cand.get("source") or "wikimedia")
+                return cached_jpg, str(cand.get("source") or "wikimedia")
             except Exception:
                 continue
     finally:
         if own_client:
             http.close()
 
-    fallback_path = resolve_prop_png(query, library_dir, accent_color=accent_color)
+    # Tầng 3: Cloudflare Workers AI (flux-1-schnell, giới hạn budget/video, lưu cache vĩnh viễn)
+    budget_ok = ai_budget is None or (len(ai_budget) > 0 and ai_budget[0] > 0)
+    if allow_ai_fallback and budget_ok:
+        acc_id = (cf_account_id or "").strip() or resolve_online_api_key(
+            "CLOUDFLARE_ACCOUNT_ID", workspace_dir
+        )
+        token = (cf_api_token or "").strip() or resolve_online_api_key(
+            "CLOUDFLARE_API_TOKEN", workspace_dir
+        )
+        if acc_id and token:
+            try:
+                generate_illustration_image(
+                    clean_prompt or clean_q,
+                    cached_jpg,
+                    account_id=acc_id,
+                    api_token=token,
+                    width=768,
+                    height=512,
+                    client=client,
+                )
+                if ai_budget is not None and len(ai_budget) > 0:
+                    ai_budget[0] = max(0, ai_budget[0] - 1)
+                return cached_jpg, "cloudflare_flux"
+            except CloudflareImageError:
+                pass
+
+    fallback_path = resolve_prop_png(clean_q, library_dir, accent_color=accent_color)
     return fallback_path, "iconify"

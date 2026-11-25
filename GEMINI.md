@@ -1,6 +1,6 @@
 # GEMINI.md
 
-Đọc toàn bộ CLAUDE.md và AGENTS.md (Ponytail mặc định mức `full` + Repo Harness khi có trên `GD-Config`) trước khi làm bất cứ việc gì. CLAUDE.md là luật chính của dự án; AGENTS.md và Repo Harness là quy tắc bắt buộc trước khi code (các skill mở rộng ở `.agents/skills/ponytail*/SKILL.md`), luôn giữ nguyên toàn bộ luật dự án trong CLAUDE.md và GEMINI.md. Luật push, merge và tag nằm ở CLAUDE.md (mục Bắt buộc và Quy trình mốc); không chép lại ở đây.
+Đọc toàn bộ CLAUDE.md, AGENTS.md (Ponytail mặc định mức `full` + Repo Harness khi có trên `GD-Config`) và skill bắt buộc `.agents/skills/regression-guard/SKILL.md` + `docs/REGRESSION-LEDGER.md` trước khi làm bất cứ việc gì. CLAUDE.md là luật chính của dự án; AGENTS.md, `regression-guard` và Repo Harness là quy tắc bắt buộc trước khi code (các skill mở rộng ở `.agents/skills/ponytail*/SKILL.md`), luôn giữ nguyên toàn bộ luật dự án trong CLAUDE.md và GEMINI.md. Luật push, merge và tag nằm ở CLAUDE.md (mục Bắt buộc và Quy trình mốc); không chép lại ở đây.
 
 ## Bổ sung cho Antigravity
 - Trong tài liệu repo, chữ "Claude Code" nghĩa là bạn (agent Antigravity). Mọi luật áp cho Claude Code đều áp cho bạn.

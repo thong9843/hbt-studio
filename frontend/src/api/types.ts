@@ -1052,6 +1052,7 @@ export interface StickvBeat {
   interaction?: StickvInteraction;
   camera_shot?: StickvCameraShot;
   prop_query?: string | null;
+  image_prompt?: string | null;
   facing: 'left' | 'right';
   motion: StickvMotion;
   sfx_tag: StickvSfxTag;

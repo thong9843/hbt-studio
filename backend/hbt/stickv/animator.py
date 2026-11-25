@@ -288,6 +288,7 @@ class StickmanAnimator:
         wav_path: Path | None = None,
         prev_pose_state: PuppetPoseState | None = None,
         global_t_offset: float = 0.0,
+        board_type: str = "bullets",
     ) -> None:
         self.facing = facing
         self.duration_sec = max(0.5, float(duration_sec))
@@ -321,11 +322,13 @@ class StickmanAnimator:
                     facing=facing,
                     beat_id=beat_id,
                     fps=self.fps,
+                    duration_sec=self.duration_sec,
                     speech_start=self.speech_start,
                     speech_end=self.speech_end,
                     rms_env=puppet_env,
                     prev_pose_state=prev_pose_state,
                     global_t_offset=global_t_offset,
+                    board_type=board_type,
                 )
             except Exception:
                 self.puppet_rig = None
