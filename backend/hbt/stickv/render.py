@@ -27,7 +27,10 @@ from hbt.shared.ffmpeg_utils import (
     measure_audio_duration,
 )
 from hbt.shared.online_sources.iconify_props import resolve_prop_png
-from hbt.shared.online_sources.reference_images import resolve_reference_image
+from hbt.shared.online_sources.reference_images import (
+    DEFAULT_AI_IMAGE_BUDGET,
+    resolve_reference_image,
+)
 from hbt.shared.pipeline.watermark import (
     WatermarkSettings,
     build_watermark_overlay_filter,
@@ -522,6 +525,7 @@ def _stream_chunk_frames_to_ffmpeg(
     beat_timeline: list[BeatTimelineEntry] | None = None,
     ai_photo_budget: list[int] | None = None,
     board_carry: dict[str, Image.Image | None] | None = None,
+    primary_entity_en: str = "",
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -705,6 +709,9 @@ def _stream_chunk_frames_to_ffmpeg(
                         photo_path = cand_m
                 if photo_path is None:
                     ref_q = raw_prop_q or beat.board_title or infer_auto_prop_query(beat.narration)
+                    entity_anchor = (
+                        getattr(beat, "beat_entity_en", "") or primary_entity_en or ""
+                    ).strip()
                     try:
                         cand_p, photo_src = resolve_reference_image(
                             ref_q,
@@ -712,6 +719,7 @@ def _stream_chunk_frames_to_ffmpeg(
                             workspace_dir=project_dir.parent.parent,
                             accent_color=accent,
                             illustration_prompt=(getattr(beat, "image_prompt", None) or "").strip(),
+                            primary_entity_en=entity_anchor,
                             allow_ai_fallback=True,
                             ai_budget=ai_photo_budget,
                         )
@@ -1143,7 +1151,7 @@ def render_stickv(
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
-        ai_photo_budget = [4]
+        ai_photo_budget = [DEFAULT_AI_IMAGE_BUDGET]
         board_carry: dict[str, Image.Image | None] = {"img": None}
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
@@ -1232,6 +1240,7 @@ def render_stickv(
                             beat_timeline=beat_timeline,
                             ai_photo_budget=ai_photo_budget,
                             board_carry=board_carry,
+                            primary_entity_en=(getattr(project, "primary_entity_en", "") or ""),
                         )
                     )
                 chunk_clips.append(chunk_mp4)

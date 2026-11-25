@@ -681,13 +681,24 @@ def _draw_pinned_photo_card(
     vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     pin_style = str(data.get("pin_style") or "pin").strip().lower()
-    raw_caption = (
-        str(data.get("caption") or "").strip()
-        or strip_rich_markup(beat.board_title or "").strip()
-        or _extract_highlight_keyword(beat.narration)
-    )
-    cap_words = raw_caption.split()[:6]
-    caption = " ".join(cap_words) if cap_words else "Ảnh tư liệu minh họa"
+    _generic_caps = {
+        "phân tích cơ chế",
+        "dữ kiện định lượng",
+        "bản đồ ý chính",
+        "hồ sơ phân tích",
+        "ảnh tư liệu minh họa",
+    }
+    raw_caption = str(data.get("caption") or "").replace("**", "").strip()
+    if raw_caption.lower() in _generic_caps:
+        raw_caption = ""
+    if not raw_caption:
+        bt_clean = strip_rich_markup(beat.board_title or "").strip()
+        if bt_clean.lower() not in _generic_caps:
+            raw_caption = bt_clean
+    if not raw_caption:
+        raw_caption = _extract_highlight_keyword(beat.narration)
+    cap_words = raw_caption.split()[:7]
+    caption = " ".join(cap_words) if cap_words else "Hình ảnh minh họa"
 
     # Tạo lớp Polaroid có viền đệm đủ cho bóng đổ + đinh ghim + xoay nghiêng ±2.2°
     pad = 44
@@ -836,6 +847,35 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
+
+    def _side_items(raw_val: Any) -> list[str]:
+        if isinstance(raw_val, list):
+            return [format_unwrapped_text(x) for x in raw_val if format_unwrapped_text(x)][:4]
+        s = format_unwrapped_text(raw_val)
+        return [s] if s else []
+
+    # Chốt chặn schema ở renderer: không vẽ comparison trống hoặc big_number "100%" vô nghĩa
+    if eff_btype == "comparison":
+        l_check = _side_items(data.get("left_items") or data.get("left"))
+        r_check = _side_items(data.get("right_items") or data.get("right"))
+        if not l_check and not r_check:
+            eff_btype = "bullets"
+    elif eff_btype == "big_number":
+        raw_bn = data.get("value")
+        if raw_bn is None or str(raw_bn).strip() == "":
+            raw_bn = data.get("number")
+        bn_str = strip_rich_markup(str(raw_bn or "")).strip()
+        if (
+            not bn_str
+            or not re.search(r"\d", bn_str)
+            or (bn_str == "100%" and "100%" not in (beat.narration or ""))
+        ):
+            eff_btype = "bullets"
+            if not data.get("items"):
+                lbl_s = format_unwrapped_text(data.get("label") or "")
+                sub_s = format_unwrapped_text(data.get("sub") or data.get("detail") or "")
+                data["items"] = [x for x in (lbl_s, sub_s) if x]
+
     takeaway = (
         format_unwrapped_text(getattr(beat, "takeaway", "") or data.get("takeaway") or "")
         .replace("**", "")
@@ -883,16 +923,8 @@ def _draw_smart_board_content(
         )
         est_h += max(140, qh + 64)
     elif eff_btype == "comparison":
-        left_items = [
-            format_unwrapped_text(x)
-            for x in (data.get("left_items") or [])
-            if format_unwrapped_text(x)
-        ][:4]
-        right_items = [
-            format_unwrapped_text(x)
-            for x in (data.get("right_items") or [])
-            if format_unwrapped_text(x)
-        ][:4]
+        left_items = _side_items(data.get("left_items") or data.get("left"))
+        right_items = _side_items(data.get("right_items") or data.get("right"))
         col_w_px = max(140, (bw - 120) // 2)
         lh = sum(
             _measure_rich_wrapped_height(
@@ -1090,11 +1122,12 @@ def _draw_smart_board_content(
                 if format_unwrapped_text(it)
             ][:3]
             if not recap_items:
-                recap_items = [
-                    "Nắm vững cơ chế gốc",
-                    "Loại bỏ lầm tưởng cũ",
-                    "Áp dụng ngay thực tế",
+                clauses = [
+                    c.strip()
+                    for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
+                    if len(c.strip().split()) >= 3
                 ]
+                recap_items = clauses[:3] or [beat.board_title or beat.narration]
             slot_h = max(72, (content_bottom - cur_y - 24) // max(1, len(recap_items)) - 12)
             for idx, item in enumerate(recap_items, start=1):
                 if cur_y > content_bottom - 58:
@@ -1114,15 +1147,16 @@ def _draw_smart_board_content(
                 _draw_rich_autofit_text(
                     draw,
                     item,
-                    (x0 + 108, cur_y + 12),
+                    (x0 + 108, cur_y + 10),
                     FONT_BOLD,
-                    32,
-                    16,
+                    30,
+                    13,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(180, bw - 160),
-                    max_height_px=max(28, (cy1 - cur_y) - 20),
-                    line_gap=6,
+                    max_height_px=max(32, (cy1 - cur_y) - 16),
+                    line_gap=5,
+                    max_lines=3,
                 )
                 cur_y = cy1 + 12
 
@@ -1230,9 +1264,15 @@ def _draw_smart_board_content(
                 cur_y += 78
 
         elif eff_btype == "big_number":
-            val = strip_rich_markup(str(data.get("value") or "100%"))
+            raw_bn = data.get("value")
+            if raw_bn is None or str(raw_bn).strip() == "":
+                raw_bn = data.get("number")
+            val = strip_rich_markup(str(raw_bn or "")).strip()
+            unit = strip_rich_markup(str(data.get("unit") or "")).strip()
+            if val and unit and unit.lower() not in val.lower():
+                val = f"{val} {unit}".strip()
             lbl = str(data.get("label") or "")
-            sub = str(data.get("sub") or "")
+            sub = str(data.get("sub") or data.get("detail") or "")
             f_stat = _fit_single_line_font(draw, val, FONT_EXTRABOLD, 128, 40, max(200, bw - 88))
             draw.text((x0 + 44, cur_y + 4), val, font=f_stat, fill=pal["accent"])
             bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_stat)
@@ -1291,8 +1331,8 @@ def _draw_smart_board_content(
             draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
             draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
 
-            left_t = format_unwrapped_text(data.get("left_title") or "Trước")
-            right_t = format_unwrapped_text(data.get("right_title") or "Sau")
+            left_t = format_unwrapped_text(data.get("left_title") or "Bên A")
+            right_t = format_unwrapped_text(data.get("right_title") or "Bên B")
             draw_rich_text_line(
                 draw,
                 left_t,
@@ -1313,16 +1353,8 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            left_list = [
-                format_unwrapped_text(x)
-                for x in (data.get("left_items") or [])[:4]
-                if format_unwrapped_text(x)
-            ]
-            right_list = [
-                format_unwrapped_text(x)
-                for x in (data.get("right_items") or [])[:4]
-                if format_unwrapped_text(x)
-            ]
+            left_list = _side_items(data.get("left_items") or data.get("left"))
+            right_list = _side_items(data.get("right_items") or data.get("right"))
             l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
             r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
             for item in left_list:

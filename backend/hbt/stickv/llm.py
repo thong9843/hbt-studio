@@ -82,13 +82,17 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "hoặc tác động cụ thể`, kèm `takeaway` ở đáy thẻ.\n"
         "- `takeaway` (CHỐT LẠI): BẮT BUỘC ngắn gọn tối đa 10-13 từ để đọc lướt trong 1 giây, "
         "không bao giờ viết dài lê thê.\n"
-        "- CÂN BẰNG ẢNH MINH HỌA (50%-60% BEAT): Bố trí 50%-60% số beat dùng "
-        "`board_type='pinned_photo'` xen kẽ nhịp nhàng với các bảng phân tích (`myth_vs_fact`, "
-        "`comparison`, `counter_grow`, `flow_steps`, `timeline_era`, `recap_card`). "
-        "Trên mỗi beat `pinned_photo`, ghi `prop_query` gồm 2-4 từ khóa tiếng Anh cụ thể nhìn "
-        "thấy ngoài đời thật (vd: 'soccer player sprint', 'marathon runner legs'), CẤM từ trừu "
-        "tượng; kèm `image_prompt` 1 câu tiếng Anh ngắn mô tả tranh 2D minh họa nếu là khái niệm "
-        "khoa học/trừu tượng.\n"
+        "- CÂN BẰNG & RẢI ĐỀU ẢNH MINH HỌA (50%-60% BEAT, KHÔNG TRỐNG NỬA SAU): Với kịch bản "
+        ">=7 beat, BẮT BUỘC có ít nhất 3-4 beat `board_type='pinned_photo'` rải đều đủ 3 chặng: "
+        "Đầu (beat 1-3), Giữa (beat 4-6) và Gần cuối (60%-85% trước `recap_card`), xen kẽ với "
+        "bảng phân tích (`myth_vs_fact`, `comparison`, `big_number`, `flow_steps`, `recap_card`). "
+        "Trả về `primary_entity_en` (thực thể trung tâm của video nếu là 1 chủ thể duy nhất, "
+        "vd 'Leaning Tower of Pisa'). Trên MỌI beat `pinned_photo`, BẮT BUỘC ghi `beat_entity_en` "
+        "(tên địa danh/sự vật/hiện tượng thật CỤ THỂ của RIÊNG beat đó bằng tiếng Anh, vd "
+        "'Bermuda Triangle', 'Racetrack Playa', 'Richat Structure Sahara') và `prop_query` neo "
+        "thực thể đó + bối cảnh (vd 'Racetrack Playa sailing stones'), CẤM ghép cụm chung chung "
+        "như 'Mysterious Places' hay từ dễ lạc đề ('old building', 'ruler', 'blueprint'); kèm "
+        "`image_prompt` 1 câu tiếng Anh mô tả tranh 2D minh họa nếu cần fallback AI.\n"
         "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
         "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
         "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
@@ -110,13 +114,27 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
         "board_type: pinned_photo|bullets|big_number|comparison|flow_steps|bar_compare|"
         "counter_grow|timeline_era|location_map|myth_vs_fact|recap_card|card|quote|list|none.\n"
-        "board_data: pinned_photo={caption:'3-6 từ tiếng Việt',pin_style:'pin'|'tape'}, "
-        "bullets/recap_card={items:['...**từ khóa**...'],takeaway:'...'}, "
-        "big_number={value,label,sub,takeaway}, bar_compare={values:[{label,value}],takeaway}, "
-        "counter_grow={target,unit,label}, timeline_era={events:[{year,title}],takeaway}, "
-        "location_map={location,coordinates,takeaway}, myth_vs_fact={myth,fact,takeaway}, "
-        "comparison={left_title,left_items,right_title,right_items,takeaway}, "
-        "flow_steps={steps:[...],takeaway}."
+        "SCHEMA `board_data` KHỚP 100% RENDERER (MỌI BEAT TỪ ĐẦU ĐẾN CUỐI PHẢI ĐỦ DỮ LIỆU THẬT, "
+        "CẤM BỎ TRỐNG `board_data` Ở NỬA SAU, CẤM DÙNG '100%' NẾU CHỦ ĐỀ KHÔNG NÓI 100%):\n"
+        '- `pinned_photo`: {"caption":"Tên địa điểm/sự vật cụ thể (3-7 từ tiếng Việt)",'
+        '"pin_style":"pin"|"tape"}\n'
+        '- `bullets`: {"items":["**Từ khóa 1:** dữ kiện thật","**Từ khóa 2:** dữ kiện thật",'
+        '"**Từ khóa 3:** dữ kiện thật"],"takeaway":"Chốt ý ngắn <=12 từ"}\n'
+        '- `flow_steps`: {"steps":["**Bước 1:** diễn biến thật","**Bước 2:** cơ chế thật",'
+        '"**Bước 3:** kết quả thật"],"takeaway":"..."}\n'
+        '- `myth_vs_fact`: {"myth":"**Lầm tưởng cụ thể:** giải thích ngắn",'
+        '"fact":"**Sự thật kiểm chứng:** số liệu/cơ chế cụ thể","takeaway":"..."}\n'
+        '- `comparison`: {"left_title":"Tên bên A","left_items":["Đặc điểm A1","Đặc điểm A2"],'
+        '"right_title":"Tên bên B","right_items":["Đặc điểm B1","Đặc điểm B2"],'
+        '"takeaway":"..."}\n'
+        '- `big_number`: {"value":"500.000 km²","label":"Diện tích vùng biển",'
+        '"sub":"Số liệu đo thực tế gắn chủ đề","takeaway":"..."}\n'
+        '- `recap_card`: {"items":["**Ý 1:** rút từ video","**Ý 2:** rút từ video",'
+        '"**Ý 3:** rút từ video"],"takeaway":"Tóm ý chính video <=12 từ"}\n'
+        '- `bar_compare`: {"values":[{"label":"...","value":10}],"takeaway":"..."}, '
+        '`counter_grow`: {"target":1173,"unit":"năm","label":"..."}, '
+        '`timeline_era`: {"events":[{"year":"1173","title":"..."}],"takeaway":"..."}, '
+        '`location_map`: {"location":"...","coordinates":"...","takeaway":"..."}'
     )
 
 
@@ -148,8 +166,8 @@ def build_director_prompt(
         f"{sys_p}\n\n"
         f"Chủ đề: {idea}\n"
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
-        'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science",'
-        '"music_mood":"curious_science",'
+        'Schema JSON:\n{"title":"Tiêu đề","primary_entity_en":"Leaning Tower of Pisa",'
+        '"domain":"physics_science","music_mood":"curious_science",'
         '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"point_up","emotion":"curious",'
         '"camera_shot":"wide_stage","anim_oneshot":"idea_bulb","anim_loop":"talk_explain",'
         '"interaction":"hold_prop","prop_query":"brain","facing":"right","motion":"bounce",'
@@ -207,6 +225,15 @@ def format_unwrapped_text(value: Any) -> str:
     return (title or body).strip()
 
 
+def _trim_at_word_boundary(text: str, max_chars: int) -> str:
+    """Cắt chuỗi gọn tại ranh giới từ (tuyệt đối không cắt cụt giữa từ như '...và c')."""
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    if len(clean) <= max_chars:
+        return clean
+    cut = clean[:max_chars].rsplit(" ", 1)[0].rstrip(",;:-–— ")
+    return cut if cut else clean[:max_chars].rstrip(",;:-–— ")
+
+
 def _trim_takeaway_words(text: str, max_words: int = 13) -> str:
     clean = format_unwrapped_text(text).replace("**", "").strip()
     words = clean.split()
@@ -215,63 +242,87 @@ def _trim_takeaway_words(text: str, max_words: int = 13) -> str:
     return " ".join(words[:max_words]).rstrip(",;:-–— ")
 
 
+def _normalize_side_items(raw_val: Any) -> list[str]:
+    if isinstance(raw_val, list):
+        return [
+            _trim_at_word_boundary(format_unwrapped_text(x), 130)
+            for x in raw_val
+            if format_unwrapped_text(x)
+        ][:4]
+    txt = format_unwrapped_text(raw_val)
+    return [_trim_at_word_boundary(txt, 130)] if txt else []
+
+
 def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     takeaway = _trim_takeaway_words(raw.get("takeaway") or "", max_words=13)
     if board_type in ("bullets", "list", "card"):
         items = [
-            format_unwrapped_text(x)[:140]
+            _trim_at_word_boundary(format_unwrapped_text(x), 140)
             for x in (raw.get("items") or [])
             if format_unwrapped_text(x)
         ][:5]
-        res: dict[str, Any] = {"items": items or ["Điểm chính cần nhớ"]}
+        res: dict[str, Any] = {"items": items}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "big_number":
+        raw_val = raw.get("value")
+        if raw_val is None or str(raw_val).strip() == "":
+            raw_val = raw.get("number")
+        val_txt = format_unwrapped_text(raw_val or "").replace("**", "").strip()
+        unit_txt = format_unwrapped_text(raw.get("unit") or "").replace("**", "").strip()
+        if val_txt and unit_txt and unit_txt.lower() not in val_txt.lower():
+            val_txt = f"{val_txt} {unit_txt}".strip()
         res = {
-            "value": format_unwrapped_text(raw.get("value") or "100%").replace("**", "")[:24],
-            "label": format_unwrapped_text(raw.get("label") or "")[:90],
-            "sub": format_unwrapped_text(raw.get("sub") or "")[:120],
+            "value": _trim_at_word_boundary(val_txt, 28),
+            "label": _trim_at_word_boundary(format_unwrapped_text(raw.get("label") or ""), 90),
+            "sub": _trim_at_word_boundary(
+                format_unwrapped_text(raw.get("sub") or raw.get("detail") or ""), 120
+            ),
         }
+        if unit_txt:
+            res["unit"] = _trim_at_word_boundary(unit_txt, 24)
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "comparison":
-        lt_clean = format_unwrapped_text(raw.get("left_title") or "Trước").replace("**", "")[:40]
-        rt_clean = format_unwrapped_text(raw.get("right_title") or "Sau").replace("**", "")[:40]
+        lt_clean = _trim_at_word_boundary(
+            format_unwrapped_text(raw.get("left_title") or "").replace("**", ""), 40
+        )
+        rt_clean = _trim_at_word_boundary(
+            format_unwrapped_text(raw.get("right_title") or "").replace("**", ""), 40
+        )
+        left_items = _normalize_side_items(raw.get("left_items") or raw.get("left"))
+        right_items = _normalize_side_items(raw.get("right_items") or raw.get("right"))
         res = {
             "left_title": lt_clean,
-            "left_items": [
-                format_unwrapped_text(x)[:130]
-                for x in (raw.get("left_items") or [])
-                if format_unwrapped_text(x)
-            ][:4],
+            "left_items": left_items,
             "right_title": rt_clean,
-            "right_items": [
-                format_unwrapped_text(x)[:130]
-                for x in (raw.get("right_items") or [])
-                if format_unwrapped_text(x)
-            ][:4],
+            "right_items": right_items,
         }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "flow_steps":
         steps = [
-            format_unwrapped_text(x)[:130]
+            _trim_at_word_boundary(format_unwrapped_text(x), 130)
             for x in (raw.get("steps") or raw.get("items") or [])
             if format_unwrapped_text(x)
         ][:4]
-        res = {"steps": steps or ["Bước 1", "Bước 2"]}
+        res = {"steps": steps}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "recap_card":
         raw_items = raw.get("items") or raw.get("bullets") or []
-        items = [format_unwrapped_text(x)[:130] for x in raw_items if format_unwrapped_text(x)][:3]
-        res = {"items": items or ["Ghi nhớ cơ chế cốt lõi"]}
+        items = [
+            _trim_at_word_boundary(format_unwrapped_text(x), 120)
+            for x in raw_items
+            if format_unwrapped_text(x)
+        ][:3]
+        res = {"items": items}
         if takeaway:
             res["takeaway"] = takeaway
         return res
@@ -283,9 +334,13 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
             "fact": f"**{fact_t}:** {fact_b}" if (fact_t and fact_b) else (fact_t or fact_b),
         }
         if raw.get("myth_title"):
-            res["myth_title"] = format_unwrapped_text(raw.get("myth_title")).replace("**", "")[:60]
+            res["myth_title"] = _trim_at_word_boundary(
+                format_unwrapped_text(raw.get("myth_title")).replace("**", ""), 60
+            )
         if raw.get("fact_title"):
-            res["fact_title"] = format_unwrapped_text(raw.get("fact_title")).replace("**", "")[:60]
+            res["fact_title"] = _trim_at_word_boundary(
+                format_unwrapped_text(raw.get("fact_title")).replace("**", ""), 60
+            )
         if takeaway:
             res["takeaway"] = takeaway
         return res
@@ -297,23 +352,34 @@ def _sanitize_board_data(board_type: str, raw: Any) -> dict[str, Any]:
                 yr = format_unwrapped_text(raw_yr).replace("**", "")
                 raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
                 tt = format_unwrapped_text(raw_tt)
-                clean_events.append({"year": yr[:30], "title": tt[:120]})
+                clean_events.append(
+                    {
+                        "year": _trim_at_word_boundary(yr, 30),
+                        "title": _trim_at_word_boundary(tt, 120),
+                    }
+                )
             else:
-                ev_t = format_unwrapped_text(ev)[:120]
+                ev_t = _trim_at_word_boundary(format_unwrapped_text(ev), 120)
                 clean_events.append({"year": f"Mốc {idx + 1}", "title": ev_t})
         res = {"events": clean_events}
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "quote":
-        res = {"quote": format_unwrapped_text(raw.get("quote") or raw.get("text") or "")[:180]}
+        res = {
+            "quote": _trim_at_word_boundary(
+                format_unwrapped_text(raw.get("quote") or raw.get("text") or ""), 180
+            )
+        }
         if takeaway:
             res["takeaway"] = takeaway
         return res
     if board_type == "pinned_photo":
         pin_raw = str(raw.get("pin_style") or "").strip().lower()
         res = {
-            "caption": format_unwrapped_text(raw.get("caption") or "").replace("**", "")[:80],
+            "caption": _trim_at_word_boundary(
+                format_unwrapped_text(raw.get("caption") or "").replace("**", ""), 80
+            ),
             "pin_style": "tape" if pin_raw == "tape" else "pin",
         }
         if takeaway:
@@ -337,6 +403,16 @@ _CLICHE_PATTERNS = (
     "điểm chính cần nhớ",
     "mở đầu video",
     "hãy tìm hiểu",
+    "phân tích cơ chế",
+    "hồ sơ phân tích",
+    "bản đồ ý chính",
+    "góc nhìn thực nghiệm",
+    "dữ kiện định lượng",
+    "ngộ nhận phổ biến",
+    "chu kỳ phục hồi",
+    "quy luật tự nhiên",
+    "phản ứng sinh học chuẩn xác",
+    "lưu lại 3 nguyên tắc cốt lõi để áp dụng ngay hôm nay",
 )
 _CTA_KEYWORDS = (
     "đăng ký",
@@ -358,6 +434,18 @@ _SUMMARY_KEYWORDS = (
     "chốt lại",
     "nhớ kỹ",
 )
+_GENERIC_BOARD_TITLES = frozenset(
+    {
+        "phân tích cơ chế",
+        "dữ kiện định lượng",
+        "bản đồ ý chính",
+        "góc nhìn thực nghiệm",
+        "hồ sơ phân tích",
+        "tổng hợp khoa học",
+        "thông tin quan trọng",
+        "ảnh tư liệu minh họa",
+    }
+)
 
 
 def _word_overlap_ratio(a: str, b: str) -> float:
@@ -368,124 +456,82 @@ def _word_overlap_ratio(a: str, b: str) -> float:
     return len(wa & wb) / max(1, min(len(wa), len(wb)))
 
 
-def _rewrite_non_parrot_title(narration: str) -> str:
-    has_num = bool(re.search(r"\d", narration or ""))
-    candidates = (
-        ("DỮ KIỆN ĐỊNH LƯỢNG", "PHÂN TÍCH CƠ CHẾ", "BẢN ĐỒ Ý CHÍNH", "GÓC NHÌN THỰC NGHIỆM")
-        if has_num
-        else ("PHÂN TÍCH CƠ CHẾ", "BẢN ĐỒ Ý CHÍNH", "GÓC NHÌN THỰC NGHIỆM", "TỔNG HỢP KHOA HỌC")
-    )
-    for cand in candidates:
-        if _word_overlap_ratio(narration, cand) <= ANTI_PARROT_THRESHOLD:
-            return cand
-    return "HỒ SƠ PHÂN TÍCH"
-
-
-def _condense_to_keyword_bullets(narration: str, takeaway: str) -> list[str]:
-    """Rút gọn bảng Anti-Parrot thành 3 ý cấu trúc `**Thuật ngữ:** cơ chế` (overlap <= 0.55)."""
-    clean = (narration or "").strip()
-    num_hits = re.findall(
-        r"\d[\d.,]*\s*(?:%|ms|giây|phút|năm|tcn|triệu|tỷ|nghìn|lần|km|°)?",
+def _extract_subject_phrase(text: str, max_words: int = 5) -> str:
+    """Trích cụm danh từ/tên riêng/số liệu trực tiếp từ lời thoại (không bịa chữ mẫu)."""
+    clean = re.sub(r"\s+", " ", (text or "").replace("**", "").strip(" .,:;!?…\"'“”"))
+    if not clean:
+        return ""
+    # Ưu tiên cụm viết hoa (tên địa danh / thực thể riêng) trong câu
+    proper = re.findall(
+        r"\b[A-ZÀ-Ỹ][a-zà-ỹA-ZÀ-Ỹ0-9\-]+(?:\s+[A-ZÀ-Ỹ][a-zà-ỹA-ZÀ-Ỹ0-9\-]+){1,4}\b",
         clean,
-        re.I,
     )
-    out: list[str] = []
-    if num_hits:
-        hl = num_hits[0].strip()
-        cand1 = f"**Mốc {hl}:** Thông số kiểm chứng phản ánh cơ chế gốc."
-        if _word_overlap_ratio(clean, cand1) <= ANTI_PARROT_THRESHOLD:
-            out.append(cand1)
-    if not out:
-        cand1 = "**Cơ chế gốc:** Phản ứng vận hành theo quy luật tự nhiên."
-        if _word_overlap_ratio(clean, cand1) <= ANTI_PARROT_THRESHOLD:
-            out.append(cand1)
-        else:
-            out.append("**Quy luật gốc:** Chuỗi nhân quả kiểm chứng thực nghiệm.")
-
-    tk_clean = (takeaway or "").strip().replace("**", "")
-    if tk_clean and _word_overlap_ratio(clean, tk_clean) <= ANTI_PARROT_THRESHOLD:
-        out.append(f"**Điểm chốt:** {tk_clean[:54]}")
-    else:
-        cand2 = "**Hệ quả trực tiếp:** Quyết định tốc độ thích nghi và phục hồi dài hạn."
-        if _word_overlap_ratio(clean, cand2) <= ANTI_PARROT_THRESHOLD:
-            out.append(cand2)
-        else:
-            out.append("**Tác động chính:** Biến đổi cấu trúc bền vững qua từng chu kỳ.")
-
-    cand3 = "**Ứng dụng thực tiễn:** Đối chiếu dữ kiện đo lường thay vì đoán cảm tính."
-    if _word_overlap_ratio(clean, cand3) <= ANTI_PARROT_THRESHOLD:
-        out.append(cand3)
-    else:
-        out.append("**Ghi nhớ nhanh:** Nắm trục nguyên lý cốt lõi để áp dụng chuẩn.")
-
-    # Bảo đảm độ dài gọn gàng & tỷ lệ trùng từ từng mục và tổng thể <= ANTI_PARROT_THRESHOLD
-    safe_out: list[str] = []
-    for item in out[:3]:
-        if _word_overlap_ratio(clean, item) <= ANTI_PARROT_THRESHOLD:
-            safe_out.append(item)
-    if len(safe_out) < 3:
-        fallbacks = (
-            "**Trục định lượng:** Bằng chứng đo lường khách quan.",
-            "**Chuỗi cơ chế:** Nguyên nhân trực tiếp dẫn tới hệ quả.",
-            "**Áp dụng chuẩn:** Tối ưu hành động dựa trên thực nghiệm.",
-        )
-        for fb in fallbacks:
-            if len(safe_out) >= 3:
-                break
-            if fb not in safe_out:
-                safe_out.append(fb)
-    return safe_out[:3]
+    if proper:
+        return " ".join(proper[0].split()[:max_words])
+    clauses = [c.strip() for c in re.split(r"[.;:!?…,—–]", clean) if len(c.strip().split()) >= 2]
+    chosen = clauses[0] if clauses else clean
+    return " ".join(chosen.split()[:max_words]).rstrip(",;:-–— ")
 
 
-def _enrich_myth_vs_fact(
-    bdata: dict[str, Any],
+def _extract_topic_points_from_beat(
     narration: str,
-    takeaway: str,
-) -> dict[str, Any]:
-    """Đảm bảo thẻ `myth_vs_fact` có tiêu đề ngắn + giải thích cơ chế cụ thể (không cụt 3 chữ)."""
-    updated = dict(bdata)
-    myth = format_unwrapped_text(updated.get("myth") or updated.get("left") or "").strip()
-    fact = format_unwrapped_text(updated.get("fact") or updated.get("right") or "").strip()
+    board_title: str = "",
+    takeaway: str = "",
+) -> list[str]:
+    """Trích rút các ý chính trực tiếp từ chính lời thoại & takeaway của beat (0% văn mẫu)."""
+    points: list[str] = []
+    seen_low: set[str] = set()
 
-    myth_plain = myth.replace("**", "").strip(" .,:;")
-    if not myth_plain:
-        myth = "**Ngộ nhận phổ biến:** Nhiều người đánh giá hiệu quả chỉ qua cảm giác tức thời."
-    elif len(myth_plain.split()) < 7:
-        myth = (
-            f"**{myth_plain}:** Quan niệm truyền miệng thiếu căn cứ đo lường, "
-            "dễ dẫn tới cách làm phản tác dụng."
-        )
-    elif _word_overlap_ratio(narration, myth) > ANTI_PARROT_THRESHOLD:
-        head = " ".join(myth_plain.split()[:5])
-        myth = f"**Ngộ nhận '{head}':** Cách nhìn cảm tính không phản ánh đúng bản chất cơ chế."
+    def _add(raw_pt: str) -> None:
+        pt = _trim_at_word_boundary(raw_pt.strip(" .,:;!?…"), 110)
+        low = pt.lower().replace("**", "")
+        if len(low.split()) < 3 or low in seen_low:
+            return
+        if any(cl in low for cl in _CLICHE_PATTERNS):
+            return
+        seen_low.add(low)
+        points.append(pt)
 
-    fact_plain = fact.replace("**", "").strip(" .,:;")
-    tk_plain = (takeaway or "").replace("**", "").strip(" .,:;")
-    if not fact_plain:
-        detail = (
-            tk_plain
-            if (tk_plain and len(tk_plain.split()) >= 5)
-            else "Quá trình thích nghi chỉ hiệu quả khi đủ cơ chế nền tảng và chu kỳ phục hồi."
-        )
-        fact = f"**Bản chất khoa học:** {detail}"
-    elif len(fact_plain.split()) < 7:
-        extra = (
-            tk_plain
-            if (tk_plain and _word_overlap_ratio(narration, tk_plain) <= ANTI_PARROT_THRESHOLD)
-            else "Cơ chế thực tế vận hành nhờ kích thích đúng ngưỡng kết hợp tái tạo bền vững."
-        )
-        fact = f"**{fact_plain}:** {extra}"
-    elif _word_overlap_ratio(narration, fact) > ANTI_PARROT_THRESHOLD:
-        detail = (
-            tk_plain
-            if (tk_plain and _word_overlap_ratio(narration, tk_plain) <= ANTI_PARROT_THRESHOLD)
-            else "Bằng chứng thực nghiệm chỉ ra hệ quả đến từ chuỗi phản ứng sinh học chuẩn xác."
-        )
-        fact = f"**Cơ chế kiểm chứng:** {detail}"
+    tk = (takeaway or "").replace("**", "").strip()
+    if tk:
+        _add(f"**Điểm chốt:** {tk}")
 
-    updated["myth"] = myth[:175]
-    updated["fact"] = fact[:175]
-    return updated
+    clauses = [
+        c.strip()
+        for c in re.split(r"[.;:!?…—–]+", (narration or "").strip())
+        if len(c.strip().split()) >= 3
+    ]
+    if len(clauses) == 1 and "," in clauses[0]:
+        sub = [s.strip() for s in clauses[0].split(",") if len(s.strip().split()) >= 3]
+        if len(sub) >= 2:
+            clauses = sub
+
+    for cl in clauses[:3]:
+        words = cl.split()
+        if len(words) >= 6:
+            head = " ".join(words[:3]).rstrip(",;:- ")
+            body = " ".join(words[3:])
+            _add(f"**{head}:** {body}")
+        else:
+            _add(cl)
+
+    if not points and board_title:
+        _add(board_title)
+    return points[:3]
+
+
+def _has_real_quantitative_value(val: str, narration: str) -> bool:
+    """Kiểm tra `big_number`/`counter_grow` có con số thật gắn với chủ đề (cấm '100%' mặc định)."""
+    clean = (val or "").replace("**", "").strip()
+    if not clean or not re.search(r"\d", clean):
+        return False
+    if (
+        clean == "100%"
+        and "100%" not in (narration or "")
+        and "100 phần trăm" not in (narration or "").lower()
+    ):
+        return False
+    return True
 
 
 def _is_tail_recap_or_cta(beat: StickvBeat) -> bool:
@@ -499,12 +545,13 @@ def _is_tail_recap_or_cta(beat: StickvBeat) -> bool:
 
 
 def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
-    """Hậu kiểm bảng tri thức GĐ9: Anti-Parrot <= 55%, bảng đủ mật độ & duy nhất 1 recap_card."""
+    """Hậu kiểm bảng tri thức (0% văn mẫu cứng, 0% khung trống, 0% '100%' ảo, 1 recap_card thật)."""
     if not beats:
         return beats
 
     out: list[StickvBeat] = []
     collected_insights: list[str] = []
+    seen_bullet_sigs: set[tuple[str, ...]] = set()
     n_total = len(beats)
     tail_start = max(0, n_total - 2)
     tail_recap_indices = {
@@ -515,53 +562,71 @@ def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
     for idx, beat in enumerate(beats):
         bdata = dict(beat.board_data or {})
         items = [
-            str(x).strip() for x in (bdata.get("items") or beat.board_items or []) if str(x).strip()
+            _trim_at_word_boundary(str(x).strip(), 130)
+            for x in (bdata.get("items") or beat.board_items or [])
+            if str(x).strip()
         ]
-        takeaway = str(beat.takeaway or bdata.get("takeaway") or "").strip()
+        takeaway = _trim_takeaway_words(
+            str(beat.takeaway or bdata.get("takeaway") or "").strip(), max_words=13
+        )
+        if any(cl in takeaway.lower() for cl in _CLICHE_PATTERNS):
+            takeaway = ""
         btitle = (beat.board_title or "").strip()
         btype = beat.board_type
 
-        # 1. Loại bỏ cụm sáo rỗng vô nghĩa
+        # 1. Loại bỏ cụm sáo rỗng / văn mẫu cũ
         items = [it for it in items if not any(cl in it.lower() for cl in _CLICHE_PATTERNS)]
-        if any(cl in btitle.lower() for cl in _CLICHE_PATTERNS):
+        if btitle.lower() in _GENERIC_BOARD_TITLES or any(
+            cl in btitle.lower() for cl in _CLICHE_PATTERNS
+        ):
             btitle = ""
 
-        # 2. Vùng tổng kết / CTA ở 1-2 beat cuối -> dùng CHUNG DUY NHẤT 1 recap_card nhất quán
+        # 2. Vùng tổng kết / CTA ở 1-2 beat cuối -> CHUNG DUY NHẤT 1 recap_card từ nội dung thật
         if idx in tail_recap_indices:
             if canonical_recap is None:
                 seed_pts = [
-                    it
+                    _trim_at_word_boundary(it, 110)
                     for it in items
                     if beat.board_type == "recap_card"
                     and not any(k in it.lower() for k in _CTA_KEYWORDS)
+                    and not any(cl in it.lower() for cl in _CLICHE_PATTERNS)
                 ]
-                recap_pts = list(dict.fromkeys([*seed_pts, *collected_insights]))[-3:]
+                recap_pts = list(dict.fromkeys([*seed_pts, *collected_insights]))[:3]
                 if len(recap_pts) < 3:
                     for prev_b in out:
-                        pt = str(prev_b.board_title or "").strip().replace("**", "")
-                        if (
-                            pt
-                            and pt not in recap_pts
-                            and not any(k in pt.lower() for k in _CTA_KEYWORDS)
-                            and not any(cl in pt.lower() for cl in _CLICHE_PATTERNS)
+                        if _is_tail_recap_or_cta(prev_b):
+                            continue
+                        pt_title = str(prev_b.board_title or "").strip().replace("**", "")
+                        cand = ""
+                        if prev_b.takeaway and not any(
+                            k in prev_b.takeaway.lower() for k in _CTA_KEYWORDS
                         ):
-                            recap_pts.append(f"**{pt}:** Điểm mấu chốt cần ghi nhớ xuyên suốt.")
+                            cand = (
+                                f"**{pt_title}:** {prev_b.takeaway}"
+                                if pt_title and pt_title.lower() not in prev_b.takeaway.lower()
+                                else prev_b.takeaway
+                            )
+                        elif prev_b.narration:
+                            cand = _extract_subject_phrase(prev_b.narration, max_words=11)
+                        cand = _trim_at_word_boundary(cand, 110)
+                        if (
+                            cand
+                            and cand not in recap_pts
+                            and not any(k in cand.lower() for k in _CTA_KEYWORDS)
+                            and not any(cl in cand.lower() for cl in _CLICHE_PATTERNS)
+                        ):
+                            recap_pts.append(cand)
                         if len(recap_pts) >= 3:
                             break
-                defaults = [
-                    "**Nguyên lý gốc:** Hiểu đúng cơ chế vận hành thay vì cảm tính.",
-                    "**Phá bỏ ngộ nhận:** Đối chiếu bằng dữ kiện khoa học kiểm chứng.",
-                    "**Ứng dụng thực tiễn:** Áp dụng đều đặn để tạo kết quả bền vững.",
-                ]
-                for d_pt in defaults:
-                    if len(recap_pts) >= 3:
-                        break
-                    recap_pts.append(d_pt)
                 recap_pts = recap_pts[:3]
                 recap_tk = (
                     takeaway
                     if (takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS))
-                    else "Lưu lại 3 nguyên tắc cốt lõi để áp dụng ngay hôm nay"
+                    else (
+                        _trim_takeaway_words(recap_pts[0], max_words=12)
+                        if recap_pts
+                        else _trim_takeaway_words(beat.narration, max_words=12)
+                    )
                 )
                 canonical_recap = (recap_pts, recap_tk)
 
@@ -581,56 +646,125 @@ def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
             )
             continue
 
-        # 3. Kiểm tra Anti-Parrot (<= 55%) trên `board_title`
-        if btitle and _word_overlap_ratio(beat.narration, btitle) > ANTI_PARROT_THRESHOLD:
-            btitle = _rewrite_non_parrot_title(beat.narration)
+        # 3. Kiểm tra `pinned_photo`: đảm bảo caption là tên địa điểm/sự vật cụ thể
+        if btype == "pinned_photo":
+            raw_cap = format_unwrapped_text(bdata.get("caption") or "").replace("**", "").strip()
+            if (
+                not raw_cap
+                or raw_cap.lower() in _GENERIC_BOARD_TITLES
+                or any(cl in raw_cap.lower() for cl in _CLICHE_PATTERNS)
+            ):
+                raw_cap = (
+                    btitle
+                    if (btitle and btitle.lower() not in _GENERIC_BOARD_TITLES)
+                    else _extract_subject_phrase(beat.narration, max_words=6)
+                )
+            bdata["caption"] = _trim_at_word_boundary(raw_cap, 64)
+            if not btitle:
+                btitle = bdata["caption"]
 
-        # 4. Nâng mật độ & Anti-Parrot theo từng loại bảng
+        # 4. Chặn `big_number`/`counter_grow` thiếu số liệu thật -> chuyển sang `bullets`
+        if btype == "big_number":
+            val_s = str(bdata.get("value") or bdata.get("number") or "").strip()
+            if not _has_real_quantitative_value(val_s, beat.narration):
+                btype = "bullets"
+                lbl = format_unwrapped_text(bdata.get("label") or "").strip()
+                sub = format_unwrapped_text(bdata.get("sub") or bdata.get("detail") or "").strip()
+                derived = [
+                    x
+                    for x in (lbl, sub)
+                    if x and not any(cl in x.lower() for cl in _CLICHE_PATTERNS)
+                ]
+                items = derived or _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+                bdata = {"items": items}
+        elif btype == "counter_grow":
+            tgt = bdata.get("target", bdata.get("value"))
+            if tgt is None or not _has_real_quantitative_value(str(tgt), beat.narration):
+                btype = "bullets"
+                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+                bdata = {"items": items}
+
+        # 5. Chặn `comparison` trống cả 2 cột -> fallback sạch sang `bullets` của chính beat
+        if btype == "comparison":
+            l_items = _normalize_side_items(bdata.get("left_items") or bdata.get("left"))
+            r_items = _normalize_side_items(bdata.get("right_items") or bdata.get("right"))
+            if not l_items and not r_items:
+                btype = "bullets"
+                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+                bdata = {"items": items}
+            else:
+                bdata["left_items"] = l_items
+                bdata["right_items"] = r_items
+
+        # 6. Chống lặp/rỗng cho `myth_vs_fact`, `flow_steps`, `bullets` (100% bám dữ liệu beat)
         if btype == "myth_vs_fact":
-            bdata = _enrich_myth_vs_fact(bdata, beat.narration, takeaway)
+            m_txt = format_unwrapped_text(bdata.get("myth") or bdata.get("left") or "").strip()
+            f_txt = format_unwrapped_text(bdata.get("fact") or bdata.get("right") or "").strip()
+            if any(cl in m_txt.lower() for cl in _CLICHE_PATTERNS):
+                m_txt = ""
+            if any(cl in f_txt.lower() for cl in _CLICHE_PATTERNS):
+                f_txt = ""
+            if not m_txt and not f_txt:
+                btype = "bullets"
+                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+                bdata = {"items": items}
+            else:
+                if not f_txt:
+                    f_txt = takeaway or _trim_at_word_boundary(beat.narration, 140)
+                if not m_txt:
+                    m_txt = _extract_subject_phrase(beat.narration, max_words=8)
+                bdata["myth"] = _trim_at_word_boundary(m_txt, 170)
+                bdata["fact"] = _trim_at_word_boundary(f_txt, 170)
         elif btype == "flow_steps":
             steps = [
-                str(s).strip()
+                _trim_at_word_boundary(str(s).strip(), 130)
                 for s in (bdata.get("steps") or items or [])
                 if str(s).strip() and not any(cl in str(s).lower() for cl in _CLICHE_PATTERNS)
             ]
-            too_similar = not steps or any(
-                _word_overlap_ratio(beat.narration, st) > ANTI_PARROT_THRESHOLD for st in steps
-            )
-            if too_similar or len(steps) < 3:
-                steps = _condense_to_keyword_bullets(beat.narration, takeaway)
-            bdata["steps"] = steps[:3]
+            if not steps:
+                steps = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+            bdata["steps"] = steps[:4]
         elif btype in ("bullets", "list", "card"):
-            joined = f"{btitle} {' '.join(items)}".strip()
-            item_parrots = any(
-                _word_overlap_ratio(beat.narration, it) > ANTI_PARROT_THRESHOLD for it in items
-            )
-            if (
-                not items
-                or item_parrots
-                or _word_overlap_ratio(beat.narration, joined) > ANTI_PARROT_THRESHOLD
-            ):
-                items = _condense_to_keyword_bullets(beat.narration, takeaway)
-                bdata["items"] = items
-            else:
-                bdata["items"] = items
+            if not items:
+                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+            # Chống lặp y nguyên cùng 1 bộ bullet ở 2 beat khác nhau
+            sig = tuple(it.lower() for it in items)
+            if sig in seen_bullet_sigs:
+                alt = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
+                if alt:
+                    items = alt
+                    sig = tuple(it.lower() for it in items)
+            if sig:
+                seen_bullet_sigs.add(sig)
+            bdata["items"] = items[:3]
 
-        # Thu thập ý giá trị để nạp cho recap_card cuối video
+        # Thu thập ý giá trị thật để nạp cho `recap_card` cuối video (cắt đúng ranh giới từ)
         if takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(takeaway[:84])
+            collected_insights.append(_trim_at_word_boundary(takeaway, 100))
         elif btype == "myth_vs_fact" and bdata.get("fact"):
-            collected_insights.append(str(bdata["fact"])[:84])
+            collected_insights.append(_trim_at_word_boundary(str(bdata["fact"]), 100))
+        elif btype == "flow_steps" and bdata.get("steps"):
+            collected_insights.append(_trim_at_word_boundary(str(bdata["steps"][0]), 100))
+        elif btype == "big_number" and bdata.get("value"):
+            bn_lbl = str(bdata.get("label") or btitle or "").strip()
+            collected_insights.append(
+                _trim_at_word_boundary(f"**{bdata['value']}:** {bn_lbl}".strip(": "), 100)
+            )
         elif items and not any(k in items[0].lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(items[0][:84])
+            collected_insights.append(_trim_at_word_boundary(items[0], 100))
 
         if takeaway:
             bdata["takeaway"] = takeaway
+        else:
+            bdata.pop("takeaway", None)
+
         out.append(
             beat.model_copy(
                 update={
-                    "board_title": btitle[:120],
+                    "board_type": btype,
+                    "board_title": _trim_at_word_boundary(btitle, 100),
                     "board_items": items if items else list(beat.board_items),
-                    "takeaway": takeaway[:160],
+                    "takeaway": _trim_at_word_boundary(takeaway, 140),
                     "board_data": bdata,
                 }
             )
@@ -676,6 +810,250 @@ def enforce_pose_diversity(beats: list[StickvBeat]) -> list[StickvBeat]:
     return out
 
 
+_ENTITY_STOPWORDS = frozenset(
+    {"the", "a", "an", "of", "in", "on", "at", "for", "with", "and", "to", "by", "from"}
+)
+_GENERIC_BAD_QUERY_TOKENS = frozenset(
+    {
+        "old",
+        "building",
+        "measurement",
+        "scale",
+        "ancient",
+        "history",
+        "soft",
+        "ground",
+        "ruler",
+        "blueprint",
+        "floorplan",
+        "coin",
+        "medal",
+        "stamp",
+        "shutter",
+        "warehouse",
+        "diagram",
+        "chart",
+        "icon",
+        "logo",
+    }
+)
+
+
+def _core_en_tokens(text: str) -> list[str]:
+    return [
+        w
+        for w in re.findall(r"[a-zA-Z0-9]+", (text or "").lower())
+        if len(w) >= 2 and w not in _ENTITY_STOPWORDS
+    ]
+
+
+_GENERIC_UMBRELLA_ENTITIES = frozenset(
+    {
+        "mysterious places",
+        "strange places",
+        "weird places",
+        "unknown places",
+        "places on earth",
+        "world mysteries",
+        "unexplained mysteries",
+        "natural wonders",
+        "science facts",
+        "historical facts",
+        "weird facts",
+        "earth mysteries",
+        "top places",
+    }
+)
+_GENERIC_BEAT_CONTEXT_WORDS = frozenset(
+    {
+        "construction",
+        "site",
+        "foundation",
+        "clay",
+        "soil",
+        "ground",
+        "building",
+        "tower",
+        "wall",
+        "scaffolding",
+        "cables",
+        "shield",
+        "sword",
+        "medieval",
+        "modern",
+        "architect",
+        "worker",
+        "map",
+        "ocean",
+        "mystery",
+    }
+)
+
+
+def _is_generic_umbrella_entity(entity: str) -> bool:
+    norm = re.sub(r"\s+", " ", (entity or "").strip().lower())
+    if not norm:
+        return True
+    if norm in _GENERIC_UMBRELLA_ENTITIES:
+        return True
+    toks = _core_en_tokens(norm)
+    return len(toks) <= 2 and any(
+        w in toks for w in ("places", "mysteries", "facts", "wonders", "things", "secrets")
+    )
+
+
+def _ensure_balanced_pinned_photos(
+    beats: list[StickvBeat], primary_entity_en: str = ""
+) -> list[StickvBeat]:
+    """Với kịch bản >=7 beat, đảm bảo có ảnh `pinned_photo` ở cả nửa sau (60%-85%, trước recap)."""
+    n = len(beats)
+    if n < 7:
+        return beats
+
+    out = list(beats)
+    late_start = max(3, int(round(n * 0.58)))
+    late_end = min(n - 1, max(late_start, int(round(n * 0.86))))
+    late_indices = [i for i in range(late_start, late_end + 1) if not _is_tail_recap_or_cta(out[i])]
+    if not late_indices:
+        return out
+
+    has_late_photo = any(out[i].board_type == "pinned_photo" for i in late_indices)
+    if not has_late_photo:
+        # Ưu tiên chuyển 1 beat bullets/none/card ở vùng 60%-85% thành pinned_photo
+        pick = next(
+            (i for i in late_indices if out[i].board_type in ("bullets", "none", "card", "list")),
+            late_indices[0],
+        )
+        b = out[pick]
+        cap = (
+            b.board_title
+            if (b.board_title and b.board_title.lower() not in _GENERIC_BOARD_TITLES)
+            else _extract_subject_phrase(b.narration, max_words=6)
+        )
+        ent = (b.beat_entity_en or "").strip()
+        if not ent and primary_entity_en and not _is_generic_umbrella_entity(primary_entity_en):
+            ent = primary_entity_en.strip()
+        pq = (
+            (b.prop_query or "").strip() or ent or _extract_subject_phrase(b.narration, max_words=4)
+        )
+        new_bdata = {
+            "caption": _trim_at_word_boundary(cap or "Hình ảnh minh họa", 64),
+            "pin_style": "tape",
+        }
+        out[pick] = b.model_copy(
+            update={
+                "board_type": "pinned_photo",
+                "beat_entity_en": ent[:100],
+                "prop_query": pq[:80] if pq else None,
+                "board_data": new_bdata,
+            }
+        )
+    return out
+
+
+def anchor_beat_image_queries(
+    beats: list[StickvBeat], primary_entity_en: str = ""
+) -> list[StickvBeat]:
+    """Neo thực thể theo từng beat (`beat_entity_en` ưu tiên trước `primary_entity_en`)."""
+    proj_entity = re.sub(r"\s+", " ", (primary_entity_en or "").strip())[:60]
+    proj_is_umbrella = _is_generic_umbrella_entity(proj_entity)
+    if not beats:
+        return beats
+
+    out: list[StickvBeat] = []
+    for beat in beats:
+        if beat.board_type != "pinned_photo":
+            out.append(beat)
+            continue
+
+        raw_q = re.sub(r"\s+", " ", (beat.prop_query or "").strip())
+        beat_ent = re.sub(r"\s+", " ", (beat.beat_entity_en or "").strip())[:80]
+        if _is_generic_umbrella_entity(beat_ent):
+            beat_ent = ""
+
+        q_tokens = _core_en_tokens(raw_q)
+        # Kiểm tra prop_query đã mang thực thể riêng (vd Racetrack Playa) hay đang chung chung
+        specific_q_tokens = [
+            t
+            for t in q_tokens
+            if t not in _GENERIC_BAD_QUERY_TOKENS and t not in _GENERIC_BEAT_CONTEXT_WORDS
+        ]
+        if beat_ent:
+            eff_entity = beat_ent
+        elif proj_entity and not proj_is_umbrella:
+            # Video 1 chủ thể (vd Pisa): nếu beat query chỉ là ngữ cảnh chung -> neo proj_entity
+            proj_toks = _core_en_tokens(proj_entity)
+            has_proj = all(tok in q_tokens for tok in proj_toks)
+            if has_proj or len(specific_q_tokens) < 2:
+                eff_entity = proj_entity
+            else:
+                eff_entity = " ".join(
+                    w
+                    for w in raw_q.split()
+                    if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+                )[:60].strip()
+        else:
+            # Video đa địa điểm (primary_entity_en chung như "Mysterious Places"): KHÔNG ghép đè
+            eff_entity = " ".join(
+                w
+                for w in raw_q.split()
+                if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+            )[:60].strip()
+
+        entity_tokens = _core_en_tokens(eff_entity)
+        if not entity_tokens:
+            out.append(beat)
+            continue
+
+        has_entity_in_q = all(tok in q_tokens for tok in entity_tokens)
+        if has_entity_in_q:
+            clean_words = [
+                w
+                for w in raw_q.split()
+                if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+                or re.sub(r"[^a-zA-Z0-9]", "", w).lower() in entity_tokens
+            ]
+            new_q = " ".join(clean_words).strip() or eff_entity
+        else:
+            extra_words: list[str] = []
+            seen_low = set(entity_tokens)
+            for w in raw_q.split():
+                wl = re.sub(r"[^a-zA-Z0-9]", "", w).lower()
+                if not wl or wl in seen_low or wl in _ENTITY_STOPWORDS:
+                    continue
+                if wl in _GENERIC_BAD_QUERY_TOKENS:
+                    continue
+                extra_words.append(w)
+                seen_low.add(wl)
+                if len(extra_words) >= 3:
+                    break
+            new_q = f"{eff_entity} {' '.join(extra_words)}".strip() if extra_words else eff_entity
+
+        new_q = new_q[:80].strip()
+
+        raw_prompt = re.sub(r"\s+", " ", (beat.image_prompt or "").strip())
+        p_tokens = _core_en_tokens(raw_prompt)
+        if not raw_prompt:
+            ctx = (beat.board_data or {}).get("caption") or beat.board_title or new_q
+            new_prompt = f"2D editorial illustration of {eff_entity}, scene context: {ctx}"[:320]
+        elif not all(tok in p_tokens for tok in entity_tokens):
+            new_prompt = f"{eff_entity} — {raw_prompt}"[:320]
+        else:
+            new_prompt = raw_prompt[:320]
+
+        updates: dict[str, Any] = {}
+        if new_q != (beat.prop_query or ""):
+            updates["prop_query"] = new_q
+        if new_prompt != (beat.image_prompt or ""):
+            updates["image_prompt"] = new_prompt
+        if eff_entity != (beat.beat_entity_en or ""):
+            updates["beat_entity_en"] = eff_entity[:100]
+        if updates:
+            beat = beat.model_copy(update=updates)
+        out.append(beat)
+    return out
+
+
 def sanitize_beats(
     raw_beats: Any,
     *,
@@ -683,6 +1061,7 @@ def sanitize_beats(
     chapter_title: str = "",
     start_idx: int = 1,
     allowed_poses: set[str] | None = None,
+    primary_entity_en: str = "",
 ) -> list[StickvBeat]:
     """Chuẩn hóa danh sách beat từ Gemini JSON thành StickvBeat hợp lệ."""
     if not isinstance(raw_beats, list):
@@ -725,7 +1104,9 @@ def sanitize_beats(
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
         raw_pq = item.get("prop_query") or item.get("image_query") or ""
         prop_query = str(raw_pq).strip()[:80] or None
-        image_prompt = str(item.get("image_prompt") or "").strip()[:320] or None
+        beat_entity_en = str(item.get("beat_entity_en") or "").strip()[:100]
+        raw_ip = item.get("image_prompt") or item.get("illustration_prompt_en") or ""
+        image_prompt = str(raw_ip).strip()[:320] or None
         raw_vdata = item.get("visual_data")
         vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}
 
@@ -761,6 +1142,7 @@ def sanitize_beats(
                 interaction=interaction,  # type: ignore[arg-type]
                 camera_shot=camera_shot,  # type: ignore[arg-type]
                 prop_query=prop_query,
+                beat_entity_en=beat_entity_en,
                 image_prompt=image_prompt,
                 facing=facing,
                 motion=motion,  # type: ignore[arg-type]
@@ -773,7 +1155,7 @@ def sanitize_beats(
                 visual_data=vdata,
             )
         )
-    return out
+    return anchor_beat_image_queries(out, primary_entity_en=primary_entity_en)
 
 
 def parse_stickv_json_payload(
@@ -787,17 +1169,25 @@ def parse_stickv_json_payload(
     if not clean:
         raise ValueError("Vui lòng dán nội dung JSON kịch bản")
     parsed = json.loads(clean)
+    primary_entity_en = ""
     if isinstance(parsed, list):
         title = "Kịch bản StickV (JSON)"
         beats = sanitize_beats(parsed, allowed_poses=allowed_poses)
     elif isinstance(parsed, dict):
         title = str(parsed.get("title") or "Kịch bản StickV (JSON)").strip()[:160]
-        beats = sanitize_beats(parsed.get("beats"), allowed_poses=allowed_poses)
+        primary_entity_en = str(parsed.get("primary_entity_en") or "").strip()[:60]
+        beats = sanitize_beats(
+            parsed.get("beats"),
+            allowed_poses=allowed_poses,
+            primary_entity_en=primary_entity_en,
+        )
     else:
         raise ValueError("JSON phải là object {title, beats} hoặc mảng beats")
     if not beats:
         raise ValueError("Không tìm thấy beat hợp lệ trong JSON")
     beats = enforce_pose_diversity(_enforce_meaningful_boards(beats))
+    beats = _ensure_balanced_pinned_photos(beats, primary_entity_en=primary_entity_en)
+    beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
     return title, beats
 
 
@@ -896,7 +1286,8 @@ def generate_stickv_script(
         beat_count = _target_beat_count(target_minutes)
         user_prompt = (
             f"Chủ đề: {clean_idea} | Nhóm: {topic} | Khung: {aspect} | {beat_count} beat.\n"
-            'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+            'JSON: {"title":"...","primary_entity_en":"English primary entity",'
+            '"domain":"history_geo","music_mood":"history_epic",'
             '"beats":[{"narration":"...","pose":"point_up","camera_shot":"wide_stage",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
             '"board_title":"...","board_data":{"items":["..."],"takeaway":"..."}}]}'
@@ -905,19 +1296,27 @@ def generate_stickv_script(
             sys_prompt, user_prompt, model=chosen_model, timeout=60.0
         )
         title = str(parsed.get("title") or clean_idea[:80]).strip()
+        primary_entity_en = str(parsed.get("primary_entity_en") or "").strip()[:60]
         beats = enforce_pose_diversity(
             _enforce_meaningful_boards(
                 sanitize_beats(
-                    parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
+                    parsed.get("beats"),
+                    chapter=1,
+                    start_idx=1,
+                    allowed_poses=allowed_set,
+                    primary_entity_en=primary_entity_en,
                 )
             )
         )
+        beats = _ensure_balanced_pinned_photos(beats, primary_entity_en=primary_entity_en)
+        beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
         return (
             title,
             beats,
             {
                 "chapters": 1,
                 "chapter_list": [],
+                "primary_entity_en": primary_entity_en,
                 "domain": normalize_domain(parsed.get("domain")),
                 "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
                 **timings,
@@ -929,13 +1328,15 @@ def generate_stickv_script(
     outline_prompt = (
         f"Video khám phá {target_minutes:.0f}p ({aspect}, {topic}): {clean_idea}. "
         f"Lập dàn ý {num_chapters} chương hấp dẫn.\n"
-        'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+        'JSON: {"title":"...","primary_entity_en":"English primary entity",'
+        '"domain":"history_geo","music_mood":"history_epic",'
         '"chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
     )
     outline, t0 = generate_structured_json(
         sys_prompt, outline_prompt, model=chosen_model, timeout=60.0
     )
     title = str(outline.get("title") or clean_idea[:80]).strip()
+    primary_entity_en = str(outline.get("primary_entity_en") or "").strip()[:60]
     raw_chapters = outline.get("chapters") or []
     if not isinstance(raw_chapters, list) or not raw_chapters:
         raw_chapters = [
@@ -950,8 +1351,9 @@ def generate_stickv_script(
         heading = str((ch or {}).get("heading") or f"Chương {ch_idx}")
         summary = str((ch or {}).get("summary") or clean_idea)
         chapter_list.append({"chapter": ch_idx, "heading": heading, "summary": summary})
+        entity_hint = f" | Thực thể chính: {primary_entity_en}" if primary_entity_en else ""
         ch_prompt = (
-            f"Video: {title} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
+            f"Video: {title}{entity_hint} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
             f"{heading} ({summary}). Viết {beats_per_ch} beat chi tiết, chuyển góc máy linh hoạt.\n"
             'JSON: {"beats":[{"narration":"...","pose":"point_up","camera_shot":"focus_board",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
@@ -967,16 +1369,20 @@ def generate_stickv_script(
             chapter_title=heading,
             start_idx=len(all_beats) + 1,
             allowed_poses=allowed_set,
+            primary_entity_en=primary_entity_en,
         )
         all_beats.extend(ch_beats)
 
     all_beats = enforce_pose_diversity(_enforce_meaningful_boards(all_beats))
+    all_beats = _ensure_balanced_pinned_photos(all_beats, primary_entity_en=primary_entity_en)
+    all_beats = anchor_beat_image_queries(all_beats, primary_entity_en=primary_entity_en)
     return (
         title,
         all_beats,
         {
             "chapters": len(raw_chapters[:num_chapters]),
             "chapter_list": chapter_list,
+            "primary_entity_en": primary_entity_en,
             "domain": normalize_domain(outline.get("domain")),
             "music_mood": str(outline.get("music_mood") or "curious_science").strip(),
             "llm_s": round(total_llm_s, 3),

@@ -100,14 +100,14 @@ def test_wikimedia_search_filters_svg_and_small_images_with_user_agent() -> None
     assert items[0]["title"] == "Easter_Island_Moai.jpg"
 
 
-def test_pixabay_fallback_from_illustration_to_all() -> None:
+def test_pixabay_fallback_from_photo_to_illustration() -> None:
     seen_types: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         img_type = request.url.params.get("image_type", "")
         seen_types.append(img_type)
         assert request.url.params.get("safesearch") == "true"
-        if img_type == "illustration":
+        if img_type == "photo":
             return httpx.Response(200, json={"hits": []})
         return httpx.Response(
             200,
@@ -131,7 +131,7 @@ def test_pixabay_fallback_from_illustration_to_all() -> None:
     finally:
         client.close()
 
-    assert seen_types == ["illustration", "all"]
+    assert seen_types == ["photo", "illustration"]
     assert len(items) == 1
     assert items[0]["source"] == "pixabay"
     assert items[0]["url"] == "https://pixabay.test/brain.jpg"
@@ -366,3 +366,228 @@ def test_stickv_generate_beat_ai_photo_endpoint(tmp_path: Path, monkeypatch) -> 
         assert beat0["board_type"] == "pinned_photo"
         assert beat0["media_path"].startswith("media/b001_ai_")
         assert beat0["board_data"]["caption"] == "Sợi cơ bền bỉ"
+
+
+def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: Path) -> None:
+    """Loại sạch ảnh rác (đồng xu, thước đo, cửa chớp, nhà kho) và chuyển thẳng Cloudflare Flux."""
+    from hbt.shared.online_sources.reference_images import (
+        DEFAULT_AI_IMAGE_BUDGET,
+        REF_CACHE_VERSION,
+        score_candidate_relevance,
+    )
+
+    clear_reference_image_cache()
+    assert REF_CACHE_VERSION == "v3_beat_entity_real_first"
+    assert DEFAULT_AI_IMAGE_BUDGET == 6
+
+    junk_pages = {
+        "1": {
+            "pageid": 1,
+            "title": "File:Roman_coin_Pisa.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/coin.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "2": {
+            "pageid": 2,
+            "title": "File:Ruler_measurement_scale.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/ruler.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "3": {
+            "pageid": 3,
+            "title": "File:Old_window_shutter.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/shutter.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "4": {
+            "pageid": 4,
+            "title": "File:Abandoned_warehouse.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/warehouse.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "5": {
+            "pageid": 5,
+            "title": "File:Leaning_Tower_of_Pisa_Tuscany.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/pisa_real.jpg",
+                    "width": 1200,
+                    "height": 900,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+    }
+
+    client_filter = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _r: httpx.Response(200, json={"query": {"pages": junk_pages}})
+        )
+    )
+    try:
+        items = search_wikimedia_images("Leaning Tower of Pisa", limit=10, client=client_filter)
+    finally:
+        client_filter.close()
+
+    # Cả 4 ảnh rác bị chặn, chỉ còn ảnh thật Tháp Nghiêng Pisa (không chặn nhầm "Tuscany")
+    assert [it["title"] for it in items] == ["Leaning_Tower_of_Pisa_Tuscany.jpg"]
+    assert (
+        score_candidate_relevance(
+            items[0],
+            "Leaning Tower of Pisa",
+            primary_entity_en="Leaning Tower of Pisa",
+        )
+        >= 0.7
+    )
+    # Nếu beat đòi bối cảnh cụ thể (cáp thép gia cố) mà ảnh chỉ là ảnh du lịch chung -> dưới ngưỡng
+    assert (
+        score_candidate_relevance(
+            items[0],
+            "Leaning Tower of Pisa modern scaffolding cables",
+            primary_entity_en="Leaning Tower of Pisa",
+        )
+        < 0.45
+    )
+
+    # Khi Wikimedia chỉ trả ảnh lạc đề (không khớp thực thể chính) -> từ chối và gọi Cloudflare Flux
+    off_topic_pages = {
+        "9": {
+            "pageid": 9,
+            "title": "File:Medieval_stone_wall_France.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/france_wall.jpg",
+                    "width": 1200,
+                    "height": 900,
+                    "mime": "image/jpeg",
+                }
+            ],
+        }
+    }
+    flux_calls: list[str] = []
+
+    def handler_fallback(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "commons.wikimedia.org" in url:
+            return httpx.Response(200, json={"query": {"pages": off_topic_pages}})
+        if "api.cloudflare.com" in url:
+            flux_calls.append(request.content.decode("utf-8"))
+            return httpx.Response(
+                200,
+                content=_png_bytes((768, 512), color=(180, 140, 90)),
+                headers={"content-type": "image/png"},
+            )
+        return httpx.Response(200, json={})
+
+    lib = tmp_path / "library"
+    budget = [DEFAULT_AI_IMAGE_BUDGET]
+    client_fb = httpx.Client(transport=httpx.MockTransport(handler_fallback))
+    try:
+        out_p, src = resolve_reference_image(
+            "Leaning Tower of Pisa soft clay foundation",
+            lib,
+            primary_entity_en="Leaning Tower of Pisa",
+            illustration_prompt="Cross section of soft clay soil tilting the tower foundation",
+            cf_account_id="acc-pisa",
+            cf_api_token="tok-pisa",
+            ai_budget=budget,
+            client=client_fb,
+        )
+    finally:
+        client_fb.close()
+
+    assert src == "cloudflare_flux"
+    assert out_p.is_file() and REF_CACHE_VERSION in out_p.name
+    assert len(flux_calls) == 1
+    assert "Leaning Tower of Pisa" in flux_calls[0]
+    assert budget == [DEFAULT_AI_IMAGE_BUDGET - 1]
+
+
+def test_v3_real_first_pass1b_entity_fallback_and_render_wiring(tmp_path: Path) -> None:
+    """Nhịp 1a rỗng -> nhịp 1b tra đúng `beat_entity_en` lấy ảnh thật Wikimedia trước khi gọi AI."""
+    from hbt.shared.online_sources.reference_images import (
+        DEFAULT_AI_IMAGE_BUDGET,
+        REF_CACHE_VERSION,
+    )
+    from hbt.stickv import render as stickv_render
+
+    clear_reference_image_cache()
+    seen_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "commons.wikimedia.org" in url:
+            gsr = request.url.params.get("gsrsearch", "")
+            seen_queries.append(gsr)
+            # Nhịp 1a rỗng -> nhịp 1b ("Racetrack Playa") trả ảnh thật Wikimedia
+            if "midnight" in gsr:
+                return httpx.Response(200, json={"query": {"pages": {}}})
+            return httpx.Response(
+                200,
+                json={
+                    "query": {
+                        "pages": {
+                            "42": {
+                                "pageid": 42,
+                                "title": "File:Racetrack_Playa_Death_Valley.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://img/racetrack.jpg",
+                                        "width": 1200,
+                                        "height": 800,
+                                        "mime": "image/jpeg",
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                },
+            )
+        return httpx.Response(200, content=_png_bytes((600, 400), color=(190, 160, 120)))
+
+    lib = tmp_path / "library"
+    budget = [DEFAULT_AI_IMAGE_BUDGET]
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        out_p, src = resolve_reference_image(
+            "Racetrack Playa sailing stones midnight",
+            lib,
+            primary_entity_en="Racetrack Playa",
+            cf_account_id="acc-test",
+            cf_api_token="tok-test",
+            ai_budget=budget,
+            client=client,
+        )
+    finally:
+        client.close()
+
+    assert src == "wikimedia"
+    assert out_p.is_file() and REF_CACHE_VERSION in out_p.name
+    assert len(seen_queries) == 2
+    assert "Racetrack Playa" in seen_queries[1]
+    assert budget == [DEFAULT_AI_IMAGE_BUDGET]  # Không tốn lượt AI khi có ảnh thật Wikimedia
+    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 6

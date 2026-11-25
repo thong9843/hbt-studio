@@ -1,8 +1,9 @@
-"""Kho ảnh tư liệu tự động cho StickV: Wikimedia Commons (0 key) -> Pixabay -> Iconify fallback."""
+"""Kho ảnh tư liệu StickV v2 (`v2_entity_strict`): Wikimedia -> Pixabay -> Cloudflare Flux 2D."""
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import time
 from io import BytesIO
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 from PIL import Image
 
 from hbt.app_settings import resolve_online_api_key
@@ -22,10 +24,147 @@ from hbt.shared.online_sources.iconify_props import resolve_prop_png
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 PIXABAY_IMAGE_API = "https://pixabay.com/api/"
 WIKIMEDIA_USER_AGENT = "HBTStudio/1.0 (https://github.com/thong9843/hbt-studio; local desktop app)"
+
+REF_CACHE_VERSION = "v3_beat_entity_real_first"
 MIN_IMAGE_DIM = 300
+MIN_LONG_EDGE = 480
+MIN_ASPECT_RATIO = 0.55
+MAX_ASPECT_RATIO = 2.4
+MIN_RELEVANCE_SCORE = 0.45
+DEFAULT_AI_IMAGE_BUDGET = 6
+
+logger = logging.getLogger(__name__)
+
+_GENERIC_SINGLE_FALLBACK_WORDS = frozenset(
+    {
+        "map",
+        "stone",
+        "rock",
+        "building",
+        "tower",
+        "ground",
+        "soil",
+        "history",
+        "water",
+        "sea",
+        "ocean",
+        "earth",
+        "place",
+        "places",
+        "world",
+        "science",
+        "nature",
+        "worker",
+        "people",
+        "mystery",
+        "mysteries",
+        "facts",
+        "wonders",
+    }
+)
+_ABSTRACT_REENACTMENT_PATTERNS = (
+    "medieval construction",
+    "medieval war",
+    "shield sword",
+    "stickman",
+    "cross section",
+    "muscle fiber",
+    "microscopic",
+    "molecular",
+    "cartoon",
+)
+
+
+def _is_valid_entity_fallback_query(entity: str) -> bool:
+    """Chỉ cho phép nhịp 1b tra theo tên thực thể cụ thể (>=2 từ có nghĩa hoặc danh từ riêng)."""
+    clean = re.sub(r"\s+", " ", (entity or "").strip())
+    if not clean:
+        return False
+    low = clean.lower()
+    if any(
+        bad in low
+        for bad in (
+            "mysterious places",
+            "strange places",
+            "world mysteries",
+            "science facts",
+            "historical facts",
+        )
+    ):
+        return False
+    toks = _core_tokens(clean)
+    meaningful = [t for t in toks if t not in _GENERIC_SINGLE_FALLBACK_WORDS]
+    if len(meaningful) >= 2:
+        return True
+    if len(meaningful) == 1 and len(meaningful[0]) >= 4 and clean[0].isupper():
+        return True
+    return False
+
+
+def _is_abstract_or_historical_reenactment(query: str, prompt: str) -> bool:
+    """Nhận diện cảnh tái hiện lịch sử/cơ chế trừu tượng không thể có ảnh chụp thật."""
+    blob = f"{query} {prompt}".lower()
+    return any(pat in blob for pat in _ABSTRACT_REENACTMENT_PATTERNS)
+
+
 _ALLOWED_MIMES = {"image/jpeg", "image/jpg", "image/png"}
 _CACHE_TTL_S = 30 * 60
 _SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+
+WIKIMEDIA_JUNK_PATTERNS: tuple[str, ...] = (
+    "coin",
+    "numismat",
+    "medal",
+    "stamp",
+    "postage",
+    "ruler",
+    "scale bar",
+    "caliper",
+    "shutter",
+    "window shutter",
+    "warehouse",
+    "shed",
+    "storage",
+    "coat of arms",
+    "seal of",
+    "emblem",
+    "logo",
+    "flag of",
+    "signature",
+    "autograph",
+    "grave",
+    "tombstone",
+    "plaque",
+    "signpost",
+    "diagram",
+    "chart",
+    "page ",
+    "scan",
+    "manuscript",
+    "book cover",
+    "screenshot",
+    "icon",
+    "button",
+    "floorplan",
+    "blueprint",
+)
+
+_JUNK_REGEXES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(
+        r"\bnumismat"
+        if p == "numismat"
+        else r"\bscan(?:ned|ning)?\b"
+        if p == "scan"
+        else r"\bpage\b"
+        if p == "page "
+        else rf"\b{re.escape(p.strip())}s?\b"
+    )
+    for p in WIKIMEDIA_JUNK_PATTERNS
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_QUERY_STOPWORDS = frozenset(
+    {"the", "a", "an", "of", "in", "on", "at", "for", "with", "and", "to", "by", "from"}
+)
 
 
 def _safe_slug(raw: str) -> str:
@@ -33,17 +172,130 @@ def _safe_slug(raw: str) -> str:
     return s[:48] or "ref"
 
 
+def _normalize_match_text(text: str) -> str:
+    stripped = _HTML_TAG_RE.sub(" ", text or "")
+    return re.sub(r"[^a-z0-9]+", " ", stripped.lower()).strip()
+
+
+def _core_tokens(text: str) -> list[str]:
+    return [
+        w
+        for w in re.findall(r"[a-z0-9]+", _normalize_match_text(text))
+        if len(w) >= 2 and w not in _QUERY_STOPWORDS
+    ]
+
+
+def is_junk_reference_candidate(title: str, metadata_text: str = "") -> bool:
+    """Chặn cứng ảnh rác Wikimedia/stock (đồng xu, thước đo, cửa chớp, nhà kho, scan tài liệu)."""
+    norm = _normalize_match_text(f"{title} {metadata_text}")
+    if not norm:
+        return False
+    return any(rx.search(norm) is not None for rx in _JUNK_REGEXES)
+
+
+def _valid_image_geometry(width: int, height: int) -> bool:
+    if width < MIN_IMAGE_DIM or height < MIN_IMAGE_DIM:
+        return False
+    if max(width, height) < MIN_LONG_EDGE:
+        return False
+    aspect = width / max(1.0, float(height))
+    return MIN_ASPECT_RATIO <= aspect <= MAX_ASPECT_RATIO
+
+
+def _is_dense_bw_text_scan(img: Image.Image) -> bool:
+    """Phát hiện trang scan tài liệu trắng đen chữ dày đặc (nền giấy trắng > 60%, độ bão hòa ~0)."""
+    small = img.convert("RGB").resize((128, 128), Image.Resampling.BILINEAR)
+    try:
+        arr = np.asarray(small, dtype=np.float32)
+    finally:
+        small.close()
+    chroma = float(np.mean(np.max(arr, axis=2) - np.min(arr, axis=2)))
+    if chroma >= 8.0:
+        return False
+    luma = np.mean(arr, axis=2)
+    bright_ratio = float(np.mean(luma > 210.0))
+    dark_ratio = float(np.mean(luma < 80.0))
+    return bright_ratio > 0.60 and dark_ratio > 0.03
+
+
+def score_candidate_relevance(
+    cand: dict[str, Any],
+    query: str,
+    primary_entity_en: str = "",
+) -> float:
+    """Chấm điểm độ khớp [0.0..1.0] dựa trên tỷ lệ khớp thực thể chính & token truy vấn."""
+    title_norm = _normalize_match_text(str(cand.get("title") or ""))
+    meta_norm = _normalize_match_text(str(cand.get("metadata_text") or ""))
+    title_toks = set(_core_tokens(title_norm))
+    meta_toks = set(_core_tokens(meta_norm))
+
+    def _token_hit_ratio(tokens: list[str]) -> float:
+        if not tokens:
+            return 0.0
+        uniq = list(dict.fromkeys(tokens))
+        pts = 0.0
+        for tok in uniq:
+            if tok in title_toks:
+                pts += 1.0
+            elif tok in meta_toks:
+                pts += 0.75
+        return pts / len(uniq)
+
+    q_toks = _core_tokens(query)
+    q_ratio = _token_hit_ratio(q_toks)
+    ent_norm = _normalize_match_text(primary_entity_en)
+    e_toks = _core_tokens(ent_norm)
+
+    if e_toks:
+        e_ratio = _token_hit_ratio(e_toks)
+        if e_ratio < 0.5:
+            return round(min(0.2, e_ratio * 0.4), 3)
+        e_set = set(e_toks)
+        ctx_toks = [t for t in q_toks if t not in e_set]
+        if ctx_toks:
+            ctx_ratio = _token_hit_ratio(ctx_toks)
+            if ctx_ratio <= 0.0:
+                # Khớp tên thực thể nhưng 0% khớp bối cảnh cụ thể của beat -> để Flux 2D vẽ sát ý
+                return round(min(0.35, 0.35 * e_ratio), 3)
+            score = 0.55 * e_ratio + 0.45 * ctx_ratio
+        else:
+            score = e_ratio
+        if len(e_toks) >= 2 and ent_norm in title_norm:
+            score = min(1.0, score + 0.12)
+        return round(min(1.0, score), 3)
+
+    score = q_ratio
+    q_norm = _normalize_match_text(query)
+    if len(q_toks) >= 2 and q_norm in title_norm:
+        score = min(1.0, score + 0.10)
+    return round(min(1.0, score), 3)
+
+
 def clear_reference_image_cache() -> None:
     _SEARCH_CACHE.clear()
+
+
+def _extract_wikimedia_extmetadata(info: dict[str, Any]) -> str:
+    ext = info.get("extmetadata")
+    if not isinstance(ext, dict):
+        return ""
+    parts: list[str] = []
+    for key in ("ObjectName", "ImageDescription", "Categories"):
+        node = ext.get(key)
+        if isinstance(node, dict):
+            val = str(node.get("value") or "").strip()
+            if val:
+                parts.append(_HTML_TAG_RE.sub(" ", val)[:240])
+    return " ".join(parts)
 
 
 def search_wikimedia_images(
     query: str,
     *,
-    limit: int = 6,
+    limit: int = 10,
     client: httpx.Client | None = None,
 ) -> list[dict[str, Any]]:
-    """Tìm ảnh tư liệu JPEG/PNG (>= 300px) từ Wikimedia Commons API (miễn phí, không cần key)."""
+    """Tìm ảnh tư liệu JPEG/PNG sạch (>= 480px cạnh dài, lọc rác & tỷ lệ cực đoan) từ Wikimedia."""
     q = (query or "").strip()
     if not q:
         return []
@@ -53,15 +305,15 @@ def search_wikimedia_images(
         "generator": "search",
         "gsrsearch": f"{q} filetype:bitmap",
         "gsrnamespace": "6",
-        "gsrlimit": str(max(lim * 2, 8)),
+        "gsrlimit": str(max(lim * 2, 16)),
         "prop": "imageinfo",
-        "iiprop": "url|size|mime",
+        "iiprop": "url|size|mime|extmetadata",
         "iiurlwidth": "1024",
         "format": "json",
     }
     headers = {"User-Agent": WIKIMEDIA_USER_AGENT}
     own_client = client is None
-    http = client if client is not None else httpx.Client(timeout=6.0, follow_redirects=True)
+    http = client if client is not None else httpx.Client(timeout=8.0, follow_redirects=True)
     out: list[dict[str, Any]] = []
     try:
         resp = http.get(WIKIMEDIA_API, params=params, headers=headers)
@@ -82,16 +334,20 @@ def search_wikimedia_images(
                 continue
             w = int(info.get("width") or 0)
             h = int(info.get("height") or 0)
-            if w < MIN_IMAGE_DIM or h < MIN_IMAGE_DIM:
+            if not _valid_image_geometry(w, h):
                 continue
             img_url = str(info.get("thumburl") or info.get("url") or "").strip()
             if not img_url:
                 continue
             title = str(page.get("title") or "").removeprefix("File:").strip()
+            meta_text = _extract_wikimedia_extmetadata(info)
+            if is_junk_reference_candidate(title, meta_text):
+                continue
             out.append(
                 {
                     "id": f"wiki:{page.get('pageid') or len(out)}",
-                    "title": title[:80],
+                    "title": title[:100],
+                    "metadata_text": meta_text[:300],
                     "url": img_url,
                     "thumb_url": img_url,
                     "width": w,
@@ -114,10 +370,10 @@ def search_pixabay_images(
     *,
     api_key: str = "",
     workspace_dir: Path | None = None,
-    limit: int = 6,
+    limit: int = 8,
     client: httpx.Client | None = None,
 ) -> list[dict[str, Any]]:
-    """Tìm ảnh minh họa / tư liệu từ Pixabay API (`image_type=illustration` fallback `all`)."""
+    """Tìm ảnh chụp thật & minh họa sạch từ Pixabay (`photo` trước -> `illustration`)."""
     q = (query or "").strip()
     if not q:
         return []
@@ -126,11 +382,11 @@ def search_pixabay_images(
         return []
     lim = max(1, min(12, int(limit)))
     own_client = client is None
-    http = client if client is not None else httpx.Client(timeout=6.0, follow_redirects=True)
+    http = client if client is not None else httpx.Client(timeout=8.0, follow_redirects=True)
     out: list[dict[str, Any]] = []
     try:
         hits: list[Any] = []
-        for img_type in ("illustration", "all"):
+        for img_type in ("photo", "illustration"):
             resp = http.get(
                 PIXABAY_IMAGE_API,
                 params={
@@ -138,7 +394,7 @@ def search_pixabay_images(
                     "q": q,
                     "image_type": img_type,
                     "safesearch": "true",
-                    "per_page": str(max(3, lim)),
+                    "per_page": str(max(6, lim * 2)),
                 },
             )
             resp.raise_for_status()
@@ -151,15 +407,19 @@ def search_pixabay_images(
                 continue
             w = int(hit.get("imageWidth") or hit.get("webformatWidth") or 0)
             h = int(hit.get("imageHeight") or hit.get("webformatHeight") or 0)
-            if w < MIN_IMAGE_DIM or h < MIN_IMAGE_DIM:
+            if not _valid_image_geometry(w, h):
                 continue
             img_url = str(hit.get("webformatURL") or hit.get("largeImageURL") or "").strip()
             if not img_url:
                 continue
+            tags = str(hit.get("tags") or q).strip()
+            if is_junk_reference_candidate(tags):
+                continue
             out.append(
                 {
                     "id": f"pixabay:{hit.get('id') or len(out)}",
-                    "title": str(hit.get("tags") or q)[:80],
+                    "title": tags[:100],
+                    "metadata_text": tags[:200],
                     "url": img_url,
                     "thumb_url": str(hit.get("previewURL") or img_url),
                     "width": w,
@@ -180,7 +440,7 @@ def search_pixabay_images(
 def search_reference_images(
     query: str,
     *,
-    limit: int = 6,
+    limit: int = 8,
     workspace_dir: Path | None = None,
     pixabay_key: str = "",
     client: httpx.Client | None = None,
@@ -252,17 +512,188 @@ def download_reference_image_url(
             http.close()
 
 
-_QUERY_STOPWORDS = frozenset({"the", "a", "an", "of", "in", "on", "at", "for", "with", "and", "to"})
+def resolve_reference_image_detailed(
+    query: str,
+    library_dir: Path,
+    *,
+    workspace_dir: Path | None = None,
+    pixabay_key: str = "",
+    accent_color: tuple[int, int, int, int] = (217, 35, 46, 255),
+    client: httpx.Client | None = None,
+    illustration_prompt: str = "",
+    primary_entity_en: str = "",
+    allow_ai_fallback: bool = True,
+    cf_account_id: str = "",
+    cf_api_token: str = "",
+    ai_budget: list[int] | None = None,
+) -> dict[str, Any]:
+    """Tải & cache ảnh 3 tầng (`v2_entity_strict`) kèm điểm độ khớp & tên nguồn."""
+    ref_dir = Path(library_dir) / "reference_images"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    clean_q = (query or "").strip()
+    clean_prompt = (illustration_prompt or "").strip()
+    clean_entity = (primary_entity_en or "").strip()
 
+    digest = hashlib.sha1(
+        f"{REF_CACHE_VERSION}|{clean_q.lower()}|{clean_prompt.lower()}|{clean_entity.lower()}".encode(),
+        usedforsecurity=False,
+    ).hexdigest()[:16]
+    cached_jpg = ref_dir / f"{REF_CACHE_VERSION}_{digest}.jpg"
+    if cached_jpg.is_file() and cached_jpg.stat().st_size > 0:
+        return {
+            "path": cached_jpg,
+            "source": "cache",
+            "score": 1.0,
+            "title": cached_jpg.name,
+            "query": clean_q,
+        }
 
-def _shorten_query(query: str) -> str:
-    """Rút gọn truy vấn dài xuống 2 từ cốt lõi tiếng Anh để tăng tỷ lệ tìm thấy ảnh thật."""
-    tokens = [w for w in re.findall(r"[a-zA-Z0-9]+", (query or "").lower()) if w]
-    core = [w for w in tokens if w not in _QUERY_STOPWORDS]
-    chosen = core if len(core) >= 2 else tokens
-    if len(chosen) <= 2:
-        return ""
-    return " ".join(chosen[:2])
+    scored_candidates: list[tuple[float, int, dict[str, Any]]] = []
+    seen_urls: set[str] = set()
+    is_abstract_scene = _is_abstract_or_historical_reenactment(clean_q, clean_prompt)
+    allow_pass_1b = (
+        bool(clean_entity)
+        and clean_entity.lower() != clean_q.lower()
+        and _is_valid_entity_fallback_query(clean_entity)
+        and not is_abstract_scene
+    )
+
+    # Tầng 1 — Wikimedia Commons (ưu tiên ảnh thật):
+    # Nhịp 1a: tìm bằng truy vấn đầy đủ (thực thể + bối cảnh)
+    if clean_q:
+        hits_1a = search_wikimedia_images(clean_q, limit=10, client=client)
+        for it in hits_1a:
+            if it["url"] in seen_urls:
+                continue
+            seen_urls.add(it["url"])
+            sc = score_candidate_relevance(it, clean_q, primary_entity_en=clean_entity)
+            if sc >= MIN_RELEVANCE_SCORE:
+                scored_candidates.append((sc, 2, it))
+
+    # Nhịp 1b: nếu 1a chưa có ảnh thật vì bối cảnh quá hẹp -> tra 1 lượt đúng `beat_entity_en`
+    if not scored_candidates and allow_pass_1b:
+        hits_1b = search_wikimedia_images(clean_entity, limit=10, client=client)
+        for it in hits_1b:
+            if it["url"] in seen_urls:
+                continue
+            seen_urls.add(it["url"])
+            sc = score_candidate_relevance(it, clean_entity, primary_entity_en=clean_entity)
+            if sc >= MIN_RELEVANCE_SCORE:
+                scored_candidates.append((sc, 1, it))
+
+    # Tầng 2 — Pixabay (`photo` trước -> `illustration`), yêu cầu khớp thực thể trong tags
+    if not scored_candidates:
+        pix_queries = [clean_q] if clean_q else []
+        if allow_pass_1b:
+            pix_queries.append(clean_entity)
+        for pq in pix_queries:
+            hits_pix = search_pixabay_images(
+                pq,
+                api_key=pixabay_key,
+                workspace_dir=workspace_dir,
+                limit=8,
+                client=client,
+            )
+            for it in hits_pix:
+                if it["url"] in seen_urls:
+                    continue
+                seen_urls.add(it["url"])
+                sc = score_candidate_relevance(it, pq, primary_entity_en=clean_entity)
+                if sc >= MIN_RELEVANCE_SCORE:
+                    scored_candidates.append((sc, 0, it))
+            if scored_candidates:
+                break
+
+    scored_candidates.sort(key=lambda row: (row[0], row[1]), reverse=True)
+
+    own_client = client is None
+    http = client if client is not None else httpx.Client(timeout=8.0, follow_redirects=True)
+    try:
+        for sc, _prio, cand in scored_candidates:
+            try:
+                resp = http.get(cand["url"], headers={"User-Agent": WIKIMEDIA_USER_AGENT})
+                resp.raise_for_status()
+                with Image.open(BytesIO(resp.content)) as raw:
+                    if not _valid_image_geometry(raw.width, raw.height):
+                        continue
+                    if _is_dense_bw_text_scan(raw):
+                        continue
+                    rgb = raw.convert("RGB")
+                    try:
+                        rgb.thumbnail((1080, 1080), Image.Resampling.LANCZOS)
+                        rgb.save(cached_jpg, format="JPEG", quality=90)
+                    finally:
+                        rgb.close()
+                src_name = str(cand.get("source") or "wikimedia")
+                logger.info(
+                    "[StickV Image] query=%r entity=%r -> source=%s score=%.2f title=%r",
+                    clean_q,
+                    clean_entity,
+                    src_name,
+                    sc,
+                    str(cand.get("title") or "")[:60],
+                )
+                return {
+                    "path": cached_jpg,
+                    "source": src_name,
+                    "score": sc,
+                    "title": str(cand.get("title") or ""),
+                    "query": clean_q,
+                }
+            except Exception:
+                continue
+    finally:
+        if own_client:
+            http.close()
+
+    # Tầng 3: Cloudflare Workers AI 2D (CHỈ gọi khi Wikimedia & Pixabay đều không có ảnh thật đạt)
+    budget_ok = ai_budget is None or (len(ai_budget) > 0 and ai_budget[0] > 0)
+    if allow_ai_fallback and budget_ok:
+        acc_id = (cf_account_id or "").strip() or resolve_online_api_key(
+            "CLOUDFLARE_ACCOUNT_ID", workspace_dir
+        )
+        token = (cf_api_token or "").strip() or resolve_online_api_key(
+            "CLOUDFLARE_API_TOKEN", workspace_dir
+        )
+        if acc_id and token:
+            flux_prompt = clean_prompt or clean_q
+            if clean_entity and clean_entity.lower() not in flux_prompt.lower():
+                flux_prompt = f"{clean_entity} — {flux_prompt}" if flux_prompt else clean_entity
+            try:
+                generate_illustration_image(
+                    flux_prompt,
+                    cached_jpg,
+                    account_id=acc_id,
+                    api_token=token,
+                    width=768,
+                    height=512,
+                    client=client,
+                )
+                if ai_budget is not None and len(ai_budget) > 0:
+                    ai_budget[0] = max(0, ai_budget[0] - 1)
+                logger.info(
+                    "[StickV Image] query=%r entity=%r -> source=cloudflare_flux",
+                    clean_q,
+                    clean_entity,
+                )
+                return {
+                    "path": cached_jpg,
+                    "source": "cloudflare_flux",
+                    "score": 1.0,
+                    "title": flux_prompt[:80],
+                    "query": clean_q,
+                }
+            except CloudflareImageError as exc:
+                logger.warning("Cloudflare Flux 2D fallback thất bại: %s", exc)
+
+    fallback_path = resolve_prop_png(clean_q, library_dir, accent_color=accent_color)
+    return {
+        "path": fallback_path,
+        "source": "iconify",
+        "score": 0.0,
+        "title": fallback_path.name,
+        "query": clean_q,
+    }
 
 
 def resolve_reference_image(
@@ -274,109 +705,25 @@ def resolve_reference_image(
     accent_color: tuple[int, int, int, int] = (217, 35, 46, 255),
     client: httpx.Client | None = None,
     illustration_prompt: str = "",
+    primary_entity_en: str = "",
     allow_ai_fallback: bool = True,
     cf_account_id: str = "",
     cf_api_token: str = "",
     ai_budget: list[int] | None = None,
 ) -> tuple[Path, str]:
-    """Tải & cache ảnh 3 tầng về `library/reference_images/<sha1>.jpg`:
-    Wikimedia (đầy đủ -> 2 từ) -> Pixabay -> Cloudflare Flux -> Iconify.
-    """
-    ref_dir = Path(library_dir) / "reference_images"
-    ref_dir.mkdir(parents=True, exist_ok=True)
-    clean_q = (query or "").strip()
-    clean_prompt = (illustration_prompt or "").strip()
-    digest = hashlib.sha1(
-        f"{clean_q.lower()}|{clean_prompt.lower()}".encode(),
-        usedforsecurity=False,
-    ).hexdigest()[:16]
-    cached_jpg = ref_dir / f"{digest}.jpg"
-    if cached_jpg.is_file() and cached_jpg.stat().st_size > 0:
-        return cached_jpg, "cache"
-    legacy_png = ref_dir / f"{_safe_slug(clean_q)}.png"
-    if legacy_png.is_file() and legacy_png.stat().st_size > 0:
-        return legacy_png, "cache"
-
-    short_q = _shorten_query(clean_q)
-    query_variants = [q for q in (clean_q, short_q) if q]
-
-    candidates: list[dict[str, Any]] = []
-    seen_urls: set[str] = set()
-    # Tầng 1: Wikimedia Commons (đầy đủ -> rút gọn 2 từ)
-    for qv in query_variants:
-        hits = search_wikimedia_images(qv, limit=6, client=client)
-        for it in hits:
-            if it["url"] not in seen_urls:
-                candidates.append(it)
-                seen_urls.add(it["url"])
-        if candidates:
-            break
-
-    # Tầng 2: Pixabay (đầy đủ -> rút gọn 2 từ)
-    if not candidates:
-        for qv in query_variants:
-            hits = search_pixabay_images(
-                qv,
-                api_key=pixabay_key,
-                workspace_dir=workspace_dir,
-                limit=6,
-                client=client,
-            )
-            for it in hits:
-                if it["url"] not in seen_urls:
-                    candidates.append(it)
-                    seen_urls.add(it["url"])
-            if candidates:
-                break
-
-    own_client = client is None
-    http = client if client is not None else httpx.Client(timeout=8.0, follow_redirects=True)
-    try:
-        for cand in candidates:
-            try:
-                resp = http.get(cand["url"], headers={"User-Agent": WIKIMEDIA_USER_AGENT})
-                resp.raise_for_status()
-                with Image.open(BytesIO(resp.content)) as raw:
-                    if raw.width < 160 or raw.height < 160:
-                        continue
-                    rgb = raw.convert("RGB")
-                    try:
-                        rgb.thumbnail((1080, 1080), Image.Resampling.LANCZOS)
-                        rgb.save(cached_jpg, format="JPEG", quality=90)
-                    finally:
-                        rgb.close()
-                return cached_jpg, str(cand.get("source") or "wikimedia")
-            except Exception:
-                continue
-    finally:
-        if own_client:
-            http.close()
-
-    # Tầng 3: Cloudflare Workers AI (flux-1-schnell, giới hạn budget/video, lưu cache vĩnh viễn)
-    budget_ok = ai_budget is None or (len(ai_budget) > 0 and ai_budget[0] > 0)
-    if allow_ai_fallback and budget_ok:
-        acc_id = (cf_account_id or "").strip() or resolve_online_api_key(
-            "CLOUDFLARE_ACCOUNT_ID", workspace_dir
-        )
-        token = (cf_api_token or "").strip() or resolve_online_api_key(
-            "CLOUDFLARE_API_TOKEN", workspace_dir
-        )
-        if acc_id and token:
-            try:
-                generate_illustration_image(
-                    clean_prompt or clean_q,
-                    cached_jpg,
-                    account_id=acc_id,
-                    api_token=token,
-                    width=768,
-                    height=512,
-                    client=client,
-                )
-                if ai_budget is not None and len(ai_budget) > 0:
-                    ai_budget[0] = max(0, ai_budget[0] - 1)
-                return cached_jpg, "cloudflare_flux"
-            except CloudflareImageError:
-                pass
-
-    fallback_path = resolve_prop_png(clean_q, library_dir, accent_color=accent_color)
-    return fallback_path, "iconify"
+    """Tải & cache ảnh 3 tầng về `library/reference_images/v2_entity_strict_<sha1>.jpg`."""
+    res = resolve_reference_image_detailed(
+        query,
+        library_dir,
+        workspace_dir=workspace_dir,
+        pixabay_key=pixabay_key,
+        accent_color=accent_color,
+        client=client,
+        illustration_prompt=illustration_prompt,
+        primary_entity_en=primary_entity_en,
+        allow_ai_fallback=allow_ai_fallback,
+        cf_account_id=cf_account_id,
+        cf_api_token=cf_api_token,
+        ai_budget=ai_budget,
+    )
+    return res["path"], str(res["source"])
