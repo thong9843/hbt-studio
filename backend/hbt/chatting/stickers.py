@@ -38,6 +38,77 @@ def get_memes_dir(library_dir: Path) -> Path:
     return resolve_memes_dir(library_dir)
 
 
+def resolve_meme_or_sticker_path(library_dir: Path, meme_id: str | None) -> Path | None:
+    """Phân giải `meme_id` trên cả `library/memes/` và `library/stickers/`."""
+    mid = (meme_id or "").strip()
+    if not mid:
+        return None
+    dirs = [get_memes_dir(library_dir), Path(library_dir) / "stickers"]
+    all_exts = SUPPORTED_IMAGE_EXTS | SUPPORTED_VIDEO_EXTS
+
+    for base in dirs:
+        if not base.is_dir():
+            continue
+        direct = base / mid
+        if direct.is_file() and direct.suffix.lower() in all_exts:
+            return direct
+        idx_path = base / "index.json"
+        if idx_path.is_file():
+            try:
+                raw = json.loads(idx_path.read_text(encoding="utf-8"))
+                entries = (
+                    raw.get("memes", [])
+                    if isinstance(raw, dict) and isinstance(raw.get("memes"), list)
+                    else (raw if isinstance(raw, list) else [])
+                )
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("id") or "") == mid or str(item.get("file") or "") == mid:
+                        fname = str(item.get("file") or "")
+                        if fname and (base / fname).is_file():
+                            return base / fname
+            except Exception:
+                pass
+        for ext in all_exts:
+            cand = base / f"{mid}{ext}"
+            if cand.is_file():
+                return cand
+    return None
+
+
+def resolve_sfx_path(library_dir: Path, sfx_id: str | None) -> Path | None:
+    """Phân giải `sfx_id` trong `library/sfx/` (theo index.json hoặc tên file)."""
+    sid = (sfx_id or "").strip()
+    if not sid:
+        return None
+    sfx_dir = Path(library_dir) / "sfx"
+    if not sfx_dir.is_dir():
+        return None
+    direct = sfx_dir / sid
+    if direct.is_file():
+        return direct
+    idx_path = sfx_dir / "index.json"
+    if idx_path.is_file():
+        try:
+            raw = json.loads(idx_path.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                for item in raw:
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("id") or "") == sid or str(item.get("file") or "") == sid:
+                        fname = str(item.get("file") or "")
+                        if fname and (sfx_dir / fname).is_file():
+                            return sfx_dir / fname
+        except Exception:
+            pass
+    for ext in (".mp3", ".wav", ".ogg", ".m4a"):
+        cand = sfx_dir / f"{sid}{ext}"
+        if cand.is_file():
+            return cand
+    return None
+
+
 def load_memes_metadata(library_dir: Path) -> list[dict[str, Any]]:
     """Đọc danh sách meme kèm metadata (file, tags, emojis, start_time, duration)."""
     memes_dir = get_memes_dir(library_dir)

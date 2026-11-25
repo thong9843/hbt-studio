@@ -976,6 +976,8 @@ class JobManager:
         slug: str | None = None,
         direct_script: bool = False,
         target_duration_s: float | None = None,
+        auto_fetch_online: bool = True,
+        model: str | None = None,
     ) -> Job:
         """Job tự động hoá Chatting 4 pha: Lấy bài -> Viết chat -> Giọng -> Xem nhanh."""
         job_slug = slug or f"chat-{uuid.uuid4().hex[:6]}"
@@ -985,6 +987,8 @@ class JobManager:
         job.chatting_background = background_name  # type: ignore[attr-defined]
         job.chatting_direct_script = direct_script  # type: ignore[attr-defined]
         job.chatting_target_duration_s = target_duration_s  # type: ignore[attr-defined]
+        job.chatting_auto_fetch_online = auto_fetch_online  # type: ignore[attr-defined]
+        job.chatting_model = model  # type: ignore[attr-defined]
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -1033,10 +1037,13 @@ class JobManager:
             library_dir = self.library_dir
             brand_dir = self.brand_dir
             voice_provider = self.voice
-            chatting_model = os.environ.get("CHATTING_MODEL", "gemini-3.8-flash")
+            chatting_model = getattr(job, "chatting_model", None) or os.environ.get(
+                "CHATTING_MODEL", "gemini-3.1-flash-lite"
+            )
 
             direct_script = getattr(job, "chatting_direct_script", False)
             target_duration_s = getattr(job, "chatting_target_duration_s", None)
+            auto_fetch_online = getattr(job, "chatting_auto_fetch_online", True)
             slug, video_path = run_chatting_auto_job(
                 workspace_dir=workspace_dir,
                 library_dir=library_dir,
@@ -1049,6 +1056,7 @@ class JobManager:
                 slug_override=job.slug,
                 direct_script=direct_script,
                 target_duration_s=target_duration_s,
+                auto_fetch_online=auto_fetch_online,
                 emit_event=on_event,
             )
 

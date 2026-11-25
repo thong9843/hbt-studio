@@ -41,11 +41,23 @@ MAX_VIDEO_DURATION_S = 300.0  # Trần thời lượng tối đa 5 phút
 VIDEO_MEME_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".gif"}
 
 
-def compute_meme_duration(stk_file: Path | None, seed: int = 0, msg_idx: int = 0) -> float:
-    """Tính thời lượng hiển thị meme/sticker linh hoạt, luôn nhỏ hơn 5.0s:
-    - Video/GIF động: đọc thời lượng thực tế và giới hạn trong [1.2s, 4.2s].
-    - Ảnh/sticker tĩnh: nhịp dừng tự nhiên theo cảm xúc trong [0.9s, 1.8s].
+def compute_meme_duration(
+    stk_file: Path | None,
+    seed: int = 0,
+    msg_idx: int = 0,
+    *,
+    intensity: int = 4,
+) -> float:
+    """Tính thời lượng hiển thị meme/sticker theo PacingPolicy:
+    - Video/GIF động: đọc thời lượng thực tế và giới hạn trong [1.2s, 3.8s].
+    - Ảnh/sticker tĩnh: nhịp dừng theo intensity trong [0.9s, 1.6s] (mức 4 -> 1.1s, mức 5 -> 1.5s).
     """
+    from hbt.shared.asset_director.models import PacingPolicy
+    from hbt.shared.asset_director.pacing import PacingGovernor
+
+    _ = (seed, msg_idx)
+    gov = PacingGovernor(PacingPolicy.for_engine("chatting"))
+
     if stk_file is not None and stk_file.is_file():
         if stk_file.suffix.lower() in VIDEO_MEME_EXTS:
             real_dur: float | None = None
@@ -55,13 +67,9 @@ def compute_meme_duration(stk_file: Path | None, seed: int = 0, msg_idx: int = 0
                 real_dur = media_duration(stk_file)
             except Exception:
                 real_dur = None
-            if real_dur is not None and real_dur > 0:
-                return round(max(1.2, min(4.2, float(real_dur))), 2)
-            return 2.4
-        # Ảnh tĩnh: biến thiên tự nhiên 0.9s - 1.8s
-        variants = (1.0, 1.25, 1.5, 1.7)
-        return variants[(abs(seed) + msg_idx) % len(variants)]
-    return 1.4
+            return gov.clamp_video_meme_duration(real_dur)
+        return gov.static_sticker_duration(intensity)
+    return gov.static_sticker_duration(intensity)
 
 
 def build_timeline(
@@ -157,17 +165,17 @@ def build_timeline(
             )
             cur_time += 0.6
 
-        # Pop tin nhắn chuẩn 60fps: 0.30s = 18 sub-frames (~0.01667s/frame, scale 0.80 -> 1.0)
+        # Xuất hiện tin nhắn dịu 60fps: 0.40s (Cubic Ease-Out, scale 0.97 -> 1.0, slide +22px -> 0)
         states.append(
             TimelineState(
                 start_time=cur_time,
-                duration=0.30,
+                duration=0.40,
                 visible_count=idx + 1,
-                scale_last_msg=0.80,
+                scale_last_msg=0.97,
                 show_seen=False,
             )
         )
-        cur_time += 0.30
+        cur_time += 0.40
 
         # Đọc tin nhắn: wav_dur
         if wav_path.is_file():
@@ -186,24 +194,31 @@ def build_timeline(
         )
         cur_time += wav_dur
 
-        # Nếu có sticker/meme: Meme Cut-in Pause linh hoạt (< 5.0s)
-        if msg.sticker:
+        # Nếu có sticker/meme: Meme Cut-in Pause linh hoạt (1.2-3.8s video, 0.9-1.6s sticker tĩnh)
+        if msg.meme_id or msg.sticker:
             stk_file: Path | None = None
             has_valid_meme = True
             if library_dir is not None:
-                from hbt.chatting.stickers import pick_sticker
+                from hbt.chatting.stickers import pick_sticker, resolve_meme_or_sticker_path
 
-                stk_file = pick_sticker(library_dir, msg.sticker, doc.background.seed)
+                stk_file = resolve_meme_or_sticker_path(library_dir, msg.meme_id)
+                if stk_file is None and msg.sticker:
+                    stk_file = pick_sticker(library_dir, msg.sticker, doc.background.seed)
                 has_valid_meme = stk_file is not None and stk_file.is_file()
 
             if has_valid_meme:
-                meme_dur = compute_meme_duration(stk_file, seed=doc.background.seed, msg_idx=idx)
+                meme_dur = compute_meme_duration(
+                    stk_file,
+                    seed=doc.background.seed,
+                    msg_idx=idx,
+                    intensity=getattr(msg, "intensity", 4),
+                )
                 states.append(
                     TimelineState(
                         start_time=cur_time,
                         duration=meme_dur,
                         visible_count=idx + 1,
-                        active_sticker=msg.sticker,
+                        active_sticker=msg.sticker or msg.meme_id,
                         sticker_from_right=is_right,
                         show_seen=True,
                         is_meme_cutin=True,
@@ -211,17 +226,17 @@ def build_timeline(
                 )
                 cur_time += meme_dur
 
-        # Nghỉ giữa tin 0.25s (trừ tin cuối cùng)
+        # Nghỉ tự nhiên giữa 2 tin 0.34s (trừ tin cuối cùng)
         if idx < len(doc.messages) - 1:
             states.append(
                 TimelineState(
                     start_time=cur_time,
-                    duration=0.25,
+                    duration=0.34,
                     visible_count=idx + 1,
                     show_seen=True,
                 )
             )
-            cur_time += 0.25
+            cur_time += 0.34
 
     # Giữ màn hình cuối 1.5s
     states.append(

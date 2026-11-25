@@ -14,7 +14,7 @@ export function StudioWorkspaceProvider({ children }: { children: ReactNode }) {
   const [jsonText, setJsonText] = useState(() => JSON.stringify(SAMPLE_V1_SCRIPT, null, 2));
   const [prompt, setPrompt] = useState('');
   const [v2Topic, setV2Topic] = useState<HbtCoreTopic>('history');
-  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const [resultSlug, setResultSlug] = useState<string | null>(null);

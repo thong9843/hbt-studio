@@ -37,6 +37,63 @@ EMOJI_REGEX = re.compile(
 
 CANVAS_WIDTH = 1080
 CANVAS_HEIGHT = 1920
+MEME_SAFE_BOTTOM = 1640
+
+
+def _apply_opacity(img: Image.Image, opacity: float) -> Image.Image:
+    """Nhân kênh alpha theo `opacity` [0..1] mà không làm thay đổi màu RGB."""
+    op = max(0.0, min(1.0, float(opacity)))
+    if op >= 0.999:
+        return img
+    out = img.copy()
+    r, g, b, a = out.split()
+    a = a.point(lambda v: int(round(v * op)))
+    out.putalpha(a)
+    return out
+
+
+def compute_meme_rect(
+    card_bottom_y: int,
+    src_w: int,
+    src_h: int,
+    *,
+    safe_bottom: int = MEME_SAFE_BOTTOM,
+    canvas_w: int = CANVAS_WIDTH,
+    canvas_h: int = CANVAS_HEIGHT,
+) -> tuple[int, int, int, int]:
+    """Định vị meme nằm hẳn dưới `card_bottom_y` (trên vùng nền gameplay), không đè chữ."""
+    aspect = max(0.3, min(3.5, float(src_w) / max(1.0, float(src_h))))
+    y_top = card_bottom_y + 24
+    avail_h = safe_bottom - y_top
+
+    if avail_h >= 320:
+        max_h = min(520, avail_h)
+        max_w = 720
+        fit_h = min(max_h, int(round(max_w / aspect)))
+        fit_w = int(round(fit_h * aspect))
+        if fit_w > max_w:
+            fit_w = max_w
+            fit_h = int(round(fit_w / aspect))
+        mw = max(120, (fit_w // 2) * 2)
+        mh = max(120, (fit_h // 2) * 2)
+        mx = (canvas_w - mw) // 2
+        my = y_top + max(0, (avail_h - mh) // 2)
+        return mx, my, mw, mh
+
+    # Khung chat cao: thu gọn meme và đặt sát phía dưới mép khung chat, không đè tin nhắn
+    y_start = min(canvas_h - 220, card_bottom_y + 12)
+    avail_low = max(180, min(340, canvas_h - y_start - 36))
+    max_w = 540
+    fit_h = min(avail_low, int(round(max_w / aspect)))
+    fit_w = int(round(fit_h * aspect))
+    if fit_w > max_w:
+        fit_w = max_w
+        fit_h = int(round(fit_w / aspect))
+    mw = max(120, (fit_w // 2) * 2)
+    mh = max(120, (fit_h // 2) * 2)
+    mx = (canvas_w - mw) // 2
+    my = max(card_bottom_y + 8, min(canvas_h - mh - 24, y_start))
+    return mx, my, mw, mh
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -455,14 +512,14 @@ class ChatFrameRenderer:
         draw.line([(0, h - 1), (w, h - 1)], fill="#F0F2F5", width=1)
         return header
 
-    def draw_typing_bubble(self, pulse_step: int = 0) -> Image.Image:
-        """Vẽ bong bóng 3 chấm 'đang nhập' với animation sóng sin nhấp nhô mượt mà."""
+    def draw_typing_bubble(self, pulse_step: int = 0, opacity: float = 1.0) -> Image.Image:
+        """Vẽ bong bóng 3 chấm 'đang nhập' với sóng sin chậm rãi (~1.1s/chu kỳ ở 60fps)."""
         w, h = 128, 64
         img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle([(0, 0), (w, h)], radius=32, fill=self.theme.bubble_left_bg)
 
-        # 3 chấm sóng sin
+        # 3 chấm sóng sin dịu (~66 frame/chu kỳ = 1.1s ở 60fps)
         dot_r = 6
         cy = h // 2
         spacing = 22
@@ -470,14 +527,45 @@ class ChatFrameRenderer:
 
         for i in range(3):
             dx = start_x + i * spacing
-            offset_y = int(math.sin(pulse_step * 0.45 + i * 1.05) * 6)
+            offset_y = int(round(math.sin(pulse_step * (2.0 * math.pi / 66.0) + i * 1.1) * 5.5))
             y = cy + offset_y
             draw.ellipse(
                 (dx, y - dot_r, dx + dot_r * 2, y + dot_r),
                 fill=self.theme.typing_dot_color,
             )
 
+        if opacity < 0.999:
+            faded = _apply_opacity(img, opacity)
+            img.close()
+            return faded
         return img
+
+    def compute_card_height(
+        self,
+        visible_messages: list[Message],
+        show_typing: bool = False,
+        show_seen: bool = True,
+    ) -> int:
+        """Tính chiều cao thực tế của khung chat (ôm gọn nội dung, tối đa frame_max_height)."""
+        page_msgs = self.paginate_messages(
+            visible_messages, show_typing=show_typing, show_seen=show_seen
+        )
+        content_h = self.get_content_height(page_msgs, show_typing=show_typing, show_seen=show_seen)
+        return min(
+            self.theme.frame_max_height,
+            max(340, self.theme.header_height + content_h + 16),
+        )
+
+    def compute_card_bottom_y(
+        self,
+        visible_messages: list[Message],
+        show_typing: bool = False,
+        show_seen: bool = True,
+    ) -> int:
+        """Trả về tọa độ đáy Y (trên canvas 1080x1920) của khung chat tại thời điểm hiện tại."""
+        return self.theme.top_y + self.compute_card_height(
+            visible_messages, show_typing=show_typing, show_seen=show_seen
+        )
 
     def get_content_height(
         self,
@@ -595,6 +683,12 @@ class ChatFrameRenderer:
         show_seen: bool = True,
         scroll_offset_override: float | None = None,
         is_meme_cutin: bool = False,
+        last_msg_opacity: float = 1.0,
+        last_msg_offset_y: float = 0.0,
+        typing_opacity: float = 1.0,
+        meme_opacity: float = 1.0,
+        meme_scale: float = 1.0,
+        frame_height_override: int | None = None,
     ) -> Image.Image:
         """Dựng một khung hình 1080x1920 hoàn chỉnh (tối ưu RAM cho kịch bản dài tới 5 phút)."""
         canvas = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
@@ -807,14 +901,19 @@ class ChatFrameRenderer:
                     )
 
             if scale != 1.0 and scale > 0.1:
-                sw = max(10, int(bubble_w * scale))
-                sh = max(10, int(bubble_h * scale))
-                scaled_img = b_img.resize((sw, sh), Image.Resampling.LANCZOS)
+                sw = max(10, int(round(bubble_w * scale)))
+                sh = max(10, int(round(bubble_h * scale)))
+                scaled_img = b_img.resize((sw, sh), Image.Resampling.BICUBIC)
                 b_img.close()
                 b_img = scaled_img
                 bubble_w, bubble_h = sw, sh
 
-            draw_y = to_screen_y(cur_y)
+            if is_last and last_msg_opacity < 0.999:
+                faded_b = _apply_opacity(b_img, last_msg_opacity)
+                b_img.close()
+                b_img = faded_b
+
+            draw_y = to_screen_y(cur_y + (last_msg_offset_y if is_last else 0.0))
             # Định vị trí x, y trên visible_content và kẹp toạ độ ngang an toàn
             if is_right:
                 bx = frame_w - 28 - bubble_w
@@ -825,6 +924,10 @@ class ChatFrameRenderer:
                     fallback_char = Character(id="?", name="?", side="left")
                     _, char_rgba = self.get_char_color(msg.from_)
                     av = make_circular_avatar(av_img, char or fallback_char, av_size, char_rgba)
+                    if is_last and last_msg_opacity < 0.999:
+                        faded_av = _apply_opacity(av, last_msg_opacity)
+                        av.close()
+                        av = faded_av
                     av_y = draw_y + bubble_h - av_size
                     visible_content.paste(av, (24, av_y), av)
                     av.close()
@@ -837,13 +940,17 @@ class ChatFrameRenderer:
 
         # Nếu có typing indicator
         if show_typing:
-            typing_b = self.draw_typing_bubble(pulse_step=typing_pulse_step)
+            typing_b = self.draw_typing_bubble(pulse_step=typing_pulse_step, opacity=typing_opacity)
             if in_viewport(cur_y, typing_b.height + 16):
                 av_size = self.theme.bubble_left_avatar_size
                 char = self.characters.get(typing_char_id or "left") or other_char
                 av_img = self.avatar_images.get(char.id)
                 _, char_rgba = self.get_char_color(char.id)
                 av = make_circular_avatar(av_img, char, av_size, char_rgba)
+                if typing_opacity < 0.999:
+                    faded_av = _apply_opacity(av, typing_opacity)
+                    av.close()
+                    av = faded_av
                 vy = to_screen_y(cur_y)
                 visible_content.paste(av, (24, vy + typing_b.height - av_size), av)
                 visible_content.paste(typing_b, (24 + av_size + 14, vy), typing_b)
@@ -894,14 +1001,38 @@ class ChatFrameRenderer:
                             font=self.font_seen,
                         )
 
-        # Tạo khung hoàn chỉnh
-        frame_surface = Image.new("RGBA", (frame_w, frame_max_h), self.theme.bg_color)
+        # Tạo khung hoàn chỉnh (chiều cao ôm gọn nội dung hoặc theo frame_height_override mượt)
+        if frame_height_override is not None:
+            actual_frame_h = max(320, min(frame_max_h, int(round(frame_height_override))))
+        else:
+            actual_frame_h = min(frame_max_h, max(340, self.theme.header_height + cur_y + 36))
+
+        frame_surface = Image.new("RGBA", (frame_w, actual_frame_h), self.theme.bg_color)
         frame_surface.paste(header_img, (0, 0))
         frame_surface.paste(visible_content, (0, self.theme.header_height), visible_content)
 
         # Bo góc toàn bộ khung chat
-        mask = draw_rounded_mask((frame_w, frame_max_h), self.theme.corner_radius)
+        mask = draw_rounded_mask((frame_w, actual_frame_h), self.theme.corner_radius)
         canvas.paste(frame_surface, (frame_x, top_y), mask)
+
+        # Vẽ Meme/Sticker cut-in (ảnh/WebP/GIF) NẰM HẲN DƯỚI đáy khung chat, không đè chữ
+        if is_meme_cutin and active_sticker_img is not None and meme_opacity > 0.01:
+            card_bottom_y = top_y + actual_frame_h
+            mx, my, mw, mh = compute_meme_rect(
+                card_bottom_y, active_sticker_img.width, active_sticker_img.height
+            )
+            sc = max(0.5, min(1.1, float(meme_scale)))
+            dw = max(20, int(round(mw * sc)))
+            dh = max(20, int(round(mh * sc)))
+            dx = mx + (mw - dw) // 2
+            dy = my + (mh - dh) // 2
+            m_img = active_sticker_img.resize((dw, dh), Image.Resampling.BICUBIC)
+            if meme_opacity < 0.999:
+                faded_m = _apply_opacity(m_img, meme_opacity)
+                m_img.close()
+                m_img = faded_m
+            canvas.paste(m_img, (dx, dy), m_img)
+            m_img.close()
 
         # Giải phóng tài nguyên ảnh tạm ngay lập tức
         header_img.close()

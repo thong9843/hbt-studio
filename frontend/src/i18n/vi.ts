@@ -1278,6 +1278,13 @@ export const vi = {
     rendering: 'Đang dựng…',
     rendered: 'Đã dựng xong',
     timingInfo: (s: number) => `Thời gian viết chat: ${s}s`,
+    autoFetchOnline: 'Tự tải tài nguyên online',
+    badgeNewlyFetched: 'Mới tải',
+    rerollAsset: 'Đổi cái khác',
+    rerollingAsset: 'Đang đổi…',
+    clearAsset: 'Bỏ',
+    assetMemeLabel: 'Meme / Sticker',
+    assetSfxLabel: 'Hiệu ứng SFX',
   },
   hbtCore: {
     openBtn: 'HBT Core V1 / V2',

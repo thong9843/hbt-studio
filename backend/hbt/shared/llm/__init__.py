@@ -42,6 +42,8 @@ def generate_structured_json(
     model: str | None = None,
     temperature: float = 0.8,
     timeout: float = 60.0,
+    response_schema: dict[str, Any] | None = None,
+    max_output_tokens: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Gọi Gemini API (Structured JSON Output) và trả về (parsed_dict, timings)."""
     api_key = load_gemini_api_key()
@@ -54,6 +56,15 @@ def generate_structured_json(
     chosen = normalize_model_name(model or GEMINI_MODEL)
     candidates = [chosen] + [m for m in MODELS if m != chosen]
 
+    gen_cfg: dict[str, Any] = {
+        "temperature": temperature,
+        "responseMimeType": "application/json",
+    }
+    if response_schema is not None:
+        gen_cfg["responseSchema"] = response_schema
+    if max_output_tokens is not None and max_output_tokens > 0:
+        gen_cfg["maxOutputTokens"] = int(max_output_tokens)
+
     payload = {
         "contents": [
             {
@@ -61,10 +72,7 @@ def generate_structured_json(
                 "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}],
             }
         ],
-        "generationConfig": {
-            "temperature": temperature,
-            "responseMimeType": "application/json",
-        },
+        "generationConfig": gen_cfg,
     }
     headers = build_gemini_headers(api_key)
 
@@ -89,6 +97,8 @@ def generate_structured_json(
                 )
                 clean_json = _extract_json_text(raw_text)
                 parsed = json.loads(clean_json)
+                if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+                    parsed = parsed[0]
                 if not isinstance(parsed, dict):
                     raise ValueError("Gemini không trả về JSON object")
                 usage = data.get("usageMetadata") or {}

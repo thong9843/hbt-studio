@@ -1,14 +1,52 @@
 """Kiểm thử tách sạch lời thoại cho TTS trong Chatting (§9, CH5)."""
 
-from hbt.chatting.voice import clean_spoken_text
+from hbt.chatting.voice import (
+    FEMALE_VOICES,
+    MALE_VOICES,
+    assign_character_voices,
+    clean_spoken_text,
+    normalize_vietnamese_for_tts,
+)
 
 
 def test_clean_spoken_text_timestamps():
-    # Mốc giờ định dạng hh:mm
+    # Mốc giờ UI định dạng hh:mm vẫn bị lọc sạch
     assert clean_spoken_text("20:15 Alo bạn có nhà không?") == "Alo bạn có nhà không?"
     assert clean_spoken_text("Hôm qua lúc 10:30 PM mình thấy bạn") == "Hôm qua lúc mình thấy bạn"
-    assert clean_spoken_text("20h15 tối nay đi ăn nhé") == "tối nay đi ăn nhé"
-    assert clean_spoken_text("9 giờ 30 phút có mặt nha") == "có mặt nha"
+    # Giờ nói tự nhiên trong lời thoại ("2h sáng", "20h15", "9 giờ 30") được giữ nguyên để TTS đọc
+    assert clean_spoken_text("2h sáng mà còn thức hả?") == "2h sáng mà còn thức hả?"
+    assert clean_spoken_text("20h15 tối nay đi ăn nhé") == "20h15 tối nay đi ăn nhé"
+    assert clean_spoken_text("9 giờ 30 phút có mặt nha") == "9 giờ 30 phút có mặt nha"
+
+
+def test_normalize_vietnamese_for_tts():
+    assert normalize_vietnamese_for_tts("2h sáng rồi bà ơi") == "2 giờ sáng rồi bà ơi"
+    assert normalize_vietnamese_for_tts("Hẹn 20h15 nhé") == "Hẹn 20 giờ 15 nhé"
+    assert normalize_vietnamese_for_tts("Chờ 15p thôi, hết 50k") == "Chờ 15 phút thôi, hết 50 nghìn"
+    assert (
+        normalize_vietnamese_for_tts("Rep ib fb của crush đi")
+        == "rép in bốc phây búc của cờ rớt đi"
+    )
+
+
+def test_assign_character_voices_matches_gender():
+    chars = [
+        {"id": "me", "name": "Linh Drama", "side": "right"},
+        {"id": "a", "name": "Trang", "side": "left", "gender": "female"},
+        {"id": "b", "name": "Minh", "side": "left", "gender": "male"},
+    ]
+    msgs = [
+        {"from": "me", "text": "Bà ơi 2h sáng rồi mà còn drama"},
+        {"from": "a", "text": "Kể lẹ đi bà"},
+    ]
+    assigned = assign_character_voices(chars, msgs)
+    assert assigned[0]["gender"] == "female"
+    assert assigned[0]["voice"] in FEMALE_VOICES
+    assert assigned[1]["gender"] == "female"
+    assert assigned[1]["voice"] in FEMALE_VOICES
+    assert assigned[0]["voice"] != assigned[1]["voice"]
+    assert assigned[2]["gender"] == "male"
+    assert assigned[2]["voice"] in MALE_VOICES
 
 
 def test_clean_spoken_text_seen_and_status():

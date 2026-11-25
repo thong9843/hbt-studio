@@ -227,3 +227,31 @@ def test_meme_duration_always_under_5s(tmp_path: Path):
 
     d_fallback = compute_meme_duration(None)
     assert 1.0 <= d_fallback < 5.0
+
+
+def test_meme_rect_always_below_card_bottom_y():
+    from hbt.chatting.draw import compute_meme_rect
+
+    chars = [
+        Character(id="me", name="Tôi", side="right"),
+        Character(id="a", name="Linh", side="left"),
+    ]
+    renderer = ChatFrameRenderer(get_theme("messenger"), chars)
+
+    # Khung chat ngắn (2 tin) -> meme nằm thoải mái dưới card_bottom_y + 24px
+    short_msgs = [
+        Message(from_="a", text="Alo bà ơi"),
+        Message(from_="me", text="Chuyện gì thế?"),
+    ]
+    short_bot = renderer.compute_card_bottom_y(short_msgs)
+    mx, my, mw, mh = compute_meme_rect(short_bot, 640, 480)
+    assert my >= short_bot + 24
+    assert my + mh <= 1640
+    assert mw >= 120 and mh >= 120
+
+    # Khung chat đầy (card_bottom_y sát 1440) -> meme vẫn nằm hẳn dưới card_bottom_y, không đè chữ
+    tall_bot = 1440
+    mx2, my2, mw2, mh2 = compute_meme_rect(tall_bot, 720, 720)
+    assert my2 >= tall_bot
+    assert my2 + mh2 <= CANVAS_HEIGHT
+    assert mw2 >= 120 and mh2 >= 120

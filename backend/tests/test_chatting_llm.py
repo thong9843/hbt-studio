@@ -112,10 +112,10 @@ def test_sanitize_chat_raw_excess_stickers():
 
     clean = sanitize_chat_raw(raw)
     sticker_indices = [i for i, m in enumerate(clean["messages"]) if m["sticker"] is not None]
-    # Giới hạn cứng tối đa 3 sticker/video và cách nhau ít nhất 3 tin nhắn
+    # Giới hạn cứng theo PacingGovernor: cấm 2 tin liền kề và bỏ tin mở đầu
     assert 1 <= len(sticker_indices) <= 3
     for a, b in zip(sticker_indices, sticker_indices[1:], strict=False):
-        assert b - a >= 4
+        assert b - a >= 2
     assert any("lược bỏ" in w for w in clean["warnings"])
 
     # Và ChatDoc validate thành công mà không bị quăng lỗi
@@ -187,3 +187,138 @@ def test_sanitize_chat_raw_edge_cases():
         assert m.from_ in char_ids
         if m.sticker:
             assert m.sticker in {"ok", "tym", "haha", "wow", "sad", "angry"}
+
+
+def test_direct_script_keyword_spam_stripped_by_pacing_governor():
+    from hbt.chatting.llm import sanitize_chat_raw
+    from hbt.chatting.sources import parse_direct_script
+
+    lines = [
+        "Minh: Chào bạn haha",
+        "Linh: Ok bạn ơi",
+        "Minh: Hôm nay chán quá",
+        "Linh: Thật hả trời ơi",
+        "Minh: Vừa trúng số 10 tỷ [meme: soc]",
+        "Linh: Haha đùa à",
+        "Minh: Ok thật luôn",
+        "Linh: Chán chả buồn nói",
+        "Minh: Đi ăn mừng thôi [sticker: cuoi]",
+        "Linh: Ok chốt luôn",
+    ]
+    parsed = parse_direct_script("\n".join(lines))
+    clean = sanitize_chat_raw(parsed)
+    kept = [i for i, m in enumerate(clean["messages"]) if m.get("sticker")]
+    # Chỉ giữ điểm cao trào tường minh (cách nhau >= 2 tin), loại sạch câu từ khóa yếu
+    assert 1 <= len(kept) <= 2
+    assert 4 in kept
+    for a, b in zip(kept, kept[1:], strict=False):
+        assert b - a >= 2
+
+
+def test_chatdoc_backward_compatible_with_legacy_chat_json():
+    from hbt.chatting.models import ChatDoc
+
+    legacy = {
+        "hbt_chat": 1,
+        "title": "Chat cũ",
+        "platform": "messenger",
+        "characters": [
+            {"id": "me", "name": "Tôi", "side": "right"},
+            {"id": "a", "name": "Bạn", "side": "left"},
+        ],
+        "messages": [{"from": "me" if i % 2 == 0 else "a", "text": f"Câu {i}"} for i in range(8)],
+    }
+    doc = ChatDoc.model_validate(legacy)
+    assert doc.auto_fetch_online is True
+    assert doc.messages[0].intensity == 2
+    assert doc.messages[0].meme_query is None
+    assert doc.messages[0].sfx_id is None
+
+
+def test_chat_json_schema_is_valid_gemini_response_schema():
+    from hbt.chatting.llm import CHAT_JSON_SCHEMA
+
+    assert CHAT_JSON_SCHEMA["type"] == "OBJECT"
+    assert CHAT_JSON_SCHEMA["required"] == ["title", "characters", "messages"]
+
+    forbidden_keys = {"anyOf", "oneOf", "additionalProperties"}
+
+    def _walk(node):
+        if isinstance(node, dict):
+            assert not (forbidden_keys & set(node.keys()))
+            if "type" in node:
+                assert isinstance(node["type"], str)
+                assert node["type"] in {"OBJECT", "ARRAY", "STRING", "INTEGER", "NUMBER", "BOOLEAN"}
+            if "enum" in node:
+                assert all(v is not None for v in node["enum"])
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for el in node:
+                _walk(el)
+
+    _walk(CHAT_JSON_SCHEMA)
+
+
+def test_unwrap_chat_payload_handles_wrapped_dict_list_and_missing_title():
+    from hbt.chatting.llm import _unwrap_chat_payload
+
+    core = {
+        "characters": [
+            {"id": "me", "name": "Tôi", "side": "right"},
+            {"id": "a", "name": "Nam", "side": "left"},
+        ],
+        "messages": [{"from": "a", "text": "Alo"}],
+    }
+    # Bọc trong {"chat": {...}} và thiếu title -> tự bóc + tự suy title
+    u1 = _unwrap_chat_payload({"chat": core}, fallback_title="Chủ đề gốc")
+    assert u1 is not None
+    assert u1["title"] == "Chủ đề gốc"
+    assert len(u1["messages"]) == 1
+
+    # Bọc trong mảng 1 phần tử [{...}]
+    u2 = _unwrap_chat_payload([{**core, "title": "Tiêu đề có sẵn"}], fallback_title="X")
+    assert u2 is not None
+    assert u2["title"] == "Tiêu đề có sẵn"
+
+
+def test_gemini_generate_chat_retries_once_when_missing_messages():
+    bad_payload = {"title": "Chỉ có tiêu đề"}
+    good_payload = {
+        "chat": {
+            "characters": [
+                {"id": "me", "name": "Tôi", "side": "right"},
+                {"id": "a", "name": "Linh", "side": "left"},
+            ],
+            "messages": [{"from": "a", "text": f"Tin {i}"} for i in range(8)],
+        }
+    }
+
+    req = httpx.Request(
+        "POST",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+    )
+    resp_bad = httpx.Response(
+        200,
+        json={"candidates": [{"content": {"parts": [{"text": json.dumps(bad_payload)}]}}]},
+        request=req,
+    )
+    resp_good = httpx.Response(
+        200,
+        json={"candidates": [{"content": {"parts": [{"text": json.dumps(good_payload)}]}}]},
+        request=req,
+    )
+
+    with (
+        patch(
+            "hbt.shared.llm.load_gemini_api_key",
+            return_value="AIzaSyTestKeyForUnitTestsOnly1234567890",
+        ),
+        patch("httpx.Client.post", side_effect=[resp_bad, resp_good]) as mock_post,
+    ):
+        client = GeminiChatClient()
+        doc, timings = client.generate_chat("Chủ đề dự phòng", "Nội dung")
+        assert mock_post.call_count == 2
+        assert timings["llm_retry"] >= 1
+        assert doc["title"] == "Chủ đề dự phòng"
+        assert len(doc["messages"]) == 8

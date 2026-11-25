@@ -38,10 +38,10 @@ import { cx } from '../ui/cx';
 const T = vi.hbtCore;
 
 const DEFAULT_GEMINI_MODELS: HbtCoreGeminiModel[] = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
-  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
 ];
 
 const STICKER_PRESETS = ['question', 'shock', 'laugh', 'think', 'check', 'warning'] as const;
@@ -135,7 +135,7 @@ export function HbtCoreWorkspace({
   );
   const [localPrompt, setLocalPrompt] = useState('');
   const [localV2Topic, setLocalV2Topic] = useState<HbtCoreTopic>('history');
-  const [localSelectedModel, setLocalSelectedModel] = useState('gemini-3.8-flash');
+  const [localSelectedModel, setLocalSelectedModel] = useState('gemini-3.1-flash-lite');
   const [localFallbackNotice, setLocalFallbackNotice] = useState<string | null>(null);
   const [localResultVideoUrl, setLocalResultVideoUrl] = useState<string | null>(null);
   const [localResultSlug, setLocalResultSlug] = useState<string | null>(initialSlug ?? null);
