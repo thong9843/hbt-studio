@@ -100,14 +100,14 @@ def test_wikimedia_search_filters_svg_and_small_images_with_user_agent() -> None
     assert items[0]["title"] == "Easter_Island_Moai.jpg"
 
 
-def test_pixabay_fallback_from_illustration_to_all() -> None:
+def test_pixabay_fallback_from_photo_to_illustration() -> None:
     seen_types: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         img_type = request.url.params.get("image_type", "")
         seen_types.append(img_type)
         assert request.url.params.get("safesearch") == "true"
-        if img_type == "illustration":
+        if img_type == "photo":
             return httpx.Response(200, json={"hits": []})
         return httpx.Response(
             200,
@@ -131,7 +131,7 @@ def test_pixabay_fallback_from_illustration_to_all() -> None:
     finally:
         client.close()
 
-    assert seen_types == ["illustration", "all"]
+    assert seen_types == ["photo", "illustration"]
     assert len(items) == 1
     assert items[0]["source"] == "pixabay"
     assert items[0]["url"] == "https://pixabay.test/brain.jpg"
@@ -377,7 +377,7 @@ def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: P
     )
 
     clear_reference_image_cache()
-    assert REF_CACHE_VERSION == "v2_entity_strict"
+    assert REF_CACHE_VERSION == "v3_beat_entity_real_first"
     assert DEFAULT_AI_IMAGE_BUDGET == 6
 
     junk_pages = {
@@ -525,3 +525,69 @@ def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: P
     assert len(flux_calls) == 1
     assert "Leaning Tower of Pisa" in flux_calls[0]
     assert budget == [DEFAULT_AI_IMAGE_BUDGET - 1]
+
+
+def test_v3_real_first_pass1b_entity_fallback_and_render_wiring(tmp_path: Path) -> None:
+    """Nhịp 1a rỗng -> nhịp 1b tra đúng `beat_entity_en` lấy ảnh thật Wikimedia trước khi gọi AI."""
+    from hbt.shared.online_sources.reference_images import (
+        DEFAULT_AI_IMAGE_BUDGET,
+        REF_CACHE_VERSION,
+    )
+    from hbt.stickv import render as stickv_render
+
+    clear_reference_image_cache()
+    seen_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "commons.wikimedia.org" in url:
+            gsr = request.url.params.get("gsrsearch", "")
+            seen_queries.append(gsr)
+            # Nhịp 1a rỗng -> nhịp 1b ("Racetrack Playa") trả ảnh thật Wikimedia
+            if "midnight" in gsr:
+                return httpx.Response(200, json={"query": {"pages": {}}})
+            return httpx.Response(
+                200,
+                json={
+                    "query": {
+                        "pages": {
+                            "42": {
+                                "pageid": 42,
+                                "title": "File:Racetrack_Playa_Death_Valley.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://img/racetrack.jpg",
+                                        "width": 1200,
+                                        "height": 800,
+                                        "mime": "image/jpeg",
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                },
+            )
+        return httpx.Response(200, content=_png_bytes((600, 400), color=(190, 160, 120)))
+
+    lib = tmp_path / "library"
+    budget = [DEFAULT_AI_IMAGE_BUDGET]
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        out_p, src = resolve_reference_image(
+            "Racetrack Playa sailing stones midnight",
+            lib,
+            primary_entity_en="Racetrack Playa",
+            cf_account_id="acc-test",
+            cf_api_token="tok-test",
+            ai_budget=budget,
+            client=client,
+        )
+    finally:
+        client.close()
+
+    assert src == "wikimedia"
+    assert out_p.is_file() and REF_CACHE_VERSION in out_p.name
+    assert len(seen_queries) == 2
+    assert "Racetrack Playa" in seen_queries[1]
+    assert budget == [DEFAULT_AI_IMAGE_BUDGET]  # Không tốn lượt AI khi có ảnh thật Wikimedia
+    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 6

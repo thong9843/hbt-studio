@@ -459,3 +459,51 @@ def test_llm_anchors_primary_entity_en_into_pinned_photo_queries() -> None:
     assert "leaning tower of pisa" in q1
     assert "clay" in q1 and "foundation" in q1
     assert "leaning tower of pisa" in (beats[1].image_prompt or "").lower()
+
+
+def test_multi_location_beat_entity_no_umbrella_override_and_late_photo_balance() -> None:
+    """Video đa địa điểm không bị ghép đè 'Mysterious Places' và có ảnh ở nửa sau (60%-85%)."""
+    payload = """{
+      "title": "Những địa điểm bí ẩn trên Trái Đất",
+      "primary_entity_en": "Mysterious Places",
+      "beats": [
+        {
+          "narration": "Tam giác quỷ Bermuda rộng lớn ở Đại Tây Dương.",
+          "board_type": "pinned_photo",
+          "board_title": "Tam giác Bermuda",
+          "beat_entity_en": "Bermuda Triangle",
+          "prop_query": "Bermuda Triangle aerial ocean"
+        },
+        {"narration": "Nhiều giả thuyết siêu nhiên xuất hiện.", "board_type": "myth_vs_fact",
+         "board_data": {"myth": "Quái vật biển", "fact": "Bão nhiệt đới và hải lưu"}},
+        {
+          "narration": "Đá biết đi tại Racetrack Playa, California tự trượt dài trên cát.",
+          "board_type": "pinned_photo",
+          "board_title": "Đá biết đi California",
+          "prop_query": "Racetrack Playa sailing stones"
+        },
+        {"narration": "Lớp băng mỏng ban đêm giảm ma sát.", "board_type": "bullets",
+         "board_data": {"items": ["Đêm xuống dưới 0°C", "Gió nhẹ đẩy đá 300 kg"]}},
+        {"narration": "Hồ Natron ở Tanzania có độ pH 10,5.", "board_type": "big_number",
+         "board_data": {"value": "pH 10,5", "label": "Độ kiềm Hồ Natron"}},
+        {"narration": "Mắt Sahara hay cấu trúc Richat rộng 40 km nhìn rõ từ vũ trụ.",
+         "board_type": "bullets",
+         "board_title": "Mắt Sahara — Cấu trúc Richat",
+         "beat_entity_en": "Richat Structure Sahara",
+         "prop_query": "Richat Structure Sahara satellite",
+         "board_data": {"items": ["Đường kính 40 km", "Hình thành do xói mòn địa chất"]}},
+        {"narration": "Tóm lại mọi bí ẩn đều có lời giải khoa học.", "board_type": "recap_card"},
+        {"narration": "Hãy đăng ký kênh ngay hôm nay!", "board_type": "recap_card"}
+      ]
+    }"""
+    _, beats = parse_stickv_json_payload(payload)
+    assert len(beats) == 8
+    # 1. Không ghép đè "Mysterious Places" vào beat "Racetrack Playa sailing stones"
+    b2 = beats[2]
+    assert "mysterious places" not in (b2.prop_query or "").lower()
+    assert "racetrack playa" in (b2.prop_query or "").lower()
+    assert "racetrack playa" in b2.beat_entity_en.lower()
+    # 2. Kịch bản 8 beat phải có ít nhất 1 pinned_photo ở nửa sau (60%-85%, beat index 4..6)
+    late_photos = [b for b in beats[4:7] if b.board_type == "pinned_photo"]
+    assert len(late_photos) >= 1
+    assert late_photos[0].beat_entity_en == "Richat Structure Sahara"

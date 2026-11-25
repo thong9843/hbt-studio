@@ -82,17 +82,17 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "hoặc tác động cụ thể`, kèm `takeaway` ở đáy thẻ.\n"
         "- `takeaway` (CHỐT LẠI): BẮT BUỘC ngắn gọn tối đa 10-13 từ để đọc lướt trong 1 giây, "
         "không bao giờ viết dài lê thê.\n"
-        "- CÂN BẰNG ẢNH MINH HỌA (50%-60% BEAT): Bố trí 50%-60% số beat dùng "
-        "`board_type='pinned_photo'` xen kẽ nhịp nhàng với các bảng phân tích (`myth_vs_fact`, "
-        "`comparison`, `counter_grow`, `flow_steps`, `timeline_era`, `recap_card`). "
-        "BẮT BUỘC trả về trường gốc `primary_entity_en` (tên thực thể/địa danh/nhân vật/khái "
-        "niệm trung tâm bằng tiếng Anh rõ nghĩa, vd: 'Leaning Tower of Pisa', 'Bermuda "
-        "Triangle', 'Human Muscle Fiber'). Trên MỌI beat `pinned_photo`, `prop_query` BẮT BUỘC "
-        "neo thẳng `primary_entity_en` + bối cảnh cụ thể của beat (vd: 'Leaning Tower of Pisa "
-        "tilt architecture', 'Leaning Tower of Pisa soft clay foundation'), CẤM sinh truy vấn "
-        "chung chung dễ lạc đề như 'old building', 'measurement scale', 'ancient history', "
-        "'soft ground', 'architect blueprint ruler'; kèm `image_prompt` (1 câu tiếng Anh ngắn "
-        "gồm `primary_entity_en` + bối cảnh cụ thể của beat để vẽ minh họa 2D chuẩn xác).\n"
+        "- CÂN BẰNG & RẢI ĐỀU ẢNH MINH HỌA (50%-60% BEAT, KHÔNG TRỐNG NỬA SAU): Với kịch bản "
+        ">=7 beat, BẮT BUỘC có ít nhất 3-4 beat `board_type='pinned_photo'` rải đều đủ 3 chặng: "
+        "Đầu (beat 1-3), Giữa (beat 4-6) và Gần cuối (60%-85% trước `recap_card`), xen kẽ với "
+        "bảng phân tích (`myth_vs_fact`, `comparison`, `big_number`, `flow_steps`, `recap_card`). "
+        "Trả về `primary_entity_en` (thực thể trung tâm của video nếu là 1 chủ thể duy nhất, "
+        "vd 'Leaning Tower of Pisa'). Trên MỌI beat `pinned_photo`, BẮT BUỘC ghi `beat_entity_en` "
+        "(tên địa danh/sự vật/hiện tượng thật CỤ THỂ của RIÊNG beat đó bằng tiếng Anh, vd "
+        "'Bermuda Triangle', 'Racetrack Playa', 'Richat Structure Sahara') và `prop_query` neo "
+        "thực thể đó + bối cảnh (vd 'Racetrack Playa sailing stones'), CẤM ghép cụm chung chung "
+        "như 'Mysterious Places' hay từ dễ lạc đề ('old building', 'ruler', 'blueprint'); kèm "
+        "`image_prompt` 1 câu tiếng Anh mô tả tranh 2D minh họa nếu cần fallback AI.\n"
         "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
         "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
         "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
@@ -847,16 +847,117 @@ def _core_en_tokens(text: str) -> list[str]:
     ]
 
 
+_GENERIC_UMBRELLA_ENTITIES = frozenset(
+    {
+        "mysterious places",
+        "strange places",
+        "weird places",
+        "unknown places",
+        "places on earth",
+        "world mysteries",
+        "unexplained mysteries",
+        "natural wonders",
+        "science facts",
+        "historical facts",
+        "weird facts",
+        "earth mysteries",
+        "top places",
+    }
+)
+_GENERIC_BEAT_CONTEXT_WORDS = frozenset(
+    {
+        "construction",
+        "site",
+        "foundation",
+        "clay",
+        "soil",
+        "ground",
+        "building",
+        "tower",
+        "wall",
+        "scaffolding",
+        "cables",
+        "shield",
+        "sword",
+        "medieval",
+        "modern",
+        "architect",
+        "worker",
+        "map",
+        "ocean",
+        "mystery",
+    }
+)
+
+
+def _is_generic_umbrella_entity(entity: str) -> bool:
+    norm = re.sub(r"\s+", " ", (entity or "").strip().lower())
+    if not norm:
+        return True
+    if norm in _GENERIC_UMBRELLA_ENTITIES:
+        return True
+    toks = _core_en_tokens(norm)
+    return len(toks) <= 2 and any(
+        w in toks for w in ("places", "mysteries", "facts", "wonders", "things", "secrets")
+    )
+
+
+def _ensure_balanced_pinned_photos(
+    beats: list[StickvBeat], primary_entity_en: str = ""
+) -> list[StickvBeat]:
+    """Với kịch bản >=7 beat, đảm bảo có ảnh `pinned_photo` ở cả nửa sau (60%-85%, trước recap)."""
+    n = len(beats)
+    if n < 7:
+        return beats
+
+    out = list(beats)
+    late_start = max(3, int(round(n * 0.58)))
+    late_end = min(n - 1, max(late_start, int(round(n * 0.86))))
+    late_indices = [i for i in range(late_start, late_end + 1) if not _is_tail_recap_or_cta(out[i])]
+    if not late_indices:
+        return out
+
+    has_late_photo = any(out[i].board_type == "pinned_photo" for i in late_indices)
+    if not has_late_photo:
+        # Ưu tiên chuyển 1 beat bullets/none/card ở vùng 60%-85% thành pinned_photo
+        pick = next(
+            (i for i in late_indices if out[i].board_type in ("bullets", "none", "card", "list")),
+            late_indices[0],
+        )
+        b = out[pick]
+        cap = (
+            b.board_title
+            if (b.board_title and b.board_title.lower() not in _GENERIC_BOARD_TITLES)
+            else _extract_subject_phrase(b.narration, max_words=6)
+        )
+        ent = (b.beat_entity_en or "").strip()
+        if not ent and primary_entity_en and not _is_generic_umbrella_entity(primary_entity_en):
+            ent = primary_entity_en.strip()
+        pq = (
+            (b.prop_query or "").strip() or ent or _extract_subject_phrase(b.narration, max_words=4)
+        )
+        new_bdata = {
+            "caption": _trim_at_word_boundary(cap or "Hình ảnh minh họa", 64),
+            "pin_style": "tape",
+        }
+        out[pick] = b.model_copy(
+            update={
+                "board_type": "pinned_photo",
+                "beat_entity_en": ent[:100],
+                "prop_query": pq[:80] if pq else None,
+                "board_data": new_bdata,
+            }
+        )
+    return out
+
+
 def anchor_beat_image_queries(
     beats: list[StickvBeat], primary_entity_en: str = ""
 ) -> list[StickvBeat]:
-    """Neo cứng `primary_entity_en` vào `prop_query` & `image_prompt` của beat `pinned_photo`."""
-    entity = re.sub(r"\s+", " ", (primary_entity_en or "").strip())[:60]
-    if not entity or not beats:
-        return beats
-
-    entity_tokens = _core_en_tokens(entity)
-    if not entity_tokens:
+    """Neo thực thể theo từng beat (`beat_entity_en` ưu tiên trước `primary_entity_en`)."""
+    proj_entity = re.sub(r"\s+", " ", (primary_entity_en or "").strip())[:60]
+    proj_is_umbrella = _is_generic_umbrella_entity(proj_entity)
+    if not beats:
         return beats
 
     out: list[StickvBeat] = []
@@ -866,18 +967,53 @@ def anchor_beat_image_queries(
             continue
 
         raw_q = re.sub(r"\s+", " ", (beat.prop_query or "").strip())
-        q_tokens = _core_en_tokens(raw_q)
-        has_entity_in_q = all(tok in q_tokens for tok in entity_tokens)
+        beat_ent = re.sub(r"\s+", " ", (beat.beat_entity_en or "").strip())[:80]
+        if _is_generic_umbrella_entity(beat_ent):
+            beat_ent = ""
 
+        q_tokens = _core_en_tokens(raw_q)
+        # Kiểm tra prop_query đã mang thực thể riêng (vd Racetrack Playa) hay đang chung chung
+        specific_q_tokens = [
+            t
+            for t in q_tokens
+            if t not in _GENERIC_BAD_QUERY_TOKENS and t not in _GENERIC_BEAT_CONTEXT_WORDS
+        ]
+        if beat_ent:
+            eff_entity = beat_ent
+        elif proj_entity and not proj_is_umbrella:
+            # Video 1 chủ thể (vd Pisa): nếu beat query chỉ là ngữ cảnh chung -> neo proj_entity
+            proj_toks = _core_en_tokens(proj_entity)
+            has_proj = all(tok in q_tokens for tok in proj_toks)
+            if has_proj or len(specific_q_tokens) < 2:
+                eff_entity = proj_entity
+            else:
+                eff_entity = " ".join(
+                    w
+                    for w in raw_q.split()
+                    if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+                )[:60].strip()
+        else:
+            # Video đa địa điểm (primary_entity_en chung như "Mysterious Places"): KHÔNG ghép đè
+            eff_entity = " ".join(
+                w
+                for w in raw_q.split()
+                if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+            )[:60].strip()
+
+        entity_tokens = _core_en_tokens(eff_entity)
+        if not entity_tokens:
+            out.append(beat)
+            continue
+
+        has_entity_in_q = all(tok in q_tokens for tok in entity_tokens)
         if has_entity_in_q:
-            # Vẫn lọc bỏ các từ dễ kích hoạt ảnh rác Wikimedia (ruler/blueprint/coin...)
             clean_words = [
                 w
                 for w in raw_q.split()
                 if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
                 or re.sub(r"[^a-zA-Z0-9]", "", w).lower() in entity_tokens
             ]
-            new_q = " ".join(clean_words).strip() or entity
+            new_q = " ".join(clean_words).strip() or eff_entity
         else:
             extra_words: list[str] = []
             seen_low = set(entity_tokens)
@@ -891,7 +1027,7 @@ def anchor_beat_image_queries(
                 seen_low.add(wl)
                 if len(extra_words) >= 3:
                     break
-            new_q = f"{entity} {' '.join(extra_words)}".strip() if extra_words else entity
+            new_q = f"{eff_entity} {' '.join(extra_words)}".strip() if extra_words else eff_entity
 
         new_q = new_q[:80].strip()
 
@@ -899,14 +1035,21 @@ def anchor_beat_image_queries(
         p_tokens = _core_en_tokens(raw_prompt)
         if not raw_prompt:
             ctx = (beat.board_data or {}).get("caption") or beat.board_title or new_q
-            new_prompt = f"2D editorial illustration of {entity}, scene context: {ctx}"[:320]
+            new_prompt = f"2D editorial illustration of {eff_entity}, scene context: {ctx}"[:320]
         elif not all(tok in p_tokens for tok in entity_tokens):
-            new_prompt = f"{entity} — {raw_prompt}"[:320]
+            new_prompt = f"{eff_entity} — {raw_prompt}"[:320]
         else:
             new_prompt = raw_prompt[:320]
 
-        if new_q != (beat.prop_query or "") or new_prompt != (beat.image_prompt or ""):
-            beat = beat.model_copy(update={"prop_query": new_q, "image_prompt": new_prompt})
+        updates: dict[str, Any] = {}
+        if new_q != (beat.prop_query or ""):
+            updates["prop_query"] = new_q
+        if new_prompt != (beat.image_prompt or ""):
+            updates["image_prompt"] = new_prompt
+        if eff_entity != (beat.beat_entity_en or ""):
+            updates["beat_entity_en"] = eff_entity[:100]
+        if updates:
+            beat = beat.model_copy(update=updates)
         out.append(beat)
     return out
 
@@ -961,6 +1104,7 @@ def sanitize_beats(
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
         raw_pq = item.get("prop_query") or item.get("image_query") or ""
         prop_query = str(raw_pq).strip()[:80] or None
+        beat_entity_en = str(item.get("beat_entity_en") or "").strip()[:100]
         raw_ip = item.get("image_prompt") or item.get("illustration_prompt_en") or ""
         image_prompt = str(raw_ip).strip()[:320] or None
         raw_vdata = item.get("visual_data")
@@ -998,6 +1142,7 @@ def sanitize_beats(
                 interaction=interaction,  # type: ignore[arg-type]
                 camera_shot=camera_shot,  # type: ignore[arg-type]
                 prop_query=prop_query,
+                beat_entity_en=beat_entity_en,
                 image_prompt=image_prompt,
                 facing=facing,
                 motion=motion,  # type: ignore[arg-type]
@@ -1041,6 +1186,7 @@ def parse_stickv_json_payload(
     if not beats:
         raise ValueError("Không tìm thấy beat hợp lệ trong JSON")
     beats = enforce_pose_diversity(_enforce_meaningful_boards(beats))
+    beats = _ensure_balanced_pinned_photos(beats, primary_entity_en=primary_entity_en)
     beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
     return title, beats
 
@@ -1162,6 +1308,7 @@ def generate_stickv_script(
                 )
             )
         )
+        beats = _ensure_balanced_pinned_photos(beats, primary_entity_en=primary_entity_en)
         beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
         return (
             title,
@@ -1227,6 +1374,7 @@ def generate_stickv_script(
         all_beats.extend(ch_beats)
 
     all_beats = enforce_pose_diversity(_enforce_meaningful_boards(all_beats))
+    all_beats = _ensure_balanced_pinned_photos(all_beats, primary_entity_en=primary_entity_en)
     all_beats = anchor_beat_image_queries(all_beats, primary_entity_en=primary_entity_en)
     return (
         title,
