@@ -374,7 +374,7 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
         resolve_stickv_emotion,
     )
 
-    assert SEG_CACHE_VERSION == "v4_hybrid_ik"
+    assert SEG_CACHE_VERSION == "v5_a_stance_legs"
     assert len(POSE_PRESETS) == 24
     assert len(VALID_EMOTIONS) == 10
     assert normalize_stickv_pose("explain") == "present_board"
@@ -582,33 +582,36 @@ def test_stickv_60fps_matches_30fps_realtime_motion_and_blink(tmp_path: Path) ->
         rig60.close()
 
 
-def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path) -> None:
-    """2-Bone IK hội tụ chính xác, kẹp giải phẫu chống gãy tay, 4 hand_shape & 3-phase."""
+def test_v5_a_stance_legs_and_arm_ik_choreography(tmp_path: Path) -> None:
+    """Giữ nguyên 2 chân chữ A gốc trong body_torso (v5_a_stance_legs), 2 tay IK + 4 hand_shape."""
     import math
 
     from hbt.stickv.puppet import (
+        ALL_SEGMENT_NAMES,
         SEG_CACHE_VERSION,
         VALID_HAND_SHAPES,
         clamp_arm_target,
+        clean_puppet_sprite,
         detect_rms_peaks,
         resolve_hand_shape,
         solve_2bone_ik,
     )
 
-    assert SEG_CACHE_VERSION == "v4_hybrid_ik"
+    assert SEG_CACHE_VERSION == "v5_a_stance_legs"
+    assert "shoe_left" not in ALL_SEGMENT_NAMES
+    assert "shoe_right" not in ALL_SEGMENT_NAMES
 
-    # 1. solve_2bone_ik bảo toàn độ dài L1, L2 và kẹp tầm với trong [0.25, 0.98]*(L1+L2)
+    # 1. solve_2bone_ik cho 2 cánh tay bảo toàn độ dài L1, L2 và kẹp tầm với [0.25, 0.98]*(L1+L2)
     root = (100.0, 100.0)
     l1, l2 = 60.0, 55.0
     elbow, wrist = solve_2bone_ik(root, (170.0, 150.0), l1, l2, bend_dir=1)
     assert abs(math.hypot(elbow[0] - root[0], elbow[1] - root[1]) - l1) < 0.5
     assert abs(math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]) - l2) < 0.5
 
-    # Mục tiêu quá xa -> tự kẹp <= 0.98*(L1+L2)
     _, wrist_far = solve_2bone_ik(root, (900.0, 900.0), l1, l2, bend_dir=1)
     assert math.hypot(wrist_far[0] - root[0], wrist_far[1] - root[1]) <= 0.98 * (l1 + l2) + 0.5
 
-    # 2. Khóa giải phẫu: tay trái không vắt chéo sâu sang phải (trừ arms_crossed / think_chin)
+    # 2. Khóa giải phẫu tay trái không vắt chéo sâu sang phải (trừ arms_crossed / think_chin)
     clamped_l = clamp_arm_target(
         "left", (80.0, 100.0), (220.0, 130.0), 100.0, 60.0, l1, l2, pose="present_board"
     )
@@ -625,17 +628,27 @@ def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path
     assert resolve_hand_shape("count_points", "right") == "count_fingers"
     assert resolve_hand_shape("present_board", "left") == "open_palm"
 
-    # 4. 3-Phase Beat Choreography trong beat 4s có biến thiên cử chỉ & đỉnh nhấn RMS
+    # 4. body_torso giữ nguyên chiều dài 2 chân chữ A xuống tận đáy ảnh gốc (không cắt ngang hông)
     fps = 30
     env = [0.25] * (4 * fps)
-    env[30] = 0.85  # t=1.0s
-    env[65] = 0.90  # t=2.16s
+    env[30] = 0.85
+    env[65] = 0.90
     peaks = detect_rms_peaks(env, fps)
     assert len(peaks) >= 2
 
     lib = tmp_path / "lib"
     assets = tmp_path / "assets"
     _make_full_puppet_dir(lib / "stickman" / "puppet")
+    base_img_p = lib / "stickman" / "puppet" / "base_character.png"
+    seg_res = auto_segment_puppet(base_img_p, tmp_path / ".seg_check")
+    assert seg_res["rig_config"].get("torso_full_legs") is True
+    with Image.open(base_img_p) as raw_b:
+        cleaned_b = clean_puppet_sprite(raw_b, padding=4)
+        cleaned_h = cleaned_b.height
+        cleaned_b.close()
+    with Image.open(seg_res["segments"]["body_torso"]) as bt_im:
+        assert bt_im.height >= int(cleaned_h * 0.58)
+
     rig = PuppetRig(
         library_dir=lib,
         assets_dir=assets,
@@ -651,7 +664,6 @@ def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path
         f_p2a = rig.render_frame(32, 32 / fps)
         f_p2b = rig.render_frame(80, 80 / fps)
         f_p3 = rig.render_frame(112, 112 / fps)
-        # Các pha khác nhau tạo khung hình có chuyển động thật (không đóng băng)
         assert not np.array_equal(np.array(f_p1), np.array(f_p2a))
         assert not np.array_equal(np.array(f_p2a), np.array(f_p2b))
         assert not np.array_equal(np.array(f_p2b), np.array(f_p3))

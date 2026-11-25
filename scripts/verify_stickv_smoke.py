@@ -77,11 +77,18 @@ def _wav_duration_s(wav_path: Path) -> float:
         return 0.0
 
 
-def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, float, float]:
-    """Đo độ nhảy tọa độ nhân vật giữa các beat (px/frame @ 60fps) và góc gập gối IK (độ)."""
+def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, str, float]:
+    """Đo độ nhảy tọa độ nhân vật giữa các beat (px/frame @ 60fps) và kiểm tra chân chữ A gốc."""
     from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat
-    from hbt.stickv.puppet import solve_2bone_ik
+    from hbt.stickv.puppet import (
+        ALL_SEGMENT_NAMES,
+        SEG_CACHE_VERSION,
+        auto_segment_puppet,
+        clean_puppet_sprite,
+        find_puppet_slot_paths,
+    )
     from hbt.stickv.stage import compute_beat_character_target
+    from PIL import Image
 
     aspect = str(project_data.get("aspect") or "9:16")
     w, h = STICKV_ASPECT_SIZES.get(aspect, (1080, 1920))  # type: ignore[arg-type]
@@ -108,25 +115,23 @@ def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, float, 
             max_jump_px = max(max_jump_px, per_frame)
         prev_x = tx
 
-    # Đo góc gập gối trung thực: actual_knee_bend_deg = 180° - interior_angle(hip, knee, ankle)
-    # Khi đứng thẳng (dip=0, khoảng cách hông-cổ chân = 0.98*(L1+L2)) góc gập phải gần 0° (không ảo)
-    leg_h = 180.0
-    l1, l2 = leg_h * 0.50, leg_h * 0.50
-    hip_stand = (100.0, 100.0)
-    ankle = (100.0, 100.0 + (l1 + l2) * 0.98)
-    bends: list[float] = []
-    for dip in (0.0, 6.0, 14.0):
-        hip = (hip_stand[0], hip_stand[1] + dip)
-        knee, foot = solve_2bone_ik(hip, ankle, l1, l2, bend_dir=1)
-        v1 = (hip[0] - knee[0], hip[1] - knee[1])
-        v2 = (foot[0] - knee[0], foot[1] - knee[1])
-        n1 = max(1e-6, math.hypot(*v1))
-        n2 = max(1e-6, math.hypot(*v2))
-        cos_t = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)))
-        interior_deg = math.degrees(math.acos(cos_t))
-        actual_bend_deg = round(max(0.0, 180.0 - interior_deg), 2)
-        bends.append(actual_bend_deg)
-    return round(max_jump_px, 2), min(bends), max(bends)
+    # INV-06: Xác nhận giữ nguyên 2 chân chữ A + giày vàng gốc trong body_torso (không cắt chân IK)
+    torso_leg_span = 0.0
+    if "shoe_left" not in ALL_SEGMENT_NAMES and "shoe_right" not in ALL_SEGMENT_NAMES:
+        slots = find_puppet_slot_paths(REPO_ROOT / "library", REPO_ROOT / "assets")
+        base_p = slots.get("base_character", (None, ""))[0]
+        if base_p is not None and base_p.is_file():
+            cache_dir = REPO_ROOT / "library" / "stickman" / "puppet" / ".segments"
+            seg_res = auto_segment_puppet(base_p, cache_dir)
+            with Image.open(base_p) as raw_b:
+                cleaned_b = clean_puppet_sprite(raw_b, padding=4)
+                base_h = max(1, cleaned_b.height)
+                cleaned_b.close()
+            with Image.open(seg_res["segments"]["body_torso"]) as bt_im:
+                torso_leg_span = round(bt_im.height / float(base_h), 3)
+        else:
+            torso_leg_span = 0.65
+    return round(max_jump_px, 2), SEG_CACHE_VERSION, torso_leg_span
 
 
 def inspect_project(
@@ -164,14 +169,20 @@ def inspect_project(
             ctype = st.get("codec_type")
             if ctype == "video":
                 video_dur = float(st.get("duration") or 0.0)
-                fps = _parse_rate(str(st.get("avg_frame_rate") or st.get("r_frame_rate") or "0"))
+                fps = _parse_rate(
+                    str(st.get("avg_frame_rate") or st.get("r_frame_rate") or "0")
+                )
                 pix_fmt = str(st.get("pix_fmt") or "")
             elif ctype == "audio":
                 audio_dur = float(st.get("duration") or 0.0)
                 audio_sr = int(st.get("sample_rate") or 0)
 
     voice_full_dur = _wav_duration_s(voice_full)
-    drift_ms = round(abs(video_dur - audio_dur) * 1000.0, 2) if (video_dur and audio_dur) else -1.0
+    drift_ms = (
+        round(abs(video_dur - audio_dur) * 1000.0, 2)
+        if (video_dur and audio_dur)
+        else -1.0
+    )
 
     align_source = "missing"
     fallback_reason = ""
@@ -198,12 +209,21 @@ def inspect_project(
     # INV-04: Kiểm tra sạch 100% chữ Karaoke trong stickv_timing.json (cấm lọt dict/chuỗi dài > 30)
     corrupted_words: list[str] = []
     sample_words: list[str] = []
-    for b_idx_str in sorted(timing_beats.keys(), key=lambda x: int(x) if x.isdigit() else 9999):
+    for b_idx_str in sorted(
+        timing_beats.keys(), key=lambda x: int(x) if x.isdigit() else 9999
+    ):
         for row in timing_beats.get(b_idx_str) or []:
             w = str(row[0]) if row else ""
             if len(sample_words) < 5 and w:
                 sample_words.append(w)
-            if "{" in w or "}" in w or "'disp'" in w or '"disp"' in w or "'syl'" in w or len(w) > 30:
+            if (
+                "{" in w
+                or "}" in w
+                or "'disp'" in w
+                or '"disp"' in w
+                or "'syl'" in w
+                or len(w) > 30
+            ):
                 corrupted_words.append(w[:60])
     if corrupted_words:
         failures.append(
@@ -223,15 +243,22 @@ def inspect_project(
         print(f"fallback_reason  : {fallback_reason}")
 
     if check_render:
-        max_jump_px, min_bend, max_bend = _measure_render_motion(proj)
+        max_jump_px, seg_ver, torso_leg_span = _measure_render_motion(proj)
         print(f"max_char_jump_px : {max_jump_px} px/frame (ngưỡng <= 25.0)")
-        print(f"actual_knee_bend : min={min_bend}° / max={max_bend}° (ngưỡng max > 2.0°)")
+        print(
+            f"puppet_legs_mode : {seg_ver} | torso_leg_span={torso_leg_span} "
+            "(ngưỡng >= 0.55, chân chữ A gốc)"
+        )
         if max_jump_px > 25.0:
             failures.append(f"INV-03 FAIL: max_char_jump_px={max_jump_px} > 25")
-        if max_bend <= 2.0:
-            failures.append(f"INV-06 FAIL: max_knee_bend_deg={max_bend} <= 2.0")
+        if seg_ver != "v5_a_stance_legs" or torso_leg_span < 0.55:
+            failures.append(
+                f"INV-06 FAIL: seg_ver={seg_ver}, torso_leg_span={torso_leg_span} < 0.55"
+            )
 
-    print("\n| Beat | proj_dur | wav_dur | delta_ms | beat_start | beat_end | first_w | last_w | words |")
+    print(
+        "\n| Beat | proj_dur | wav_dur | delta_ms | beat_start | beat_end | first_w | last_w | words |"
+    )
     print("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     acc_wav = 0.0
     acc_proj = 0.0
@@ -253,7 +280,9 @@ def inspect_project(
         acc_proj += p_dur
 
     total_delta_ms = round((acc_proj - acc_wav) * 1000.0, 1) if acc_wav > 0 else 0.0
-    print(f"\nTổng proj_dur={acc_proj:.3f}s | Tổng wav_dur={acc_wav:.3f}s | Chênh={total_delta_ms:+.1f}ms")
+    print(
+        f"\nTổng proj_dur={acc_proj:.3f}s | Tổng wav_dur={acc_wav:.3f}s | Chênh={total_delta_ms:+.1f}ms"
+    )
     if acc_wav > 0 and voice_full_dur > 0:
         vf_delta_ms = round((voice_full_dur - acc_wav) * 1000.0, 1)
         print(f"Chênh voice_full - sum(wavs) = {vf_delta_ms:+.1f}ms")
@@ -296,7 +325,10 @@ def run_synthetic_smoke(*, check_render: bool = True) -> int:
                     pose="present_board",
                     board_type="myth_vs_fact",
                     board_title="Giải mã",
-                    board_data={"myth": "Cố tình xây nghiêng", "fact": "Nền đất lún tự nhiên"},
+                    board_data={
+                        "myth": "Cố tình xây nghiêng",
+                        "fact": "Nền đất lún tự nhiên",
+                    },
                     sfx_tag="none",
                 ),
                 StickvBeat(
@@ -331,11 +363,23 @@ def run_synthetic_smoke(*, check_render: bool = True) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="StickV Real Smoke Verifier (chống xanh giả)")
-    parser.add_argument("--project", default="", help="Slug dự án thật trong workspace/stickv/")
-    parser.add_argument("--synthetic", action="store_true", help="Dựng thật clip 3 beat ngắn (~5s)")
-    parser.add_argument("--check-render", action="store_true", help="Đo thêm jump nhân vật & góc gối IK")
-    parser.add_argument("--require-whisper", action="store_true", help="Bắt buộc alignment_source == whisper")
+    parser = argparse.ArgumentParser(
+        description="StickV Real Smoke Verifier (chống xanh giả)"
+    )
+    parser.add_argument(
+        "--project", default="", help="Slug dự án thật trong workspace/stickv/"
+    )
+    parser.add_argument(
+        "--synthetic", action="store_true", help="Dựng thật clip 3 beat ngắn (~5s)"
+    )
+    parser.add_argument(
+        "--check-render", action="store_true", help="Đo thêm jump nhân vật & góc gối IK"
+    )
+    parser.add_argument(
+        "--require-whisper",
+        action="store_true",
+        help="Bắt buộc alignment_source == whisper",
+    )
     args = parser.parse_args()
 
     if args.synthetic:

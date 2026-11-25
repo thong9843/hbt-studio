@@ -25,7 +25,7 @@ PUPPET_SLOTS: tuple[str, ...] = (
     "mouth_open",
 )
 
-SEG_CACHE_VERSION = "v4_hybrid_ik"
+SEG_CACHE_VERSION = "v5_a_stance_legs"
 SEGMENT_NAMES: tuple[str, ...] = ("body_torso", "head_blank", "arm_left", "arm_right")
 ARM_2SEG_NAMES: tuple[str, ...] = (
     "upper_arm_left",
@@ -33,8 +33,7 @@ ARM_2SEG_NAMES: tuple[str, ...] = (
     "upper_arm_right",
     "forearm_right",
 )
-SHOE_NAMES: tuple[str, ...] = ("shoe_left", "shoe_right")
-ALL_SEGMENT_NAMES: tuple[str, ...] = SEGMENT_NAMES + ARM_2SEG_NAMES + SHOE_NAMES
+ALL_SEGMENT_NAMES: tuple[str, ...] = SEGMENT_NAMES + ARM_2SEG_NAMES
 VALID_HAND_SHAPES: tuple[str, ...] = (
     "open_palm",
     "point_index",
@@ -433,20 +432,18 @@ def auto_segment_puppet(
         if gaps:
             torso_half_w = max(6, min(int(w * 0.22), max(gaps)))
 
-    # 3. Tạo mask từng bộ phận (v4_hybrid_ik: tách sạch thân áo sơ mi + 2 giày vàng đáy)
+    # 3. Tạo mask từng bộ phận (v5_a_stance_legs: giữ nguyên thân áo + 2 chân chữ A + giày vàng)
     head_mask = np.zeros((h, w), dtype=bool)
     head_mask[: neck_y + 2, :] = alpha[: neck_y + 2, :]
 
     arm_y_end = min(h, int(0.80 * h))
-    hip_y = min(h - 4, max(neck_y + 12, neck_y + int(round(0.46 * (h - neck_y)))))
-    shoe_y_start = min(h - 2, max(hip_y + 4, int(round(0.84 * h))))
 
     arm_left_mask = np.zeros((h, w), dtype=bool)
     arm_right_mask = np.zeros((h, w), dtype=bool)
     torso_mask = np.zeros((h, w), dtype=bool)
 
     shoulder_y = min(h - 1, neck_y + max(2, int(0.04 * h)))
-    torso_mask[neck_y:hip_y, :] = alpha[neck_y:hip_y, :]
+    torso_mask[neck_y:, :] = alpha[neck_y:, :]
 
     # Tách tay trái/phải trong khoảng [neck_y, arm_y_end] bên ngoài phần thân giữa
     cut_l = max(1, x_center - torso_half_w)
@@ -465,55 +462,21 @@ def auto_segment_puppet(
         left_px = alpha[y, :eff_cut_l]
         if np.any(left_px):
             arm_left_mask[y, :eff_cut_l] = left_px
-            if y < hip_y:
-                torso_mask[y, :eff_cut_l] = False
+            torso_mask[y, :eff_cut_l] = False
 
         right_px = alpha[y, eff_cut_r + 1 :]
         if np.any(right_px):
             arm_right_mask[y, eff_cut_r + 1 :] = right_px
-            if y < hip_y:
-                torso_mask[y, eff_cut_r + 1 :] = False
+            torso_mask[y, eff_cut_r + 1 :] = False
 
     # Đảm bảo không có mask rỗng nếu ảnh synthetic rất nhỏ
     if not np.any(torso_mask):
-        torso_mask[neck_y:hip_y, :] = alpha[neck_y:hip_y, :]
-    if not np.any(torso_mask):
         torso_mask[neck_y:, :] = alpha[neck_y:, :]
-
-    # Tách 2 chiếc giày vàng (shoe_left / shoe_right) ở vùng đáy ảnh gốc
-    shoe_l_mask = np.zeros((h, w), dtype=bool)
-    shoe_r_mask = np.zeros((h, w), dtype=bool)
-    shoe_l_mask[shoe_y_start:, :x_center] = alpha[shoe_y_start:, :x_center]
-    shoe_r_mask[shoe_y_start:, x_center:] = alpha[shoe_y_start:, x_center:]
-
-    def _make_default_shoe(facing_left: bool) -> Image.Image:
-        sw_px = max(24, int(round(w * 0.14)))
-        sh_px = max(14, int(round(sw_px * 0.56)))
-        im = Image.new("RGBA", (sw_px, sh_px), (0, 0, 0, 0))
-        d_s = ImageDraw.Draw(im)
-        d_s.rounded_rectangle(
-            (2, 2, sw_px - 3, sh_px - 3),
-            radius=max(5, sh_px // 2),
-            fill=(250, 204, 21, 255),
-            outline=JOINT_CAP_COLOR,
-            width=max(2, int(round(sh_px * 0.16))),
-        )
-        return im.transpose(Image.Transpose.FLIP_LEFT_RIGHT) if facing_left else im
 
     head_img, _head_off = _crop_rgba_mask(arr, head_mask)
     torso_img, torso_off = _crop_rgba_mask(arr, torso_mask)
     arm_l_img, arm_l_off = _crop_rgba_mask(arr, arm_left_mask)
     arm_r_img, arm_r_off = _crop_rgba_mask(arr, arm_right_mask)
-    shoe_l_img = (
-        _crop_rgba_mask(arr, shoe_l_mask, pad=2)[0]
-        if int(np.count_nonzero(shoe_l_mask)) >= 20
-        else _make_default_shoe(True)
-    )
-    shoe_r_img = (
-        _crop_rgba_mask(arr, shoe_r_mask, pad=2)[0]
-        if int(np.count_nonzero(shoe_r_mask)) >= 20
-        else _make_default_shoe(False)
-    )
 
     # 4. Tính tọa độ khớp giải phẫu & tách bắp tay / cẳng tay + vá khớp `#0B0E14`
     cap_r = max(4, int(round(min(w, h) * 0.014)))
@@ -527,11 +490,8 @@ def auto_segment_puppet(
     )
     rig_cfg["shoulder_left_torso"] = _norm_in_img(sh_l_global, torso_off, torso_img)
     rig_cfg["shoulder_right_torso"] = _norm_in_img(sh_r_global, torso_off, torso_img)
-    rig_cfg["hip_left_torso"] = [0.36, 0.94]
-    rig_cfg["hip_right_torso"] = [0.64, 0.94]
     rig_cfg["limb_stroke_px"] = round(max(6.0, min(18.0, min(w, h) * 0.024)), 2)
-    leg_ratio_raw = (h - hip_y) / max(1.0, hip_y - neck_y)
-    rig_cfg["torso_leg_ratio"] = round(max(0.45, min(0.85, leg_ratio_raw)), 3)
+    rig_cfg["torso_full_legs"] = True
 
     if np.any(arm_left_mask):
         rig_cfg["shoulder_left_pivot"] = _norm_in_img(sh_l_global, arm_l_off, arm_l_img)
@@ -602,8 +562,6 @@ def auto_segment_puppet(
         "forearm_left": fore_l_img,
         "upper_arm_right": up_r_img,
         "forearm_right": fore_r_img,
-        "shoe_left": shoe_l_img,
-        "shoe_right": shoe_r_img,
     }
     try:
         for seg_key, seg_im in imgs_to_save.items():
@@ -1858,10 +1816,9 @@ class PuppetRig:
         self.rig_cfg: dict[str, Any] = seg_info["rig_config"]
         seg_paths: dict[str, Path] = seg_info["segments"]
 
-        # Scale khớp `target_height` (chừa đủ khoảng đầu cho bóng đèn/ký hiệu cảm xúc)
-        leg_ratio = float(self.rig_cfg.get("torso_leg_ratio", 0.62))
+        # Scale khớp `target_height` (body_torso đã chứa trọn 2 chân chữ A + giày vàng)
         with Image.open(seg_paths["body_torso"]) as bt, Image.open(seg_paths["head_blank"]) as hb:
-            raw_total_h = max(1, int(bt.height * (1.0 + leg_ratio)) + int(hb.height * 1.25))
+            raw_total_h = max(1, bt.height + int(hb.height * 1.22))
         scale = (self.target_height * 0.88) / raw_total_h
         self._scale = scale
 
@@ -2349,38 +2306,31 @@ class PuppetRig:
         return hip_dx, knee_dip, l_dx, l_dy, r_dx, r_dy
 
     def render_frame(self, frame_idx: int, t_sec: float) -> Image.Image:
-        """Dựng 1 frame Hybrid 2D IK Puppet (`v4_hybrid_ik`): tứ chi IK 3x SSAA, chân bám đất."""
+        """Dựng 1 frame Puppet (`v5_a_stance_legs`): giữ nguyên 2 chân chữ A + giày vàng gốc,
+        kết hợp 2 tay IK 3x SSAA + 4 bàn tay găng trắng."""
         env_val = self.env[frame_idx] if 0 <= frame_idx < len(self.env) else 0.0
         st = self._pose_state_at(t_sec, env_val)
 
         torso_base = self.parts["body_torso"]
         head_local, head_piv = self._build_head_layer(frame_idx, env_val, t_sec=t_sec)
-        leg_ratio = float(self.rig_cfg.get("torso_leg_ratio", 0.62))
-        leg_total_h = max(32.0, torso_base.height * leg_ratio)
 
         # Canvas cục bộ ôm sát nhân vật (nhẹ CPU trên i5-10400)
         cw = max(int(self.target_height * 0.96), torso_base.width * 3 + 48)
         ch = self.target_height
         canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
 
-        hip_dx_c, knee_dip_c, l_dx_c, l_dy_c, r_dx_c, r_dy_c = self._choreography_offsets(
+        _hip_dx_c, _knee_dip_c, l_dx_c, l_dy_c, r_dx_c, r_dy_c = self._choreography_offsets(
             t_sec, env_val
         )
 
         try:
-            # Neo mặt đất cố định cho 2 chiếc giày (0% trượt chân)
-            ground_y = float(ch - 10)
-            shoe_l = self.parts.get("shoe_left")
-            shoe_r = self.parts.get("shoe_right")
-            shoe_h = float(max(shoe_l.height if shoe_l else 18, shoe_r.height if shoe_r else 18))
-            ankle_y = ground_y - shoe_h * 0.65
-            stance_half = max(18.0, torso_base.width * 0.34)
-            ankle_l = (cw * 0.5 - stance_half, ankle_y)
-            ankle_r = (cw * 0.5 + stance_half, ankle_y)
+            # Neo đế giày vàng gốc vững chắc xuống sàn (không nhún/bẻ cong dáng chân chữ A)
+            ground_y = float(ch - 8)
+            eff_scale_y = 1.0 + (st.torso_scale_y - 1.0) * 0.35
+            eff_torso_angle = st.torso_angle * 0.45
 
-            # [1] BODY_TORSO nằm phía trên chân IK, nhún gối & chuyển trọng tâm mượt
             t_w = torso_base.width
-            t_h = max(16, int(round(torso_base.height * st.torso_scale_y)))
+            t_h = max(16, int(round(torso_base.height * eff_scale_y)))
             torso_scaled = (
                 torso_base.resize((t_w, t_h), Image.Resampling.BICUBIC)
                 if t_h != torso_base.height
@@ -2388,33 +2338,30 @@ class PuppetRig:
             )
             torso_pivot_local = (t_w * 0.5, float(t_h))
             torso_rot, torso_rot_pivot = rotate_around_pivot(
-                torso_scaled, st.torso_angle, torso_pivot_local
+                torso_scaled, eff_torso_angle, torso_pivot_local
             )
             torso_scaled.close()
 
-            hip_center_x = cw * 0.5 + st.torso_dx + hip_dx_c
-            hip_center_y = ankle_y - leg_total_h * 0.92 + st.torso_dy + knee_dip_c
-            torso_tl_x = int(round(hip_center_x - torso_rot_pivot[0]))
-            torso_tl_y = int(round(hip_center_y - torso_rot_pivot[1]))
+            foot_center_x = cw * 0.5 + st.torso_dx * 0.35
+            foot_center_y = ground_y
+            torso_tl_x = int(round(foot_center_x - torso_rot_pivot[0]))
+            torso_tl_y = int(round(foot_center_y - torso_rot_pivot[1]))
 
             def _torso_anchor_world(norm_xy: list[float]) -> tuple[float, float]:
                 lx = float(norm_xy[0]) * t_w
                 ly = float(norm_xy[1]) * t_h
                 return _transform_anchor_world(
-                    (lx, ly), torso_pivot_local, (hip_center_x, hip_center_y), st.torso_angle
+                    (lx, ly), torso_pivot_local, (foot_center_x, foot_center_y), eff_torso_angle
                 )
 
             sh_l = _torso_anchor_world(self.rig_cfg["shoulder_left_torso"])
             sh_r = _torso_anchor_world(self.rig_cfg["shoulder_right_torso"])
-            hip_l = _torso_anchor_world(self.rig_cfg.get("hip_left_torso", [0.36, 0.94]))
-            hip_r = _torso_anchor_world(self.rig_cfg.get("hip_right_torso", [0.64, 0.94]))
             neck_world = _torso_anchor_world(self.rig_cfg["neck_anchor_torso"])
 
-            # Chiều dài 2 đoạn xương tay & chân tỷ lệ giải phẫu với thân áo
-            arm_l1 = max(24.0, t_h * 0.54)
-            arm_l2 = max(22.0, t_h * 0.50)
-            leg_l1 = max(24.0, leg_total_h * 0.51)
-            leg_l2 = max(24.0, leg_total_h * 0.51)
+            # Chiều dài 2 đoạn xương tay tỷ lệ giải phẫu với thân trên (t_h gồm cả chân chữ A)
+            upper_body_w = max(24.0, float(t_w) * 0.55)
+            arm_l1 = max(22.0, t_h * 0.25)
+            arm_l2 = max(20.0, t_h * 0.23)
 
             def _fk_to_ik_target(
                 sh: tuple[float, float],
@@ -2425,8 +2372,8 @@ class PuppetRig:
                 extra_dy: float,
             ) -> tuple[float, float]:
                 # Quy đổi góc pose cũ (tương thích 100% 24 pose) sang điểm mục tiêu cổ tay IK
-                a1 = math.radians(base_out_deg - sh_deg - st.torso_angle)
-                a2 = math.radians(base_out_deg - sh_deg - el_deg - st.torso_angle)
+                a1 = math.radians(base_out_deg - sh_deg - eff_torso_angle)
+                a2 = math.radians(base_out_deg - sh_deg - el_deg - eff_torso_angle)
                 ex = sh[0] + math.sin(a1) * arm_l1
                 ey = sh[1] + math.cos(a1) * arm_l1
                 wx = ex + math.sin(a2) * arm_l2 + extra_dx
@@ -2440,14 +2387,21 @@ class PuppetRig:
                 sh_r, st.arm_r_angle, st.elbow_r_angle, 24.0, r_dx_c, r_dy_c
             )
             target_l = clamp_arm_target(
-                "left", sh_l, raw_target_l, hip_center_x, float(t_w), arm_l1, arm_l2, pose=self.pose
+                "left",
+                sh_l,
+                raw_target_l,
+                foot_center_x,
+                upper_body_w,
+                arm_l1,
+                arm_l2,
+                pose=self.pose,
             )
             target_r = clamp_arm_target(
                 "right",
                 sh_r,
                 raw_target_r,
-                hip_center_x,
-                float(t_w),
+                foot_center_x,
+                upper_body_w,
                 arm_l1,
                 arm_l2,
                 pose=self.pose,
@@ -2455,36 +2409,26 @@ class PuppetRig:
 
             el_l, wr_l = solve_2bone_ik(sh_l, target_l, arm_l1, arm_l2, bend_dir=-1)
             el_r, wr_r = solve_2bone_ik(sh_r, target_r, arm_l1, arm_l2, bend_dir=1)
-            knee_l, foot_l = solve_2bone_ik(hip_l, ankle_l, leg_l1, leg_l2, bend_dir=-1)
-            knee_r, foot_r = solve_2bone_ik(hip_r, ankle_r, leg_l1, leg_l2, bend_dir=1)
 
             stroke_base = max(4.0, float(self.rig_cfg.get("limb_stroke_px", 9.0)) * self._scale)
             ss = 3  # 3x Supersampled AA trên canvas cục bộ nhân vật
             hand_r = max(7.0, stroke_base * 1.45)
+            shadow_half_w = max(24.0, t_w * 0.46)
 
-            # Lớp 1 (Sau thân): Bóng sàn + 2 chân IK + tay trái IK (3x SSAA cục bộ)
+            # Lớp 1 (Sau thân): Bóng sàn mềm + tay trái IK (3x SSAA cục bộ)
             back_hi = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
             try:
                 db = ImageDraw.Draw(back_hi)
-                # Bóng bầu dục mềm dưới chân
                 db.ellipse(
                     (
-                        (ankle_l[0] - stance_half * 0.7) * ss,
+                        (foot_center_x - shadow_half_w) * ss,
                         (ground_y - 10) * ss,
-                        (ankle_r[0] + stance_half * 0.7) * ss,
-                        (ground_y + 8) * ss,
+                        (foot_center_x + shadow_half_w) * ss,
+                        (ground_y + 6) * ss,
                     ),
-                    fill=(15, 23, 42, 46),
+                    fill=(15, 23, 42, 42),
                 )
                 w_ss = stroke_base * ss
-                for h_pt, k_pt, f_pt in ((hip_l, knee_l, foot_l), (hip_r, knee_r, foot_r)):
-                    _draw_capsule_bone(
-                        db, (h_pt[0] * ss, h_pt[1] * ss), (k_pt[0] * ss, k_pt[1] * ss), w_ss
-                    )
-                    _draw_capsule_bone(
-                        db, (k_pt[0] * ss, k_pt[1] * ss), (f_pt[0] * ss, f_pt[1] * ss), w_ss
-                    )
-                # Tay trái (tay sau)
                 _draw_capsule_bone(
                     db, (sh_l[0] * ss, sh_l[1] * ss), (el_l[0] * ss, el_l[1] * ss), w_ss
                 )
@@ -2507,7 +2451,7 @@ class PuppetRig:
             finally:
                 back_hi.close()
 
-            # Lớp 2: Thân áo sơ mi & cà vạt đỏ (che gọn gốc khớp vai/hông)
+            # Lớp 2: Thân áo sơ mi + cà vạt đỏ + nguyên 2 chân chữ A (`/ \`) + giày vàng gốc
             canvas.alpha_composite(torso_rot, (torso_tl_x, torso_tl_y))
             torso_rot.close()
 
@@ -2540,7 +2484,7 @@ class PuppetRig:
 
             # Lớp 4: Đầu + Mắt + Miệng + Biểu cảm (xoay quanh cổ)
             head_rot, head_rpiv = rotate_around_pivot(
-                head_local, st.head_angle + st.torso_angle, head_piv
+                head_local, st.head_angle + eff_torso_angle, head_piv
             )
             canvas.alpha_composite(
                 head_rot,
@@ -2550,20 +2494,6 @@ class PuppetRig:
                 ),
             )
             head_rot.close()
-
-            # Lớp 5: Đôi giày vàng HBT bám sàn 0% trượt
-            if shoe_l is not None:
-                sl_pos = (
-                    int(round(ankle_l[0] - shoe_l.width * 0.62)),
-                    int(round(ground_y - shoe_l.height)),
-                )
-                canvas.alpha_composite(shoe_l, sl_pos)
-            if shoe_r is not None:
-                sr_pos = (
-                    int(round(ankle_r[0] - shoe_r.width * 0.38)),
-                    int(round(ground_y - shoe_r.height)),
-                )
-                canvas.alpha_composite(shoe_r, sr_pos)
         finally:
             head_local.close()
 
