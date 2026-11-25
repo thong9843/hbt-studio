@@ -85,10 +85,14 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "- CÂN BẰNG ẢNH MINH HỌA (50%-60% BEAT): Bố trí 50%-60% số beat dùng "
         "`board_type='pinned_photo'` xen kẽ nhịp nhàng với các bảng phân tích (`myth_vs_fact`, "
         "`comparison`, `counter_grow`, `flow_steps`, `timeline_era`, `recap_card`). "
-        "Trên mỗi beat `pinned_photo`, ghi `prop_query` gồm 2-4 từ khóa tiếng Anh cụ thể nhìn "
-        "thấy ngoài đời thật (vd: 'soccer player sprint', 'marathon runner legs'), CẤM từ trừu "
-        "tượng; kèm `image_prompt` 1 câu tiếng Anh ngắn mô tả tranh 2D minh họa nếu là khái niệm "
-        "khoa học/trừu tượng.\n"
+        "BẮT BUỘC trả về trường gốc `primary_entity_en` (tên thực thể/địa danh/nhân vật/khái "
+        "niệm trung tâm bằng tiếng Anh rõ nghĩa, vd: 'Leaning Tower of Pisa', 'Bermuda "
+        "Triangle', 'Human Muscle Fiber'). Trên MỌI beat `pinned_photo`, `prop_query` BẮT BUỘC "
+        "neo thẳng `primary_entity_en` + bối cảnh cụ thể của beat (vd: 'Leaning Tower of Pisa "
+        "tilt architecture', 'Leaning Tower of Pisa soft clay foundation'), CẤM sinh truy vấn "
+        "chung chung dễ lạc đề như 'old building', 'measurement scale', 'ancient history', "
+        "'soft ground', 'architect blueprint ruler'; kèm `image_prompt` (1 câu tiếng Anh ngắn "
+        "gồm `primary_entity_en` + bối cảnh cụ thể của beat để vẽ minh họa 2D chuẩn xác).\n"
         "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
         "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
         "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
@@ -148,8 +152,8 @@ def build_director_prompt(
         f"{sys_p}\n\n"
         f"Chủ đề: {idea}\n"
         f"Nhóm: {topic} | Khung: {aspect} | Số beat: {beat_count}\n"
-        'Schema JSON:\n{"title":"Tiêu đề","domain":"physics_science",'
-        '"music_mood":"curious_science",'
+        'Schema JSON:\n{"title":"Tiêu đề","primary_entity_en":"Leaning Tower of Pisa",'
+        '"domain":"physics_science","music_mood":"curious_science",'
         '"beats":[{"narration":"1-2 câu tiếng Việt","pose":"point_up","emotion":"curious",'
         '"camera_shot":"wide_stage","anim_oneshot":"idea_bulb","anim_loop":"talk_explain",'
         '"interaction":"hold_prop","prop_query":"brain","facing":"right","motion":"bounce",'
@@ -676,6 +680,107 @@ def enforce_pose_diversity(beats: list[StickvBeat]) -> list[StickvBeat]:
     return out
 
 
+_ENTITY_STOPWORDS = frozenset(
+    {"the", "a", "an", "of", "in", "on", "at", "for", "with", "and", "to", "by", "from"}
+)
+_GENERIC_BAD_QUERY_TOKENS = frozenset(
+    {
+        "old",
+        "building",
+        "measurement",
+        "scale",
+        "ancient",
+        "history",
+        "soft",
+        "ground",
+        "ruler",
+        "blueprint",
+        "floorplan",
+        "coin",
+        "medal",
+        "stamp",
+        "shutter",
+        "warehouse",
+        "diagram",
+        "chart",
+        "icon",
+        "logo",
+    }
+)
+
+
+def _core_en_tokens(text: str) -> list[str]:
+    return [
+        w
+        for w in re.findall(r"[a-zA-Z0-9]+", (text or "").lower())
+        if len(w) >= 2 and w not in _ENTITY_STOPWORDS
+    ]
+
+
+def anchor_beat_image_queries(
+    beats: list[StickvBeat], primary_entity_en: str = ""
+) -> list[StickvBeat]:
+    """Neo cứng `primary_entity_en` vào `prop_query` & `image_prompt` của beat `pinned_photo`."""
+    entity = re.sub(r"\s+", " ", (primary_entity_en or "").strip())[:60]
+    if not entity or not beats:
+        return beats
+
+    entity_tokens = _core_en_tokens(entity)
+    if not entity_tokens:
+        return beats
+
+    out: list[StickvBeat] = []
+    for beat in beats:
+        if beat.board_type != "pinned_photo":
+            out.append(beat)
+            continue
+
+        raw_q = re.sub(r"\s+", " ", (beat.prop_query or "").strip())
+        q_tokens = _core_en_tokens(raw_q)
+        has_entity_in_q = all(tok in q_tokens for tok in entity_tokens)
+
+        if has_entity_in_q:
+            # Vẫn lọc bỏ các từ dễ kích hoạt ảnh rác Wikimedia (ruler/blueprint/coin...)
+            clean_words = [
+                w
+                for w in raw_q.split()
+                if re.sub(r"[^a-zA-Z0-9]", "", w).lower() not in _GENERIC_BAD_QUERY_TOKENS
+                or re.sub(r"[^a-zA-Z0-9]", "", w).lower() in entity_tokens
+            ]
+            new_q = " ".join(clean_words).strip() or entity
+        else:
+            extra_words: list[str] = []
+            seen_low = set(entity_tokens)
+            for w in raw_q.split():
+                wl = re.sub(r"[^a-zA-Z0-9]", "", w).lower()
+                if not wl or wl in seen_low or wl in _ENTITY_STOPWORDS:
+                    continue
+                if wl in _GENERIC_BAD_QUERY_TOKENS:
+                    continue
+                extra_words.append(w)
+                seen_low.add(wl)
+                if len(extra_words) >= 3:
+                    break
+            new_q = f"{entity} {' '.join(extra_words)}".strip() if extra_words else entity
+
+        new_q = new_q[:80].strip()
+
+        raw_prompt = re.sub(r"\s+", " ", (beat.image_prompt or "").strip())
+        p_tokens = _core_en_tokens(raw_prompt)
+        if not raw_prompt:
+            ctx = (beat.board_data or {}).get("caption") or beat.board_title or new_q
+            new_prompt = f"2D editorial illustration of {entity}, scene context: {ctx}"[:320]
+        elif not all(tok in p_tokens for tok in entity_tokens):
+            new_prompt = f"{entity} — {raw_prompt}"[:320]
+        else:
+            new_prompt = raw_prompt[:320]
+
+        if new_q != (beat.prop_query or "") or new_prompt != (beat.image_prompt or ""):
+            beat = beat.model_copy(update={"prop_query": new_q, "image_prompt": new_prompt})
+        out.append(beat)
+    return out
+
+
 def sanitize_beats(
     raw_beats: Any,
     *,
@@ -683,6 +788,7 @@ def sanitize_beats(
     chapter_title: str = "",
     start_idx: int = 1,
     allowed_poses: set[str] | None = None,
+    primary_entity_en: str = "",
 ) -> list[StickvBeat]:
     """Chuẩn hóa danh sách beat từ Gemini JSON thành StickvBeat hợp lệ."""
     if not isinstance(raw_beats, list):
@@ -725,7 +831,8 @@ def sanitize_beats(
         anim_loop = str(item.get("anim_loop") or "talk_explain").strip() or "talk_explain"
         raw_pq = item.get("prop_query") or item.get("image_query") or ""
         prop_query = str(raw_pq).strip()[:80] or None
-        image_prompt = str(item.get("image_prompt") or "").strip()[:320] or None
+        raw_ip = item.get("image_prompt") or item.get("illustration_prompt_en") or ""
+        image_prompt = str(raw_ip).strip()[:320] or None
         raw_vdata = item.get("visual_data")
         vdata = dict(raw_vdata) if isinstance(raw_vdata, dict) else {}
 
@@ -773,7 +880,7 @@ def sanitize_beats(
                 visual_data=vdata,
             )
         )
-    return out
+    return anchor_beat_image_queries(out, primary_entity_en=primary_entity_en)
 
 
 def parse_stickv_json_payload(
@@ -787,17 +894,24 @@ def parse_stickv_json_payload(
     if not clean:
         raise ValueError("Vui lòng dán nội dung JSON kịch bản")
     parsed = json.loads(clean)
+    primary_entity_en = ""
     if isinstance(parsed, list):
         title = "Kịch bản StickV (JSON)"
         beats = sanitize_beats(parsed, allowed_poses=allowed_poses)
     elif isinstance(parsed, dict):
         title = str(parsed.get("title") or "Kịch bản StickV (JSON)").strip()[:160]
-        beats = sanitize_beats(parsed.get("beats"), allowed_poses=allowed_poses)
+        primary_entity_en = str(parsed.get("primary_entity_en") or "").strip()[:60]
+        beats = sanitize_beats(
+            parsed.get("beats"),
+            allowed_poses=allowed_poses,
+            primary_entity_en=primary_entity_en,
+        )
     else:
         raise ValueError("JSON phải là object {title, beats} hoặc mảng beats")
     if not beats:
         raise ValueError("Không tìm thấy beat hợp lệ trong JSON")
     beats = enforce_pose_diversity(_enforce_meaningful_boards(beats))
+    beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
     return title, beats
 
 
@@ -896,7 +1010,8 @@ def generate_stickv_script(
         beat_count = _target_beat_count(target_minutes)
         user_prompt = (
             f"Chủ đề: {clean_idea} | Nhóm: {topic} | Khung: {aspect} | {beat_count} beat.\n"
-            'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+            'JSON: {"title":"...","primary_entity_en":"English primary entity",'
+            '"domain":"history_geo","music_mood":"history_epic",'
             '"beats":[{"narration":"...","pose":"point_up","camera_shot":"wide_stage",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
             '"board_title":"...","board_data":{"items":["..."],"takeaway":"..."}}]}'
@@ -905,19 +1020,26 @@ def generate_stickv_script(
             sys_prompt, user_prompt, model=chosen_model, timeout=60.0
         )
         title = str(parsed.get("title") or clean_idea[:80]).strip()
+        primary_entity_en = str(parsed.get("primary_entity_en") or "").strip()[:60]
         beats = enforce_pose_diversity(
             _enforce_meaningful_boards(
                 sanitize_beats(
-                    parsed.get("beats"), chapter=1, start_idx=1, allowed_poses=allowed_set
+                    parsed.get("beats"),
+                    chapter=1,
+                    start_idx=1,
+                    allowed_poses=allowed_set,
+                    primary_entity_en=primary_entity_en,
                 )
             )
         )
+        beats = anchor_beat_image_queries(beats, primary_entity_en=primary_entity_en)
         return (
             title,
             beats,
             {
                 "chapters": 1,
                 "chapter_list": [],
+                "primary_entity_en": primary_entity_en,
                 "domain": normalize_domain(parsed.get("domain")),
                 "music_mood": str(parsed.get("music_mood") or "curious_science").strip(),
                 **timings,
@@ -929,13 +1051,15 @@ def generate_stickv_script(
     outline_prompt = (
         f"Video khám phá {target_minutes:.0f}p ({aspect}, {topic}): {clean_idea}. "
         f"Lập dàn ý {num_chapters} chương hấp dẫn.\n"
-        'JSON: {"title":"...","domain":"history_geo","music_mood":"history_epic",'
+        'JSON: {"title":"...","primary_entity_en":"English primary entity",'
+        '"domain":"history_geo","music_mood":"history_epic",'
         '"chapters":[{"chapter":1,"heading":"...","summary":"..."}]}'
     )
     outline, t0 = generate_structured_json(
         sys_prompt, outline_prompt, model=chosen_model, timeout=60.0
     )
     title = str(outline.get("title") or clean_idea[:80]).strip()
+    primary_entity_en = str(outline.get("primary_entity_en") or "").strip()[:60]
     raw_chapters = outline.get("chapters") or []
     if not isinstance(raw_chapters, list) or not raw_chapters:
         raw_chapters = [
@@ -950,8 +1074,9 @@ def generate_stickv_script(
         heading = str((ch or {}).get("heading") or f"Chương {ch_idx}")
         summary = str((ch or {}).get("summary") or clean_idea)
         chapter_list.append({"chapter": ch_idx, "heading": heading, "summary": summary})
+        entity_hint = f" | Thực thể chính: {primary_entity_en}" if primary_entity_en else ""
         ch_prompt = (
-            f"Video: {title} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
+            f"Video: {title}{entity_hint} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
             f"{heading} ({summary}). Viết {beats_per_ch} beat chi tiết, chuyển góc máy linh hoạt.\n"
             'JSON: {"beats":[{"narration":"...","pose":"point_up","camera_shot":"focus_board",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
@@ -967,16 +1092,19 @@ def generate_stickv_script(
             chapter_title=heading,
             start_idx=len(all_beats) + 1,
             allowed_poses=allowed_set,
+            primary_entity_en=primary_entity_en,
         )
         all_beats.extend(ch_beats)
 
     all_beats = enforce_pose_diversity(_enforce_meaningful_boards(all_beats))
+    all_beats = anchor_beat_image_queries(all_beats, primary_entity_en=primary_entity_en)
     return (
         title,
         all_beats,
         {
             "chapters": len(raw_chapters[:num_chapters]),
             "chapter_list": chapter_list,
+            "primary_entity_en": primary_entity_en,
             "domain": normalize_domain(outline.get("domain")),
             "music_mood": str(outline.get("music_mood") or "curious_science").strip(),
             "llm_s": round(total_llm_s, 3),

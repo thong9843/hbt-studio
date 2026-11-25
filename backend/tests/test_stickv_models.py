@@ -347,3 +347,41 @@ def test_phase9_meaningful_boards_anti_parrot_55_rich_myth_and_single_recap() ->
     assert enforced[-2].takeaway == enforced[-1].takeaway
     assert len(enforced[-1].board_data["items"]) == 3
     assert all("đăng ký" not in it.lower() for it in enforced[-1].board_data["items"])
+
+
+def test_llm_anchors_primary_entity_en_into_pinned_photo_queries() -> None:
+    """Hậu xử lý llm.py luôn neo `primary_entity_en` và loại từ rác khỏi `prop_query`."""
+    payload = """{
+      "title": "Bí mật Tháp Nghiêng Pisa",
+      "primary_entity_en": "Leaning Tower of Pisa",
+      "beats": [
+        {
+          "narration": "Các kỹ sư đã đo độ lệch của công trình.",
+          "pose": "point_up",
+          "board_type": "pinned_photo",
+          "board_title": "GIẢI PHÁP KỸ THUẬT",
+          "prop_query": "architect blueprint ruler",
+          "image_prompt": "A 2D architect drawing curved lines on a tower"
+        },
+        {
+          "narration": "Nền đất bùn non khiến móng lún lệch.",
+          "pose": "think_chin",
+          "board_type": "pinned_photo",
+          "board_title": "ĐỊA CHẤT",
+          "prop_query": "soft ground clay foundation"
+        }
+      ]
+    }"""
+    title, beats = parse_stickv_json_payload(payload)
+    assert title == "Bí mật Tháp Nghiêng Pisa"
+    assert len(beats) == 2
+
+    q0 = (beats[0].prop_query or "").lower()
+    assert "leaning tower of pisa" in q0
+    assert "ruler" not in q0 and "blueprint" not in q0
+    assert "leaning tower of pisa" in (beats[0].image_prompt or "").lower()
+
+    q1 = (beats[1].prop_query or "").lower()
+    assert "leaning tower of pisa" in q1
+    assert "clay" in q1 and "foundation" in q1
+    assert "leaning tower of pisa" in (beats[1].image_prompt or "").lower()

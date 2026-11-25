@@ -366,3 +366,162 @@ def test_stickv_generate_beat_ai_photo_endpoint(tmp_path: Path, monkeypatch) -> 
         assert beat0["board_type"] == "pinned_photo"
         assert beat0["media_path"].startswith("media/b001_ai_")
         assert beat0["board_data"]["caption"] == "Sợi cơ bền bỉ"
+
+
+def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: Path) -> None:
+    """Loại sạch ảnh rác (đồng xu, thước đo, cửa chớp, nhà kho) và chuyển thẳng Cloudflare Flux."""
+    from hbt.shared.online_sources.reference_images import (
+        DEFAULT_AI_IMAGE_BUDGET,
+        REF_CACHE_VERSION,
+        score_candidate_relevance,
+    )
+
+    clear_reference_image_cache()
+    assert REF_CACHE_VERSION == "v2_entity_strict"
+    assert DEFAULT_AI_IMAGE_BUDGET == 6
+
+    junk_pages = {
+        "1": {
+            "pageid": 1,
+            "title": "File:Roman_coin_Pisa.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/coin.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "2": {
+            "pageid": 2,
+            "title": "File:Ruler_measurement_scale.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/ruler.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "3": {
+            "pageid": 3,
+            "title": "File:Old_window_shutter.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/shutter.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "4": {
+            "pageid": 4,
+            "title": "File:Abandoned_warehouse.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/warehouse.jpg",
+                    "width": 1000,
+                    "height": 800,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+        "5": {
+            "pageid": 5,
+            "title": "File:Leaning_Tower_of_Pisa_Tuscany.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/pisa_real.jpg",
+                    "width": 1200,
+                    "height": 900,
+                    "mime": "image/jpeg",
+                }
+            ],
+        },
+    }
+
+    client_filter = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _r: httpx.Response(200, json={"query": {"pages": junk_pages}})
+        )
+    )
+    try:
+        items = search_wikimedia_images("Leaning Tower of Pisa", limit=10, client=client_filter)
+    finally:
+        client_filter.close()
+
+    # Cả 4 ảnh rác bị chặn, chỉ còn ảnh thật Tháp Nghiêng Pisa (không chặn nhầm "Tuscany")
+    assert [it["title"] for it in items] == ["Leaning_Tower_of_Pisa_Tuscany.jpg"]
+    assert (
+        score_candidate_relevance(
+            items[0],
+            "Leaning Tower of Pisa",
+            primary_entity_en="Leaning Tower of Pisa",
+        )
+        >= 0.7
+    )
+    # Nếu beat đòi bối cảnh cụ thể (cáp thép gia cố) mà ảnh chỉ là ảnh du lịch chung -> dưới ngưỡng
+    assert (
+        score_candidate_relevance(
+            items[0],
+            "Leaning Tower of Pisa modern scaffolding cables",
+            primary_entity_en="Leaning Tower of Pisa",
+        )
+        < 0.45
+    )
+
+    # Khi Wikimedia chỉ trả ảnh lạc đề (không khớp thực thể chính) -> từ chối và gọi Cloudflare Flux
+    off_topic_pages = {
+        "9": {
+            "pageid": 9,
+            "title": "File:Medieval_stone_wall_France.jpg",
+            "imageinfo": [
+                {
+                    "url": "https://img/france_wall.jpg",
+                    "width": 1200,
+                    "height": 900,
+                    "mime": "image/jpeg",
+                }
+            ],
+        }
+    }
+    flux_calls: list[str] = []
+
+    def handler_fallback(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "commons.wikimedia.org" in url:
+            return httpx.Response(200, json={"query": {"pages": off_topic_pages}})
+        if "api.cloudflare.com" in url:
+            flux_calls.append(request.content.decode("utf-8"))
+            return httpx.Response(
+                200,
+                content=_png_bytes((768, 512), color=(180, 140, 90)),
+                headers={"content-type": "image/png"},
+            )
+        return httpx.Response(200, json={})
+
+    lib = tmp_path / "library"
+    budget = [DEFAULT_AI_IMAGE_BUDGET]
+    client_fb = httpx.Client(transport=httpx.MockTransport(handler_fallback))
+    try:
+        out_p, src = resolve_reference_image(
+            "Leaning Tower of Pisa soft clay foundation",
+            lib,
+            primary_entity_en="Leaning Tower of Pisa",
+            illustration_prompt="Cross section of soft clay soil tilting the tower foundation",
+            cf_account_id="acc-pisa",
+            cf_api_token="tok-pisa",
+            ai_budget=budget,
+            client=client_fb,
+        )
+    finally:
+        client_fb.close()
+
+    assert src == "cloudflare_flux"
+    assert out_p.is_file() and REF_CACHE_VERSION in out_p.name
+    assert len(flux_calls) == 1
+    assert "Leaning Tower of Pisa" in flux_calls[0]
+    assert budget == [DEFAULT_AI_IMAGE_BUDGET - 1]
