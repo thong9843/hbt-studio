@@ -237,15 +237,18 @@ def test_v9_meaningful_boards_anti_parrot_cta_recap_and_emotion_diversity() -> N
     enforced = _enforce_meaningful_boards(raw_beats)
     assert enforced[0].board_title == ""  # Đã xóa tiêu đề sáo rỗng "Mở đầu video"
     assert all("tìm hiểu" not in it.lower() for it in enforced[0].board_data["items"])
-    # Beat 0 chống nhại lời thoại -> đã rút gọn từ khóa **...** ngắn hơn câu gốc
-    first_item = enforced[0].board_data["items"][0]
-    assert "**" in first_item and len(first_item) < len(raw_beats[0].narration)
-    assert enforced[0].board_data["items"] != raw_beats[0].board_data["items"]
+    # Beat 0 giữ nội dung chủ đề thật, tuyệt đối không tiêm văn mẫu gym/sinh học
+    joined_b0 = " ".join(enforced[0].board_data["items"]).lower()
+    assert "chu kỳ phục hồi" not in joined_b0 and "quy luật tự nhiên" not in joined_b0
 
-    # Beat cuối CTA bắt buộc chuyển thành recap_card 3 ý cốt lõi
+    # Beat cuối CTA bắt buộc chuyển thành recap_card rút từ chính kiến thức thật của video
     assert enforced[-1].board_type == "recap_card"
     assert enforced[-1].board_title == "TÓM TẮT 3 Ý CỐT LÕI"
     assert len(enforced[-1].board_data["items"]) >= 2
+    assert all(
+        "cảm tính" not in it.lower() and "nguyên lý gốc" not in it.lower()
+        for it in enforced[-1].board_data["items"]
+    )
 
     # 3. enforce_pose_diversity phải chống trùng cả pose lẫn emotion liên tiếp
     diversified = enforce_pose_diversity(enforced)
@@ -258,7 +261,6 @@ def test_phase9_meaningful_boards_anti_parrot_55_rich_myth_and_single_recap() ->
     from hbt.stickv.llm import (
         ANTI_PARROT_THRESHOLD,
         _enforce_meaningful_boards,
-        _word_overlap_ratio,
         build_director_prompt,
     )
     from hbt.stickv.models import StickvBeat
@@ -325,18 +327,24 @@ def test_phase9_meaningful_boards_anti_parrot_55_rich_myth_and_single_recap() ->
 
     enforced = _enforce_meaningful_boards(raw_beats)
 
-    # 1. Anti-Parrot <= 55% trên cả board_title lẫn từng item
-    b0 = enforced[0]
-    assert _word_overlap_ratio(b0.narration, b0.board_title) <= 0.55
-    for it in b0.board_data["items"]:
-        assert _word_overlap_ratio(b0.narration, it) <= 0.55
-    assert len(b0.board_data["items"]) == 3
+    # 1. Cấm tuyệt đối tiêm văn mẫu cũ ("chu kỳ phục hồi", "quy luật tự nhiên", "PHÂN TÍCH CƠ CHẾ")
+    banned_boilerplate = (
+        "chu kỳ phục hồi",
+        "quy luật tự nhiên",
+        "phản ứng sinh học chuẩn xác",
+        "ngộ nhận phổ biến",
+        "phân tích cơ chế",
+        "lưu lại 3 nguyên tắc cốt lõi để áp dụng ngay hôm nay",
+    )
+    for b in enforced:
+        blob = f"{b.board_title} {b.takeaway} {b.board_data}".lower()
+        for bad in banned_boilerplate:
+            assert bad not in blob, f"Phát hiện văn mẫu rác '{bad}' trong beat {b.id}"
 
-    # 2. myth_vs_fact được làm đầy đặn (>= 8 từ mỗi ô, có **tiêu đề:** giải thích)
+    # 2. myth_vs_fact giữ nguyên ý thật của kịch bản (không bịa câu mẫu)
     b1 = enforced[1]
-    assert len(b1.board_data["myth"].split()) >= 8
-    assert len(b1.board_data["fact"].split()) >= 8
-    assert "**" in b1.board_data["myth"] and "**" in b1.board_data["fact"]
+    assert "Đau là tốt" in b1.board_data["myth"]
+    assert "Ngủ đủ giấc" in b1.board_data["fact"]
 
     # 3. Hai beat cuối (tổng kết + CTA) dùng chung DUY NHẤT 1 bảng recap_card giống hệt nhau
     assert enforced[-2].board_type == "recap_card"
@@ -347,6 +355,72 @@ def test_phase9_meaningful_boards_anti_parrot_55_rich_myth_and_single_recap() ->
     assert enforced[-2].takeaway == enforced[-1].takeaway
     assert len(enforced[-1].board_data["items"]) == 3
     assert all("đăng ký" not in it.lower() for it in enforced[-1].board_data["items"])
+
+
+def test_no_boilerplate_empty_comparison_or_fake_100_percent() -> None:
+    """Chặn sạch comparison trống, big_number '100%' ảo, caption chung chung và cắt giữa từ."""
+    payload = """{
+      "title": "Những địa điểm bí ẩn trên Trái Đất",
+      "primary_entity_en": "Bermuda Triangle",
+      "beats": [
+        {
+          "narration": "Tam giác quỷ Bermuda rộng 500.000 km² nằm ở Đại Tây Dương.",
+          "board_type": "pinned_photo",
+          "board_title": "PHÂN TÍCH CƠ CHẾ",
+          "prop_query": "ocean mystery",
+          "board_data": {"caption": "PHÂN TÍCH CƠ CHẾ", "pin_style": "pin"}
+        },
+        {
+          "narration": "Đá biết đi tại Thung lũng Chết tự trượt dài trên nền bùn đóng băng.",
+          "board_type": "big_number",
+          "board_title": "Đá biết đi California",
+          "board_data": {"label": "Hiện tượng trượt đá", "sub": "Di chuyển trên lớp băng mỏng"}
+        },
+        {
+          "narration": "Hồ Natron ở Tanzania có độ pH cao tới 10,5 khiến xác động vật hóa đá.",
+          "board_type": "comparison",
+          "board_title": "So sánh độ kiềm",
+          "board_data": {"left_title": "Trước", "right_title": "Sau"}
+        },
+        {
+          "narration": "Băng tan ban ngày và gió mạnh ban đêm đẩy tảng đá nặng 300 kg.",
+          "board_type": "comparison",
+          "board_title": "Cơ chế đẩy đá",
+          "board_data": {
+            "left_title": "Đêm lạnh",
+            "left": "Tạo lớp băng mỏng dưới đá",
+            "right_title": "Sáng nắng",
+            "right": "Gió nhẹ đẩy tảng đá trượt đi"
+          }
+        },
+        {
+          "narration": "Hãy bấm đăng ký kênh để khám phá thêm nhiều bí ẩn địa lý thú vị nhé!",
+          "board_type": "recap_card",
+          "board_title": "Tổng kết"
+        }
+      ]
+    }"""
+    _, beats = parse_stickv_json_payload(payload)
+    # 1. pinned_photo không dùng caption "PHÂN TÍCH CƠ CHẾ"
+    assert beats[0].board_data["caption"]
+    assert "phân tích cơ chế" not in beats[0].board_data["caption"].lower()
+    # 2. big_number không có số thật -> tự đổi sang bullets (cấm vẽ "100%")
+    assert beats[1].board_type == "bullets"
+    assert "100%" not in str(beats[1].board_data)
+    # 3. comparison trống 2 cột -> tự đổi sang bullets (cấm vẽ 2 hộp Trước/Sau trống)
+    assert beats[2].board_type == "bullets"
+    assert beats[2].board_data["items"]
+    # 4. comparison dùng alias left/right vẫn giữ nguyên dữ liệu thật
+    assert beats[3].board_type == "comparison"
+    assert beats[3].board_data["left_items"] == ["Tạo lớp băng mỏng dưới đá"]
+    assert beats[3].board_data["right_items"] == ["Gió nhẹ đẩy tảng đá trượt đi"]
+    # 5. recap_card rút kiến thức thật của video, không văn mẫu và không cắt cụt giữa từ
+    recap_items = beats[-1].board_data["items"]
+    assert len(recap_items) >= 2
+    assert all(
+        "chu kỳ phục hồi" not in it.lower() and "nguyên lý gốc" not in it.lower()
+        for it in recap_items
+    )
 
 
 def test_llm_anchors_primary_entity_en_into_pinned_photo_queries() -> None:
