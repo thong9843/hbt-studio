@@ -77,6 +77,111 @@ def _wav_duration_s(wav_path: Path) -> float:
         return 0.0
 
 
+def _measure_wrist_kinematics(
+    project_data: dict[str, Any], *, fps: int = 60, target_height: int = 560
+) -> dict[str, float]:
+    """Đo trực tiếp độ mượt cổ tay 60fps xuyên suốt mọi beat nối tiếp (kể cả ranh giới beat)."""
+    import numpy as np
+
+    from hbt.stickv.models import StickvBeat
+    from hbt.stickv.puppet import PuppetPoseState, PuppetRig, is_puppet_ready
+
+    lib_dir = REPO_ROOT / "library"
+    assets_dir = REPO_ROOT / "assets"
+    if not is_puppet_ready(lib_dir, assets_dir):
+        return {
+            "max_wrist_step_px": 0.0,
+            "p95_wrist_step_px": 0.0,
+            "wrist_direction_reversals_per_sec": 0.0,
+        }
+
+    raw_beats = project_data.get("beats") or []
+    prev_state: PuppetPoseState | None = None
+    global_t = 0.0
+    traj_l: list[tuple[float, float]] = []
+    traj_r: list[tuple[float, float]] = []
+
+    for rb in raw_beats:
+        try:
+            b = StickvBeat.model_validate(rb)
+        except Exception:
+            continue
+        dur = max(1.5, min(4.8, float(b.duration_sec or 3.5)))
+        n_frames = max(30, int(round(dur * fps)))
+        # Mô phỏng sóng RMS thực tế có nhịp nói 4Hz để kiểm chứng chống lọt giật vào tay
+        env = [
+            0.5 + 0.45 * math.sin(2.0 * math.pi * 4.2 * (i / fps))
+            for i in range(n_frames)
+        ]
+        rig = PuppetRig(
+            library_dir=lib_dir,
+            assets_dir=assets_dir,
+            target_height=target_height,
+            pose=b.pose,
+            emotion=getattr(b, "emotion", "auto"),
+            face_mood=getattr(b, "face_mood", None),
+            narration=b.narration,
+            anim_oneshot=getattr(b, "anim_oneshot", None),
+            anim_loop=getattr(b, "anim_loop", "talk_explain"),
+            interaction=getattr(b, "interaction", "none"),
+            facing=b.facing,
+            beat_id=b.id,
+            fps=fps,
+            duration_sec=dur,
+            speech_start=0.0,
+            speech_end=max(0.8, dur - 0.35),
+            rms_env=env,
+            prev_pose_state=prev_state,
+            global_t_offset=global_t,
+            board_type=b.board_type,
+        )
+        try:
+            for fi in range(n_frames):
+                fr = rig.render_frame(fi, fi / float(fps))
+                fr.close()
+                traj_l.append(rig.last_wrists[0])
+                traj_r.append(rig.last_wrists[1])
+            prev_state = rig.last_pose_state
+        finally:
+            rig.close()
+        global_t += dur
+
+    steps: list[float] = []
+    reversals = 0
+    for traj in (traj_l, traj_r):
+        for i in range(1, len(traj)):
+            steps.append(
+                math.hypot(traj[i][0] - traj[i - 1][0], traj[i][1] - traj[i - 1][1])
+            )
+        # Đếm số lần đổi chiều đột ngột của vận tốc trung bình cửa sổ 6 frame (~0.10s)
+        win = max(3, fps // 10)
+        prev_dir: tuple[float, float] | None = None
+        for i in range(win, len(traj), win):
+            dx = traj[i][0] - traj[i - win][0]
+            dy = traj[i][1] - traj[i - win][1]
+            mag = math.hypot(dx, dy)
+            if mag < 2.0:
+                continue
+            cur_dir = (dx / mag, dy / mag)
+            if (
+                prev_dir is not None
+                and (cur_dir[0] * prev_dir[0] + cur_dir[1] * prev_dir[1]) < -0.35
+            ):
+                reversals += 1
+            prev_dir = cur_dir
+
+    total_sec = max(1.0, len(traj_l) / float(fps))
+    max_step = round(float(max(steps)) if steps else 0.0, 2)
+    p95_step = round(float(np.percentile(steps, 95)) if steps else 0.0, 2)
+    # Trung bình mỗi tay đổi chiều / giây
+    rev_per_sec = round((reversals / 2.0) / total_sec, 2)
+    return {
+        "max_wrist_step_px": max_step,
+        "p95_wrist_step_px": p95_step,
+        "wrist_direction_reversals_per_sec": rev_per_sec,
+    }
+
+
 def _measure_render_motion(project_data: dict[str, Any]) -> tuple[float, str, float]:
     """Đo độ nhảy tọa độ nhân vật giữa các beat (px/frame @ 60fps) và kiểm tra chân chữ A gốc."""
     from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat
@@ -244,16 +349,35 @@ def inspect_project(
 
     if check_render:
         max_jump_px, seg_ver, torso_leg_span = _measure_render_motion(proj)
+        kin = _measure_wrist_kinematics(proj)
         print(f"max_char_jump_px : {max_jump_px} px/frame (ngưỡng <= 25.0)")
         print(
             f"puppet_legs_mode : {seg_ver} | torso_leg_span={torso_leg_span} "
             "(ngưỡng >= 0.55, chân chữ A gốc)"
+        )
+        print(
+            f"wrist_kinematics : max_step={kin['max_wrist_step_px']}px/f (<=10.0) | "
+            f"p95={kin['p95_wrist_step_px']}px/f (<=3.5) | "
+            f"reversals={kin['wrist_direction_reversals_per_sec']}/s (<=1.8)"
         )
         if max_jump_px > 25.0:
             failures.append(f"INV-03 FAIL: max_char_jump_px={max_jump_px} > 25")
         if seg_ver != "v5_a_stance_legs" or torso_leg_span < 0.55:
             failures.append(
                 f"INV-06 FAIL: seg_ver={seg_ver}, torso_leg_span={torso_leg_span} < 0.55"
+            )
+        if kin["max_wrist_step_px"] > 10.0:
+            failures.append(
+                f"INV-09 FAIL: max_wrist_step_px={kin['max_wrist_step_px']} > 10.0"
+            )
+        if kin["p95_wrist_step_px"] > 3.5:
+            failures.append(
+                f"INV-09 FAIL: p95_wrist_step_px={kin['p95_wrist_step_px']} > 3.5"
+            )
+        if kin["wrist_direction_reversals_per_sec"] > 1.8:
+            failures.append(
+                "INV-09 FAIL: wrist_direction_reversals_per_sec="
+                f"{kin['wrist_direction_reversals_per_sec']} > 1.8"
             )
 
     print(

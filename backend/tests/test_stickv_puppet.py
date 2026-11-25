@@ -676,3 +676,60 @@ def test_v5_a_stance_legs_and_arm_ik_choreography(tmp_path: Path) -> None:
             im.close()
     finally:
         rig.close()
+
+
+def test_smooth_60fps_wrist_kinematics_across_beat_boundaries(tmp_path: Path) -> None:
+    """INV-09: Lò xo giảm chấn tới hạn xuyên beat (kể cả đổi facing), 0 nhảy cổ tay > 10px/f."""
+    import math
+
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    fps = 60
+    beats_spec = [
+        ("b001", "point_up", "right", "pinned_photo", 2.0),
+        ("b002", "shock_hands_up", "left", "myth_vs_fact", 2.0),
+        ("b003", "welcome_open", "right", "recap_card", 2.0),
+    ]
+    prev_state: PuppetPoseState | None = None
+    global_t = 0.0
+    traj_l: list[tuple[float, float]] = []
+    traj_r: list[tuple[float, float]] = []
+
+    for bid, pose, facing, btype, dur in beats_spec:
+        n_frames = int(dur * fps)
+        # Sóng RMS 4.5Hz dày đặc để xác nhận kênh tay đã tách khỏi RMS nhanh
+        env = [0.5 + 0.48 * math.sin(2.0 * math.pi * 4.5 * (i / fps)) for i in range(n_frames)]
+        rig = PuppetRig(
+            library_dir=lib,
+            assets_dir=assets,
+            target_height=420,
+            pose=pose,
+            facing=facing,
+            beat_id=bid,
+            fps=fps,
+            duration_sec=dur,
+            speech_end=dur - 0.25,
+            rms_env=env,
+            prev_pose_state=prev_state,
+            global_t_offset=global_t,
+            board_type=btype,
+        )
+        try:
+            for fi in range(n_frames):
+                fr = rig.render_frame(fi, fi / float(fps))
+                fr.close()
+                traj_l.append(rig.last_wrists[0])
+                traj_r.append(rig.last_wrists[1])
+            prev_state = rig.last_pose_state
+        finally:
+            rig.close()
+        global_t += dur
+
+    steps = [
+        math.hypot(t[i][0] - t[i - 1][0], t[i][1] - t[i - 1][1])
+        for t in (traj_l, traj_r)
+        for i in range(1, len(t))
+    ]
+    assert max(steps) <= 10.0
+    assert float(np.percentile(steps, 95)) <= 3.5
