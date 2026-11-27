@@ -6,6 +6,7 @@ import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/Saf
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
 import { useRenderJobStatus } from '../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
 import type { PostvPickComment, PostvPickData, PostvQuickOptions, PostvStage } from '../api/types';
 import {
   AlertIcon,
@@ -210,6 +211,8 @@ export function PostvQuickPage() {
 
   const renderJob = useRenderJobStatus();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const outputVideoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(outputVideoRef, output?.video);
 
   // Tự co giãn chiều cao ô textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -382,7 +385,7 @@ export function PostvQuickPage() {
   const { data: activeJobs } = useQuery({
     queryKey: ['active-jobs'],
     queryFn: () => api.listActiveJobs(),
-    refetchInterval: isFinished || !!errorMessage || !!jobId ? false : 3000,
+    refetchInterval: false,
   });
 
   useEffect(() => {
@@ -1251,9 +1254,11 @@ export function PostvQuickPage() {
                 <SafeZoneOverlay platform={safeZone} />
                 {output.video ? (
                   <video
+                    ref={outputVideoRef}
                     src={fileUrl(output.video)}
                     controls
                     playsInline
+                    preload="metadata"
                     className="aspect-[9/16] w-full object-contain"
                   />
                 ) : (

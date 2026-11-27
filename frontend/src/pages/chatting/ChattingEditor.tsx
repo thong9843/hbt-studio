@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { useSafeZone } from '../../components/SafeZoneOverlay';
@@ -8,6 +8,7 @@ import { SceneTimelineStrip } from '../../components/studio/SceneTimelineStrip';
 import { StudioTopBar } from '../../components/studio/StudioTopBar';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
 import { useRenderJobStatus } from '../../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
@@ -48,6 +49,8 @@ export function ChattingEditor() {
   const [isRerolling, setIsRerolling] = useState<'meme' | 'sfx' | null>(null);
   const [startingRender, setStartingRender] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
+  const [avatarVersion, setAvatarVersion] = useState(0);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [autoProgress, setAutoProgress] = useState<{
     percent: number;
@@ -88,6 +91,11 @@ export function ChattingEditor() {
 
   const doc = data?.doc;
   const activeRunningJob = jobInfo || data?.job;
+  const latestRender = data?.renders?.[0];
+  const videoUrl = latestRender
+    ? `/api/chatting/${slug}/renders/${latestRender.video_file}`
+    : data?.preview_url;
+  useReleaseVideoOnUnmount(previewVideoRef, videoUrl);
 
   // Đồng bộ job chatting_auto vào RenderJobProvider toàn cục (0 EventSource trùng)
   useEffect(() => {
@@ -428,6 +436,7 @@ export function ChattingEditor() {
         body: formData,
       });
       if (res.ok) {
+        setAvatarVersion((v) => v + 1);
         refetchProject();
       } else {
         alert('Tải ảnh đại diện thất bại');
@@ -436,11 +445,6 @@ export function ChattingEditor() {
       console.error(err);
     }
   };
-
-  const latestRender = data?.renders?.[0];
-  const videoUrl = latestRender
-    ? `/api/chatting/${slug}/renders/${latestRender.video_file}`
-    : data?.preview_url;
 
   return (
     <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-bg text-text">
@@ -480,7 +484,11 @@ export function ChattingEditor() {
                   <label className="relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-line bg-soft">
                     {char.avatar ? (
                       <img
-                        src={`/api/chatting/${slug}/${char.avatar}?t=${Date.now()}`}
+                        src={
+                          avatarVersion > 0
+                            ? `/api/chatting/${slug}/${char.avatar}?v=${avatarVersion}`
+                            : `/api/chatting/${slug}/${char.avatar}`
+                        }
                         alt={char.name}
                         className="h-full w-full object-cover"
                       />
@@ -861,9 +869,11 @@ export function ChattingEditor() {
             {videoUrl ? (
               <video
                 key={videoUrl}
+                ref={previewVideoRef}
                 src={videoUrl}
                 controls
                 autoPlay={false}
+                preload="metadata"
                 className="h-full w-full object-cover"
               />
             ) : (

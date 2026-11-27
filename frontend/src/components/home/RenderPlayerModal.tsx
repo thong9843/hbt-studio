@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import type { UnifiedRenderItem } from '../../api/types';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { formatDuration } from '../../utils/format';
 import { releaseVideoElementLocks } from '../../utils/media';
 import { CopyIcon, DownloadIcon, TrashIcon } from '../icons';
@@ -27,6 +29,9 @@ export function RenderPlayerModal({
   onCopyPublish,
   onRequestDelete,
 }: RenderPlayerModalProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(videoRef, item?.video_url);
+
   return (
     <Dialog
       open={Boolean(item)}
@@ -38,10 +43,12 @@ export function RenderPlayerModal({
         <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr]">
           <div className="mx-auto aspect-[9/16] w-full max-w-[240px] overflow-hidden rounded-inner border border-line bg-hero shadow-card">
             <video
+              ref={videoRef}
               src={item.video_url}
               controls
               autoPlay
               playsInline
+              preload="metadata"
               className="h-full w-full object-contain"
             />
           </div>

@@ -55,7 +55,6 @@ export function ChattingHome() {
   const { data: status, isLoading: isStatusLoading } = useQuery({
     queryKey: ['chattingStatus'],
     queryFn: api.getChattingStatus,
-    refetchInterval: 10_000,
   });
 
   // 2. Danh sách dự án gần đây

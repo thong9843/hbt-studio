@@ -108,7 +108,10 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
       setFinished(job);
       if (!completedJobIdsRef.current.has(job.id)) {
         completedJobIdsRef.current.add(job.id);
-        const effEngine = inferJobEngine(kindRef.current ?? job.kind, engineRef.current ?? job.engine);
+        const effEngine = inferJobEngine(
+          kindRef.current ?? job.kind,
+          engineRef.current ?? job.engine,
+        );
         void queryClient.invalidateQueries({ queryKey: ['renders', job.project] });
         void queryClient.invalidateQueries({ queryKey: ['projects'] });
         void queryClient.invalidateQueries({ queryKey: ['unified-renders'] });
@@ -128,8 +131,12 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
           if (job.status === 'done') toast.info(vi.hbtCore.prepare.doneToast);
           else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
         } else if (effEngine === 'chatting') {
-          void queryClient.invalidateQueries({ queryKey: ['chattingProject', job.slug ?? job.project] });
-          void queryClient.invalidateQueries({ queryKey: ['chattingJob', job.slug ?? job.project] });
+          void queryClient.invalidateQueries({
+            queryKey: ['chattingProject', job.slug ?? job.project],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ['chattingJob', job.slug ?? job.project],
+          });
           void queryClient.invalidateQueries({ queryKey: ['chattingProjects'] });
           if (job.status === 'done') toast.info(vi.export.done);
           else if (job.status === 'failed') toast.error(job.error || vi.export.failed);
@@ -159,37 +166,34 @@ export function RenderJobProvider({ children }: { children: ReactNode }) {
     },
   );
 
-  const attachJob = useCallback(
-    (input: AttachJobInput) => {
-      if (jobIdRef.current === input.jobId && finishedRef.current === null) {
-        return;
-      }
-      completedJobIdsRef.current.delete(input.jobId);
-      const resolvedEngine = inferJobEngine(input.kind, input.engine);
-      const resolvedRoute = resolveJobRoute(resolvedEngine, input.kind, input.slug, input.route);
-      const seed: Partial<JobProgress> = {
-        progress: input.progress ?? 0,
-        step: input.step ?? input.stage ?? '',
-        stage: input.stage ?? input.step ?? '',
-        message: input.message ?? '',
-        current_beat: input.currentBeat ?? null,
-        total_beats: input.totalBeats ?? null,
-      };
-      progressStoreRef.current.setSnapshot(toSnapshot(seed), true);
-      setSlug(input.slug);
-      setKind(input.kind);
-      setEngine(resolvedEngine);
-      setTitle(input.title || input.slug);
-      setRoute(resolvedRoute);
-      setOptions({ preview: Boolean(input.preview) });
-      setFinished(null);
-      setEstimate(input.estimateSeconds ?? null);
-      setStartedAt(input.startedAt ?? Date.now() / 1000);
-      setSeedProgress(seed);
-      setJobId(input.jobId);
-    },
-    [],
-  );
+  const attachJob = useCallback((input: AttachJobInput) => {
+    if (jobIdRef.current === input.jobId && finishedRef.current === null) {
+      return;
+    }
+    completedJobIdsRef.current.delete(input.jobId);
+    const resolvedEngine = inferJobEngine(input.kind, input.engine);
+    const resolvedRoute = resolveJobRoute(resolvedEngine, input.kind, input.slug, input.route);
+    const seed: Partial<JobProgress> = {
+      progress: input.progress ?? 0,
+      step: input.step ?? input.stage ?? '',
+      stage: input.stage ?? input.step ?? '',
+      message: input.message ?? '',
+      current_beat: input.currentBeat ?? null,
+      total_beats: input.totalBeats ?? null,
+    };
+    progressStoreRef.current.setSnapshot(toSnapshot(seed), true);
+    setSlug(input.slug);
+    setKind(input.kind);
+    setEngine(resolvedEngine);
+    setTitle(input.title || input.slug);
+    setRoute(resolvedRoute);
+    setOptions({ preview: Boolean(input.preview) });
+    setFinished(null);
+    setEstimate(input.estimateSeconds ?? null);
+    setStartedAt(input.startedAt ?? Date.now() / 1000);
+    setSeedProgress(seed);
+    setJobId(input.jobId);
+  }, []);
 
   const start = useCallback(
     async (target: string, opts: RenderOptions, estimate: number | null = null) => {

@@ -41,6 +41,7 @@ import { StudioSelect } from '../components/ui/StudioSelect';
 import { Switch } from '../components/ui/Switch';
 import { cx } from '../components/ui/cx';
 import { useRenderJobStatus } from '../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 
@@ -445,6 +446,13 @@ export function StickvPage() {
 
     return Array.from(byId.values());
   }, [listQuery.data?.poses, stickmanQuery.data?.items]);
+
+  const lastRenderVideoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasPoseVideoRef = useRef<HTMLVideoElement | null>(null);
+  const activePoseVideoUrl =
+    activeBeat?.clip_path || poseOptions.find((p) => p.id === activeBeat?.pose)?.url;
+  useReleaseVideoOnUnmount(lastRenderVideoRef, draft?.last_render?.video_url);
+  useReleaseVideoOnUnmount(canvasPoseVideoRef, activePoseVideoUrl);
 
   const genMutation = useMutation({
     mutationFn: () =>
@@ -1361,8 +1369,10 @@ export function StickvPage() {
             {draft?.last_render?.video_url ? (
               <video
                 key={draft.last_render.video_url}
+                ref={lastRenderVideoRef}
                 src={draft.last_render.video_url}
                 controls
+                preload="metadata"
                 className="h-full w-full bg-black object-contain"
               />
             ) : (
@@ -1396,14 +1406,14 @@ export function StickvPage() {
                         activeBeat?.clip_path ||
                         poseOptions.find((p) => p.id === activeBeat?.pose)?.url
                       }
+                      ref={canvasPoseVideoRef}
                       src={
                         activeBeat?.clip_path ||
                         poseOptions.find((p) => p.id === activeBeat?.pose)?.url
                       }
                       muted
-                      loop
-                      autoPlay
                       playsInline
+                      preload="metadata"
                       className="h-36 w-auto rounded-lg object-contain"
                     />
                   ) : (

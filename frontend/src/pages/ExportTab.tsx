@@ -119,9 +119,7 @@ function ExportLiveStatusBody({
       <p className="text-small">
         <span className="tabular-nums">{Math.round(pct)}%</span>
         {stepName && <span> · {stepName}</span>}
-        {running && progress.message && (
-          <span className="text-muted"> — {progress.message}</span>
-        )}
+        {running && progress.message && <span className="text-muted"> — {progress.message}</span>}
       </p>
       {running && (
         <div className="flex items-center justify-between gap-2 text-small text-muted">

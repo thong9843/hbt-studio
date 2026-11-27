@@ -226,10 +226,7 @@ describe('Unified Studio UI: AppLayout & Sidebar & HbtCorePage', () => {
     statusCard = await screen.findByRole('status', { name: 'Đang dựng' });
     expect(statusCard).toHaveTextContent('StickV');
     expect(statusCard).toHaveTextContent('Tháp Pisa');
-    expect(within(statusCard).getByRole('link')).toHaveAttribute(
-      'href',
-      '/stickv?slug=pisa-demo',
-    );
+    expect(within(statusCard).getByRole('link')).toHaveAttribute('href', '/stickv?slug=pisa-demo');
 
     // Chuyển qua tất cả route kể cả /stickv -> SidebarRenderStatus LUÔN hiển thị và KHÔNG re-render trang khi % nhảy
     await user.click(within(nav).getByRole('link', { name: 'StickV' }));
