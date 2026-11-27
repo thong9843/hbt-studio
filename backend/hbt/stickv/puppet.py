@@ -2700,7 +2700,8 @@ class PuppetRig:
                     self._elbow_springs["el_ry"].step(raw_el_r[1], dt, omega=9.0, zeta=1.0),
                 )
 
-            # Ghép TOÀN BỘ cụm bóng + tay trái + thân + tay phải + đầu trên CÙNG 1 canvas 2x SSAA
+            # Ghép TOÀN BỘ cụm bóng + thân + tay trái/phải + đầu trên CÙNG 1 canvas 2x SSAA
+            # Thứ tự Z-order bắt buộc: Lớp 1 body_torso -> Lớp 2 arm_left & arm_right -> Lớp 3 head
             ss = 2
             stroke_base = max(4.0, float(self.rig_cfg.get("limb_stroke_px", 9.0)) * self._scale)
             hand_r = max(7.5, stroke_base * 1.48)
@@ -2711,7 +2712,7 @@ class PuppetRig:
             hi_canvas = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
             try:
                 dh = ImageDraw.Draw(hi_canvas)
-                # Lớp 1: Bóng sàn mềm + tay trái Bézier mượt
+                # Lớp 1: Bóng sàn mềm + Thân áo + cà vạt đỏ + nguyên 2 chân chữ A + giày vàng gốc
                 dh.ellipse(
                     (
                         (foot_center_x - shadow_half_w) * ss,
@@ -2721,28 +2722,6 @@ class PuppetRig:
                     ),
                     fill=(15, 23, 42, 42),
                 )
-                tan_l = _draw_bezier_arm(
-                    dh,
-                    (sh_l[0] * ss, sh_l[1] * ss),
-                    (el_l[0] * ss, el_l[1] * ss),
-                    (wr_l[0] * ss, wr_l[1] * ss),
-                    w_ss,
-                )
-                self._composite_custom_or_vector_hand(
-                    hi_canvas,
-                    dh,
-                    (wr_l[0] * ss, wr_l[1] * ss),
-                    tan_l,
-                    resolve_hand_shape(
-                        self.pose, "left", self.interaction, board_type=self.board_type
-                    ),
-                    hand_r_ss=hand_r * ss,
-                    outline_w_ss=outline_w_ss,
-                    side="left",
-                    ss=ss,
-                )
-
-                # Lớp 2: Thân áo + cà vạt đỏ + nguyên 2 chân chữ A + giày vàng gốc (scale 2x mượt)
                 rot_ang_q = round(eff_torso_angle, 1)
                 trot_key = (t_h, rot_ang_q)
                 trot_cached = self._torso_rot_cache.get(trot_key)
@@ -2790,7 +2769,27 @@ class PuppetRig:
                     if owns_torso_rot:
                         torso_rot_hi.close()
 
-                # Lớp 3: Tay phải Bézier mượt + găng tay bo tròn liền khối
+                # Lớp 2: Cả 2 cánh tay Bézier + khớp vai + găng tay bo tròn (trước thân & cà vạt)
+                tan_l = _draw_bezier_arm(
+                    dh,
+                    (sh_l[0] * ss, sh_l[1] * ss),
+                    (el_l[0] * ss, el_l[1] * ss),
+                    (wr_l[0] * ss, wr_l[1] * ss),
+                    w_ss,
+                )
+                self._composite_custom_or_vector_hand(
+                    hi_canvas,
+                    dh,
+                    (wr_l[0] * ss, wr_l[1] * ss),
+                    tan_l,
+                    resolve_hand_shape(
+                        self.pose, "left", self.interaction, board_type=self.board_type
+                    ),
+                    hand_r_ss=hand_r * ss,
+                    outline_w_ss=outline_w_ss,
+                    side="left",
+                    ss=ss,
+                )
                 tan_r = _draw_bezier_arm(
                     dh,
                     (sh_r[0] * ss, sh_r[1] * ss),
@@ -2812,7 +2811,7 @@ class PuppetRig:
                     ss=ss,
                 )
 
-                # Lớp 4: Đầu + Mắt + Miệng + Biểu cảm (scale 2x, chống rung nấc pixel)
+                # Lớp 3: Đầu + Mắt + Miệng + Biểu cảm (nằm trên cùng, trên cả tay & thân)
                 head_hi = head_local.resize(
                     (head_local.width * ss, head_local.height * ss), Image.Resampling.BILINEAR
                 )

@@ -733,3 +733,71 @@ def test_smooth_60fps_wrist_kinematics_across_beat_boundaries(tmp_path: Path) ->
     ]
     assert max(steps) <= 10.0
     assert float(np.percentile(steps, 95)) <= 3.5
+
+
+def test_arms_and_gloves_render_in_front_of_torso_and_behind_head(tmp_path: Path) -> None:
+    """INV-06: Cả 2 cánh tay & găng tay nằm TRƯỚC body_torso, và head nằm TRÊN CÙNG."""
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+
+    rig = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="arms_crossed",
+        facing="right",
+        duration_sec=1.0,
+        fps=60,
+        rms_env=[0.3] * 60,
+    )
+    try:
+        t_size = rig.parts["body_torso"].size
+        h_size = rig.parts["head_blank"].size
+        rig.parts["body_torso"].close()
+        rig.parts["head_blank"].close()
+        rig.parts["body_torso"] = Image.new("RGBA", t_size, (220, 40, 120, 255))
+        rig.parts["head_blank"] = Image.new("RGBA", h_size, (30, 110, 240, 255))
+        if rig._torso_2x is not None:
+            rig._torso_2x.close()
+            rig._torso_2x = None
+        rig._torso_rot_cache.clear()
+
+        fr = rig.render_frame(0, 0.0)
+        try:
+            arr = np.asarray(fr)
+            cw, ch = rig.canvas_size
+            ground_y = float(ch - 8)
+            t_w, t_h = t_size
+            foot_x = cw * 0.5
+            sx_l = int(
+                round(foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_left_torso"][0]) * t_w)
+            )
+            sy_l = int(round(ground_y - t_h + float(rig.rig_cfg["shoulder_left_torso"][1]) * t_h))
+            sx_r = int(
+                round(foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_right_torso"][0]) * t_w)
+            )
+            sy_r = int(round(ground_y - t_h + float(rig.rig_cfg["shoulder_right_torso"][1]) * t_h))
+            # Cả khớp vai/tay trái lẫn phải phải đè lên thân áo hồng cánh sen (220, 40, 120)
+            for sx, sy in ((sx_l, sy_l), (sx_r, sy_r)):
+                patch = arr[max(0, sy - 2) : sy + 3, max(0, sx - 2) : sx + 3]
+                assert np.any((patch[..., 0] < 60) & (patch[..., 1] < 60) & (patch[..., 2] < 60))
+        finally:
+            fr.close()
+
+        # Hạ nhẹ cổ để head chồng trực tiếp lên vùng khớp vai/tay -> đầu vẫn phải đè lên tay
+        rig.rig_cfg["neck_anchor_torso"] = [0.50, 0.24]
+        fr_head = rig.render_frame(0, 0.0)
+        try:
+            arr_h = np.asarray(fr_head)
+            sh_mid_y = int(
+                round(ground_y - t_h + float(rig.rig_cfg["shoulder_left_torso"][1]) * t_h)
+            )
+            patch_l = arr_h[max(0, sh_mid_y - 2) : sh_mid_y + 3, max(0, sx_l - 2) : sx_l + 3]
+            patch_r = arr_h[max(0, sh_mid_y - 2) : sh_mid_y + 3, max(0, sx_r - 2) : sx_r + 3]
+            assert np.any((patch_l[..., 2] > 180) & (patch_l[..., 0] < 80))
+            assert np.any((patch_r[..., 2] > 180) & (patch_r[..., 0] < 80))
+        finally:
+            fr_head.close()
+    finally:
+        rig.close()
