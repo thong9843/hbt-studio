@@ -144,6 +144,9 @@ def load_gemini_api_key(env_file: Path | None = None) -> str:
     return key
 
 
+_ORIG_LOAD_GEMINI_API_KEY = load_gemini_api_key
+
+
 def build_gemini_payload(
     user_prompt: str,
     system_prompt: str,
@@ -207,7 +210,17 @@ def generate_structured_json(
     if api_key is not None:
         key = _clean_key_value(api_key)
     else:
-        key = load_gemini_api_key(env_file=env_file)
+        # Giữ tương thích khi caller/test patch `hbt.shared.llm.load_gemini_api_key`
+        import sys
+
+        pkg = sys.modules.get("hbt.shared.llm")
+        pkg_loader = getattr(pkg, "load_gemini_api_key", None) if pkg else None
+        loader = (
+            pkg_loader
+            if pkg_loader is not None and pkg_loader is not _ORIG_LOAD_GEMINI_API_KEY
+            else load_gemini_api_key
+        )
+        key = loader(env_file=env_file)
 
     if not is_valid_gemini_api_key(key):
         raise GeminiClientError(
