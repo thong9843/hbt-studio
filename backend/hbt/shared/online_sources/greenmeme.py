@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
+from hbt.shared.fs_utils import safe_slug
 from hbt.shared.online_sources.meme_tagging import (
     auto_tag_meme,
     load_memes_index,
@@ -36,8 +37,7 @@ def _clean_title(raw: str) -> str:
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "meme").strip()).strip("-").lower()
-    return s[:64] or "meme"
+    return safe_slug(raw, default="meme", max_len=64, lowercase=True)
 
 
 def _parse_wp_posts(posts: list[dict[str, Any]]) -> list[dict[str, Any]]:

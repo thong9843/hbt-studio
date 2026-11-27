@@ -13,6 +13,10 @@ export interface JobProgress {
   total_beats?: number | null;
   percent?: number;
   text?: string;
+  status?: string;
+  phase?: string;
+  data?: Record<string, unknown>;
+  timings?: Record<string, unknown>;
 }
 
 export interface UseJobOptions {
@@ -22,7 +26,7 @@ export interface UseJobOptions {
 }
 
 const EMPTY: JobProgress = { progress: 0, step: '', message: '' };
-export const PROGRESS_THROTTLE_MS = 150;
+export const PROGRESS_THROTTLE_MS = 250;
 
 /**
  * Single-Stream SSE Registry: đảm bảo mỗi `jobId` chỉ mở tối đa 1 kết nối `EventSource`
@@ -60,6 +64,10 @@ function mergeProgress(prev: JobProgress, data: Partial<JobProgress>): JobProgre
   if (data.total_beats !== undefined) next.total_beats = data.total_beats;
   else if (prev.total_beats !== undefined) next.total_beats = prev.total_beats;
   if (data.percent !== undefined) next.percent = data.percent;
+  if (data.status !== undefined) next.status = data.status;
+  if (data.phase !== undefined) next.phase = data.phase;
+  if (data.data !== undefined) next.data = data.data;
+  if (data.timings !== undefined) next.timings = data.timings;
   return next;
 }
 
@@ -124,7 +132,7 @@ export function useJob(
     emitProgress(initial);
     setJob(null);
     setConnectionError(null);
-    if (!jobId) return;
+    if (!jobId || typeof EventSource === 'undefined') return;
 
     let closed = false;
     const existing = activeStreams.get(jobId);
@@ -153,41 +161,72 @@ export function useJob(
       }
     };
 
-    const finish = async (fromEndEvent: boolean) => {
+    const finish = async (fromEndEvent: boolean, endEvent?: Event) => {
       if (closed) return;
       clearTimer();
+      let final: Job | null = null;
       try {
-        const final = await api.getJob(jobId);
-        // Nếu kết nối SSE ngắt tạm thời nhưng backend vẫn đang chạy/chờ -> KHÔNG báo hoàn tất giả
-        if (!fromEndEvent && (final.status === 'running' || final.status === 'queued')) {
-          const synced = mergeProgress(latestProgressRef.current, {
-            progress: final.progress ?? latestProgressRef.current.progress,
-            step: final.step ?? final.stage ?? latestProgressRef.current.step,
-            stage: final.stage ?? final.step,
-            current_beat: final.current_beat,
-            total_beats: final.total_beats,
-          });
-          latestProgressRef.current = synced;
-          emitProgress(synced);
+        final = await api.getJob(jobId);
+      } catch (e) {
+        if (fromEndEvent && endEvent && 'data' in endEvent) {
+          try {
+            const payload = JSON.parse((endEvent as MessageEvent<string>).data) as {
+              status?: Job['status'];
+              error?: string | null;
+              output?: Job['output'];
+            };
+            if (payload && payload.status) {
+              final = {
+                id: jobId,
+                project: '',
+                status: payload.status,
+                progress: payload.status === 'done' ? 100 : latestProgressRef.current.progress,
+                step: latestProgressRef.current.step,
+                log_tail: [],
+                output: payload.output ?? null,
+                error: payload.error ?? null,
+                needs_confirmation: false,
+                preview: false,
+                preview_seconds: null,
+              };
+            }
+          } catch {
+            // Bỏ qua nếu gói end không hợp lệ
+          }
+        }
+        if (!final) {
+          closed = true;
+          closeStream();
+          setConnectionError(e instanceof Error ? e.message : String(e));
           return;
         }
-        closed = true;
-        closeStream();
-        setJob(final);
-        const terminalProgress: JobProgress = {
-          ...latestProgressRef.current,
-          progress: final.status === 'done' ? 100 : latestProgressRef.current.progress,
-        };
-        latestProgressRef.current = terminalProgress;
-        emitProgress(terminalProgress);
-        if (notifiedJobIdRef.current !== jobId) {
-          notifiedJobIdRef.current = jobId;
-          finishedRef.current?.(final);
-        }
-      } catch (e) {
-        closed = true;
-        closeStream();
-        setConnectionError(e instanceof Error ? e.message : String(e));
+      }
+
+      // Nếu kết nối SSE ngắt tạm thời nhưng backend vẫn đang chạy/chờ -> KHÔNG báo hoàn tất giả
+      if (!fromEndEvent && (final.status === 'running' || final.status === 'queued')) {
+        const synced = mergeProgress(latestProgressRef.current, {
+          progress: final.progress ?? latestProgressRef.current.progress,
+          step: final.step ?? final.stage ?? latestProgressRef.current.step,
+          stage: final.stage ?? final.step,
+          current_beat: final.current_beat,
+          total_beats: final.total_beats,
+        });
+        latestProgressRef.current = synced;
+        emitProgress(synced);
+        return;
+      }
+      closed = true;
+      closeStream();
+      setJob(final);
+      const terminalProgress: JobProgress = {
+        ...latestProgressRef.current,
+        progress: final.status === 'done' ? 100 : latestProgressRef.current.progress,
+      };
+      latestProgressRef.current = terminalProgress;
+      emitProgress(terminalProgress);
+      if (notifiedJobIdRef.current !== jobId) {
+        notifiedJobIdRef.current = jobId;
+        finishedRef.current?.(final);
       }
     };
 
@@ -201,8 +240,13 @@ export function useJob(
 
         const now = Date.now();
         const stepChanged = next.step !== prev.step || next.stage !== prev.stage;
+        const hasStructuredPayload =
+          next.data !== undefined || next.status === 'waiting_pick' || next.status !== prev.status;
         const isFirstOrBoundary =
-          lastFlushAtRef.current === 0 || stepChanged || next.progress >= 100;
+          lastFlushAtRef.current === 0 ||
+          stepChanged ||
+          hasStructuredPayload ||
+          next.progress >= 100;
         const elapsed = now - lastFlushAtRef.current;
 
         if (isFirstOrBoundary || elapsed >= PROGRESS_THROTTLE_MS) {
@@ -224,7 +268,7 @@ export function useJob(
       }
     };
 
-    const onEnd = () => void finish(true);
+    const onEnd = (ev: Event) => void finish(true, ev);
     const onError = () => {
       // EventSource tự nối lại; chỉ khi đã đóng hẳn mới hỏi trạng thái job.
       if (source.readyState === EventSource.CLOSED) void finish(false);

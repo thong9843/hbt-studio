@@ -6,8 +6,8 @@ import { ProjectsPage } from '../pages/ProjectsPage';
 import { useRenderJob } from '../hooks/renderJob';
 import { FakeEventSource, stubFetch } from '../test/fakes';
 import { renderWithProviders } from '../test/render';
-import { AppShell } from './AppShell';
-import { RenderCard } from './SideNav';
+import { AppLayout } from './layout/AppLayout';
+import { RenderCard } from './layout/Sidebar';
 
 afterEach(() => {
   localStorage.removeItem('hbt_sidebar_collapsed');
@@ -47,7 +47,7 @@ function Where() {
 function shell(route = '/', render?: { percent: number; step: string } | null) {
   return renderWithProviders(
     <Routes>
-      <Route element={<AppShell render={render} />}>
+      <Route element={<AppLayout render={render} />}>
         <Route path="/" element={<Where />} />
         <Route path="/core" element={<Where />} />
         <Route path="/projects" element={<ProjectsPage />} />
@@ -342,7 +342,7 @@ describe('render progress card', () => {
     }
     renderWithProviders(
       <Routes>
-        <Route element={<AppShell />}>
+        <Route element={<AppLayout />}>
           <Route path="/" element={<Starter />} />
           <Route path="/library" element={<Where />} />
         </Route>
@@ -380,7 +380,7 @@ describe('render progress card', () => {
     }
     renderWithProviders(
       <Routes>
-        <Route element={<AppShell />}>
+        <Route element={<AppLayout />}>
           <Route path="/" element={<Starter />} />
         </Route>
       </Routes>,

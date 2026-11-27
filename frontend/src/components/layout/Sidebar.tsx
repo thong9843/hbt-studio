@@ -43,10 +43,16 @@ const ENV_ITEMS = [
   'vieneu',
 ] as const satisfies readonly (keyof Health)[];
 
-/** Tiến độ dựng đang chạy, do AppLayout / AppShell truyền vào. */
+/** Tiến độ dựng đang chạy, do AppLayout / SidebarRenderStatus truyền vào. */
 export interface RenderProgress {
   percent: number;
   step: string;
+  /** Động cơ sở hữu job (`core | postv | chatting | stickv`). */
+  engine?: 'core' | 'postv' | 'chatting' | 'stickv';
+  /** Tên dự án hiển thị gọn 1 dòng. */
+  title?: string;
+  /** Đường dẫn nhảy thẳng tới dự án đang chạy. */
+  route?: string;
   /** Dòng "Còn ≈ …" hoặc "Đang ước tính…"; bỏ trống = không hiện. */
   remaining?: string;
   /** Có thì hiện nút Huỷ. */
@@ -216,36 +222,157 @@ function ThemeToggle({ mini }: { mini: boolean }) {
   );
 }
 
-/** Thẻ tiến độ dựng ở chân thanh trái; chỉ hiện khi có `render`. */
-export function RenderCard({ render, mini }: { render: RenderProgress; mini: boolean }) {
-  const pct = Math.round(render.percent);
+const ENGINE_BADGE_MAP: Record<
+  'core' | 'postv' | 'chatting' | 'stickv',
+  { label: string; badgeClass: string }
+> = {
+  core: {
+    label: 'HBT Core',
+    badgeClass: 'bg-red-500/15 text-red-500 border-red-500/30',
+  },
+  postv: {
+    label: 'PostV',
+    badgeClass: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  },
+  chatting: {
+    label: 'Chatting',
+    badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  },
+  stickv: {
+    label: 'StickV',
+    badgeClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  },
+};
+
+/** Khối tiến độ tổng cố định ở Sidebar trái cho cả 4 động cơ (hỗ trợ cả 224px & Icon Rail 64px). */
+export function SidebarRenderStatus({ render, mini }: { render: RenderProgress; mini: boolean }) {
+  const pct = Math.max(0, Math.min(100, Math.round(render.percent)));
+  const engineInfo = render.engine ? ENGINE_BADGE_MAP[render.engine] : null;
+  const projectLabel = render.title || '';
+  const tooltip = [engineInfo?.label || vi.nav.renderProgress, projectLabel, `${pct}%`, render.step]
+    .filter(Boolean)
+    .join(' · ');
+
   if (mini) {
+    const r = 16;
+    const c = 2 * Math.PI * r;
+    const offset = c * (1 - pct / 100);
+    const ring = (
+      <div
+        role="progressbar"
+        aria-label={vi.nav.renderProgressBar}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        title={tooltip}
+        className="relative mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-soft/70 text-[10px] font-bold tabular-nums text-text"
+      >
+        <svg viewBox="0 0 40 40" className="h-10 w-10 -rotate-90" aria-hidden="true">
+          <circle
+            cx="20"
+            cy="20"
+            r={r}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            className="text-border-subtle"
+          />
+          <circle
+            cx="20"
+            cy="20"
+            r={r}
+            fill="none"
+            stroke="var(--brand)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={c}
+            strokeDashoffset={offset}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center">{pct}%</span>
+      </div>
+    );
     return (
-      <div className="px-2 py-2" title={`${vi.nav.renderProgress}: ${pct}%`}>
-        <Progress value={render.percent} label={vi.nav.renderProgressBar} />
+      <div className="px-2 py-2">
+        {render.route ? (
+          <Link
+            to={render.route}
+            title={tooltip}
+            aria-label={`Đi tới dự án: ${tooltip}`}
+            className="block rounded-full transition-transform hover:scale-105"
+          >
+            {ring}
+          </Link>
+        ) : (
+          ring
+        )}
       </div>
     );
   }
+
   return (
-    <div className="ui-inner mx-3 my-2 p-3" role="status" aria-label={vi.nav.renderProgress}>
-      <p className="text-tiny font-semibold text-muted">{vi.nav.renderProgress}</p>
-      <p className="mb-2 mt-1 truncate text-small font-bold">
-        <span className="tabular-nums">{pct}%</span>
-        {render.step && <span> · {render.step}</span>}
+    <div
+      className="ui-inner mx-3 my-2 space-y-2 border border-line/80 p-3"
+      role="status"
+      aria-label={vi.nav.renderProgress}
+    >
+      <div className="flex items-center justify-between gap-2">
+        {engineInfo ? (
+          <span
+            className={cx(
+              'inline-flex items-center rounded-pill border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider',
+              engineInfo.badgeClass,
+            )}
+          >
+            {engineInfo.label}
+          </span>
+        ) : (
+          <p className="text-tiny font-semibold text-muted">{vi.nav.renderProgress}</p>
+        )}
+        <span className="tabular-nums text-tiny font-extrabold text-brand">{pct}%</span>
+      </div>
+
+      {projectLabel && (
+        <p className="truncate text-tiny font-bold text-text" title={projectLabel}>
+          {projectLabel}
+        </p>
+      )}
+
+      <p className="truncate text-[11px] font-semibold text-muted" title={render.step}>
+        {render.step || vi.nav.renderProgress}
       </p>
-      <Progress value={render.percent} label={vi.nav.renderProgressBar} />
-      {(render.remaining || render.onCancel) && (
-        <p className="mt-2 flex items-center justify-between gap-2 text-tiny text-muted">
-          <span className="tabular-nums">{render.remaining}</span>
+
+      <Progress value={pct} label={vi.nav.renderProgressBar} />
+
+      <div className="flex items-center justify-between gap-1.5 pt-0.5">
+        {render.route ? (
+          <Link
+            to={render.route}
+            className="truncate text-[11px] font-bold text-text hover:text-brand hover:underline"
+          >
+            Đi tới dự án →
+          </Link>
+        ) : (
+          <span className="truncate text-tiny text-muted tabular-nums">{render.remaining}</span>
+        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {render.route && render.remaining && (
+            <span className="text-[10px] text-muted tabular-nums">{render.remaining}</span>
+          )}
           {render.onCancel && (
             <Button tone="soft" size="sm" onClick={render.onCancel}>
               {vi.nav.cancelRender}
             </Button>
           )}
-        </p>
-      )}
+        </div>
+      </div>
     </div>
   );
+}
+
+/** Alias tương thích cho các test đơn lẻ đang mount `RenderCard`. */
+export function RenderCard({ render, mini }: { render: RenderProgress; mini: boolean }) {
+  return <SidebarRenderStatus render={render} mini={mini} />;
 }
 
 /**

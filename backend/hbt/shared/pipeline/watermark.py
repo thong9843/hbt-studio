@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from pydantic import BaseModel, Field
 
 from hbt.config import BRAND_DIR, REPO_ROOT
+from hbt.shared.pillow_utils import load_cached_font
 
 WatermarkMode = Literal["text", "logo", "both"]
 WatermarkPosition = Literal["bottom-right", "bottom-left", "top-right", "top-left", "center-subtle"]
@@ -29,12 +30,7 @@ class WatermarkSettings(BaseModel):
 
 
 def _load_bold_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        if FONT_BOLD.is_file():
-            return ImageFont.truetype(str(FONT_BOLD), size=max(10, size))
-    except Exception:
-        pass
-    return ImageFont.load_default()
+    return load_cached_font(FONT_BOLD, size)
 
 
 def resolve_watermark_logo(

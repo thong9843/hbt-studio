@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-import struct
 import wave
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +21,7 @@ from hbt.core.models import HbtCoreSegment, SegmentVoiceTiming
 from hbt.pipeline.text import RAW_TOKEN_RE, TOKEN_RE
 from hbt.postv.voice import DEFAULT_NARRATOR as DEFAULT_VOICE
 from hbt.postv.voice import SynthItem, VoiceProvider
+from hbt.shared.audio_utils import write_fallback_speech_wav_atomic
 from hbt.shared.tts_client import resolve_voice_id as _resolve_voice_id
 
 logger = logging.getLogger(__name__)
@@ -90,39 +90,8 @@ def _segment_hash(voice_id: str, spoken: str) -> str:
 
 
 def create_fallback_speech_wav(dest: Path, text: str, sample_rate: int = SAMPLE_RATE) -> None:
-    """Tạo file WAV giọng giả lập có nhịp âm tiết (dùng khi môi trường test/CI chưa cài .venv-tts).
-
-    Tạo cụm xung âm thanh theo từng từ và khoảng lặng giữa các phân đoạn để bộ căn chữ
-    (align_scenes / silence) và bộ trộn FFmpeg luôn hoạt động mượt 100% offline.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    words = [w for w in (text or "").split() if w.strip()]
-    word_count = max(2, len(words))
-    # Mỗi từ ~0.24s phát âm + 0.05s nghỉ nhẹ, không giới hạn 750 từ
-    dur_s = max(1.2, word_count * 0.28 + 0.25)
-    total_frames = int(round(dur_s * sample_rate))
-
-    buf = bytearray(total_frames * 2)
-    frames_per_word = max(1, int(0.21 * sample_rate))
-    gap_frames = max(1, int(0.05 * sample_rate))
-    stride = frames_per_word + gap_frames
-
-    for w_idx in range(word_count):
-        start_f = int(0.08 * sample_rate) + w_idx * stride
-        end_f = min(total_frames - int(0.08 * sample_rate), start_f + frames_per_word)
-        if start_f >= total_frames or end_f <= start_f:
-            break
-        freq = 185.0 + (w_idx % 4) * 25.0
-        for f in range(start_f, end_f):
-            env = math.sin(math.pi * (f - start_f) / max(1, end_f - start_f))
-            val = int(7500.0 * env * math.sin(2.0 * math.pi * freq * (f / sample_rate)))
-            struct.pack_into("<h", buf, f * 2, val)
-
-    with wave.open(str(dest), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(bytes(buf))
+    """Tạo file WAV giọng giả lập có nhịp âm tiết (khi CI/test chưa cài .venv-tts)."""
+    write_fallback_speech_wav_atomic(dest, text, sample_rate=sample_rate, audible=True)
 
 
 def wav_frames_and_rate(wav_path: Path) -> tuple[int, int]:

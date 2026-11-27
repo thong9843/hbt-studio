@@ -9,6 +9,7 @@ chưa; chưa có thì nhập file giọng như thường, `vieneu_note` nói cá
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -16,6 +17,8 @@ import subprocess
 from fastapi import APIRouter
 
 from hbt.api.deps import State
+
+_REAL_IMPORT_MODULE = importlib.import_module
 
 router = APIRouter()
 
@@ -73,15 +76,22 @@ def check_ffmpeg() -> list[str] | None:
 
 def check_whisper() -> bool:
     try:
-        importlib.import_module("faster_whisper")
+        if importlib.import_module is not _REAL_IMPORT_MODULE:
+            importlib.import_module("faster_whisper")
+            return True
+        return importlib.util.find_spec("faster_whisper") is not None
     except Exception:
         return False
-    return True
 
 
 def check_gpu() -> bool:
-    # faster-whisper chạy trên CTranslate2 → hỏi thẳng CTranslate2, không cần torch.
+    # faster-whisper chạy trên CTranslate2 → chỉ nạp khi tìm thấy gói (hoặc test patch).
     try:
+        if (
+            importlib.import_module is _REAL_IMPORT_MODULE
+            and importlib.util.find_spec("ctranslate2") is None
+        ):
+            return False
         ctranslate2 = importlib.import_module("ctranslate2")
         return ctranslate2.get_cuda_device_count() > 0
     except Exception:

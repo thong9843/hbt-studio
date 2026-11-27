@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from hbt.shared.fs_utils import safe_slug
 from hbt.shared.online_sources.meme_tagging import auto_tag_meme
 
 GIPHY_SEARCH_URL = "https://api.giphy.com/v1/stickers/search"
@@ -30,8 +31,7 @@ _STICKER_URL_RE = re.compile(
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "sticker").strip()).strip("-").lower()
-    return s[:64] or "sticker"
+    return safe_slug(raw, default="sticker", max_len=64, lowercase=True)
 
 
 def _infer_emotion_tag(name: str) -> str:

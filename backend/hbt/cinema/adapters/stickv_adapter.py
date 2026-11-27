@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from hbt.cinema.director_ai import assign_editorial_shots
 from hbt.cinema.preflight import PreflightQualityGate
 from hbt.cinema.schema import (
     AudioPlan,
@@ -101,8 +100,7 @@ def stickv_to_timeline(
         beats=beats,
     )
 
-    if run_director:
-        spec = assign_editorial_shots(spec)
+    _ = run_director
     if run_preflight:
         spec = PreflightQualityGate().validate_and_reflow(spec, auto_fix=True).repaired_spec
     return spec

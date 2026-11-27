@@ -100,6 +100,10 @@ class Job:
     stage: str = ""
     current_beat: int | None = None
     total_beats: int | None = None
+    engine: str = ""
+    title: str = ""
+    route: str = ""
+    updated_at: float = field(default_factory=time.time)
 
     @property
     def finished(self) -> bool:
@@ -118,12 +122,16 @@ class Job:
 
     def _emit(self, kind: str, data: dict) -> None:
         with self._lock:
-            self.last_heartbeat = time.time()
+            now = time.time()
+            self.last_heartbeat = now
+            self.updated_at = now
             self._events.append((kind, data))
 
     def _progress(self, pct: float, step: str, message: str, **extra: Any) -> None:
         with self._lock:
-            self.last_heartbeat = time.time()
+            now = time.time()
+            self.last_heartbeat = now
+            self.updated_at = now
             self.progress, self.step = pct, step
             if "stage" in extra and isinstance(extra["stage"], str):
                 self.stage = extra["stage"]
@@ -141,8 +149,10 @@ class Job:
     def _finish_locked(self, status: str, **extra: Any) -> None:
         if self.status in FINISHED:  # chỉ kết thúc một lần
             return
+        now = time.time()
         self.status = status
-        self.finished_at = time.time()
+        self.finished_at = now
+        self.updated_at = now
         for k, v in extra.items():
             setattr(self, k, v)
         payload = {"status": status, "error": self.error, "output": self.output}
@@ -202,6 +212,35 @@ def check_render_tools() -> None:
         )
     if missing:
         raise ServiceUnavailable(f"FFmpeg trên máy thiếu: {', '.join(missing)}. {INSTALL_HINT}")
+
+
+def infer_engine_and_route(
+    kind: str, slug: str, *, engine_hint: str = "", route_hint: str = ""
+) -> tuple[str, str]:
+    """Chuẩn hoá cặp `(engine, route)` cho mọi loại job của 4 động cơ."""
+    raw = (kind or "").strip()
+    if raw in ("stickv", "stickv_render"):
+        engine = "stickv"
+        route = f"/stickv?slug={slug}" if slug else "/stickv"
+    elif raw in ("chatting_auto", "chatting_render"):
+        engine = "chatting"
+        route = f"/chatting/{slug}" if slug else "/chatting"
+    elif raw == "postv_quick":
+        engine = "postv"
+        route = "/postv"
+    elif raw == "postv_auto":
+        engine = "postv"
+        route = f"/postv/{slug}/export" if slug else "/postv"
+    elif raw in ("hbt_core_auto", "hbt_core_images", "hbt_core_prepare"):
+        engine = "core"
+        route = f"/core?slug={slug}" if slug else "/core"
+    else:
+        engine = engine_hint or "core"
+        if engine == "postv":
+            route = f"/postv/{slug}/export" if slug else "/postv"
+        else:
+            route = f"/p/{slug}/export" if slug else "/core"
+    return engine_hint or engine, route_hint or route
 
 
 class JobManager:
@@ -379,6 +418,9 @@ class JobManager:
                 raise Unprocessable("Có từ bị chặn, sửa rồi dựng lại: " + "; ".join(blocked))
         if self._tool_check is not None:
             self._tool_check()
+        is_postv = isinstance(project, PostvProject)
+        engine = "postv" if is_postv else "core"
+        route = f"/postv/{slug}/export" if is_postv else f"/p/{slug}/export"
         job = Job(
             uuid.uuid4().hex[:12],
             slug,
@@ -388,6 +430,9 @@ class JobManager:
             allow_long_trim,
             preview_seconds,
             aspect_mode=aspect_mode,
+            engine=engine,
+            title=getattr(project, "title", "") or slug,
+            route=route,
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -409,7 +454,18 @@ class JobManager:
             raise Unprocessable("Chưa có đoạn nào có lời đọc để sinh giọng")
         if self.is_busy(slug):
             raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
-        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="voice",
+            engine="postv",
+            title=getattr(project, "title", "") or slug,
+            route=f"/postv/{slug}/script",
+        )
         with self._lock:
             self._jobs[job.id] = job
             self._prune()
@@ -436,7 +492,18 @@ class JobManager:
             raise Unprocessable("Chưa có cảnh nào có lời đọc để sinh giọng")
         if self.is_busy(slug):
             raise Conflict("Dự án đang được dựng hoặc đang sinh giọng, hãy đợi hoặc huỷ job")
-        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="voice")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="voice",
+            engine="core",
+            title=getattr(project, "title", "") or slug,
+            route=f"/p/{slug}/audio",
+        )
         job.hbt_voice_id = voice_id  # type: ignore[attr-defined]
         with self._lock:
             self._jobs[job.id] = job
@@ -461,7 +528,18 @@ class JobManager:
             raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
         if seed is None:
             seed = random.randint(1, 999999)
-        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_auto")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="postv_auto",
+            engine="postv",
+            title=getattr(project, "title", "") or slug,
+            route=f"/postv/{slug}/export",
+        )
         job.auto_options = {  # type: ignore[attr-defined]
             "style": style,
             "comments": comments,
@@ -487,7 +565,18 @@ class JobManager:
             raise Unprocessable("Chỉ dự án PostV mới hỗ trợ chuỗi tự động")
         if self.is_busy(slug):
             raise Conflict("Dự án đang bận (đang dựng hoặc sinh giọng), hãy đợi xong hoặc huỷ")
-        job = Job(uuid.uuid4().hex[:12], slug, False, None, None, False, kind="postv_quick")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            slug,
+            False,
+            None,
+            None,
+            False,
+            kind="postv_quick",
+            engine="postv",
+            title=getattr(project, "title", "") or slug,
+            route="/postv",
+        )
         job.auto_input = input_text  # type: ignore[attr-defined]
         job.auto_options = options or {}  # type: ignore[attr-defined]
         job.start_stage = start_stage  # type: ignore[attr-defined]
@@ -981,7 +1070,18 @@ class JobManager:
     ) -> Job:
         """Job tự động hoá Chatting 4 pha: Lấy bài -> Viết chat -> Giọng -> Xem nhanh."""
         job_slug = slug or f"chat-{uuid.uuid4().hex[:6]}"
-        job = Job(uuid.uuid4().hex[:12], job_slug, False, None, None, False, kind="chatting_auto")
+        job = Job(
+            uuid.uuid4().hex[:12],
+            job_slug,
+            False,
+            None,
+            None,
+            False,
+            kind="chatting_auto",
+            engine="chatting",
+            title=job_slug,
+            route=f"/chatting/{job_slug}",
+        )
         job.chatting_input = raw_input  # type: ignore[attr-defined]
         job.chatting_platform = platform  # type: ignore[attr-defined]
         job.chatting_background = background_name  # type: ignore[attr-defined]
@@ -1013,6 +1113,9 @@ class JobManager:
             False,
             aspect_mode=aspect_mode,
             kind="chatting_render",
+            engine="chatting",
+            title=slug,
+            route=f"/chatting/{slug}",
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -1025,12 +1128,14 @@ class JobManager:
         from hbt.chatting.service import run_chatting_auto_job
 
         def on_event(event_type: str, data: dict[str, Any]) -> None:
-            pct = data.get("percent", 0)
-            phase = data.get("phase", "")
-            msg = data.get("text", "")
-            job._emit(event_type, data)
             if event_type == "progress":
-                job._progress(pct, phase, msg)
+                pct = data.get("percent", 0)
+                phase = data.get("phase", "")
+                msg = data.get("text", "")
+                extra = {k: v for k, v in data.items() if k not in ("progress", "step", "message")}
+                job._progress(pct, phase, msg, **extra)
+            else:
+                job._emit(event_type, data)
 
         try:
             workspace_dir = self.storage.workspace_dir
@@ -1091,8 +1196,7 @@ class JobManager:
         from hbt.chatting.store import load_chat
 
         def on_progress(pct: int, msg: str) -> None:
-            job._progress(pct, "render", msg)
-            job._emit("progress", {"percent": pct, "text": msg})
+            job._progress(pct, "render", msg, percent=pct, text=msg)
 
         try:
             workspace_dir = self.storage.workspace_dir
@@ -1157,6 +1261,9 @@ class JobManager:
             False,
             aspect_mode=aspect_mode,
             kind="hbt_core_auto",
+            engine="core",
+            title=getattr(script, "title", "") or slug,
+            route=f"/core?slug={slug}",
         )
         job.core_script = script  # type: ignore[attr-defined]
         job.core_voice_id = voice_id  # type: ignore[attr-defined]
@@ -1249,6 +1356,9 @@ class JobManager:
             stage="Tự vẽ ảnh 2D",
             current_beat=0,
             total_beats=total,
+            engine="core",
+            title=getattr(project, "title", "") or slug,
+            route=f"/core?slug={slug}",
         )
         job.core_images_overwrite = overwrite  # type: ignore[attr-defined]
         job.core_images_economy = economy_mode  # type: ignore[attr-defined]
@@ -1461,6 +1571,9 @@ class JobManager:
             stage="Tạo kịch bản",
             current_beat=0,
             total_beats=total or None,
+            engine="core",
+            title=(getattr(script, "title", "") if script is not None else "") or slug,
+            route=f"/core?slug={slug}",
         )
         job.core_prepare_options = {  # type: ignore[attr-defined]
             "prompt": prompt,
@@ -1797,11 +1910,13 @@ class JobManager:
         if self._tool_check is not None:
             self._tool_check()
         total_beats: int | None = None
+        proj_title = slug
         try:
             from hbt.stickv.storage import load_stickv_project
 
             proj = load_stickv_project(self.storage.workspace_dir, slug)
             total_beats = len(proj.beats[:3] if preview else proj.beats)
+            proj_title = getattr(proj, "title", "") or slug
         except Exception:
             total_beats = None
 
@@ -1817,6 +1932,9 @@ class JobManager:
             stage="Sinh giọng VieNeu-TTS",
             current_beat=0 if total_beats else None,
             total_beats=total_beats,
+            engine="stickv",
+            title=proj_title,
+            route=f"/stickv?slug={slug}",
         )
         job._progress(
             2.0,

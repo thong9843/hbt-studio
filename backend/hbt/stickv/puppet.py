@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from hbt.shared.audio_utils import extract_wav_rms_frames
 from hbt.stickv.poses_init import remove_white_background_image
 
 PUPPET_SLOTS: tuple[str, ...] = (
@@ -585,8 +585,10 @@ def rotate_around_pivot(
     layer_rgba: Image.Image,
     angle_deg: float,
     pivot_xy: tuple[float, float],
+    *,
+    resample: int = Image.Resampling.BICUBIC,
 ) -> tuple[Image.Image, tuple[float, float]]:
-    """Xoay ảnh RGBA quanh đúng `pivot_xy` bằng phép biến đổi affine BICUBIC, không cắt góc."""
+    """Xoay ảnh RGBA quanh đúng `pivot_xy` bằng phép biến đổi affine, không cắt góc."""
     if abs(angle_deg) < 0.05:
         return layer_rgba.copy(), pivot_xy
 
@@ -628,7 +630,7 @@ def rotate_around_pivot(
         (out_w, out_h),
         Image.Transform.AFFINE,
         (a, b, c, d, e, f),
-        resample=Image.Resampling.BICUBIC,
+        resample=resample,
     )
     return rotated, (ox, oy)
 
@@ -651,37 +653,8 @@ def smooth_rms_envelope(raw_rms: list[float], fps: int = 30) -> list[float]:
 
 def compute_smoothed_rms(wav_path: Path, fps: int, duration_sec: float) -> list[float]:
     """Tính RMS từng frame từ WAV (chuẩn hóa theo P92) và lọc mượt EMA."""
-    n_frames = max(1, int(round(max(0.1, duration_sec) * max(1, fps))))
-    if not wav_path.is_file():
-        return [0.0] * n_frames
-    try:
-        with wave.open(str(wav_path), "rb") as wf:
-            sr = wf.getframerate()
-            ch = wf.getnchannels()
-            sw = wf.getsampwidth()
-            raw = wf.readframes(wf.getnframes())
-        if not raw or sw != 2:
-            return [0.0] * n_frames
-        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        if ch > 1:
-            samples = samples.reshape(-1, ch).mean(axis=1)
-        samples /= 32768.0
-        win = max(1, int(sr / max(1, fps)))
-        frame_rms: list[float] = []
-        for idx in range(n_frames):
-            s0 = idx * win
-            s1 = s0 + win
-            if s0 >= len(samples):
-                frame_rms.append(0.0)
-            else:
-                seg = samples[s0:s1]
-                frame_rms.append(float(np.sqrt(np.mean(seg**2))))
-        p92 = float(np.percentile(frame_rms, 92)) if frame_rms else 0.1
-        peak_ref = max(0.02, p92)
-        rms_norm = [min(1.0, r / peak_ref) for r in frame_rms]
-        return smooth_rms_envelope(rms_norm, fps=fps)
-    except Exception:
-        return [0.0] * n_frames
+    rms_norm = extract_wav_rms_frames(wav_path, fps, duration_sec, norm_mode="frame_p92")
+    return smooth_rms_envelope(rms_norm, fps=fps)
 
 
 def compute_mouth_transform(env_val: float) -> tuple[str, float, float]:
@@ -1778,6 +1751,125 @@ def _load_rgba_scaled(path: Path, scale: float) -> Image.Image:
         return rgba.resize((nw, nh), Image.Resampling.LANCZOS)
 
 
+@dataclass
+class _CachedPuppetSprites:
+    """Bộ sprite Puppet đã giải nén & scale sẵn, chia sẻ qua nhiều beat trong cùng render."""
+
+    rig_cfg: dict[str, Any]
+    scale: float
+    parts: dict[str, Image.Image]
+    torso_2x: Image.Image | None
+    custom_hands: dict[str, Image.Image]
+    eyes: dict[str, Image.Image]
+    mouths: dict[str, Image.Image]
+
+    def close(self) -> None:
+        for group in (self.parts, self.custom_hands, self.eyes, self.mouths):
+            for im in group.values():
+                im.close()
+            group.clear()
+        if self.torso_2x is not None:
+            self.torso_2x.close()
+            self.torso_2x = None
+
+
+class PuppetAssetCache:
+    """Cache tập sprite `PuppetRig` theo `(library_dir, assets_dir, target_height)`."""
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[str, str, int], _CachedPuppetSprites] = {}
+
+    def get_or_load(
+        self,
+        library_dir: Path,
+        assets_dir: Path,
+        target_height: int,
+    ) -> _CachedPuppetSprites:
+        key = (
+            str(Path(library_dir).resolve()),
+            str(Path(assets_dir).resolve()),
+            int(target_height),
+        )
+        cached = self._entries.get(key)
+        if cached is not None:
+            return cached
+
+        slot_paths = find_puppet_slot_paths(library_dir, assets_dir)
+        base_path = slot_paths["base_character"][0]
+        pdir = Path(assets_dir) / "stickman" / "puppet"
+        if not (pdir / "base_character.png").is_file():
+            pdir = Path(library_dir) / "stickman" / "puppet"
+        cache_dir = pdir / ".segments"
+
+        if base_path is None:
+            raise FileNotFoundError("Không tìm thấy base_character cho Puppet 2D")
+
+        seg_info = auto_segment_puppet(
+            base_path, cache_dir, puppet_dir=pdir if pdir.is_dir() else None
+        )
+        rig_cfg: dict[str, Any] = seg_info["rig_config"]
+        seg_paths: dict[str, Path] = seg_info["segments"]
+
+        with Image.open(seg_paths["body_torso"]) as bt, Image.open(seg_paths["head_blank"]) as hb:
+            raw_total_h = max(1, bt.height + int(hb.height * 1.22))
+        scale = (target_height * 0.88) / raw_total_h
+
+        parts: dict[str, Image.Image] = {}
+        for name in ALL_SEGMENT_NAMES:
+            sp = seg_paths.get(name)
+            if sp is not None and sp.is_file():
+                parts[name] = _load_rgba_scaled(sp, scale)
+        torso_2x: Image.Image | None = None
+        torso_bt = parts.get("body_torso")
+        if torso_bt is not None:
+            torso_2x = torso_bt.resize(
+                (max(8, torso_bt.width * 2), max(16, torso_bt.height * 2)),
+                Image.Resampling.BICUBIC,
+            )
+
+        custom_hands = _load_optional_custom_hands(library_dir, assets_dir, scale)
+
+        eyes: dict[str, Image.Image] = {}
+        for eslot in ("eyes_neutral", "eyes_happy", "eyes_shock", "eyes_angry"):
+            ep = slot_paths[eslot][0]
+            if ep is not None:
+                cleaned_p = prepare_puppet_sprite(ep, cache_dir, eslot)
+                with Image.open(cleaned_p) as raw_e:
+                    eyes[eslot] = raw_e.convert("RGBA")
+        if "eyes_neutral" not in eyes and eyes:
+            first_e = next(iter(eyes.values()))
+            eyes["eyes_neutral"] = first_e.copy()
+
+        mouths: dict[str, Image.Image] = {}
+        for mslot in ("mouth_closed", "mouth_open"):
+            mp = slot_paths[mslot][0]
+            if mp is not None:
+                cleaned_p = prepare_puppet_sprite(mp, cache_dir, mslot)
+                with Image.open(cleaned_p) as raw_m:
+                    mouths[mslot] = raw_m.convert("RGBA")
+        if "mouth_closed" not in mouths and "mouth_open" in mouths:
+            mouths["mouth_closed"] = mouths["mouth_open"].copy()
+        if "mouth_open" not in mouths and "mouth_closed" in mouths:
+            mouths["mouth_open"] = mouths["mouth_closed"].copy()
+
+        entry = _CachedPuppetSprites(
+            rig_cfg=rig_cfg,
+            scale=scale,
+            parts=parts,
+            torso_2x=torso_2x,
+            custom_hands=custom_hands,
+            eyes=eyes,
+            mouths=mouths,
+        )
+        self._entries[key] = entry
+        return entry
+
+    def close(self) -> None:
+        for entry in self._entries.values():
+            entry.close()
+        self._entries.clear()
+
+
 class PuppetRig:
     """Bộ diễn hoạt Puppet 2D hoàn chỉnh (xương tay 2 đoạn vai–khuỷu + hierarchical bone tree)."""
 
@@ -1804,6 +1896,7 @@ class PuppetRig:
         prev_pose_state: PuppetPoseState | None = None,
         global_t_offset: float = 0.0,
         board_type: str = "bullets",
+        asset_cache: PuppetAssetCache | None = None,
     ) -> None:
         self.target_height = max(120, int(target_height))
         self.raw_pose = (pose or "present_board").strip().lower()
@@ -1860,60 +1953,24 @@ class PuppetRig:
         self._mouth_sy_smooth: float = 1.0
         self.last_pose_state: PuppetPoseState = init_st
 
-        slot_paths = find_puppet_slot_paths(library_dir, assets_dir)
-        base_path = slot_paths["base_character"][0]
-        pdir = Path(assets_dir) / "stickman" / "puppet"
-        if not (pdir / "base_character.png").is_file():
-            pdir = Path(library_dir) / "stickman" / "puppet"
-        cache_dir = pdir / ".segments"
-
-        if base_path is None:
-            raise FileNotFoundError("Không tìm thấy base_character cho Puppet 2D")
-
-        seg_info = auto_segment_puppet(
-            base_path, cache_dir, puppet_dir=pdir if pdir.is_dir() else None
+        self._shared_assets = asset_cache is not None
+        loader = asset_cache if asset_cache is not None else PuppetAssetCache()
+        sprites = loader.get_or_load(library_dir, assets_dir, self.target_height)
+        self.rig_cfg: dict[str, Any] = sprites.rig_cfg
+        self._scale = sprites.scale
+        self.parts: dict[str, Image.Image] = sprites.parts
+        self._torso_2x: Image.Image | None = sprites.torso_2x
+        self.custom_hands: dict[str, Image.Image] = sprites.custom_hands
+        self.eyes: dict[str, Image.Image] = sprites.eyes
+        self.mouths: dict[str, Image.Image] = sprites.mouths
+        self._eye_resize_cache: dict[tuple[str, int, int], Image.Image] = {}
+        self._mouth_resize_cache: dict[tuple[str, int, int], Image.Image] = {}
+        self._torso_rot_cache: dict[tuple[int, float], tuple[Image.Image, tuple[float, float]]] = {}
+        bt_ref = self.parts["body_torso"]
+        self.canvas_size: tuple[int, int] = (
+            max(int(self.target_height * 0.96), bt_ref.width * 3 + 48),
+            self.target_height,
         )
-        self.rig_cfg: dict[str, Any] = seg_info["rig_config"]
-        seg_paths: dict[str, Path] = seg_info["segments"]
-
-        # Scale khớp `target_height` (body_torso đã chứa trọn 2 chân chữ A + giày vàng)
-        with Image.open(seg_paths["body_torso"]) as bt, Image.open(seg_paths["head_blank"]) as hb:
-            raw_total_h = max(1, bt.height + int(hb.height * 1.22))
-        scale = (self.target_height * 0.88) / raw_total_h
-        self._scale = scale
-
-        self.parts: dict[str, Image.Image] = {}
-        for name in ALL_SEGMENT_NAMES:
-            sp = seg_paths.get(name)
-            if sp is not None and sp.is_file():
-                self.parts[name] = _load_rgba_scaled(sp, scale)
-        self.custom_hands: dict[str, Image.Image] = _load_optional_custom_hands(
-            library_dir, assets_dir, scale
-        )
-
-        # Nạp mắt và miệng (đã tách nền trắng + crop + cache)
-        self.eyes: dict[str, Image.Image] = {}
-        for eslot in ("eyes_neutral", "eyes_happy", "eyes_shock", "eyes_angry"):
-            ep = slot_paths[eslot][0]
-            if ep is not None:
-                cleaned_p = prepare_puppet_sprite(ep, cache_dir, eslot)
-                with Image.open(cleaned_p) as raw_e:
-                    self.eyes[eslot] = raw_e.convert("RGBA")
-        if "eyes_neutral" not in self.eyes and self.eyes:
-            first_e = next(iter(self.eyes.values()))
-            self.eyes["eyes_neutral"] = first_e.copy()
-
-        self.mouths: dict[str, Image.Image] = {}
-        for mslot in ("mouth_closed", "mouth_open"):
-            mp = slot_paths[mslot][0]
-            if mp is not None:
-                cleaned_p = prepare_puppet_sprite(mp, cache_dir, mslot)
-                with Image.open(cleaned_p) as raw_m:
-                    self.mouths[mslot] = raw_m.convert("RGBA")
-        if "mouth_closed" not in self.mouths and "mouth_open" in self.mouths:
-            self.mouths["mouth_closed"] = self.mouths["mouth_open"].copy()
-        if "mouth_open" not in self.mouths and "mouth_closed" in self.mouths:
-            self.mouths["mouth_open"] = self.mouths["mouth_closed"].copy()
 
         self.eye_ctrl = EyeController(
             pose=pose,
@@ -2217,13 +2274,19 @@ class PuppetRig:
         if eye_src is not None:
             ew = max(8, int(round(hw * float(self.rig_cfg["eyes_width_ratio"]))))
             eh = max(2, int(round((ew * eye_src.height / max(1, eye_src.width)) * eye_sy)))
-            eye_resized = eye_src.resize((ew, eh), Image.Resampling.LANCZOS)
+            ekey = (eslot, ew, eh)
+            eye_resized = self._eye_resize_cache.get(ekey)
+            if eye_resized is None:
+                if len(self._eye_resize_cache) >= 32:
+                    old_k = next(iter(self._eye_resize_cache))
+                    self._eye_resize_cache.pop(old_k).close()
+                eye_resized = eye_src.resize((ew, eh), Image.Resampling.LANCZOS)
+                self._eye_resize_cache[ekey] = eye_resized
             ecx = pad_x + hw * float(self.rig_cfg["eyes_center_head"][0]) + eox
             ecy = pad_top + hh * float(self.rig_cfg["eyes_center_head"][1]) + eoy
             ex = max(pad_x + 2, min(pad_x + hw - ew - 2, int(round(ecx - ew / 2))))
             ey = max(pad_top + 2, min(pad_top + hh - eh - 2, int(round(ecy - eh / 2))))
             head.alpha_composite(eye_resized, (ex, ey))
-            eye_resized.close()
 
         # 2. Mouth layer (3 mức closed -> half_open -> open + độ mở 1.18x khi shock/excited)
         mslot, msx, msy_target = compute_mouth_transform(env_val)
@@ -2240,13 +2303,19 @@ class PuppetRig:
             base_mh = max(4, int(round(base_mw * mouth_src.height / max(1, mouth_src.width))))
             mw = max(4, min(int(hw * 0.65), int(round(base_mw * msx))))
             mh = max(3, min(int(hh * 0.42), int(round(base_mh * msy))))
-            mouth_resized = mouth_src.resize((mw, mh), Image.Resampling.LANCZOS)
+            mkey = (mslot, mw, mh)
+            mouth_resized = self._mouth_resize_cache.get(mkey)
+            if mouth_resized is None:
+                if len(self._mouth_resize_cache) >= 32:
+                    old_k = next(iter(self._mouth_resize_cache))
+                    self._mouth_resize_cache.pop(old_k).close()
+                mouth_resized = mouth_src.resize((mw, mh), Image.Resampling.LANCZOS)
+                self._mouth_resize_cache[mkey] = mouth_resized
             mcx = pad_x + hw * float(self.rig_cfg["mouth_center_head"][0])
             mcy = pad_top + hh * float(self.rig_cfg["mouth_center_head"][1])
             mx = max(pad_x + 2, min(pad_x + hw - mw - 2, int(round(mcx - mw / 2))))
             my = max(pad_top + 2, min(pad_top + hh - mh - 2, int(round(mcy - mh / 2))))
             head.alpha_composite(mouth_resized, (mx, my))
-            mouth_resized.close()
 
         self._draw_emotion_details(
             head, pad_x=pad_x, pad_top=pad_top, hw=hw, hh=hh, t_sec=t_sec, env_val=env_val
@@ -2438,7 +2507,9 @@ class PuppetRig:
             side=side,
         )
 
-    def render_frame(self, frame_idx: int, t_sec: float) -> Image.Image:
+    def render_frame(
+        self, frame_idx: int, t_sec: float, *, output_scale: float = 1.0
+    ) -> Image.Image:
         """Dựng 1 frame Puppet 60fps siêu mượt (`v5_a_stance_legs`): 6 kênh lò xo giảm chấn tới hạn
         (zeta=1.0), 0 lật gương 1-frame, 0 lật khuỷu IK và ghép 1 lượt trên canvas 2x SSAA."""
         # Tách 2 kênh tốc độ: env_val nhanh CHỈ cho miệng Lip-Sync; slow_val (<0.8Hz) cho tay/đầu
@@ -2450,8 +2521,7 @@ class PuppetRig:
         torso_base = self.parts["body_torso"]
         head_local, head_piv = self._build_head_layer(frame_idx, env_val, t_sec=t_sec)
 
-        cw = max(int(self.target_height * 0.96), torso_base.width * 3 + 48)
-        ch = self.target_height
+        cw, ch = self.canvas_size
 
         (
             head_extra_deg,
@@ -2673,23 +2743,52 @@ class PuppetRig:
                 )
 
                 # Lớp 2: Thân áo + cà vạt đỏ + nguyên 2 chân chữ A + giày vàng gốc (scale 2x mượt)
-                torso_hi = torso_base.resize((t_w * ss, t_h * ss), Image.Resampling.BICUBIC)
-                try:
-                    torso_rot_hi, torso_rpiv_hi = rotate_around_pivot(
-                        torso_hi, eff_torso_angle, (t_w * ss * 0.5, float(t_h * ss))
-                    )
+                rot_ang_q = round(eff_torso_angle, 1)
+                trot_key = (t_h, rot_ang_q)
+                trot_cached = self._torso_rot_cache.get(trot_key)
+                if trot_cached is not None:
+                    torso_rot_hi, torso_rpiv_hi = trot_cached
+                    owns_torso_rot = False
+                else:
+                    torso_hi_cached = self._torso_2x
+                    if (
+                        torso_hi_cached is not None
+                        and torso_hi_cached.width == t_w * ss
+                        and torso_hi_cached.height == t_h * ss
+                    ):
+                        torso_hi = torso_hi_cached
+                        owns_torso_hi = False
+                    else:
+                        torso_src = torso_hi_cached if torso_hi_cached is not None else torso_base
+                        torso_hi = torso_src.resize((t_w * ss, t_h * ss), Image.Resampling.BILINEAR)
+                        owns_torso_hi = True
                     try:
-                        hi_canvas.alpha_composite(
-                            torso_rot_hi,
-                            (
-                                int(round(foot_center_x * ss - torso_rpiv_hi[0])),
-                                int(round(foot_center_y * ss - torso_rpiv_hi[1])),
-                            ),
+                        torso_rot_hi, torso_rpiv_hi = rotate_around_pivot(
+                            torso_hi,
+                            rot_ang_q,
+                            (t_w * ss * 0.5, float(t_h * ss)),
+                            resample=Image.Resampling.BILINEAR,
                         )
                     finally:
-                        torso_rot_hi.close()
+                        if owns_torso_hi:
+                            torso_hi.close()
+                    if len(self._torso_rot_cache) >= 48:
+                        old_tk = next(iter(self._torso_rot_cache))
+                        old_rim, _ = self._torso_rot_cache.pop(old_tk)
+                        old_rim.close()
+                    self._torso_rot_cache[trot_key] = (torso_rot_hi, torso_rpiv_hi)
+                    owns_torso_rot = False
+                try:
+                    hi_canvas.alpha_composite(
+                        torso_rot_hi,
+                        (
+                            int(round(foot_center_x * ss - torso_rpiv_hi[0])),
+                            int(round(foot_center_y * ss - torso_rpiv_hi[1])),
+                        ),
+                    )
                 finally:
-                    torso_hi.close()
+                    if owns_torso_rot:
+                        torso_rot_hi.close()
 
                 # Lớp 3: Tay phải Bézier mượt + găng tay bo tròn liền khối
                 tan_r = _draw_bezier_arm(
@@ -2715,13 +2814,14 @@ class PuppetRig:
 
                 # Lớp 4: Đầu + Mắt + Miệng + Biểu cảm (scale 2x, chống rung nấc pixel)
                 head_hi = head_local.resize(
-                    (head_local.width * ss, head_local.height * ss), Image.Resampling.BICUBIC
+                    (head_local.width * ss, head_local.height * ss), Image.Resampling.BILINEAR
                 )
                 try:
                     head_rot_hi, head_rpiv_hi = rotate_around_pivot(
                         head_hi,
                         eff_head_angle + eff_torso_angle,
                         (head_piv[0] * ss, head_piv[1] * ss),
+                        resample=Image.Resampling.BILINEAR,
                     )
                     try:
                         hi_canvas.alpha_composite(
@@ -2736,15 +2836,54 @@ class PuppetRig:
                 finally:
                     head_hi.close()
 
-                # Downscale 1 lần duy nhất bằng LANCZOS (không lật gương FLIP_LEFT_RIGHT đột ngột)
-                return hi_canvas.resize((cw, ch), Image.Resampling.LANCZOS)
+                # Downscale 1 lần duy nhất bằng LANCZOS trên đúng vùng có pixel (tight bbox)
+                eff_out_scale = max(0.2, float(output_scale))
+                out_w = max(32, int(round(cw * eff_out_scale)))
+                out_h = max(32, int(round(ch * eff_out_scale)))
+                bbox = hi_canvas.getbbox()
+                if bbox is None:
+                    return Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+                px0 = max(0, ((bbox[0] - 4) // ss) * ss)
+                py0 = max(0, ((bbox[1] - 4) // ss) * ss)
+                px1 = min(hi_canvas.width, ((bbox[2] + 4 + ss - 1) // ss) * ss)
+                py1 = min(hi_canvas.height, ((bbox[3] + 4 + ss - 1) // ss) * ss)
+                if px0 == 0 and py0 == 0 and px1 == hi_canvas.width and py1 == hi_canvas.height:
+                    return hi_canvas.resize((out_w, out_h), Image.Resampling.LANCZOS)
+                scale_x = out_w / float(hi_canvas.width)
+                scale_y = out_h / float(hi_canvas.height)
+                dx = int(round(px0 * scale_x))
+                dy = int(round(py0 * scale_y))
+                dw = max(2, int(round((px1 - px0) * scale_x)))
+                dh_out = max(2, int(round((py1 - py0) * scale_y)))
+                hi_crop = hi_canvas.crop((px0, py0, px1, py1))
+                try:
+                    scaled_crop = hi_crop.resize((dw, dh_out), Image.Resampling.LANCZOS)
+                    try:
+                        out_img = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+                        out_img.paste(scaled_crop, (dx, dy))
+                        return out_img
+                    finally:
+                        scaled_crop.close()
+                finally:
+                    hi_crop.close()
             finally:
                 hi_canvas.close()
         finally:
             head_local.close()
 
     def close(self) -> None:
-        for group in (self.parts, self.eyes, self.mouths, self.custom_hands):
+        for im, _ in self._torso_rot_cache.values():
+            im.close()
+        self._torso_rot_cache.clear()
+        for group in (self._eye_resize_cache, self._mouth_resize_cache):
             for im in group.values():
                 im.close()
             group.clear()
+        if not self._shared_assets:
+            for group in (self.parts, self.eyes, self.mouths, self.custom_hands):
+                for im in group.values():
+                    im.close()
+                group.clear()
+            if self._torso_2x is not None:
+                self._torso_2x.close()
+                self._torso_2x = None

@@ -114,6 +114,12 @@ def create_app(
         except Exception:
             pass
         yield
+        try:
+            from hbt.api.cinema import evict_all_tts_pools
+
+            evict_all_tts_pools()
+        except Exception:
+            pass
         state.jobs.shutdown()  # huỷ việc đang dựng khi tắt server
 
     app = FastAPI(title="HBT Studio", version="0.3.0", lifespan=lifespan)

@@ -114,11 +114,25 @@ class BackdropRenderer:
         self.height = max(64, int(height))
         self.palette = DOMAIN_PALETTES[self.domain]
         self._base: Image.Image = self._build_base()
+        self._base_rgba: Image.Image = self._base.convert("RGBA")
+        self._dot_tile: Image.Image | None = (
+            self._build_paper_dot_tile() if self.domain == "paper_classic" else None
+        )
 
         # Tọa độ sao xác định cho cosmos_mystery
         rng = np.random.default_rng(seed=42)
         self._far_stars = rng.random((45, 3))
         self._near_stars = rng.random((22, 3))
+
+    def _build_paper_dot_tile(self) -> Image.Image:
+        step = 72
+        tile = Image.new("RGBA", (self.width + step * 2, self.height + step * 2), (0, 0, 0, 0))
+        d = ImageDraw.Draw(tile)
+        dot_c = (210, 200, 184, 95)
+        for x in range(0, tile.width, step):
+            for y in range(0, tile.height, step):
+                d.ellipse((x - 1, y - 1, x + 2, y + 2), fill=dot_c)
+        return tile
 
     def _build_base(self) -> Image.Image:
         bg_rgb = self.palette["bg"][:3]
@@ -155,6 +169,10 @@ class BackdropRenderer:
                 outline=(138, 104, 62),
                 width=3,
             )
+            # Đường vĩ tuyến ngang đứng yên trên nền bản đồ cổ
+            horiz_draw = ImageDraw.Draw(img, "RGBA")
+            for y in range(0, self.height, 110):
+                horiz_draw.line([(0, y), (self.width, y)], fill=(146, 114, 68, 120), width=1)
             return img
 
         img = Image.new("RGB", (self.width, self.height), bg_rgb)
@@ -168,24 +186,25 @@ class BackdropRenderer:
             )
         return img
 
-    def render_frame(self, t_sec: float) -> Image.Image:
-        """Trả về khung hình RGB ở thời điểm `t_sec` (chu kỳ lặp 4.0s)."""
+    def render_frame_rgba(self, t_sec: float) -> Image.Image:
+        """Trả về khung hình RGBA ở thời điểm `t_sec` (chu kỳ lặp 4.0s, bỏ qua convert lại)."""
         phase = (t_sec % LOOP_DURATION_S) / LOOP_DURATION_S  # [0, 1)
         angle = phase * 2.0 * math.pi
-        frame = self._base.copy()
-        draw = ImageDraw.Draw(frame, "RGBA")
+        frame = self._base_rgba.copy()
         w, h = self.width, self.height
 
         if self.domain == "paper_classic":
             step = 72
             ox = int(round(phase * step))
             oy = int(round(phase * step * 0.5))
-            dot_c = (210, 200, 184, 95)
-            for x in range(ox - step, w + step, step):
-                for y in range(oy - step, h + step, step):
-                    draw.ellipse((x - 1, y - 1, x + 2, y + 2), fill=dot_c)
+            if self._dot_tile is not None:
+                sx = step - ox
+                sy = step - oy
+                frame.alpha_composite(self._dot_tile, (0, 0), (sx, sy, sx + w, sy + h))
+            return frame
 
-        elif self.domain == "physics_science":
+        draw = ImageDraw.Draw(frame)
+        if self.domain == "physics_science":
             step = 84
             shift = int(round(phase * step))
             grid_c = (30, 41, 59, 210)
@@ -201,14 +220,12 @@ class BackdropRenderer:
                 draw.ellipse((px - 5, py - 5, px + 5, py + 5), fill=(56, 189, 248, 95))
 
         elif self.domain == "history_geo":
-            # Đường kinh tuyến / vĩ tuyến bản đồ cổ trôi nhẹ
+            # Đường kinh tuyến dọc trôi nhẹ (đường ngang đã vẽ sẵn trên `_base_rgba`)
             step = 110
             ox = int(round(phase * step))
             line_c = (146, 114, 68, 120)
             for x in range(ox - step, w + step, step):
                 draw.line([(x, 0), (x, h)], fill=line_c, width=1)
-            for y in range(0, h, step):
-                draw.line([(0, y), (w, y)], fill=line_c, width=1)
 
             # Đường nét đứt hành trình uốn lượn
             route_y = int(h * 0.36)
@@ -276,5 +293,17 @@ class BackdropRenderer:
 
         return frame
 
+    def render_frame(self, t_sec: float) -> Image.Image:
+        """Trả về khung hình RGB ở thời điểm `t_sec` (chu kỳ lặp 4.0s)."""
+        rgba = self.render_frame_rgba(t_sec)
+        try:
+            return rgba.convert("RGB")
+        finally:
+            rgba.close()
+
     def close(self) -> None:
         self._base.close()
+        self._base_rgba.close()
+        if self._dot_tile is not None:
+            self._dot_tile.close()
+            self._dot_tile = None

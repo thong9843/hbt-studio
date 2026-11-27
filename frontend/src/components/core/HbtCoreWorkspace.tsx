@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { api, projectFileUrl } from '../../api/endpoints';
@@ -116,6 +116,120 @@ function PrepareProgressBar({
   );
 }
 
+function CoreWaterfallCard({
+  rendering,
+  resultVideoUrl,
+  resultSlug,
+  renderError,
+  voiceDetail,
+  stepLogs,
+  onClose,
+}: {
+  rendering: boolean;
+  resultVideoUrl: string | null;
+  resultSlug: string | null;
+  renderError: string | null;
+  voiceDetail: VoiceProgressDetail | null;
+  stepLogs: Record<'script' | 'voice' | 'assets' | 'render', string[]>;
+  onClose?: () => void;
+}) {
+  const progress = useRenderJobProgress();
+  const progressPct = Boolean(resultVideoUrl) && !rendering ? 100 : progress.percent;
+  const progressStep = progress.step;
+  const done = Boolean(resultVideoUrl) && !rendering;
+  const scriptState: WaterfallStepState =
+    renderError && !rendering && progressPct <= 5 ? 'error' : 'done';
+  const voiceState: WaterfallStepState = done
+    ? 'done'
+    : progressStep === 'voice' && rendering
+      ? 'running'
+      : ['bgm', 'sfx', 'render', 'mix', 'compose'].includes(progressStep)
+        ? 'done'
+        : 'waiting';
+  const assetsState: WaterfallStepState = done
+    ? 'done'
+    : ['bgm', 'sfx'].includes(progressStep) && rendering
+      ? 'running'
+      : ['render', 'mix', 'compose'].includes(progressStep)
+        ? 'done'
+        : 'waiting';
+  const renderState: WaterfallStepState = done
+    ? 'done'
+    : renderError && !rendering
+      ? 'error'
+      : ['render', 'mix', 'compose'].includes(progressStep) && rendering
+        ? 'running'
+        : 'waiting';
+
+  const wfSteps: WaterfallStep[] = [
+    {
+      id: 'script',
+      icon: '📝',
+      title: 'Khởi tạo kịch bản (Gemini API)',
+      state: scriptState,
+      logs: stepLogs.script,
+    },
+    {
+      id: 'voice',
+      icon: '🎙️',
+      title: 'Sinh giọng thuyết minh (VieNeu-TTS từng câu)',
+      state: voiceState,
+      badgeText: voiceDetail ? `${voiceDetail.current}/${voiceDetail.total} câu` : undefined,
+      logs: stepLogs.voice,
+    },
+    {
+      id: 'assets',
+      icon: '🎨',
+      title: 'Chuẩn bị hình ảnh & Sticker',
+      state: assetsState,
+      logs: stepLogs.assets,
+    },
+    {
+      id: 'render',
+      icon: '🎬',
+      title: 'Render video hoàn chỉnh (60fps · 9:16)',
+      state: renderState,
+      logs: stepLogs.render,
+    },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <WaterfallProgress
+        title={T.progress.title}
+        overallPercent={progressPct}
+        steps={wfSteps}
+        error={renderError}
+      />
+      {resultVideoUrl && (
+        <div className="space-y-3 rounded-card border border-ok/40 bg-card p-4">
+          <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={resultVideoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="ui-btn ui-btn-ink ui-btn-sm"
+            >
+              <PlayIcon size={16} />
+              {T.progress.watchVideo}
+            </a>
+            {resultSlug && (
+              <Link
+                to={`/p/${encodeURIComponent(resultSlug)}`}
+                className="ui-btn ui-btn-soft ui-btn-sm"
+                onClick={onClose}
+              >
+                {T.progress.openProject}
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HbtCoreWorkspace({
   slug: initialSlug,
   onClose,
@@ -178,10 +292,9 @@ export function HbtCoreWorkspace({
     (renderJob.running &&
       (renderJob.kind === 'hbt_core_prepare' || renderJob.kind === 'hbt_core_images'));
 
-  // Render & SSE state
-  const [rendering, setRendering] = useState(false);
-  const [progressPct, setProgressPct] = useState(0);
-  const [progressStep, setProgressStep] = useState('');
+  // Render & global SSE state (gắn vào RenderJobProvider để Sidebar trái hiện tiến độ xuyên route)
+  const [startingRender, setStartingRender] = useState(false);
+  const [activeCoreJobId, setActiveCoreJobId] = useState<string | null>(null);
   const [voiceDetail, setVoiceDetail] = useState<VoiceProgressDetail | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [stepLogs, setStepLogs] = useState<
@@ -193,7 +306,11 @@ export function HbtCoreWorkspace({
     render: [],
   });
 
-  const esRef = useRef<EventSource | null>(null);
+  const rendering =
+    startingRender ||
+    (renderJob.running &&
+      renderJob.kind === 'hbt_core_auto' &&
+      (!resultSlug || renderJob.slug === resultSlug));
 
   const { data: assets } = useQuery({
     queryKey: ['hbt-core-assets', resultSlug ?? initialSlug ?? ''],
@@ -232,13 +349,67 @@ export function HbtCoreWorkspace({
   }, [active, initialSlug]);
 
   useEffect(() => {
-    return () => {
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
+    const isMyAutoJob =
+      renderJob.kind === 'hbt_core_auto' &&
+      (renderJob.jobId === activeCoreJobId || (!activeCoreJobId && renderJob.slug === resultSlug));
+    if (!isMyAutoJob || !renderJob.running) return;
+    const applySnap = () => {
+      const snap = renderJob.progressStore.getSnapshot();
+      if (snap.message) {
+        const bucket: 'script' | 'voice' | 'assets' | 'render' =
+          snap.step === 'init'
+            ? 'script'
+            : snap.step === 'voice'
+              ? 'voice'
+              : snap.step === 'bgm' || snap.step === 'sfx'
+                ? 'assets'
+                : 'render';
+        setStepLogs((prev) => {
+          const cur = prev[bucket];
+          if (cur[cur.length - 1] === snap.message) return prev;
+          return { ...prev, [bucket]: [...cur.slice(-25), snap.message] };
+        });
+      }
+      if (
+        snap.step === 'voice' &&
+        typeof snap.current === 'number' &&
+        typeof snap.total === 'number'
+      ) {
+        setVoiceDetail({
+          current: snap.current,
+          total: snap.total,
+          percent: Math.round(snap.percent ?? 0),
+        });
       }
     };
-  }, []);
+    applySnap();
+    return renderJob.progressStore.subscribe(applySnap);
+  }, [
+    renderJob.kind,
+    renderJob.jobId,
+    renderJob.running,
+    renderJob.slug,
+    renderJob.progressStore,
+    activeCoreJobId,
+    resultSlug,
+  ]);
+
+  useEffect(() => {
+    if (renderJob.kind !== 'hbt_core_auto' || !renderJob.finished) return;
+    const finishedJob = renderJob.finished;
+    const targetSlug = finishedJob.slug || finishedJob.project || resultSlug;
+    if (finishedJob.status === 'done') {
+      setResultVideoUrl(finishedJob.output?.video ?? null);
+      if (targetSlug) {
+        setResultSlug(targetSlug);
+        void queryClient.invalidateQueries({ queryKey: ['project', targetSlug] });
+      }
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    } else if (finishedJob.status === 'failed') {
+      setRenderError(finishedJob.error ?? vi.export.failed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderJob.finished, renderJob.kind, queryClient]);
 
   useEffect(() => {
     if (
@@ -505,113 +676,20 @@ export function HbtCoreWorkspace({
     }
   };
 
-  const connectJobSse = (jobId: string, targetSlug: string) => {
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-    setRendering(true);
-    setRenderError(null);
-    setResultVideoUrl(null);
-    setProgressPct(2);
-    setProgressStep('init');
-    setVoiceDetail(null);
-    setStepLogs((prev) => ({
-      ...prev,
-      voice: [],
-      assets: [],
-      render: ['Khởi tạo phiên dựng video HBT Core…'],
-    }));
-
-    if (typeof EventSource === 'undefined') {
-      return;
-    }
-
-    const es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events`);
-    esRef.current = es;
-
-    es.addEventListener('progress', (ev: MessageEvent) => {
-      try {
-        const data = JSON.parse(String(ev.data)) as {
-          progress?: number;
-          step?: string;
-          message?: string;
-          current?: number;
-          total?: number;
-          percent?: number;
-        };
-        if (typeof data.progress === 'number') setProgressPct(data.progress);
-        if (data.step) setProgressStep(data.step);
-        if (data.message) {
-          const msg = String(data.message);
-          const bucket: 'script' | 'voice' | 'assets' | 'render' =
-            data.step === 'init'
-              ? 'script'
-              : data.step === 'voice'
-                ? 'voice'
-                : data.step === 'bgm' || data.step === 'sfx'
-                  ? 'assets'
-                  : 'render';
-          setStepLogs((prev) => ({
-            ...prev,
-            [bucket]: [...prev[bucket].slice(-25), msg],
-          }));
-        }
-        if (
-          data.step === 'voice' &&
-          typeof data.current === 'number' &&
-          typeof data.total === 'number'
-        ) {
-          setVoiceDetail({
-            current: data.current,
-            total: data.total,
-            percent:
-              typeof data.percent === 'number' ? data.percent : Math.round(data.progress ?? 0),
-          });
-        }
-      } catch {
-        // Bỏ qua gói tin lỗi cú pháp
-      }
-    });
-
-    es.addEventListener('end', (ev: MessageEvent) => {
-      es.close();
-      esRef.current = null;
-      setRendering(false);
-      try {
-        const data = JSON.parse(String(ev.data)) as {
-          status?: string;
-          error?: string | null;
-          output?: { video?: string } | null;
-        };
-        if (data.status === 'done') {
-          setProgressPct(100);
-          setResultVideoUrl(data.output?.video ?? null);
-          setResultSlug(targetSlug);
-          void queryClient.invalidateQueries({ queryKey: ['projects'] });
-          void queryClient.invalidateQueries({ queryKey: ['project', targetSlug] });
-        } else if (data.status === 'failed') {
-          setRenderError(data.error ?? vi.export.failed);
-        }
-      } catch {
-        setRenderError(vi.export.failed);
-      }
-    });
-
-    es.onerror = () => {
-      es.close();
-      esRef.current = null;
-      setRendering(false);
-    };
-  };
-
   const handleStartV1Render = async () => {
     const validScript = applyJsonTextareaToSegments();
     if (!validScript) return;
 
-    setRendering(true);
+    setStartingRender(true);
     setRenderError(null);
     setResultVideoUrl(null);
+    setVoiceDetail(null);
+    setStepLogs({
+      script: [],
+      voice: [],
+      assets: [],
+      render: ['Khởi tạo phiên dựng video HBT Core…'],
+    });
     try {
       const res = await api.renderHbtCoreV1({
         script: validScript,
@@ -620,22 +698,32 @@ export function HbtCoreWorkspace({
       });
       if (res.success === false || res.ok === false || !res.slug) {
         const msg = res.message || res.detail || res.error || vi.export.failed;
-        setRendering(false);
         setRenderError(msg);
         toast.error(new Error(msg));
         return;
       }
       setResultSlug(res.slug);
       if (res.job_id) {
-        connectJobSse(res.job_id, res.slug);
-      } else {
-        setRendering(false);
+        setActiveCoreJobId(res.job_id);
+        renderJob.attachJob({
+          jobId: res.job_id,
+          slug: res.slug,
+          kind: 'hbt_core_auto',
+          engine: 'core',
+          title: validScript.title || res.slug,
+          route: `/core?slug=${encodeURIComponent(res.slug)}`,
+          progress: 2,
+          step: 'init',
+          stage: 'Khởi tạo kịch bản',
+          message: 'Khởi tạo phiên dựng video HBT Core…',
+        });
       }
     } catch (err) {
-      setRendering(false);
       const msg = err instanceof Error ? err.message : String(err);
       setRenderError(msg);
       toast.error(err);
+    } finally {
+      setStartingRender(false);
     }
   };
 
@@ -765,8 +853,12 @@ export function HbtCoreWorkspace({
                 finalLabel={rendering ? T.v1.renderingBtn : T.prepare.exportBtn}
                 disabled={rendering || isPreparing}
                 isRendering={rendering}
-                progressPct={progressPct}
-                progressStage={progressStep}
+                subscribeGlobalProgress={renderJob.running && renderJob.kind === 'hbt_core_auto'}
+                onCancelRender={
+                  renderJob.running && renderJob.kind === 'hbt_core_auto'
+                    ? () => void renderJob.cancel()
+                    : undefined
+                }
               />
             </div>
           </div>
@@ -1122,103 +1214,17 @@ export function HbtCoreWorkspace({
         />
 
         {/* Khối hiển thị tiến trình Waterfall Dropdown */}
-        {(rendering || resultVideoUrl || renderError) &&
-          (() => {
-            const done = Boolean(resultVideoUrl) && !rendering;
-            const scriptState: WaterfallStepState =
-              renderError && !rendering && progressPct <= 5 ? 'error' : 'done';
-            const voiceState: WaterfallStepState = done
-              ? 'done'
-              : progressStep === 'voice' && rendering
-                ? 'running'
-                : ['bgm', 'sfx', 'render', 'mix', 'compose'].includes(progressStep)
-                  ? 'done'
-                  : 'waiting';
-            const assetsState: WaterfallStepState = done
-              ? 'done'
-              : ['bgm', 'sfx'].includes(progressStep) && rendering
-                ? 'running'
-                : ['render', 'mix', 'compose'].includes(progressStep)
-                  ? 'done'
-                  : 'waiting';
-            const renderState: WaterfallStepState = done
-              ? 'done'
-              : renderError && !rendering
-                ? 'error'
-                : ['render', 'mix', 'compose'].includes(progressStep) && rendering
-                  ? 'running'
-                  : 'waiting';
-
-            const wfSteps: WaterfallStep[] = [
-              {
-                id: 'script',
-                icon: '📝',
-                title: 'Khởi tạo kịch bản (Gemini API)',
-                state: scriptState,
-                logs: stepLogs.script,
-              },
-              {
-                id: 'voice',
-                icon: '🎙️',
-                title: 'Sinh giọng thuyết minh (VieNeu-TTS từng câu)',
-                state: voiceState,
-                badgeText: voiceDetail
-                  ? `${voiceDetail.current}/${voiceDetail.total} câu`
-                  : undefined,
-                logs: stepLogs.voice,
-              },
-              {
-                id: 'assets',
-                icon: '🎨',
-                title: 'Chuẩn bị hình ảnh & Sticker',
-                state: assetsState,
-                logs: stepLogs.assets,
-              },
-              {
-                id: 'render',
-                icon: '🎬',
-                title: 'Render video hoàn chỉnh (60fps · 9:16)',
-                state: renderState,
-                logs: stepLogs.render,
-              },
-            ];
-
-            return (
-              <div className="space-y-3">
-                <WaterfallProgress
-                  title={T.progress.title}
-                  overallPercent={progressPct}
-                  steps={wfSteps}
-                  error={renderError}
-                />
-                {resultVideoUrl && (
-                  <div className="space-y-3 rounded-card border border-ok/40 bg-card p-4">
-                    <p className="text-small font-bold text-ok">{T.progress.doneTitle}</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={resultVideoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ui-btn ui-btn-ink ui-btn-sm"
-                      >
-                        <PlayIcon size={16} />
-                        {T.progress.watchVideo}
-                      </a>
-                      {resultSlug && (
-                        <Link
-                          to={`/p/${encodeURIComponent(resultSlug)}`}
-                          className="ui-btn ui-btn-soft ui-btn-sm"
-                          onClick={onClose}
-                        >
-                          {T.progress.openProject}
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+        {(rendering || resultVideoUrl || renderError) && (
+          <CoreWaterfallCard
+            rendering={rendering}
+            resultVideoUrl={resultVideoUrl}
+            resultSlug={resultSlug}
+            renderError={renderError}
+            voiceDetail={voiceDetail}
+            stepLogs={stepLogs}
+            onClose={onClose}
+          />
+        )}
       </aside>
     </div>
   );

@@ -34,11 +34,10 @@ export interface ExportPopoverProps {
 
 /**
  * Popover Xuất video chuẩn VEED.IO:
- * - Trên Topbar CHỈ hiển thị duy nhất 1 nút đỏ `Xuất video` (khi đang dựng hiện `Đang xuất · 54%`
- *   kèm thanh tiến độ siêu mảnh ngay trong nút và nút `Hủy dựng` dễ bấm).
- * - Bên trong Popover gom toàn bộ `Xem nhanh`, `Xuất bản đẹp`, `Watermark`, `Outro 4s` và chi tiết tiến độ.
+ * - Tách wrapper theo `subscribeGlobalProgress` để các trang KHÔNG bật flag này re-render 0 lần
+ *   khi job toàn cục cập nhật %.
  */
-export const ExportPopover = memo(function ExportPopover({
+function ExportPopoverInner({
   aspect = '9:16',
   outroEnabled,
   onOutroChange,
@@ -50,7 +49,6 @@ export const ExportPopover = memo(function ExportPopover({
   disabled = false,
   isSubmitting = false,
   isRendering = false,
-  subscribeGlobalProgress = false,
   progressPct = 0,
   progressStage = '',
   progressMessage = '',
@@ -58,28 +56,15 @@ export const ExportPopover = memo(function ExportPopover({
   remainingText = null,
   onCancelRender,
   extraSettings,
-}: ExportPopoverProps) {
+}: Omit<ExportPopoverProps, 'subscribeGlobalProgress'>) {
   const [open, setOpen] = useState(false);
-  const globalProgress = useRenderJobProgress();
-  const globalRemaining = useRemainingText();
 
   const busy = isSubmitting || isRendering;
-  const rawPct = subscribeGlobalProgress ? globalProgress.percent : progressPct;
-  const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
-  const stage = subscribeGlobalProgress
-    ? globalProgress.stage || globalProgress.step || progressStage
-    : progressStage;
-  const message = subscribeGlobalProgress
-    ? globalProgress.message || progressMessage
-    : progressMessage;
-  const beatText = subscribeGlobalProgress
-    ? globalProgress.totalBeats != null &&
-      globalProgress.totalBeats > 0 &&
-      globalProgress.currentBeat != null
-      ? vi.stickvJob.beatProgress(globalProgress.currentBeat, globalProgress.totalBeats)
-      : beatProgressText
-    : beatProgressText;
-  const remaining = subscribeGlobalProgress ? (globalRemaining ?? remainingText) : remainingText;
+  const pct = Math.max(0, Math.min(100, Math.round(progressPct)));
+  const stage = progressStage;
+  const message = progressMessage;
+  const beatText = beatProgressText;
+  const remaining = remainingText;
 
   return (
     <Popover
@@ -213,4 +198,32 @@ export const ExportPopover = memo(function ExportPopover({
       </div>
     </Popover>
   );
+}
+
+function SubscribedExportPopover(props: ExportPopoverProps) {
+  const globalProgress = useRenderJobProgress();
+  const globalRemaining = useRemainingText();
+  const beatText =
+    globalProgress.totalBeats != null &&
+    globalProgress.totalBeats > 0 &&
+    globalProgress.currentBeat != null
+      ? vi.stickvJob.beatProgress(globalProgress.currentBeat, globalProgress.totalBeats)
+      : props.beatProgressText;
+  return (
+    <ExportPopoverInner
+      {...props}
+      progressPct={globalProgress.percent}
+      progressStage={globalProgress.stage || globalProgress.step || props.progressStage}
+      progressMessage={globalProgress.message || props.progressMessage}
+      beatProgressText={beatText}
+      remainingText={globalRemaining ?? props.remainingText}
+    />
+  );
+}
+
+export const ExportPopover = memo(function ExportPopover(props: ExportPopoverProps) {
+  if (props.subscribeGlobalProgress) {
+    return <SubscribedExportPopover {...props} />;
+  }
+  return <ExportPopoverInner {...props} />;
 });
