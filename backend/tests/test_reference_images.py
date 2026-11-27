@@ -378,7 +378,7 @@ def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: P
 
     clear_reference_image_cache()
     assert REF_CACHE_VERSION == "v3_beat_entity_real_first"
-    assert DEFAULT_AI_IMAGE_BUDGET == 6
+    assert DEFAULT_AI_IMAGE_BUDGET == 8
 
     junk_pages = {
         "1": {
@@ -590,4 +590,50 @@ def test_v3_real_first_pass1b_entity_fallback_and_render_wiring(tmp_path: Path) 
     assert len(seen_queries) == 2
     assert "Racetrack Playa" in seen_queries[1]
     assert budget == [DEFAULT_AI_IMAGE_BUDGET]  # Không tốn lượt AI khi có ảnh thật Wikimedia
-    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 6
+    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 8
+
+
+def test_cloudflare_flux_prompt_enforces_zero_text_directive(tmp_path: Path, monkeypatch) -> None:
+    """Khi rơi sang Flux 2D, prompt kèm chỉ dẫn không chữ, không nhãn, không mũi tên."""
+    from hbt.shared.online_sources.reference_images import (
+        clear_reference_image_cache,
+        resolve_reference_image,
+    )
+
+    clear_reference_image_cache()
+    seen_prompts: list[str] = []
+
+    def _empty_handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"query": {"search": [], "pages": {}}, "hits": []})
+
+    def _fake_flux(prompt: str, dest: Path, **_kwargs) -> Path:
+        seen_prompts.append(prompt)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(_png_bytes((600, 400)))
+        return dest
+
+    monkeypatch.setattr(
+        "hbt.shared.online_sources.reference_images.generate_illustration_image",
+        _fake_flux,
+    )
+    client = httpx.Client(transport=httpx.MockTransport(_empty_handler))
+    try:
+        out_p, src = resolve_reference_image(
+            "Leaning Tower of Pisa soft clay",
+            tmp_path / "lib",
+            illustration_prompt="Cross section of tower foundation on clay",
+            primary_entity_en="Leaning Tower of Pisa",
+            cf_account_id="acc-test",
+            cf_api_token="tok-test",
+            ai_budget=[8],
+            client=client,
+        )
+    finally:
+        client.close()
+
+    assert src == "cloudflare_flux"
+    assert out_p.is_file()
+    assert len(seen_prompts) == 1
+    p_low = seen_prompts[0].lower()
+    assert "no text" in p_low and "no labels" in p_low and "no arrows" in p_low
+    assert "no watermark" in p_low

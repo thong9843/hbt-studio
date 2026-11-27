@@ -773,10 +773,10 @@ POSE_PRESETS: dict[str, dict[str, Any]] = {
         "eye_gaze": (3.0, -3.0),
     },
     "arms_crossed": {
-        "shoulder_l": 22.0,
-        "elbow_l": 78.0,
-        "shoulder_r": -22.0,
-        "elbow_r": -78.0,
+        "shoulder_l": -24.0,
+        "elbow_l": 88.0,
+        "shoulder_r": -28.0,
+        "elbow_r": 94.0,
         "head_deg": -2.0,
         "torso_deg": 0.0,
         "dy_px": 0.0,
@@ -784,10 +784,10 @@ POSE_PRESETS: dict[str, dict[str, Any]] = {
         "eye_gaze": (0.0, 0.0),
     },
     "hands_on_hips": {
-        "shoulder_l": 34.0,
-        "elbow_l": -72.0,
-        "shoulder_r": -34.0,
-        "elbow_r": 72.0,
+        "shoulder_l": -26.0,
+        "elbow_l": 92.0,
+        "shoulder_r": -26.0,
+        "elbow_r": 92.0,
         "head_deg": 0.0,
         "torso_deg": 0.0,
         "dy_px": 0.0,
@@ -839,12 +839,12 @@ POSE_PRESETS: dict[str, dict[str, Any]] = {
         "eye_gaze": (0.0, 0.0),
     },
     "lean_secret": {
-        "shoulder_l": 16.0,
-        "elbow_l": 20.0,
-        "shoulder_r": 12.0,
-        "elbow_r": -105.0,
+        "shoulder_l": -24.0,
+        "elbow_l": 88.0,
+        "shoulder_r": -38.0,
+        "elbow_r": -28.0,
         "head_deg": 5.0,
-        "torso_deg": 4.5,
+        "torso_deg": 3.5,
         "dy_px": 0.0,
         "eye_override": None,
         "eye_gaze": (5.0, 0.0),
@@ -1463,11 +1463,45 @@ def solve_arm_ik_natural(
     l1: float,
     l2: float,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Giải 2-Bone IK với `bend_dir` cố định theo giải phẫu (Zero IK Elbow Pop, cấm lật dấu)."""
-    # Tay trái màn hình (ux < 0) dùng bend_dir=-1, tay phải (ux > 0) dùng bend_dir=+1
-    # => khuỷu tay luôn cong tự nhiên ra ngoài/xuống dưới, tuyệt đối không lật dấu đột ngột.
-    fixed_bend = -1 if side == "left" else 1
-    return solve_2bone_ik(shoulder, target, l1, l2, bend_dir=fixed_bend)
+    """Solve 2-bone arm IK with C∞-smooth outward elbow bias (no inward fold or pop)."""
+    sx, sy = shoulder
+    tx, ty = target
+    dx, dy = tx - sx, ty - sy
+    raw_d = math.hypot(dx, dy)
+    out_sign = -1.0 if side == "left" else 1.0
+    if raw_d < 1e-4:
+        ux, uy = out_sign * 0.25, 0.968
+        raw_d = 1.0
+    else:
+        ux, uy = dx / raw_d, dy / raw_d
+
+    min_reach = max(abs(l1 - l2) + 1.0, 0.25 * (l1 + l2))
+    max_reach = 0.98 * (l1 + l2)
+    d = max(min_reach, min(max_reach, raw_d))
+    wx, wy = sx + d * ux, sy + d * uy
+
+    cos_a = max(-1.0, min(1.0, (l1 * l1 + d * d - l2 * l2) / max(1e-6, 2.0 * l1 * d)))
+    sin_a = math.sqrt(max(0.0, 1.0 - cos_a * cos_a))
+    along = l1 * cos_a
+    perp = l1 * sin_a
+
+    # Smooth anatomical bias: primarily outward away from torso, slightly downward.
+    bx, by = out_sign * 0.92, 0.39
+    proj = bx * ux + by * uy
+    px = bx - proj * ux
+    py = by - proj * uy
+    p_len = math.hypot(px, py) + 0.15
+    ex = sx + along * ux + (px / p_len) * perp
+    ey = sy + along * uy + (py / p_len) * perp
+
+    # Hard outward guard so elbows never cross inward over the torso/tie.
+    min_out = max(6.0, l1 * 0.22)
+    if side == "left":
+        ex = min(ex, sx - min_out)
+    else:
+        ex = max(ex, sx + min_out)
+
+    return (ex, ey), (wx, wy)
 
 
 def clamp_arm_target(
@@ -2700,7 +2734,8 @@ class PuppetRig:
                     self._elbow_springs["el_ry"].step(raw_el_r[1], dt, omega=9.0, zeta=1.0),
                 )
 
-            # Ghép TOÀN BỘ cụm bóng + tay trái + thân + tay phải + đầu trên CÙNG 1 canvas 2x SSAA
+            # Ghép TOÀN BỘ cụm bóng + thân + tay trái/phải + đầu trên CÙNG 1 canvas 2x SSAA
+            # Thứ tự Z-order bắt buộc: Lớp 1 body_torso -> Lớp 2 arm_left & arm_right -> Lớp 3 head
             ss = 2
             stroke_base = max(4.0, float(self.rig_cfg.get("limb_stroke_px", 9.0)) * self._scale)
             hand_r = max(7.5, stroke_base * 1.48)
@@ -2711,7 +2746,7 @@ class PuppetRig:
             hi_canvas = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
             try:
                 dh = ImageDraw.Draw(hi_canvas)
-                # Lớp 1: Bóng sàn mềm + tay trái Bézier mượt
+                # Lớp 1: Bóng sàn mềm + Thân áo + cà vạt đỏ + nguyên 2 chân chữ A + giày vàng gốc
                 dh.ellipse(
                     (
                         (foot_center_x - shadow_half_w) * ss,
@@ -2721,28 +2756,6 @@ class PuppetRig:
                     ),
                     fill=(15, 23, 42, 42),
                 )
-                tan_l = _draw_bezier_arm(
-                    dh,
-                    (sh_l[0] * ss, sh_l[1] * ss),
-                    (el_l[0] * ss, el_l[1] * ss),
-                    (wr_l[0] * ss, wr_l[1] * ss),
-                    w_ss,
-                )
-                self._composite_custom_or_vector_hand(
-                    hi_canvas,
-                    dh,
-                    (wr_l[0] * ss, wr_l[1] * ss),
-                    tan_l,
-                    resolve_hand_shape(
-                        self.pose, "left", self.interaction, board_type=self.board_type
-                    ),
-                    hand_r_ss=hand_r * ss,
-                    outline_w_ss=outline_w_ss,
-                    side="left",
-                    ss=ss,
-                )
-
-                # Lớp 2: Thân áo + cà vạt đỏ + nguyên 2 chân chữ A + giày vàng gốc (scale 2x mượt)
                 rot_ang_q = round(eff_torso_angle, 1)
                 trot_key = (t_h, rot_ang_q)
                 trot_cached = self._torso_rot_cache.get(trot_key)
@@ -2790,7 +2803,27 @@ class PuppetRig:
                     if owns_torso_rot:
                         torso_rot_hi.close()
 
-                # Lớp 3: Tay phải Bézier mượt + găng tay bo tròn liền khối
+                # Lớp 2: Cả 2 cánh tay Bézier + khớp vai + găng tay bo tròn (trước thân & cà vạt)
+                tan_l = _draw_bezier_arm(
+                    dh,
+                    (sh_l[0] * ss, sh_l[1] * ss),
+                    (el_l[0] * ss, el_l[1] * ss),
+                    (wr_l[0] * ss, wr_l[1] * ss),
+                    w_ss,
+                )
+                self._composite_custom_or_vector_hand(
+                    hi_canvas,
+                    dh,
+                    (wr_l[0] * ss, wr_l[1] * ss),
+                    tan_l,
+                    resolve_hand_shape(
+                        self.pose, "left", self.interaction, board_type=self.board_type
+                    ),
+                    hand_r_ss=hand_r * ss,
+                    outline_w_ss=outline_w_ss,
+                    side="left",
+                    ss=ss,
+                )
                 tan_r = _draw_bezier_arm(
                     dh,
                     (sh_r[0] * ss, sh_r[1] * ss),
@@ -2812,7 +2845,7 @@ class PuppetRig:
                     ss=ss,
                 )
 
-                # Lớp 4: Đầu + Mắt + Miệng + Biểu cảm (scale 2x, chống rung nấc pixel)
+                # Lớp 3: Đầu + Mắt + Miệng + Biểu cảm (nằm trên cùng, trên cả tay & thân)
                 head_hi = head_local.resize(
                     (head_local.width * ss, head_local.height * ss), Image.Resampling.BILINEAR
                 )

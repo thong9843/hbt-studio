@@ -68,36 +68,28 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
     extra = [p for p in (available_poses or []) if p not in POSES_V9]
     pose_str = "|".join([*POSES_V9, *extra[:16]])
     return (
-        "Biên kịch video Người que (Stickman 2D/2.5D) kênh Hay Biết Tuốt. "
+        "Biên kịch video Người que (Stickman 2D Visual-First) kênh Hay Biết Tuốt. "
         "Cấu trúc 5 chặng: 1.Hook nghịch lý -> 2.Phá vỡ lầm tưởng -> 3.Hé lộ sự thật -> "
         "4.Bài học cốt lõi -> 5.Tóm tắt & CTA. Trả về JSON thuần, không markdown.\n"
         "Mỗi beat chỉ dài 1-2 câu ngắn (12-22 từ), dùng dấu chấm/phẩy rõ ràng "
-        "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài.\n"
-        "LUẬT CẤM CHÉP LỜI THOẠI (ANTI-PARROT <= 55%): Cấm tuyệt đối chép lại nguyên văn "
-        "narration lên `board_title` hay `items` (trùng từ <= 55%)! "
-        "`board_data` là Tấm Bảng Bằng Chứng & Ghi Chú Khoa Học giàu thông tin:\n"
-        "- `myth_vs_fact` / `comparison`: mỗi ô (LẦM TƯỞNG / SỰ THẬT) BẮT BUỘC có Tiêu đề ngắn "
-        "(4-7 từ) + 1 câu giải thích cơ chế/số liệu cụ thể (10-18 từ), không viết 3 chữ cụt lủn.\n"
-        "- `bullets` / `flow_steps`: đủ 3 ý (8-15 từ/ý) dạng `**Thuật ngữ/Con số:** cơ chế "
-        "hoặc tác động cụ thể`, kèm `takeaway` ở đáy thẻ.\n"
-        "- `takeaway` (CHỐT LẠI): BẮT BUỘC ngắn gọn tối đa 10-13 từ để đọc lướt trong 1 giây, "
-        "không bao giờ viết dài lê thê.\n"
-        "- CÂN BẰNG & RẢI ĐỀU ẢNH MINH HỌA (50%-60% BEAT, KHÔNG TRỐNG NỬA SAU): Với kịch bản "
-        ">=7 beat, BẮT BUỘC có ít nhất 3-4 beat `board_type='pinned_photo'` rải đều đủ 3 chặng: "
-        "Đầu (beat 1-3), Giữa (beat 4-6) và Gần cuối (60%-85% trước `recap_card`), xen kẽ với "
-        "bảng phân tích (`myth_vs_fact`, `comparison`, `big_number`, `flow_steps`, `recap_card`). "
-        "Trả về `primary_entity_en` (thực thể trung tâm của video nếu là 1 chủ thể duy nhất, "
-        "vd 'Leaning Tower of Pisa'). Trên MỌI beat `pinned_photo`, BẮT BUỘC ghi `beat_entity_en` "
-        "(tên địa danh/sự vật/hiện tượng thật CỤ THỂ của RIÊNG beat đó bằng tiếng Anh, vd "
-        "'Bermuda Triangle', 'Racetrack Playa', 'Richat Structure Sahara') và `prop_query` neo "
-        "thực thể đó + bối cảnh (vd 'Racetrack Playa sailing stones'), CẤM ghép cụm chung chung "
-        "như 'Mysterious Places' hay từ dễ lạc đề ('old building', 'ruler', 'blueprint'); kèm "
-        "`image_prompt` 1 câu tiếng Anh mô tả tranh 2D minh họa nếu cần fallback AI.\n"
-        "- Cấm cụm sáo rỗng: '100% Mức độ cảnh báo', 'Thông tin quan trọng', 'Lưu ý đặc biệt'.\n"
-        "THẺ TÓM TẮT CUỐI VIDEO (DUY NHẤT 1 RECAP): Nếu 2 beat cuối là tổng kết + CTA "
-        "(bình luận / đăng ký kênh), BẮT BUỘC giữ CHUNG DUY NHẤT 1 `recap_card` giống hệt nhau "
-        "(`board_title='TÓM TẮT 3 Ý CỐT LÕI'`, đúng 3 ý đúc kết giá trị nhất, không đổi bảng "
-        "tóm tắt thứ hai và không ghi câu đăng ký kênh lên bảng).\n"
+        "để tạo nhịp ngắt tự nhiên cho VieNeu-TTS, không viết câu ghép dài. "
+        "THÂN THIỆN VIENEU-TTS: Tránh chèn từ tiếng Anh khó đọc giữa câu tiếng Việt "
+        "(vd dùng 'vận động viên chạy đường dài' thay cho 'marathoner').\n"
+        "CHẾ ĐỘ VISUAL-FIRST (CẤM BẢNG CHỮ ĐỌC DÀI DÒNG): "
+        "Dẹp hoàn toàn bảng nhiều chữ (`bullets`, `myth_vs_fact`, `flow_steps`, `comparison`, "
+        "`big_number`, `recap_card`). Ép 100% beat dùng `board_type='pinned_photo'`!\n"
+        "- `board_title`: BẮT BUỘC là cụm danh từ/ý nhấn cực ngắn đúng 3-6 từ tiếng Việt "
+        "(vd 'Bí ẩn nền móng yếu', 'Cáp thép giữ thẳng tháp'), tuyệt đối không viết cả câu,\n"
+        "không chép nguyên văn narration (<= 55%), cấm văn mẫu ('Mở đầu video', "
+        "'Phân tích cơ chế', 'Tóm tắt 3 ý cốt lõi', 'Kết luận', 'Thông tin quan trọng', "
+        "'100% Mức độ cảnh báo').\n"
+        "- ẢNH MINH HỌA SÁT TỪNG BEAT (100% BEAT): Trả về `primary_entity_en` (thực thể trung tâm "
+        "nếu là 1 chủ thể, vd 'Leaning Tower of Pisa'). Trên MỌI beat, BẮT BUỘC ghi "
+        "`beat_entity_en` (tên địa danh/sự vật thật cụ thể của beat bằng tiếng Anh), "
+        "`prop_query` (2-5 từ tiếng Anh neo đúng thực thể + bối cảnh từng beat để ưu tiên tìm ảnh "
+        "thật Wikimedia Commons -> Pixabay, cấm từ chung chung như 'ruler', 'blueprint', "
+        "'old building') và `image_prompt` (1 câu tiếng Anh mô tả tranh minh họa editorial 2D "
+        "trực quan, không chữ, không nhãn chú thích, không mũi tên sơ đồ, không watermark).\n"
         "LUẬT ĐA DẠNG: Không dùng cùng 1 `pose` hoặc 1 `emotion` cho 2 beat đứng liền kề.\n"
         "domain: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
@@ -107,34 +99,13 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "face_mood (6 sắc thái khuôn mặt): explaining|curious|excited|skeptical|shocked|warm_cta.\n"
         "anim_oneshot: null|shock_jump|idea_bulb|point_board|facepalm|nod_agree|celebrate. "
         "anim_loop: talk_explain|talk_excited|think_loop|idle_breathe|walk_loop. "
-        "interaction: none|hold_prop|point_chart|versus_split "
-        "(nếu hold_prop, bullets hoặc pinned_photo thêm prop_query 2-4 từ tiếng Anh). "
-        "camera_shot: wide_stage|focus_board|closeup_react. "
+        "interaction: none|point_chart (ưu tiên `none` hoặc `point_chart`). "
+        "camera_shot: wide_stage|focus_board (không dùng `closeup_react` che mất ảnh minh họa). "
         "motion: bounce|slide_left|slide_right|float|static. "
         "sfx_tag: none|whoosh|pop|vine_boom|ding. "
-        "board_type: pinned_photo|bullets|big_number|comparison|flow_steps|bar_compare|"
-        "counter_grow|timeline_era|location_map|myth_vs_fact|recap_card|card|quote|list|none.\n"
-        "SCHEMA `board_data` KHỚP 100% RENDERER (MỌI BEAT TỪ ĐẦU ĐẾN CUỐI PHẢI ĐỦ DỮ LIỆU THẬT, "
-        "CẤM BỎ TRỐNG `board_data` Ở NỬA SAU, CẤM DÙNG '100%' NẾU CHỦ ĐỀ KHÔNG NÓI 100%):\n"
-        '- `pinned_photo`: {"caption":"Tên địa điểm/sự vật cụ thể (3-7 từ tiếng Việt)",'
-        '"pin_style":"pin"|"tape"}\n'
-        '- `bullets`: {"items":["**Từ khóa 1:** dữ kiện thật","**Từ khóa 2:** dữ kiện thật",'
-        '"**Từ khóa 3:** dữ kiện thật"],"takeaway":"Chốt ý ngắn <=12 từ"}\n'
-        '- `flow_steps`: {"steps":["**Bước 1:** diễn biến thật","**Bước 2:** cơ chế thật",'
-        '"**Bước 3:** kết quả thật"],"takeaway":"..."}\n'
-        '- `myth_vs_fact`: {"myth":"**Lầm tưởng cụ thể:** giải thích ngắn",'
-        '"fact":"**Sự thật kiểm chứng:** số liệu/cơ chế cụ thể","takeaway":"..."}\n'
-        '- `comparison`: {"left_title":"Tên bên A","left_items":["Đặc điểm A1","Đặc điểm A2"],'
-        '"right_title":"Tên bên B","right_items":["Đặc điểm B1","Đặc điểm B2"],'
-        '"takeaway":"..."}\n'
-        '- `big_number`: {"value":"500.000 km²","label":"Diện tích vùng biển",'
-        '"sub":"Số liệu đo thực tế gắn chủ đề","takeaway":"..."}\n'
-        '- `recap_card`: {"items":["**Ý 1:** rút từ video","**Ý 2:** rút từ video",'
-        '"**Ý 3:** rút từ video"],"takeaway":"Tóm ý chính video <=12 từ"}\n'
-        '- `bar_compare`: {"values":[{"label":"...","value":10}],"takeaway":"..."}, '
-        '`counter_grow`: {"target":1173,"unit":"năm","label":"..."}, '
-        '`timeline_era`: {"events":[{"year":"1173","title":"..."}],"takeaway":"..."}, '
-        '`location_map`: {"location":"...","coordinates":"...","takeaway":"..."}'
+        "board_type: pinned_photo.\n"
+        'SCHEMA `board_data`: {"caption":"<tiêu đề ngắn 3-6 từ khớp board_title>",'
+        '"pin_style":"pin"|"tape"}'
     )
 
 
@@ -444,8 +415,92 @@ _GENERIC_BOARD_TITLES = frozenset(
         "tổng hợp khoa học",
         "thông tin quan trọng",
         "ảnh tư liệu minh họa",
+        "mở đầu video",
+        "tóm tắt 3 ý cốt lõi",
+        "kết luận",
+        "tổng kết",
+        "tổng kết nhanh",
     }
 )
+
+_DANGLING_VI_ENDINGS = frozenset(
+    {
+        "và",
+        "của",
+        "để",
+        "khi",
+        "với",
+        "là",
+        "bị",
+        "do",
+        "từ",
+        "trong",
+        "ở",
+        "nhưng",
+        "vì",
+        "cho",
+        "về",
+        "hay",
+        "hoặc",
+        "nên",
+        "mà",
+        "thì",
+        "tại",
+        "đã",
+        "đang",
+        "sẽ",
+        "những",
+        "các",
+    }
+)
+
+_NO_TEXT_IMAGE_DIRECTIVE = "no text, no labels, no arrows, no watermark"
+
+
+def shorten_visual_title(
+    raw_title: str,
+    *,
+    fallback_narration: str = "",
+    min_words: int = 3,
+    max_words: int = 6,
+) -> str:
+    """Rút gọn tiêu đề Visual-First về 3-6 từ sạch sẽ, không câu dài, không '...' hay văn mẫu."""
+
+    def _clean_text(s: str) -> str:
+        t = format_unwrapped_text(s or "").replace("**", "").replace("__", "")
+        t = t.replace("...", "").replace("…", "")
+        return re.sub(r"\s+", " ", t).strip(" .,:;!?\"'“”–—-")
+
+    def _is_usable(s: str) -> bool:
+        low = s.lower()
+        if not s or re.fullmatch(r"điểm\s*#?\d+", low):
+            return False
+        if low in _GENERIC_BOARD_TITLES:
+            return False
+        return not any(cl in low for cl in _CLICHE_PATTERNS)
+
+    def _trim_words(s: str) -> list[str]:
+        words = [w.strip(".,;:!?\"'“”") for w in s.split() if w.strip(".,;:!?\"'“”")]
+        if len(words) > max_words:
+            words = words[:max_words]
+        while len(words) > min_words and words[-1].lower() in _DANGLING_VI_ENDINGS:
+            words.pop()
+        return words
+
+    cand = _clean_text(raw_title)
+    words = _trim_words(cand) if _is_usable(cand) else []
+
+    if len(words) < min_words and fallback_narration:
+        sub_phrase = _clean_text(_extract_subject_phrase(fallback_narration, max_words=max_words))
+        nar_clean = _clean_text(fallback_narration)
+        src = sub_phrase if len(sub_phrase.split()) >= min_words else nar_clean
+        alt_words = _trim_words(src)
+        if len(alt_words) > len(words):
+            words = alt_words
+
+    if len(words) < min_words:
+        words = ["Điểm", "nhấn", "trực", "quan"]
+    return " ".join(words[:max_words])
 
 
 def _word_overlap_ratio(a: str, b: str) -> float:
@@ -545,231 +600,55 @@ def _is_tail_recap_or_cta(beat: StickvBeat) -> bool:
 
 
 def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
-    """Hậu kiểm bảng tri thức (0% văn mẫu cứng, 0% khung trống, 0% '100%' ảo, 1 recap_card thật)."""
+    """Chuẩn hóa 100% beat sang chế độ Visual-First: `pinned_photo` + tiêu đề ngắn 3-6 từ."""
     if not beats:
         return beats
 
     out: list[StickvBeat] = []
-    collected_insights: list[str] = []
-    seen_bullet_sigs: set[tuple[str, ...]] = set()
-    n_total = len(beats)
-    tail_start = max(0, n_total - 2)
-    tail_recap_indices = {
-        idx for idx in range(tail_start, n_total) if _is_tail_recap_or_cta(beats[idx])
-    }
-    canonical_recap: tuple[list[str], str] | None = None
-
     for idx, beat in enumerate(beats):
         bdata = dict(beat.board_data or {})
-        items = [
-            _trim_at_word_boundary(str(x).strip(), 130)
-            for x in (bdata.get("items") or beat.board_items or [])
-            if str(x).strip()
-        ]
-        takeaway = _trim_takeaway_words(
-            str(beat.takeaway or bdata.get("takeaway") or "").strip(), max_words=13
+        raw_title = str(beat.board_title or "").replace("**", "").strip()
+        raw_cap = format_unwrapped_text(bdata.get("caption") or "").replace("**", "").strip()
+
+        clean_raw_title = re.sub(r"\s+", " ", raw_title).strip(" .,:;!?\"'“”")
+        clean_raw_cap = re.sub(r"\s+", " ", raw_cap).strip(" .,:;!?\"'“”")
+        title_is_bad = (
+            not clean_raw_title
+            or clean_raw_title.lower() in _GENERIC_BOARD_TITLES
+            or any(cl in clean_raw_title.lower() for cl in _CLICHE_PATTERNS)
         )
-        if any(cl in takeaway.lower() for cl in _CLICHE_PATTERNS):
-            takeaway = ""
-        btitle = (beat.board_title or "").strip()
-        btype = beat.board_type
+        cap_is_good = bool(clean_raw_cap) and (
+            clean_raw_cap.lower() not in _GENERIC_BOARD_TITLES
+            and not any(cl in clean_raw_cap.lower() for cl in _CLICHE_PATTERNS)
+        )
+        seed_title = clean_raw_cap if (title_is_bad and cap_is_good) else raw_title
+        short_title = shorten_visual_title(seed_title, fallback_narration=beat.narration)
 
-        # 1. Loại bỏ cụm sáo rỗng / văn mẫu cũ
-        items = [it for it in items if not any(cl in it.lower() for cl in _CLICHE_PATTERNS)]
-        if btitle.lower() in _GENERIC_BOARD_TITLES or any(
-            cl in btitle.lower() for cl in _CLICHE_PATTERNS
-        ):
-            btitle = ""
+        pin_style = str(bdata.get("pin_style") or "").strip().lower()
+        if pin_style not in ("pin", "tape"):
+            pin_style = "pin" if idx % 2 == 0 else "tape"
 
-        # 2. Vùng tổng kết / CTA ở 1-2 beat cuối -> CHUNG DUY NHẤT 1 recap_card từ nội dung thật
-        if idx in tail_recap_indices:
-            if canonical_recap is None:
-                seed_pts = [
-                    _trim_at_word_boundary(it, 110)
-                    for it in items
-                    if beat.board_type == "recap_card"
-                    and not any(k in it.lower() for k in _CTA_KEYWORDS)
-                    and not any(cl in it.lower() for cl in _CLICHE_PATTERNS)
-                ]
-                recap_pts = list(dict.fromkeys([*seed_pts, *collected_insights]))[:3]
-                if len(recap_pts) < 3:
-                    for prev_b in out:
-                        if _is_tail_recap_or_cta(prev_b):
-                            continue
-                        pt_title = str(prev_b.board_title or "").strip().replace("**", "")
-                        cand = ""
-                        if prev_b.takeaway and not any(
-                            k in prev_b.takeaway.lower() for k in _CTA_KEYWORDS
-                        ):
-                            cand = (
-                                f"**{pt_title}:** {prev_b.takeaway}"
-                                if pt_title and pt_title.lower() not in prev_b.takeaway.lower()
-                                else prev_b.takeaway
-                            )
-                        elif prev_b.narration:
-                            cand = _extract_subject_phrase(prev_b.narration, max_words=11)
-                        cand = _trim_at_word_boundary(cand, 110)
-                        if (
-                            cand
-                            and cand not in recap_pts
-                            and not any(k in cand.lower() for k in _CTA_KEYWORDS)
-                            and not any(cl in cand.lower() for cl in _CLICHE_PATTERNS)
-                        ):
-                            recap_pts.append(cand)
-                        if len(recap_pts) >= 3:
-                            break
-                recap_pts = recap_pts[:3]
-                recap_tk = (
-                    takeaway
-                    if (takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS))
-                    else (
-                        _trim_takeaway_words(recap_pts[0], max_words=12)
-                        if recap_pts
-                        else _trim_takeaway_words(beat.narration, max_words=12)
-                    )
-                )
-                canonical_recap = (recap_pts, recap_tk)
+        raw_prompt = re.sub(r"\s+", " ", (beat.image_prompt or "").strip())
+        if raw_prompt and "no text" not in raw_prompt.lower():
+            raw_prompt = f"{raw_prompt.rstrip('.')}, {_NO_TEXT_IMAGE_DIRECTIVE}"
 
-            recap_pts, recap_tk = canonical_recap
-            recap_data = {**bdata, "items": list(recap_pts), "takeaway": recap_tk}
-            out.append(
-                beat.model_copy(
-                    update={
-                        "board_type": "recap_card",
-                        "board_title": "TÓM TẮT 3 Ý CỐT LÕI",
-                        "board_items": list(recap_pts),
-                        "takeaway": recap_tk,
-                        "board_data": recap_data,
-                        "camera_shot": "wide_stage",
-                    }
-                )
-            )
-            continue
-
-        # 3. Kiểm tra `pinned_photo`: đảm bảo caption là tên địa điểm/sự vật cụ thể
-        if btype == "pinned_photo":
-            raw_cap = format_unwrapped_text(bdata.get("caption") or "").replace("**", "").strip()
-            if (
-                not raw_cap
-                or raw_cap.lower() in _GENERIC_BOARD_TITLES
-                or any(cl in raw_cap.lower() for cl in _CLICHE_PATTERNS)
-            ):
-                raw_cap = (
-                    btitle
-                    if (btitle and btitle.lower() not in _GENERIC_BOARD_TITLES)
-                    else _extract_subject_phrase(beat.narration, max_words=6)
-                )
-            bdata["caption"] = _trim_at_word_boundary(raw_cap, 64)
-            if not btitle:
-                btitle = bdata["caption"]
-
-        # 4. Chặn `big_number`/`counter_grow` thiếu số liệu thật -> chuyển sang `bullets`
-        if btype == "big_number":
-            val_s = str(bdata.get("value") or bdata.get("number") or "").strip()
-            if not _has_real_quantitative_value(val_s, beat.narration):
-                btype = "bullets"
-                lbl = format_unwrapped_text(bdata.get("label") or "").strip()
-                sub = format_unwrapped_text(bdata.get("sub") or bdata.get("detail") or "").strip()
-                derived = [
-                    x
-                    for x in (lbl, sub)
-                    if x and not any(cl in x.lower() for cl in _CLICHE_PATTERNS)
-                ]
-                items = derived or _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-                bdata = {"items": items}
-        elif btype == "counter_grow":
-            tgt = bdata.get("target", bdata.get("value"))
-            if tgt is None or not _has_real_quantitative_value(str(tgt), beat.narration):
-                btype = "bullets"
-                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-                bdata = {"items": items}
-
-        # 5. Chặn `comparison` trống cả 2 cột -> fallback sạch sang `bullets` của chính beat
-        if btype == "comparison":
-            l_items = _normalize_side_items(bdata.get("left_items") or bdata.get("left"))
-            r_items = _normalize_side_items(bdata.get("right_items") or bdata.get("right"))
-            if not l_items and not r_items:
-                btype = "bullets"
-                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-                bdata = {"items": items}
-            else:
-                bdata["left_items"] = l_items
-                bdata["right_items"] = r_items
-
-        # 6. Chống lặp/rỗng cho `myth_vs_fact`, `flow_steps`, `bullets` (100% bám dữ liệu beat)
-        if btype == "myth_vs_fact":
-            m_txt = format_unwrapped_text(bdata.get("myth") or bdata.get("left") or "").strip()
-            f_txt = format_unwrapped_text(bdata.get("fact") or bdata.get("right") or "").strip()
-            if any(cl in m_txt.lower() for cl in _CLICHE_PATTERNS):
-                m_txt = ""
-            if any(cl in f_txt.lower() for cl in _CLICHE_PATTERNS):
-                f_txt = ""
-            if not m_txt and not f_txt:
-                btype = "bullets"
-                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-                bdata = {"items": items}
-            else:
-                if not f_txt:
-                    f_txt = takeaway or _trim_at_word_boundary(beat.narration, 140)
-                if not m_txt:
-                    m_txt = _extract_subject_phrase(beat.narration, max_words=8)
-                bdata["myth"] = _trim_at_word_boundary(m_txt, 170)
-                bdata["fact"] = _trim_at_word_boundary(f_txt, 170)
-        elif btype == "flow_steps":
-            steps = [
-                _trim_at_word_boundary(str(s).strip(), 130)
-                for s in (bdata.get("steps") or items or [])
-                if str(s).strip() and not any(cl in str(s).lower() for cl in _CLICHE_PATTERNS)
-            ]
-            if not steps:
-                steps = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-            bdata["steps"] = steps[:4]
-        elif btype in ("bullets", "list", "card"):
-            if not items:
-                items = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-            # Chống lặp y nguyên cùng 1 bộ bullet ở 2 beat khác nhau
-            sig = tuple(it.lower() for it in items)
-            if sig in seen_bullet_sigs:
-                alt = _extract_topic_points_from_beat(beat.narration, btitle, takeaway)
-                if alt:
-                    items = alt
-                    sig = tuple(it.lower() for it in items)
-            if sig:
-                seen_bullet_sigs.add(sig)
-            bdata["items"] = items[:3]
-
-        # Thu thập ý giá trị thật để nạp cho `recap_card` cuối video (cắt đúng ranh giới từ)
-        if takeaway and not any(k in takeaway.lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(_trim_at_word_boundary(takeaway, 100))
-        elif btype == "myth_vs_fact" and bdata.get("fact"):
-            collected_insights.append(_trim_at_word_boundary(str(bdata["fact"]), 100))
-        elif btype == "flow_steps" and bdata.get("steps"):
-            collected_insights.append(_trim_at_word_boundary(str(bdata["steps"][0]), 100))
-        elif btype == "big_number" and bdata.get("value"):
-            bn_lbl = str(bdata.get("label") or btitle or "").strip()
-            collected_insights.append(
-                _trim_at_word_boundary(f"**{bdata['value']}:** {bn_lbl}".strip(": "), 100)
-            )
-        elif items and not any(k in items[0].lower() for k in _CTA_KEYWORDS):
-            collected_insights.append(_trim_at_word_boundary(items[0], 100))
-
-        if takeaway:
-            bdata["takeaway"] = takeaway
-        else:
-            bdata.pop("takeaway", None)
+        eff_shot = beat.camera_shot
+        if _is_tail_recap_or_cta(beat) and eff_shot == "closeup_react":
+            eff_shot = "wide_stage"
 
         out.append(
             beat.model_copy(
                 update={
-                    "board_type": btype,
-                    "board_title": _trim_at_word_boundary(btitle, 100),
-                    "board_items": items if items else list(beat.board_items),
-                    "takeaway": _trim_at_word_boundary(takeaway, 140),
-                    "board_data": bdata,
+                    "board_type": "pinned_photo",
+                    "board_title": short_title,
+                    "board_items": [],
+                    "takeaway": "",
+                    "board_data": {"caption": short_title, "pin_style": pin_style},
+                    "image_prompt": raw_prompt or None,
+                    "camera_shot": eff_shot,
                 }
             )
         )
-
     return out
 
 
@@ -905,48 +784,36 @@ def _is_generic_umbrella_entity(entity: str) -> bool:
 def _ensure_balanced_pinned_photos(
     beats: list[StickvBeat], primary_entity_en: str = ""
 ) -> list[StickvBeat]:
-    """Với kịch bản >=7 beat, đảm bảo có ảnh `pinned_photo` ở cả nửa sau (60%-85%, trước recap)."""
-    n = len(beats)
-    if n < 7:
+    """Bảo đảm 100% beat ở chế độ Visual-First có `pinned_photo`, thực thể và truy vấn ảnh."""
+    if not beats:
         return beats
 
-    out = list(beats)
-    late_start = max(3, int(round(n * 0.58)))
-    late_end = min(n - 1, max(late_start, int(round(n * 0.86))))
-    late_indices = [i for i in range(late_start, late_end + 1) if not _is_tail_recap_or_cta(out[i])]
-    if not late_indices:
-        return out
-
-    has_late_photo = any(out[i].board_type == "pinned_photo" for i in late_indices)
-    if not has_late_photo:
-        # Ưu tiên chuyển 1 beat bullets/none/card ở vùng 60%-85% thành pinned_photo
-        pick = next(
-            (i for i in late_indices if out[i].board_type in ("bullets", "none", "card", "list")),
-            late_indices[0],
-        )
-        b = out[pick]
-        cap = (
-            b.board_title
-            if (b.board_title and b.board_title.lower() not in _GENERIC_BOARD_TITLES)
-            else _extract_subject_phrase(b.narration, max_words=6)
-        )
+    out: list[StickvBeat] = []
+    for idx, b in enumerate(beats):
+        cap = shorten_visual_title(b.board_title, fallback_narration=b.narration)
         ent = (b.beat_entity_en or "").strip()
         if not ent and primary_entity_en and not _is_generic_umbrella_entity(primary_entity_en):
             ent = primary_entity_en.strip()
         pq = (
             (b.prop_query or "").strip() or ent or _extract_subject_phrase(b.narration, max_words=4)
         )
-        new_bdata = {
-            "caption": _trim_at_word_boundary(cap or "Hình ảnh minh họa", 64),
-            "pin_style": "tape",
-        }
-        out[pick] = b.model_copy(
-            update={
-                "board_type": "pinned_photo",
-                "beat_entity_en": ent[:100],
-                "prop_query": pq[:80] if pq else None,
-                "board_data": new_bdata,
-            }
+        pin_style = str((b.board_data or {}).get("pin_style") or "").strip().lower()
+        if pin_style not in ("pin", "tape"):
+            pin_style = "pin" if idx % 2 == 0 else "tape"
+        raw_prompt = re.sub(r"\s+", " ", (b.image_prompt or "").strip())
+        if raw_prompt and "no text" not in raw_prompt.lower():
+            raw_prompt = f"{raw_prompt.rstrip('.')}, {_NO_TEXT_IMAGE_DIRECTIVE}"
+        out.append(
+            b.model_copy(
+                update={
+                    "board_type": "pinned_photo",
+                    "board_title": cap,
+                    "beat_entity_en": ent[:100],
+                    "prop_query": pq[:80] if pq else None,
+                    "image_prompt": raw_prompt or b.image_prompt,
+                    "board_data": {"caption": cap, "pin_style": pin_style},
+                }
+            )
         )
     return out
 
@@ -1035,10 +902,18 @@ def anchor_beat_image_queries(
         p_tokens = _core_en_tokens(raw_prompt)
         if not raw_prompt:
             ctx = (beat.board_data or {}).get("caption") or beat.board_title or new_q
-            new_prompt = f"2D editorial illustration of {eff_entity}, scene context: {ctx}"[:320]
+            new_prompt = (
+                f"2D editorial illustration of {eff_entity}, scene context: {ctx}, "
+                f"{_NO_TEXT_IMAGE_DIRECTIVE}"
+            )[:320]
         elif not all(tok in p_tokens for tok in entity_tokens):
-            new_prompt = f"{eff_entity} — {raw_prompt}"[:320]
+            base_p = f"{eff_entity} — {raw_prompt}"
+            if "no text" not in base_p.lower():
+                base_p = f"{base_p.rstrip('.')}, {_NO_TEXT_IMAGE_DIRECTIVE}"
+            new_prompt = base_p[:320]
         else:
+            if "no text" not in raw_prompt.lower():
+                raw_prompt = f"{raw_prompt.rstrip('.')}, {_NO_TEXT_IMAGE_DIRECTIVE}"
             new_prompt = raw_prompt[:320]
 
         updates: dict[str, Any] = {}
@@ -1220,7 +1095,6 @@ def split_raw_narration_to_beats(raw_text: str, *, title: str = "") -> tuple[str
     total = len(chunks)
     for idx, line in enumerate(chunks, start=1):
         low = line.lower()
-        num_match = re.search(r"\b(\d+(?:[.,]\d+)?%|\d+\s*(?:triệu|tỷ|nghìn|năm|ngày|lần))\b", low)
         if idx == 1:
             pose, motion, sfx = "shock", "slide_left", "vine_boom"
         elif idx == total:
@@ -1234,17 +1108,7 @@ def split_raw_narration_to_beats(raw_text: str, *, title: str = "") -> tuple[str
         else:
             pose, motion, sfx = "explain", "bounce", "whoosh"
 
-        if num_match:
-            btype = "big_number"
-            bdata: dict[str, Any] = {
-                "value": num_match.group(1).upper(),
-                "label": line[:60],
-                "takeaway": "Con số đáng chú ý",
-            }
-        else:
-            btype = "bullets"
-            bdata = {"items": [line[:88]]}
-
+        short_t = shorten_visual_title("", fallback_narration=line)
         beats.append(
             StickvBeat(
                 id=f"b{idx:03d}",
@@ -1254,9 +1118,12 @@ def split_raw_narration_to_beats(raw_text: str, *, title: str = "") -> tuple[str
                 facing="right" if idx % 2 == 1 else "left",
                 motion=motion,  # type: ignore[arg-type]
                 sfx_tag=sfx,  # type: ignore[arg-type]
-                board_type=btype,  # type: ignore[arg-type]
-                board_title=f"Điểm #{idx}",
-                board_data=bdata,
+                board_type="pinned_photo",
+                board_title=short_t,
+                board_data={
+                    "caption": short_t,
+                    "pin_style": "pin" if idx % 2 == 1 else "tape",
+                },
             )
         )
 
@@ -1289,8 +1156,10 @@ def generate_stickv_script(
             'JSON: {"title":"...","primary_entity_en":"English primary entity",'
             '"domain":"history_geo","music_mood":"history_epic",'
             '"beats":[{"narration":"...","pose":"point_up","camera_shot":"wide_stage",'
-            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
-            '"board_title":"...","board_data":{"items":["..."],"takeaway":"..."}}]}'
+            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"pinned_photo",'
+            '"board_title":"Tiêu đề ngắn 3-6 từ","beat_entity_en":"English entity",'
+            '"prop_query":"English search query","image_prompt":"2D editorial scene, no text",'
+            '"board_data":{"caption":"Tiêu đề ngắn 3-6 từ","pin_style":"pin"}}]}'
         )
         parsed, timings = generate_structured_json(
             sys_prompt, user_prompt, model=chosen_model, timeout=60.0
@@ -1356,8 +1225,10 @@ def generate_stickv_script(
             f"Video: {title}{entity_hint} | Chương {ch_idx}/{len(raw_chapters[:num_chapters])}: "
             f"{heading} ({summary}). Viết {beats_per_ch} beat chi tiết, chuyển góc máy linh hoạt.\n"
             'JSON: {"beats":[{"narration":"...","pose":"point_up","camera_shot":"focus_board",'
-            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"bullets",'
-            '"board_title":"...","board_data":{}}]}'
+            '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"pinned_photo",'
+            '"board_title":"Tiêu đề ngắn 3-6 từ","beat_entity_en":"English entity",'
+            '"prop_query":"English search query","image_prompt":"2D editorial scene, no text",'
+            '"board_data":{"caption":"Tiêu đề ngắn 3-6 từ","pin_style":"tape"}}]}'
         )
         ch_parsed, ch_t = generate_structured_json(
             sys_prompt, ch_prompt, model=chosen_model, timeout=60.0

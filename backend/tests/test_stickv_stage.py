@@ -943,16 +943,16 @@ def test_pinned_photo_polaroid_board_on_dynamic_backdrop() -> None:
         # 1. Không phủ kín nền: góc trên trái & mép trên vẫn giữ đúng màu nền động
         assert frame.getpixel((20, 20)) == bg_color
         assert frame.getpixel((1060, 20)) == bg_color
-        # 2. Vùng bảng chứa khung Polaroid trắng #FFFFFF và đinh ghim đỏ #D9232E
-        top_zone = arr[100:950, 80:1000]
-        white_mask = (
-            (top_zone[:, :, 0] > 248) & (top_zone[:, :, 1] > 248) & (top_zone[:, :, 2] > 248)
+        # 2. Vùng bảng chứa khung ảnh lớn Visual-First (màu ảnh xanh dương) + dải tiêu đề sáng
+        top_zone = arr[100:860, 50:1030]
+        photo_blue_mask = (
+            (top_zone[:, :, 0] < 95) & (top_zone[:, :, 1] > 100) & (top_zone[:, :, 2] > 150)
         )
-        red_pin_mask = (
-            (top_zone[:, :, 0] > 190) & (top_zone[:, :, 1] < 65) & (top_zone[:, :, 2] < 75)
+        white_card_mask = (
+            (top_zone[:, :, 0] > 235) & (top_zone[:, :, 1] > 235) & (top_zone[:, :, 2] > 235)
         )
-        assert int(white_mask.sum()) > 5000
-        assert int(red_pin_mask.sum()) > 100
+        assert int(photo_blue_mask.sum()) > 50000
+        assert int(white_card_mask.sum()) > 5000
         frame.close()
 
         # 3. Kiểu băng dính (pin_style='tape') + pha vào mượt 0.35s không lỗi
@@ -1124,10 +1124,10 @@ def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> N
         "]}"
     )
     _, parsed_beats = parse_stickv_json_payload(payload)
-    assert parsed_beats[-1].board_type == "recap_card"
+    assert parsed_beats[-1].board_type == "pinned_photo"
     assert parsed_beats[-1].camera_shot == "wide_stage"
 
-    # 3. pinned_photo khi prop_img=None tự rơi mềm sang thẻ bullets (không vẽ Polaroid rỗng)
+    # 3. pinned_photo khi prop_img=None tự vẽ thẻ icon Visual-First gọn (0 crash, 0 text-wall)
     pal = resolve_stage_palette("paper_classic", "cream")
     canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
     try:
@@ -1146,7 +1146,7 @@ def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> N
             prop_img=None,
             total_chapters=1,
         )
-        assert box[2] - box[0] > 800
+        assert box[2] - box[0] > 700
     finally:
         canvas.close()
 
@@ -1247,3 +1247,97 @@ def test_stage_board_schemas_no_empty_comparison_or_fake_100_percent() -> None:
                 canvas.close()
     finally:
         sample_photo.close()
+
+
+def test_visual_first_title_unified_uppercase() -> None:
+    """Packet A3: 100% tiêu đề Visual-First đồng bộ UPPERCASE 3-6 từ, không cắt dấu '...'."""
+    from hbt.stickv.stage import _pick_visual_first_title
+
+    samples = [
+        StickvBeat(
+            id="b1",
+            narration="Kỹ sư phát hiện nền đất bị lún.",
+            board_type="pinned_photo",
+            board_title="Phát hiện lún móng",
+        ),
+        StickvBeat(
+            id="b2",
+            narration="Tháp nghiêng Pisa nổi tiếng toàn cầu.",
+            board_type="pinned_photo",
+            board_title="KIỆT TÁC KIẾN TRÚC",
+        ),
+        StickvBeat(
+            id="b3",
+            narration="Mực nước ngầm khiến nền đất sét mềm nghiêng về phía nam.",
+            board_type="pinned_photo",
+            board_title="",
+        ),
+    ]
+    for b in samples:
+        out = _pick_visual_first_title(b)
+        assert out == out.upper(), out
+        assert "..." not in out
+        assert 3 <= len(out.split()) <= 6, out
+
+
+def test_resolve_beat_visual_image_dedupes_adjacent_beats(tmp_path: Path, monkeypatch) -> None:
+    """Packet A3: 2 beat liền kề không trả cùng 1 file ảnh khi có phương án thay thế."""
+    from hbt.stickv import render as sr
+
+    proj_dir = tmp_path / "workspace" / "stickv" / "demo"
+    lib_dir = tmp_path / "library"
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    img_a = lib_dir / "ref_a.jpg"
+    img_b = lib_dir / "ref_b.jpg"
+    Image.new("RGB", (64, 64), (210, 40, 40)).save(img_a, format="JPEG")
+    Image.new("RGB", (64, 64), (40, 120, 210)).save(img_b, format="JPEG")
+
+    def _fake_resolve(query: str, *args, **kwargs):
+        if "detail closeup" in query or "panorama" in query or "alternate" in query:
+            return img_b, "cloudflare_flux"
+        return img_a, "wikimedia"
+
+    monkeypatch.setattr(sr, "resolve_reference_image", _fake_resolve)
+
+    b009 = StickvBeat(
+        id="b009",
+        narration="Toàn cảnh quảng trường tháp nghiêng.",
+        board_type="pinned_photo",
+        board_title="TOÀN CẢNH QUẢNG TRƯỜNG",
+        prop_query="Leaning Tower of Pisa aerial",
+    )
+    b010 = StickvBeat(
+        id="b010",
+        narration="Chi tiết phần đỉnh tháp.",
+        board_type="pinned_photo",
+        board_title="TÓM TẮT 3 Ý CỐT LÕI",
+        prop_query="Leaning Tower of Pisa aerial",
+    )
+    m1: dict[str, str] = {}
+    m2: dict[str, str] = {}
+    im1, _ = sr._resolve_beat_visual_image(
+        b009,
+        project_dir=proj_dir,
+        library_dir=lib_dir,
+        accent=(220, 38, 38, 255),
+        out_meta=m1,
+    )
+    im2, src2 = sr._resolve_beat_visual_image(
+        b010,
+        project_dir=proj_dir,
+        library_dir=lib_dir,
+        accent=(220, 38, 38, 255),
+        prev_image_path=m1["path"],
+        out_meta=m2,
+    )
+    if im1 is not None:
+        im1.close()
+    if im2 is not None:
+        im2.close()
+
+    assert m1["path"] == str(img_a)
+    assert m2["path"] == str(img_b)
+    assert m1["path"] != m2["path"]
+    assert src2 == "cloudflare_flux"

@@ -733,3 +733,179 @@ def test_smooth_60fps_wrist_kinematics_across_beat_boundaries(tmp_path: Path) ->
     ]
     assert max(steps) <= 10.0
     assert float(np.percentile(steps, 95)) <= 3.5
+
+
+def test_arms_and_gloves_render_in_front_of_torso_and_behind_head(tmp_path: Path) -> None:
+    """INV-06: Cả 2 cánh tay & găng tay nằm TRƯỚC body_torso, và head nằm TRÊN CÙNG."""
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+
+    rig = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=360,
+        pose="arms_crossed",
+        facing="right",
+        duration_sec=1.0,
+        fps=60,
+        rms_env=[0.3] * 60,
+    )
+    try:
+        t_size = rig.parts["body_torso"].size
+        h_size = rig.parts["head_blank"].size
+        rig.parts["body_torso"].close()
+        rig.parts["head_blank"].close()
+        rig.parts["body_torso"] = Image.new("RGBA", t_size, (220, 40, 120, 255))
+        rig.parts["head_blank"] = Image.new("RGBA", h_size, (30, 110, 240, 255))
+        if rig._torso_2x is not None:
+            rig._torso_2x.close()
+            rig._torso_2x = None
+        rig._torso_rot_cache.clear()
+
+        fr = rig.render_frame(0, 0.0)
+        try:
+            arr = np.asarray(fr)
+            cw, ch = rig.canvas_size
+            ground_y = float(ch - 8)
+            t_w, t_h = t_size
+            foot_x = cw * 0.5
+            sx_l = int(
+                round(foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_left_torso"][0]) * t_w)
+            )
+            sy_l = int(round(ground_y - t_h + float(rig.rig_cfg["shoulder_left_torso"][1]) * t_h))
+            sx_r = int(
+                round(foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_right_torso"][0]) * t_w)
+            )
+            sy_r = int(round(ground_y - t_h + float(rig.rig_cfg["shoulder_right_torso"][1]) * t_h))
+            # Cả khớp vai/tay trái lẫn phải phải đè lên thân áo hồng cánh sen (220, 40, 120)
+            for sx, sy in ((sx_l, sy_l), (sx_r, sy_r)):
+                patch = arr[max(0, sy - 2) : sy + 3, max(0, sx - 2) : sx + 3]
+                assert np.any((patch[..., 0] < 60) & (patch[..., 1] < 60) & (patch[..., 2] < 60))
+        finally:
+            fr.close()
+
+        # Hạ nhẹ cổ để head chồng trực tiếp lên vùng khớp vai/tay -> đầu vẫn phải đè lên tay
+        rig.rig_cfg["neck_anchor_torso"] = [0.50, 0.24]
+        fr_head = rig.render_frame(0, 0.0)
+        try:
+            arr_h = np.asarray(fr_head)
+            sh_mid_y = int(
+                round(ground_y - t_h + float(rig.rig_cfg["shoulder_left_torso"][1]) * t_h)
+            )
+            patch_l = arr_h[max(0, sh_mid_y - 2) : sh_mid_y + 3, max(0, sx_l - 2) : sx_l + 3]
+            patch_r = arr_h[max(0, sh_mid_y - 2) : sh_mid_y + 3, max(0, sx_r - 2) : sx_r + 3]
+            assert np.any((patch_l[..., 2] > 180) & (patch_l[..., 0] < 80))
+            assert np.any((patch_r[..., 2] > 180) & (patch_r[..., 0] < 80))
+        finally:
+            fr_head.close()
+    finally:
+        rig.close()
+
+
+def test_outward_elbows_and_clear_red_tie_across_six_poses(tmp_path: Path) -> None:
+    """Packet A1.1: Khuỷu tay luôn hướng ra ngoài và 6 tư thế không cắt chéo qua cà vạt đỏ."""
+    from hbt.stickv.puppet import solve_arm_ik_natural
+
+    # 1. Kiểm tra bất biến khuỷu hướng ngoài trực tiếp qua các vùng mục tiêu (hông, ngực, trên cao)
+    sh_l_t = (100.0, 120.0)
+    sh_r_t = (160.0, 120.0)
+    for tgt_l, tgt_r in (
+        ((95.0, 210.0), (165.0, 210.0)),  # tay đặt cạnh hông
+        ((105.0, 140.0), (155.0, 140.0)),  # gần thân
+        ((60.0, 50.0), (220.0, 50.0)),  # giơ cao chỉ bảng
+    ):
+        el_l, _ = solve_arm_ik_natural("left", sh_l_t, tgt_l, 52.0, 48.0)
+        el_r, _ = solve_arm_ik_natural("right", sh_r_t, tgt_r, 52.0, 48.0)
+        assert el_l[0] < sh_l_t[0]
+        assert el_r[0] > sh_r_t[0]
+
+    # 2. Render 6 tư thế chính với PuppetRig: khuỷu ngoài + 0 pixel tay tối cắt ngang tie_bbox
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    six_poses = (
+        "arms_crossed",
+        "hands_on_hips",
+        "think_chin",
+        "lean_secret",
+        "point_up",
+        "present_board",
+    )
+
+    for pose_name in six_poses:
+        rig = PuppetRig(
+            library_dir=lib,
+            assets_dir=assets,
+            target_height=360,
+            pose=pose_name,
+            facing="right",
+            duration_sec=1.0,
+            fps=60,
+            rms_env=[0.25] * 60,
+        )
+        try:
+            t_size = rig.parts["body_torso"].size
+            rig.parts["body_torso"].close()
+            torso_img = Image.new("RGBA", t_size, (245, 245, 245, 255))
+            td = ImageDraw.Draw(torso_img)
+            cx = t_size[0] // 2
+            tie_top = int(round(t_size[1] * 0.08))
+            tie_bot = int(round(t_size[1] * 0.36))
+            td.rectangle((cx - 4, tie_top, cx + 4, tie_bot), fill=(217, 35, 46, 255))
+            rig.parts["body_torso"] = torso_img
+            if rig._torso_2x is not None:
+                rig._torso_2x.close()
+                rig._torso_2x = None
+            rig._torso_rot_cache.clear()
+
+            # Chờ lò xo ổn định ở 60fps rồi lấy frame cuối cùng
+            last_fr = None
+            for fi in range(60):
+                if last_fr is not None:
+                    last_fr.close()
+                last_fr = rig.render_frame(fi, fi / 60.0)
+
+            assert rig._elbow_springs is not None
+            cw, ch = rig.canvas_size
+            ground_y = float(ch - 8)
+            t_w, t_h = t_size
+            foot_x = cw * 0.5
+            sh_l_x = foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_left_torso"][0]) * t_w
+            sh_r_x = foot_x - t_w * 0.5 + float(rig.rig_cfg["shoulder_right_torso"][0]) * t_w
+            assert rig._elbow_springs["el_lx"].pos < sh_l_x, pose_name
+            assert rig._elbow_springs["el_rx"].pos > sh_r_x, pose_name
+
+            assert last_fr is not None
+            try:
+                arr = np.asarray(last_fr)
+                y0 = max(0, int(round(ground_y - t_h + tie_top + 4)))
+                y1 = min(ch, int(round(ground_y - t_h + tie_bot - 4)))
+                x0 = max(0, int(round(foot_x - 18)))
+                x1 = min(cw, int(round(foot_x + 19)))
+                strip = arr[y0:y1, x0:x1]
+                red_mask = (
+                    (strip[..., 0] > 180)
+                    & (strip[..., 1] < 70)
+                    & (strip[..., 2] < 70)
+                    & (strip[..., 3] > 200)
+                )
+                ys, xs = np.where(red_mask)
+                assert len(xs) >= 40, f"{pose_name}: red tie missing or occluded"
+                tie_bbox = arr[
+                    y0 + int(ys.min()) : y0 + int(ys.max()) + 1,
+                    x0 + int(xs.min()) : x0 + int(xs.max()) + 1,
+                ]
+                dark_on_tie = (
+                    (tie_bbox[..., 0] < 60)
+                    & (tie_bbox[..., 1] < 60)
+                    & (tie_bbox[..., 2] < 60)
+                    & (tie_bbox[..., 3] > 120)
+                )
+                assert int(np.sum(dark_on_tie)) == 0, (
+                    f"{pose_name}: dark arm pixels crossed red tie"
+                )
+            finally:
+                last_fr.close()
+        finally:
+            rig.close()
