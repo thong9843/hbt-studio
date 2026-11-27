@@ -2,119 +2,44 @@
 
 from __future__ import annotations
 
-import json
-import time
-from typing import Any
-
-import httpx
-
-from hbt.core.gemini_client import (
+from hbt.shared.llm.gemini import (
     AVAILABLE_GEMINI_MODELS,
+    GEMINI_BASE_URL,
+    GEMINI_ENDPOINT,
     GEMINI_MODEL,
     MODELS,
+    PLACEHOLDER_KEYS,
     GeminiClientError,
+    _clean_key_value,
     _extract_json_text,
+    _safe_print_config,
     build_gemini_headers,
+    build_gemini_payload,
     build_gemini_url,
+    generate_structured_json,
     is_valid_gemini_api_key,
     load_gemini_api_key,
     normalize_model_name,
+    resolve_candidate_env_paths,
 )
 
 __all__ = [
     "AVAILABLE_GEMINI_MODELS",
+    "GEMINI_BASE_URL",
+    "GEMINI_ENDPOINT",
     "GEMINI_MODEL",
     "MODELS",
+    "PLACEHOLDER_KEYS",
     "GeminiClientError",
+    "_clean_key_value",
+    "_extract_json_text",
+    "_safe_print_config",
     "build_gemini_headers",
+    "build_gemini_payload",
     "build_gemini_url",
     "generate_structured_json",
     "is_valid_gemini_api_key",
     "load_gemini_api_key",
     "normalize_model_name",
+    "resolve_candidate_env_paths",
 ]
-
-
-def generate_structured_json(
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    model: str | None = None,
-    temperature: float = 0.8,
-    timeout: float = 60.0,
-    response_schema: dict[str, Any] | None = None,
-    max_output_tokens: int | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Gọi Gemini API (Structured JSON Output) và trả về (parsed_dict, timings)."""
-    api_key = load_gemini_api_key()
-    if not is_valid_gemini_api_key(api_key):
-        raise GeminiClientError(
-            "Chưa cấu hình GEMINI_API_KEY hợp lệ trong .env.",
-            fallback_v1=True,
-        )
-
-    chosen = normalize_model_name(model or GEMINI_MODEL)
-    candidates = [chosen] + [m for m in MODELS if m != chosen]
-
-    gen_cfg: dict[str, Any] = {
-        "temperature": temperature,
-        "responseMimeType": "application/json",
-    }
-    if response_schema is not None:
-        gen_cfg["responseSchema"] = response_schema
-    if max_output_tokens is not None and max_output_tokens > 0:
-        gen_cfg["maxOutputTokens"] = int(max_output_tokens)
-
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}],
-            }
-        ],
-        "generationConfig": gen_cfg,
-    }
-    headers = build_gemini_headers(api_key)
-
-    t0 = time.perf_counter()
-    last_err: Exception | None = None
-    for idx, m in enumerate(candidates):
-        url = build_gemini_url(m)
-        try:
-            with httpx.Client(timeout=timeout) as client:
-                resp = client.post(url, headers=headers, json=payload)
-                if resp.status_code >= 400:
-                    last_err = GeminiClientError(
-                        f"Gemini HTTP {resp.status_code}: {resp.text[:200]}"
-                    )
-                    continue
-                data = resp.json()
-                raw_text = (
-                    data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [{}])[0]
-                    .get("text", "")
-                )
-                clean_json = _extract_json_text(raw_text)
-                parsed = json.loads(clean_json)
-                if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
-                    parsed = parsed[0]
-                if not isinstance(parsed, dict):
-                    raise ValueError("Gemini không trả về JSON object")
-                usage = data.get("usageMetadata") or {}
-                tokens = int(usage.get("candidatesTokenCount") or 0)
-                timings = {
-                    "llm_s": round(time.perf_counter() - t0, 3),
-                    "llm_tokens": tokens,
-                    "llm_retry": idx,
-                    "model": m,
-                }
-                return parsed, timings
-        except Exception as exc:
-            last_err = exc
-            continue
-
-    raise GeminiClientError(
-        f"Không thể gọi Gemini API: {last_err}",
-        fallback_v1=True,
-    )

@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
+from hbt.shared.pillow_utils import load_cached_font
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
 from hbt.stickv.llm import format_unwrapped_text, unwrap_board_text
 from hbt.stickv.models import (
@@ -135,12 +137,7 @@ THEME_PALETTES: dict[StickvTheme, dict[str, tuple[int, int, int, int]]] = {
 
 
 def _load_font(path: Path, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        if path.is_file():
-            return ImageFont.truetype(str(path), size=max(12, size))
-    except Exception:
-        pass
-    return ImageFont.load_default()
+    return load_cached_font(path, max(12, size))
 
 
 _POSE_IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -681,13 +678,24 @@ def _draw_pinned_photo_card(
     vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     pin_style = str(data.get("pin_style") or "pin").strip().lower()
-    raw_caption = (
-        str(data.get("caption") or "").strip()
-        or strip_rich_markup(beat.board_title or "").strip()
-        or _extract_highlight_keyword(beat.narration)
-    )
-    cap_words = raw_caption.split()[:6]
-    caption = " ".join(cap_words) if cap_words else "Ảnh tư liệu minh họa"
+    _generic_caps = {
+        "phân tích cơ chế",
+        "dữ kiện định lượng",
+        "bản đồ ý chính",
+        "hồ sơ phân tích",
+        "ảnh tư liệu minh họa",
+    }
+    raw_caption = str(data.get("caption") or "").replace("**", "").strip()
+    if raw_caption.lower() in _generic_caps:
+        raw_caption = ""
+    if not raw_caption:
+        bt_clean = strip_rich_markup(beat.board_title or "").strip()
+        if bt_clean.lower() not in _generic_caps:
+            raw_caption = bt_clean
+    if not raw_caption:
+        raw_caption = _extract_highlight_keyword(beat.narration)
+    cap_words = raw_caption.split()[:7]
+    caption = " ".join(cap_words) if cap_words else "Hình ảnh minh họa"
 
     # Tạo lớp Polaroid có viền đệm đủ cho bóng đổ + đinh ghim + xoay nghiêng ±2.2°
     pad = 44
@@ -787,11 +795,7 @@ def _draw_pinned_photo_card(
         sign = 1.0 if (sum(ord(c) for c in (beat.id or "b1")) % 2 == 0) else -1.0
         tilted = polaroid.rotate(sign * 2.2, resample=Image.Resampling.BICUBIC, expand=True)
         try:
-            if content_alpha < 0.995:
-                a_band = tilted.getchannel("A").point(
-                    lambda p: int(round(p * max(0.0, min(1.0, content_alpha))))
-                )
-                tilted.putalpha(a_band)
+            _scale_alpha_inplace(tilted, content_alpha)
             dest_x = x0 + (bw - tilted.width) // 2
             dest_y = y0 + (bh - tilted.height) // 2
             canvas.alpha_composite(tilted, (dest_x, dest_y))
@@ -800,6 +804,45 @@ def _draw_pinned_photo_card(
             tilted.close()
     finally:
         polaroid.close()
+
+
+_ALPHA_LUT_CACHE: dict[int, list[int]] = {}
+
+
+def _scale_alpha_inplace(img: Image.Image, factor: float) -> None:
+    """Nhân kênh alpha tại chỗ bằng bảng tra C (LUT), tránh lambda từng pixel."""
+    clamped = max(0.0, min(1.0, float(factor)))
+    if clamped >= 0.995:
+        return
+    q = int(round(clamped * 255))
+    lut = _ALPHA_LUT_CACHE.get(q)
+    if lut is None:
+        s = q / 255.0
+        lut = [int(round(i * s)) for i in range(256)]
+        _ALPHA_LUT_CACHE[q] = lut
+    a_band = img.getchannel("A")
+    try:
+        scaled_a = a_band.point(lut)
+        try:
+            img.putalpha(scaled_a)
+        finally:
+            scaled_a.close()
+    finally:
+        a_band.close()
+
+
+def close_stage_cache(cache: dict[str, Any] | None) -> None:
+    """Giải phóng mọi `PIL.Image` nằm trong cache tạm của stage."""
+    if not cache:
+        return
+    for val in cache.values():
+        if isinstance(val, Image.Image):
+            val.close()
+        elif isinstance(val, tuple):
+            for item in val:
+                if isinstance(item, Image.Image):
+                    item.close()
+    cache.clear()
 
 
 def _draw_smart_board_content(
@@ -836,6 +879,35 @@ def _draw_smart_board_content(
     data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
     if not data.get("items") and getattr(beat, "board_items", None):
         data["items"] = list(beat.board_items)
+
+    def _side_items(raw_val: Any) -> list[str]:
+        if isinstance(raw_val, list):
+            return [format_unwrapped_text(x) for x in raw_val if format_unwrapped_text(x)][:4]
+        s = format_unwrapped_text(raw_val)
+        return [s] if s else []
+
+    # Chốt chặn schema ở renderer: không vẽ comparison trống hoặc big_number "100%" vô nghĩa
+    if eff_btype == "comparison":
+        l_check = _side_items(data.get("left_items") or data.get("left"))
+        r_check = _side_items(data.get("right_items") or data.get("right"))
+        if not l_check and not r_check:
+            eff_btype = "bullets"
+    elif eff_btype == "big_number":
+        raw_bn = data.get("value")
+        if raw_bn is None or str(raw_bn).strip() == "":
+            raw_bn = data.get("number")
+        bn_str = strip_rich_markup(str(raw_bn or "")).strip()
+        if (
+            not bn_str
+            or not re.search(r"\d", bn_str)
+            or (bn_str == "100%" and "100%" not in (beat.narration or ""))
+        ):
+            eff_btype = "bullets"
+            if not data.get("items"):
+                lbl_s = format_unwrapped_text(data.get("label") or "")
+                sub_s = format_unwrapped_text(data.get("sub") or data.get("detail") or "")
+                data["items"] = [x for x in (lbl_s, sub_s) if x]
+
     takeaway = (
         format_unwrapped_text(getattr(beat, "takeaway", "") or data.get("takeaway") or "")
         .replace("**", "")
@@ -883,16 +955,8 @@ def _draw_smart_board_content(
         )
         est_h += max(140, qh + 64)
     elif eff_btype == "comparison":
-        left_items = [
-            format_unwrapped_text(x)
-            for x in (data.get("left_items") or [])
-            if format_unwrapped_text(x)
-        ][:4]
-        right_items = [
-            format_unwrapped_text(x)
-            for x in (data.get("right_items") or [])
-            if format_unwrapped_text(x)
-        ][:4]
+        left_items = _side_items(data.get("left_items") or data.get("left"))
+        right_items = _side_items(data.get("right_items") or data.get("right"))
         col_w_px = max(140, (bw - 120) // 2)
         lh = sum(
             _measure_rich_wrapped_height(
@@ -1090,11 +1154,12 @@ def _draw_smart_board_content(
                 if format_unwrapped_text(it)
             ][:3]
             if not recap_items:
-                recap_items = [
-                    "Nắm vững cơ chế gốc",
-                    "Loại bỏ lầm tưởng cũ",
-                    "Áp dụng ngay thực tế",
+                clauses = [
+                    c.strip()
+                    for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
+                    if len(c.strip().split()) >= 3
                 ]
+                recap_items = clauses[:3] or [beat.board_title or beat.narration]
             slot_h = max(72, (content_bottom - cur_y - 24) // max(1, len(recap_items)) - 12)
             for idx, item in enumerate(recap_items, start=1):
                 if cur_y > content_bottom - 58:
@@ -1114,15 +1179,16 @@ def _draw_smart_board_content(
                 _draw_rich_autofit_text(
                     draw,
                     item,
-                    (x0 + 108, cur_y + 12),
+                    (x0 + 108, cur_y + 10),
                     FONT_BOLD,
-                    32,
-                    16,
+                    30,
+                    13,
                     pal["text"],
                     hl_fill,
                     max_width_px=max(180, bw - 160),
-                    max_height_px=max(28, (cy1 - cur_y) - 20),
-                    line_gap=6,
+                    max_height_px=max(32, (cy1 - cur_y) - 16),
+                    line_gap=5,
+                    max_lines=3,
                 )
                 cur_y = cy1 + 12
 
@@ -1230,9 +1296,15 @@ def _draw_smart_board_content(
                 cur_y += 78
 
         elif eff_btype == "big_number":
-            val = strip_rich_markup(str(data.get("value") or "100%"))
+            raw_bn = data.get("value")
+            if raw_bn is None or str(raw_bn).strip() == "":
+                raw_bn = data.get("number")
+            val = strip_rich_markup(str(raw_bn or "")).strip()
+            unit = strip_rich_markup(str(data.get("unit") or "")).strip()
+            if val and unit and unit.lower() not in val.lower():
+                val = f"{val} {unit}".strip()
             lbl = str(data.get("label") or "")
-            sub = str(data.get("sub") or "")
+            sub = str(data.get("sub") or data.get("detail") or "")
             f_stat = _fit_single_line_font(draw, val, FONT_EXTRABOLD, 128, 40, max(200, bw - 88))
             draw.text((x0 + 44, cur_y + 4), val, font=f_stat, fill=pal["accent"])
             bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_stat)
@@ -1291,8 +1363,8 @@ def _draw_smart_board_content(
             draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
             draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
 
-            left_t = format_unwrapped_text(data.get("left_title") or "Trước")
-            right_t = format_unwrapped_text(data.get("right_title") or "Sau")
+            left_t = format_unwrapped_text(data.get("left_title") or "Bên A")
+            right_t = format_unwrapped_text(data.get("right_title") or "Bên B")
             draw_rich_text_line(
                 draw,
                 left_t,
@@ -1313,16 +1385,8 @@ def _draw_smart_board_content(
             )
             ly = cur_y + 66
             ry = cur_y + 66
-            left_list = [
-                format_unwrapped_text(x)
-                for x in (data.get("left_items") or [])[:4]
-                if format_unwrapped_text(x)
-            ]
-            right_list = [
-                format_unwrapped_text(x)
-                for x in (data.get("right_items") or [])[:4]
-                if format_unwrapped_text(x)
-            ]
+            left_list = _side_items(data.get("left_items") or data.get("left"))
+            right_list = _side_items(data.get("right_items") or data.get("right"))
             l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
             r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
             for item in left_list:
@@ -1647,10 +1711,7 @@ def _draw_smart_board_content(
             )
 
         if inner_layer is not canvas:
-            a_band = inner_layer.getchannel("A").point(
-                lambda p: int(round(p * max(0.0, min(1.0, content_alpha))))
-            )
-            inner_layer.putalpha(a_band)
+            _scale_alpha_inplace(inner_layer, content_alpha)
             canvas.alpha_composite(inner_layer)
     finally:
         if inner_layer is not canvas:
@@ -1688,6 +1749,7 @@ def _composite_transitioned_board(
     clamp_bounds: tuple[int, int, int, int] | None = None,
     anchor_top_center: tuple[float, float] | None = None,
     prev_board_img: Image.Image | None = None,
+    board_cache: dict[str, Any] | None = None,
 ) -> None:
     """Chuyển tiếp thẻ bằng Cross-Fade 0.28s Cosine Ease-In-Out (0% chớp trống, 0% cắt cứng)."""
     if cam_board_alpha <= 0.015:
@@ -1737,10 +1799,7 @@ def _composite_transitioned_board(
             if prev_alpha > 0.015:
                 fading_prev = prev_board_img.copy()
                 try:
-                    pa_band = fading_prev.getchannel("A").point(
-                        lambda p: int(round(p * prev_alpha))
-                    )
-                    fading_prev.putalpha(pa_band)
+                    _scale_alpha_inplace(fading_prev, prev_alpha)
                     frame_rgba.alpha_composite(fading_prev)
                 finally:
                     fading_prev.close()
@@ -1760,67 +1819,88 @@ def _composite_transitioned_board(
         )
         return
 
-    layer = Image.new("RGBA", frame_rgba.size, (0, 0, 0, 0))
-    try:
-        bx0, by0, bx1, by1 = _draw_smart_board_content(
-            layer,
-            beat,
-            box,
-            pal,
-            progress=progress,
-            prop_img=prop_img,
-            total_chapters=total_chapters,
-        )
-        pad = 16
-        cx0 = max(0, bx0 - pad)
-        cy0 = max(0, by0 - pad)
-        cx1 = min(layer.width, bx1 + pad)
-        cy1 = min(layer.height, by1 + pad)
-        sub = layer.crop((cx0, cy0, cx1, cy1))
+    # Tái sử dụng bảng gốc tĩnh đã crop ở t_sec=0 để mọi frame tween không vẽ lại Polaroid
+    sub: Image.Image | None = None
+    owns_sub = False
+    cx0 = cy0 = 0
+    is_static_type = beat.board_type not in _ANIMATED_BOARD_TYPES
+    raw_cache_entry = (
+        board_cache.get("raw_board_crop") if (board_cache is not None and is_static_type) else None
+    )
+    if isinstance(raw_cache_entry, tuple) and len(raw_cache_entry) == 4:
+        cached_sub, c_x0, c_y0, cached_box = raw_cache_entry
+        if cached_box == box and isinstance(cached_sub, Image.Image):
+            sub = cached_sub
+            cx0, cy0 = c_x0, c_y0
+
+    if sub is None:
+        layer = Image.new("RGBA", frame_rgba.size, (0, 0, 0, 0))
         try:
-            if abs(scale - 1.0) >= 0.004:
-                nw = max(8, int(round(sub.width * scale)))
-                nh = max(8, int(round(sub.height * scale)))
-                if clamp_bounds is not None:
-                    cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
-                    max_w = max(8, cb_x1 - cb_x0)
-                    max_h = max(8, cb_y1 - cb_y0)
-                    if nw > max_w or nh > max_h:
-                        fit = min(max_w / nw, max_h / nh)
-                        nw = max(8, int(round(nw * fit)))
-                        nh = max(8, int(round(nh * fit)))
-                scaled = sub.resize((nw, nh), Image.Resampling.BICUBIC)
+            bx0, by0, bx1, by1 = _draw_smart_board_content(
+                layer,
+                beat,
+                box,
+                pal,
+                progress=progress,
+                prop_img=prop_img,
+                total_chapters=total_chapters,
+            )
+            pad = 16
+            cx0 = max(0, bx0 - pad)
+            cy0 = max(0, by0 - pad)
+            cx1 = min(layer.width, bx1 + pad)
+            cy1 = min(layer.height, by1 + pad)
+            cropped = layer.crop((cx0, cy0, cx1, cy1))
+            if board_cache is not None and is_static_type:
+                board_cache["raw_board_crop"] = (cropped, cx0, cy0, box)
+                sub = cropped
+                owns_sub = False
             else:
-                scaled = sub.copy()
-            try:
-                if alpha < 0.995:
-                    a_band = scaled.getchannel("A").point(
-                        lambda p: int(round(p * max(0.0, min(1.0, alpha))))
-                    )
-                    scaled.putalpha(a_band)
-                if anchor_top_center is not None:
-                    dest_x = int(round(anchor_top_center[0] - scaled.width * 0.5))
-                    dest_y = int(round(anchor_top_center[1] + dy_px))
-                else:
-                    dest_x = cx0 + (sub.width - scaled.width) // 2
-                    dest_y = cy0 + (sub.height - scaled.height) // 2 + int(round(dy_px))
-
-                # Kẹp cứng biên an toàn cho Bảng tri thức (không bao giờ lọt ngoài khung)
-                if clamp_bounds is not None:
-                    cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
-                    dest_x = max(cb_x0, min(cb_x1 - scaled.width, dest_x))
-                    dest_y = max(cb_y0, min(cb_y1 - scaled.height, dest_y))
-                else:
-                    dest_x = max(0, min(frame_rgba.width - scaled.width, dest_x))
-                    dest_y = max(0, min(frame_rgba.height - scaled.height, dest_y))
-
-                frame_rgba.alpha_composite(scaled, (dest_x, dest_y))
-            finally:
-                scaled.close()
+                sub = cropped
+                owns_sub = True
         finally:
-            sub.close()
+            layer.close()
+
+    try:
+        if abs(scale - 1.0) >= 0.004:
+            nw = max(8, int(round(sub.width * scale)))
+            nh = max(8, int(round(sub.height * scale)))
+            if clamp_bounds is not None:
+                cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+                max_w = max(8, cb_x1 - cb_x0)
+                max_h = max(8, cb_y1 - cb_y0)
+                if nw > max_w or nh > max_h:
+                    fit = min(max_w / nw, max_h / nh)
+                    nw = max(8, int(round(nw * fit)))
+                    nh = max(8, int(round(nh * fit)))
+            scaled = sub.resize((nw, nh), Image.Resampling.BICUBIC)
+        else:
+            scaled = sub.copy()
+        try:
+            if alpha < 0.995:
+                _scale_alpha_inplace(scaled, alpha)
+            if anchor_top_center is not None:
+                dest_x = int(round(anchor_top_center[0] - scaled.width * 0.5))
+                dest_y = int(round(anchor_top_center[1] + dy_px))
+            else:
+                dest_x = cx0 + (sub.width - scaled.width) // 2
+                dest_y = cy0 + (sub.height - scaled.height) // 2 + int(round(dy_px))
+
+            # Kẹp cứng biên an toàn cho Bảng tri thức (không bao giờ lọt ngoài khung)
+            if clamp_bounds is not None:
+                cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+                dest_x = max(cb_x0, min(cb_x1 - scaled.width, dest_x))
+                dest_y = max(cb_y0, min(cb_y1 - scaled.height, dest_y))
+            else:
+                dest_x = max(0, min(frame_rgba.width - scaled.width, dest_x))
+                dest_y = max(0, min(frame_rgba.height - scaled.height, dest_y))
+
+            frame_rgba.alpha_composite(scaled, (dest_x, dest_y))
+        finally:
+            scaled.close()
     finally:
-        layer.close()
+        if owns_sub and sub is not None:
+            sub.close()
 
 
 def compute_karaoke_word_boxes(
@@ -1910,6 +1990,7 @@ def draw_karaoke_strip(
     aspect: StickvAspect,
     spoken_segments: list[tuple[float, float, str]] | None = None,
     camera_shot: str = "wide_stage",
+    karaoke_cache: dict[str, Any] | None = None,
 ) -> None:
     """Vẽ dải phụ đề Karaoke khóa câu đang nói, có đệm highlight >= 14px chống dính chữ."""
     if not word_timings:
@@ -1986,13 +2067,67 @@ def draw_karaoke_strip(
         return
 
     active_local = active_idx - chunk_idx * win_size
+    words_key = tuple(wd for wd, _, _ in chunk)
+    cache_key = (words_key, active_local, base_y, w, aspect)
+    if (
+        karaoke_cache is not None
+        and karaoke_cache.get("key") == cache_key
+        and isinstance(karaoke_cache.get("patch"), Image.Image)
+    ):
+        patch_img: Image.Image = karaoke_cache["patch"]
+        px0, py0 = karaoke_cache["pos"]
+        frame.alpha_composite(patch_img, (px0, py0))
+        return
+
     font, strip_box, layout_items = compute_karaoke_word_boxes(
-        [wd for wd, _, _ in chunk],
+        list(words_key),
         active_local,
         frame_w=w,
         base_y=base_y,
         aspect=aspect,
     )
+    if karaoke_cache is not None:
+        pad = 12
+        px0 = max(0, strip_box[0] - pad)
+        py0 = max(0, strip_box[1] - pad)
+        px1 = min(w, strip_box[2] + pad)
+        py1 = min(h, strip_box[3] + pad)
+        patch = Image.new("RGBA", (max(1, px1 - px0), max(1, py1 - py0)), (0, 0, 0, 0))
+        pd = ImageDraw.Draw(patch)
+        pd.rounded_rectangle(
+            (strip_box[0] - px0, strip_box[1] - py0, strip_box[2] - px0, strip_box[3] - py0),
+            radius=18,
+            fill=(15, 23, 42, 145),
+        )
+        for item in layout_items:
+            word = item["word"]
+            tx, ty = item["text_xy"][0] - px0, item["text_xy"][1] - py0
+            if item["active"] and item["highlight_box"] is not None:
+                hb = item["highlight_box"]
+                pd.rounded_rectangle(
+                    (hb[0] - px0, hb[1] - py0, hb[2] - px0, hb[3] - py0),
+                    radius=12,
+                    fill=(255, 212, 59, 255),
+                )
+                pd.text((tx, ty), word, font=font, fill=(15, 23, 42, 255))
+            else:
+                pd.text(
+                    (tx, ty),
+                    word,
+                    font=font,
+                    fill=(255, 255, 255, 255),
+                    stroke_width=4,
+                    stroke_fill=(15, 23, 42, 255),
+                )
+        old_patch = karaoke_cache.get("patch")
+        if isinstance(old_patch, Image.Image):
+            old_patch.close()
+        karaoke_cache["key"] = cache_key
+        karaoke_cache["patch"] = patch
+        karaoke_cache["pos"] = (px0, py0)
+        frame.alpha_composite(patch, (px0, py0))
+        return
+
     draw.rounded_rectangle(strip_box, radius=18, fill=(15, 23, 42, 145))
 
     for item in layout_items:
@@ -2381,9 +2516,7 @@ def _draw_chapter_banner(
             width=2,
         )
         d.text((base_x + 24, slide_y + 11), label, font=f_chap, fill=(255, 255, 255, 255))
-        if u < 0.99:
-            a_band = banner.getchannel("A").point(lambda p: int(round(p * u)))
-            banner.putalpha(a_band)
+        _scale_alpha_inplace(banner, u)
         frame_rgba.alpha_composite(banner)
     finally:
         banner.close()
@@ -2480,6 +2613,7 @@ def _composite_prop_overlay(
     aspect: StickvAspect,
     t_sec: float,
     pal: dict[str, tuple[int, int, int, int]],
+    board_cache: dict[str, Any] | None = None,
 ) -> None:
     w, h = frame_rgba.size
     pop_p = min(1.0, max(0.0, t_sec / 0.25))
@@ -2487,7 +2621,22 @@ def _composite_prop_overlay(
     if pop_p < 0.05:
         pop_scale = 0.2
     target_size = max(120, int((250 if aspect == "9:16" else 240) * pop_scale))
-    resized = prop_img.resize((target_size, target_size), Image.Resampling.LANCZOS)
+    owns_resized = True
+    cached_prop = board_cache.get("prop_hold_resized") if board_cache is not None else None
+    if (
+        pop_p >= 1.0
+        and isinstance(cached_prop, tuple)
+        and len(cached_prop) == 2
+        and cached_prop[0] == target_size
+        and isinstance(cached_prop[1], Image.Image)
+    ):
+        resized = cached_prop[1]
+        owns_resized = False
+    else:
+        resized = prop_img.resize((target_size, target_size), Image.Resampling.LANCZOS)
+        if pop_p >= 1.0 and board_cache is not None:
+            board_cache["prop_hold_resized"] = (target_size, resized)
+            owns_resized = False
 
     cx = int(w * (0.68 if aspect == "9:16" else 0.36))
     cy = int(h * (0.44 if aspect == "9:16" else 0.42) + math.sin(t_sec * 3.8) * 10.0)
@@ -2502,7 +2651,8 @@ def _composite_prop_overlay(
         width=3,
     )
     frame_rgba.alpha_composite(resized, (cx - target_size // 2, cy - target_size // 2))
-    resized.close()
+    if owns_resized:
+        resized.close()
 
 
 _ANIMATED_BOARD_TYPES: frozenset[str] = frozenset(
@@ -2525,18 +2675,54 @@ def _is_dark_stage_bg(
     return (0.299 * r + 0.587 * g + 0.114 * b) < 110.0
 
 
+def _crop_rgba_layer(img: Image.Image) -> tuple[Image.Image, int, int] | None:
+    """Cắt sát vùng pixel khác rỗng để bỏ phần nền trong suốt khi composite 60fps."""
+    bbox = img.getbbox()
+    if bbox is None:
+        return None
+    return img.crop(bbox), int(bbox[0]), int(bbox[1])
+
+
 def _apply_dark_bg_rim_light(char_rgba: Image.Image) -> Image.Image:
     """Thêm viền sáng mảnh ~2px (#CBD5E1, 55% alpha) quanh silhouette trên nền tối."""
-    alpha = char_rgba.getchannel("A")
-    dilated = alpha.filter(ImageFilter.MaxFilter(5))
-    rim_a = dilated.point(lambda p: int(round(p * 0.55)))
-    rim = Image.new("RGBA", char_rgba.size, (203, 213, 225, 0))
-    rim.putalpha(rim_a)
-    rim.alpha_composite(char_rgba)
-    dilated.close()
-    rim_a.close()
-    alpha.close()
-    return rim
+    bbox = char_rgba.getbbox()
+    if bbox is None:
+        return char_rgba.copy()
+    px0 = max(0, bbox[0] - 4)
+    py0 = max(0, bbox[1] - 4)
+    px1 = min(char_rgba.width, bbox[2] + 4)
+    py1 = min(char_rgba.height, bbox[3] + 4)
+    sub = char_rgba.crop((px0, py0, px1, py1))
+    try:
+        a_ch = sub.getchannel("A")
+        try:
+            arr = np.asarray(a_ch, dtype=np.uint8)
+        finally:
+            a_ch.close()
+        padded = np.pad(arr, 2, mode="edge")
+        hmax = np.maximum.reduce([padded[2:-2, i : padded.shape[1] - 4 + i] for i in range(5)])
+        vmax = np.maximum.reduce(
+            [
+                np.pad(hmax, ((2, 2), (0, 0)), mode="edge")[i : hmax.shape[0] + i, :]
+                for i in range(5)
+            ]
+        )
+        rim_a_arr = ((vmax.astype(np.uint16) * 140) // 255).astype(np.uint8)
+        rim_arr = np.empty((sub.height, sub.width, 4), dtype=np.uint8)
+        rim_arr[..., 0] = 203
+        rim_arr[..., 1] = 213
+        rim_arr[..., 2] = 225
+        rim_arr[..., 3] = rim_a_arr
+        rim_sub = Image.fromarray(rim_arr, mode="RGBA")
+        try:
+            rim_sub.alpha_composite(sub)
+            out = Image.new("RGBA", char_rgba.size, (0, 0, 0, 0))
+            out.paste(rim_sub, (px0, py0))
+            return out
+        finally:
+            rim_sub.close()
+    finally:
+        sub.close()
 
 
 def render_animated_beat_frame(
@@ -2561,12 +2747,16 @@ def render_animated_beat_frame(
     total_chapters: int = 1,
     has_next_diff_title: bool = True,
     show_chapter_banner: bool = False,
-    board_cache: dict[str, Image.Image] | None = None,
+    board_cache: dict[str, Any] | None = None,
     prev_board_img: Image.Image | None = None,
+    mutate_bg: bool = False,
+    karaoke_cache: dict[str, Any] | None = None,
+    watermark_img: Image.Image | None = None,
+    watermark_patch: tuple[Image.Image, int, int] | None = None,
+    char_unscaled_size: tuple[int, int] | None = None,
 ) -> Image.Image:
     """Tổng hợp 1 frame động: backdrop + camera tách lớp + thẻ 2 tầng + puppet + karaoke."""
-    frame = bg_img.copy()
-    w, h = frame.size
+    w, h = bg_img.size
     pal = resolve_stage_palette(domain, theme)
     interaction = getattr(beat, "interaction", "none") or "none"
     camera_shot = getattr(beat, "camera_shot", "wide_stage") or "wide_stage"
@@ -2587,10 +2777,31 @@ def render_animated_beat_frame(
         prev_stage_state=prev_stage_state,
     )
 
-    frame_rgba = frame.convert("RGBA")
+    owns_rgba = not (mutate_bg and bg_img.mode == "RGBA")
+    if not owns_rgba:
+        frame_rgba = bg_img
+    elif bg_img.mode == "RGBA":
+        frame_rgba = bg_img.copy()
+    else:
+        frame_rgba = bg_img.convert("RGBA")
+
     try:
         if interaction == "versus_split" and cam_layout.board_alpha > 0.05:
-            _draw_versus_split_layer(frame_rgba, beat, pal, aspect=aspect)
+            if board_cache is not None:
+                v_entry = board_cache.get("versus_layer")
+                if v_entry is None:
+                    v_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    try:
+                        _draw_versus_split_layer(v_layer, beat, pal, aspect=aspect)
+                        v_entry = _crop_rgba_layer(v_layer)
+                    finally:
+                        v_layer.close()
+                    if v_entry is not None:
+                        board_cache["versus_layer"] = v_entry
+                if isinstance(v_entry, tuple) and isinstance(v_entry[0], Image.Image):
+                    frame_rgba.alpha_composite(v_entry[0], (v_entry[1], v_entry[2]))
+            else:
+                _draw_versus_split_layer(frame_rgba, beat, pal, aspect=aspect)
 
         if draw_board:
             can_prebake = (
@@ -2600,16 +2811,94 @@ def render_animated_beat_frame(
             )
             if can_prebake and board_cache is not None:
                 baked = board_cache.get("static_board")
-                if baked is None:
-                    baked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                if baked is None and "static_board_empty" not in board_cache:
+                    tmp_baked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    try:
+                        _composite_transitioned_board(
+                            tmp_baked,
+                            beat,
+                            cam_layout.board_box,
+                            pal,
+                            t_sec=t_sec,
+                            duration_sec=duration_sec,
+                            progress=1.0,
+                            prop_img=prop_img,
+                            prev_stage_state=prev_stage_state,
+                            total_chapters=total_chapters,
+                            has_next_diff_title=has_next_diff_title,
+                            cam_board_scale=cam_layout.board_scale,
+                            cam_board_alpha=cam_layout.board_alpha,
+                            clamp_bounds=cam_layout.clamp_bounds,
+                            anchor_top_center=cam_layout.anchor_top_center,
+                            board_cache=board_cache,
+                        )
+                        baked = _crop_rgba_layer(tmp_baked)
+                    finally:
+                        tmp_baked.close()
+                    if baked is not None:
+                        board_cache["static_board"] = baked
+                    else:
+                        board_cache["static_board_empty"] = True
+                if isinstance(baked, tuple) and isinstance(baked[0], Image.Image):
+                    frame_rgba.alpha_composite(baked[0], (baked[1], baked[2]))
+                elif isinstance(baked, Image.Image):
+                    frame_rgba.alpha_composite(baked)
+            else:
+                anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
+                prog = min(1.0, max(0.0, t_sec / anim_dur))
+                is_anim_type = beat.board_type in _ANIMATED_BOARD_TYPES
+                if board_cache is not None and is_anim_type and t_sec >= 0.72:
+                    step_q = int(round(prog * 30))
+                    anim_entry = board_cache.get("anim_board_q")
+                    if isinstance(anim_entry, tuple) and anim_entry[0] == step_q:
+                        if len(anim_entry) == 4 and isinstance(anim_entry[1], Image.Image):
+                            frame_rgba.alpha_composite(
+                                anim_entry[1], (anim_entry[2], anim_entry[3])
+                            )
+                    else:
+                        step_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                        try:
+                            _composite_transitioned_board(
+                                step_img,
+                                beat,
+                                cam_layout.board_box,
+                                pal,
+                                t_sec=t_sec,
+                                duration_sec=duration_sec,
+                                progress=step_q / 30.0,
+                                prop_img=prop_img,
+                                prev_stage_state=prev_stage_state,
+                                total_chapters=total_chapters,
+                                has_next_diff_title=has_next_diff_title,
+                                cam_board_scale=cam_layout.board_scale,
+                                cam_board_alpha=cam_layout.board_alpha,
+                                clamp_bounds=cam_layout.clamp_bounds,
+                                anchor_top_center=cam_layout.anchor_top_center,
+                                prev_board_img=prev_board_img,
+                                board_cache=board_cache,
+                            )
+                            cropped_step = _crop_rgba_layer(step_img)
+                        finally:
+                            step_img.close()
+                        if isinstance(anim_entry, tuple) and len(anim_entry) >= 2:
+                            old_im = anim_entry[1]
+                            if isinstance(old_im, Image.Image):
+                                old_im.close()
+                        if cropped_step is not None:
+                            c_im, c_ox, c_oy = cropped_step
+                            board_cache["anim_board_q"] = (step_q, c_im, c_ox, c_oy)
+                            frame_rgba.alpha_composite(c_im, (c_ox, c_oy))
+                        else:
+                            board_cache["anim_board_q"] = (step_q,)
+                else:
                     _composite_transitioned_board(
-                        baked,
+                        frame_rgba,
                         beat,
                         cam_layout.board_box,
                         pal,
                         t_sec=t_sec,
                         duration_sec=duration_sec,
-                        progress=1.0,
+                        progress=prog,
                         prop_img=prop_img,
                         prev_stage_state=prev_stage_state,
                         total_chapters=total_chapters,
@@ -2618,54 +2907,66 @@ def render_animated_beat_frame(
                         cam_board_alpha=cam_layout.board_alpha,
                         clamp_bounds=cam_layout.clamp_bounds,
                         anchor_top_center=cam_layout.anchor_top_center,
+                        prev_board_img=prev_board_img,
+                        board_cache=board_cache,
                     )
-                    board_cache["static_board"] = baked
-                frame_rgba.alpha_composite(baked)
-            else:
-                anim_dur = max(0.5, float(duration_sec or 2.0) * 0.6)
-                prog = min(1.0, max(0.0, t_sec / anim_dur))
-                _composite_transitioned_board(
-                    frame_rgba,
-                    beat,
-                    cam_layout.board_box,
-                    pal,
-                    t_sec=t_sec,
-                    duration_sec=duration_sec,
-                    progress=prog,
-                    prop_img=prop_img,
-                    prev_stage_state=prev_stage_state,
-                    total_chapters=total_chapters,
-                    has_next_diff_title=has_next_diff_title,
-                    cam_board_scale=cam_layout.board_scale,
-                    cam_board_alpha=cam_layout.board_alpha,
-                    clamp_bounds=cam_layout.clamp_bounds,
-                    anchor_top_center=cam_layout.anchor_top_center,
-                    prev_board_img=prev_board_img,
-                )
 
         if aspect == "9:16" and camera_shot == "closeup_react" and cam_layout.board_alpha < 0.85:
-            _draw_compact_topic_pill(
-                frame_rgba,
-                chapter=beat.chapter,
-                chapter_title=getattr(beat, "chapter_title", ""),
-                board_title=beat.board_title,
-                pal=pal,
-                aspect=aspect,
-                narration=beat.narration,
-                takeaway=getattr(beat, "takeaway", "")
-                or str((beat.board_data or {}).get("takeaway") or ""),
-                total_chapters=total_chapters,
-            )
+            if board_cache is not None:
+                pill_entry = board_cache.get("topic_pill_layer")
+                if pill_entry is None:
+                    pill_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                    try:
+                        _draw_compact_topic_pill(
+                            pill_layer,
+                            chapter=beat.chapter,
+                            chapter_title=getattr(beat, "chapter_title", ""),
+                            board_title=beat.board_title,
+                            pal=pal,
+                            aspect=aspect,
+                            narration=beat.narration,
+                            takeaway=getattr(beat, "takeaway", "")
+                            or str((beat.board_data or {}).get("takeaway") or ""),
+                            total_chapters=total_chapters,
+                        )
+                        pill_entry = _crop_rgba_layer(pill_layer)
+                    finally:
+                        pill_layer.close()
+                    if pill_entry is not None:
+                        board_cache["topic_pill_layer"] = pill_entry
+                if isinstance(pill_entry, tuple) and isinstance(pill_entry[0], Image.Image):
+                    frame_rgba.alpha_composite(pill_entry[0], (pill_entry[1], pill_entry[2]))
+            else:
+                _draw_compact_topic_pill(
+                    frame_rgba,
+                    chapter=beat.chapter,
+                    chapter_title=getattr(beat, "chapter_title", ""),
+                    board_title=beat.board_title,
+                    pal=pal,
+                    aspect=aspect,
+                    narration=beat.narration,
+                    takeaway=getattr(beat, "takeaway", "")
+                    or str((beat.board_data or {}).get("takeaway") or ""),
+                    total_chapters=total_chapters,
+                )
 
         if interaction == "hold_prop" and prop_img is not None and cam_layout.board_alpha > 0.1:
-            _composite_prop_overlay(frame_rgba, prop_img, aspect=aspect, t_sec=t_sec, pal=pal)
+            _composite_prop_overlay(
+                frame_rgba,
+                prop_img,
+                aspect=aspect,
+                t_sec=t_sec,
+                pal=pal,
+                board_cache=board_cache,
+            )
 
         if char_img is not None:
+            eff_cw, eff_ch = char_unscaled_size or (char_img.width, char_img.height)
             target_x, target_y, target_scale = compute_beat_character_target(
                 w,
                 h,
-                char_img.width,
-                char_img.height,
+                eff_cw,
+                eff_ch,
                 interaction=interaction,
                 aspect=aspect,
                 camera_shot=camera_shot,
@@ -2679,9 +2980,9 @@ def render_animated_beat_frame(
                 base_x, base_y, cur_scale = target_x, target_y, target_scale
 
             eff_char = char_img
-            if abs(cur_scale - 1.0) > 0.01:
-                nw = max(32, int(round(char_img.width * cur_scale)))
-                nh = max(32, int(round(char_img.height * cur_scale)))
+            nw = max(32, int(round(eff_cw * cur_scale)))
+            nh = max(32, int(round(eff_ch * cur_scale)))
+            if char_img.size != (nw, nh) and abs(cur_scale - 1.0) > 0.01:
                 eff_char = char_img.resize((nw, nh), Image.Resampling.LANCZOS)
 
             dx, dy = 0.0, 0.0
@@ -2735,11 +3036,16 @@ def render_animated_beat_frame(
             aspect=aspect,
             spoken_segments=spoken_segments,
             camera_shot=camera_shot,
+            karaoke_cache=karaoke_cache,
         )
+        if watermark_patch is not None:
+            frame_rgba.alpha_composite(watermark_patch[0], (watermark_patch[1], watermark_patch[2]))
+        elif watermark_img is not None and watermark_img.size == frame_rgba.size:
+            frame_rgba.alpha_composite(watermark_img)
         return frame_rgba.convert("RGB")
     finally:
-        frame_rgba.close()
-        frame.close()
+        if owns_rgba:
+            frame_rgba.close()
 
 
 def render_beat_layers(

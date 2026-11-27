@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { api } from '../../api/endpoints';
 import type { BackupEntry } from '../../api/types';
 import { useProjectEditor } from '../../hooks/projectEditor';
-import { useRenderJob } from '../../hooks/renderJob';
+import { useRenderJobStatus } from '../../hooks/renderJob';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { formatDateTime } from '../../utils/format';
@@ -25,7 +25,7 @@ interface Props {
 /** Danh sách ≤ 10 bản sao lưu `project.json` và Khôi phục (có xác nhận). Lấy một lần khi mở. */
 export function BackupsDialog({ open, onClose }: Props) {
   const { project, flush, applyServer, bumpImages } = useProjectEditor();
-  const job = useRenderJob();
+  const job = useRenderJobStatus();
   const toast = useToast();
   const queryClient = useQueryClient();
   const slug = project.slug;

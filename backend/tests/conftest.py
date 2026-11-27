@@ -20,6 +20,8 @@ def whisper_off(monkeypatch):
 def vieneu_off(monkeypatch):
     """Mặc định test không đụng VieNeu thật: coi như chưa cài. Test cần giọng truyền `voice=`."""
     from hbt import main
+    from hbt.core import tts_pipeline
     from hbt.postv.voice import FakeVoice
 
     monkeypatch.setattr(main, "make_voice_provider", lambda settings: FakeVoice(ok=False))
+    monkeypatch.setattr(tts_pipeline, "VieNeuProvider", lambda *_a, **_kw: FakeVoice(ok=False))

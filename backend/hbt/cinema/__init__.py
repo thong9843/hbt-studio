@@ -17,7 +17,6 @@ from hbt.cinema.hardware import (
     detect_hardware,
     probe_nvenc_one_frame,
     reset_hardware_cache,
-    resolve_filter_complex_script_flag,
 )
 from hbt.cinema.layer_cache import FontCache, LayerCache, estimate_image_bytes
 from hbt.cinema.schema import (
@@ -37,6 +36,7 @@ from hbt.cinema.schema import (
     TimelineSpec,
     TransitionType,
 )
+from hbt.shared.ffmpeg_utils import resolve_filter_complex_script_flag
 
 __all__ = [
     "ASPECT_DIMENSIONS",

@@ -7,12 +7,13 @@ import os
 import subprocess
 import threading
 import time
-import wave
+from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from hbt.postv.voice import BACKEND_DIR, WEIGHTS_REPO, venv_python
+from hbt.shared.audio_utils import write_fallback_speech_wav_atomic
 
 RESIDENT_WORKER = Path(__file__).with_name("resident_worker.py")
 DEFAULT_IDLE_TTL_SEC = 600.0
@@ -21,22 +22,9 @@ FALLBACK_SAMPLE_RATE = 24000
 
 def _write_fallback_wav_atomic(dest: Path, text: str) -> Path:
     """Tạo file WAV 24kHz mono 16-bit dự phòng khi chạy trên CI không có VieNeu/weights."""
-    words = max(1, len((text or "").split()))
-    dur_s = max(0.8, min(12.0, words * 0.34))
-    n_frames = int(round(dur_s * FALLBACK_SAMPLE_RATE))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        with wave.open(str(tmp), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(FALLBACK_SAMPLE_RATE)
-            wf.writeframes(b"\x00\x00" * n_frames)
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-    return dest
+    return write_fallback_speech_wav_atomic(
+        dest, text, sample_rate=FALLBACK_SAMPLE_RATE, audible=False
+    )
 
 
 def _close_proc_safely(proc: subprocess.Popen[str]) -> None:
@@ -100,6 +88,8 @@ class WarmTTSPool:
         self._worker_pid: int | None = None
         self._spawn_count: int = 0
         self._reaper_thread: threading.Thread | None = None
+        self._stderr_tail: deque[str] = deque(maxlen=20)
+        self._stderr_thread: threading.Thread | None = None
 
     def is_available(self) -> bool:
         """Kiểm tra có tiến trình worker cấu hình riêng hoặc đủ `.venv-tts` + trọng số local."""
@@ -188,10 +178,26 @@ class WarmTTSPool:
             cwd=str(BACKEND_DIR),
         )
         try:
+            if proc.stderr is not None:
+                self._stderr_tail.clear()
+
+                def _drain_stderr(stream=proc.stderr, buf=self._stderr_tail) -> None:
+                    try:
+                        for line in iter(stream.readline, ""):
+                            buf.append(line.rstrip())
+                    except Exception:
+                        pass
+
+                self._stderr_thread = threading.Thread(
+                    target=_drain_stderr, name="warm-tts-stderr", daemon=True
+                )
+                self._stderr_thread.start()
             assert proc.stdout is not None
             boot_line = proc.stdout.readline()
             if not boot_line:
-                err_txt = proc.stderr.read() if proc.stderr is not None else ""
+                if self._stderr_thread is not None:
+                    self._stderr_thread.join(timeout=0.5)
+                err_txt = "\n".join(self._stderr_tail)
                 raise RuntimeError(f"WarmTTS worker thoát sớm lúc khởi động: {err_txt[-300:]}")
             boot_data = json.loads(boot_line)
             if not boot_data.get("ok"):

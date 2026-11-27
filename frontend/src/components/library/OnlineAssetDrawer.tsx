@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/endpoints';
 import type { OnlineGiphyItem, OnlineGreenMemeItem } from '../../api/types';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { useToast } from '../../hooks/toast';
 import { PlayIcon, PlusIcon, SearchIcon, StopIcon } from '../icons';
 import { Button } from '../ui/Button';
@@ -19,6 +20,28 @@ const QUICK_TAGS: Record<'music' | 'sfx' | 'memes' | 'stickers', readonly string
   memes: ['shocked', 'cat', 'laugh', 'angry'],
   stickers: ['happy', 'shock', 'cry', 'fire'],
 };
+
+function GreenMemeVideo({ src, poster }: { src: string; poster?: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(videoRef, src);
+  return (
+    <video
+      ref={videoRef}
+      src={src}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      preload="none"
+      onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+      onMouseLeave={(e) => {
+        e.currentTarget.pause();
+        e.currentTarget.currentTime = 0;
+      }}
+      className="h-full w-full object-cover"
+    />
+  );
+}
 
 export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawerProps) {
   const toast = useToast();
@@ -464,19 +487,7 @@ export function OnlineAssetDrawer({ open, category, onClose }: OnlineAssetDrawer
                 className="flex flex-col overflow-hidden rounded-inner border border-line bg-card"
               >
                 <div className="aspect-video bg-hero">
-                  <video
-                    src={it.video_url}
-                    poster={it.poster_url || undefined}
-                    muted
-                    loop
-                    playsInline
-                    onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.pause();
-                      e.currentTarget.currentTime = 0;
-                    }}
-                    className="h-full w-full object-cover"
-                  />
+                  <GreenMemeVideo src={it.video_url} poster={it.poster_url || undefined} />
                 </div>
                 <div className="flex flex-1 flex-col justify-between gap-2 p-2.5">
                   <p className="line-clamp-2 text-tiny font-bold text-text">{it.title}</p>

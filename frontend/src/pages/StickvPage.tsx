@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
@@ -41,6 +41,7 @@ import { StudioSelect } from '../components/ui/StudioSelect';
 import { Switch } from '../components/ui/Switch';
 import { cx } from '../components/ui/cx';
 import { useRenderJobStatus } from '../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 
@@ -359,9 +360,22 @@ export function StickvPage() {
     };
   }, [selectedSlug, attachJob, qc, toast]);
 
+  const loadedSlugRef = useRef<string>('');
   useEffect(() => {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;
     if (found) {
+      if (loadedSlugRef.current === found.slug) {
+        setDraft((prev) => {
+          if (!prev || prev.slug !== found.slug) return found;
+          // Chỉ cập nhật `last_render` từ server refetch để không ghi đè lời thoại đang sửa dở
+          if (JSON.stringify(prev.last_render) !== JSON.stringify(found.last_render)) {
+            return { ...prev, last_render: found.last_render };
+          }
+          return prev;
+        });
+        return;
+      }
+      loadedSlugRef.current = found.slug;
       setDraft(found);
       if (found.domain) setDomain(found.domain);
       if (found.music_mood) setMusicMood(found.music_mood);
@@ -432,6 +446,13 @@ export function StickvPage() {
 
     return Array.from(byId.values());
   }, [listQuery.data?.poses, stickmanQuery.data?.items]);
+
+  const lastRenderVideoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasPoseVideoRef = useRef<HTMLVideoElement | null>(null);
+  const activePoseVideoUrl =
+    activeBeat?.clip_path || poseOptions.find((p) => p.id === activeBeat?.pose)?.url;
+  useReleaseVideoOnUnmount(lastRenderVideoRef, draft?.last_render?.video_url);
+  useReleaseVideoOnUnmount(canvasPoseVideoRef, activePoseVideoUrl);
 
   const genMutation = useMutation({
     mutationFn: () =>
@@ -544,6 +565,9 @@ export function StickvPage() {
         jobId: job_id,
         slug,
         kind: 'stickv',
+        engine: 'stickv',
+        title: draft?.title || slug,
+        route: `/stickv?slug=${encodeURIComponent(slug)}`,
         preview,
         progress: 2,
         step: 'Sinh giọng VieNeu-TTS',
@@ -565,7 +589,8 @@ export function StickvPage() {
     }
   }, [job.finished, job.kind]);
 
-  const isStickvJobRunning = job.running && job.kind === 'stickv';
+  const isStickvJobRunning =
+    job.running && job.kind === 'stickv' && (!draft?.slug || job.slug === draft.slug);
 
   const updateBeat = (beatId: string, patch: Partial<StickvBeat>) => {
     if (!draft) return;
@@ -1344,8 +1369,10 @@ export function StickvPage() {
             {draft?.last_render?.video_url ? (
               <video
                 key={draft.last_render.video_url}
+                ref={lastRenderVideoRef}
                 src={draft.last_render.video_url}
                 controls
+                preload="metadata"
                 className="h-full w-full bg-black object-contain"
               />
             ) : (
@@ -1379,14 +1406,14 @@ export function StickvPage() {
                         activeBeat?.clip_path ||
                         poseOptions.find((p) => p.id === activeBeat?.pose)?.url
                       }
+                      ref={canvasPoseVideoRef}
                       src={
                         activeBeat?.clip_path ||
                         poseOptions.find((p) => p.id === activeBeat?.pose)?.url
                       }
                       muted
-                      loop
-                      autoPlay
                       playsInline
+                      preload="metadata"
                       className="h-36 w-auto rounded-lg object-contain"
                     />
                   ) : (

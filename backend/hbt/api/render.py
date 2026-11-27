@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from hbt.api.deps import State, file_url
-from hbt.jobs import Job
+from hbt.jobs import Job, infer_engine_and_route
 
 router = APIRouter(tags=["render"])
 
@@ -39,7 +39,16 @@ def _public_kind(job: Job) -> str:
     raw = getattr(job, "kind", "render")
     if raw in ("stickv", "stickv_render"):
         return "stickv"
-    if raw in ("postv_quick", "postv_auto", "voice", "hbt_core_auto", "hbt_core_images"):
+    if raw in (
+        "postv_quick",
+        "postv_auto",
+        "voice",
+        "hbt_core_auto",
+        "hbt_core_images",
+        "hbt_core_prepare",
+        "chatting_auto",
+        "chatting_render",
+    ):
         return raw
     return "preview" if job.preview else "final"
 
@@ -54,11 +63,22 @@ def job_view(job: Job) -> dict:
     output = None
     if job.output is not None:
         output = {k: (_format_output_url(v) if k in URL_KEYS else v) for k, v in job.output.items()}
+    pub_kind = _public_kind(job)
+    engine, route = infer_engine_and_route(
+        pub_kind,
+        job.slug,
+        engine_hint=getattr(job, "engine", "") or "",
+        route_hint=getattr(job, "route", "") or "",
+    )
     return {
         "id": job.id,
+        "job_id": job.id,
         "project": job.slug,
         "slug": job.slug,
-        "kind": _public_kind(job)
+        "engine": engine,
+        "title": getattr(job, "title", "") or job.slug,
+        "route": route,
+        "kind": pub_kind
         if getattr(job, "kind", "") in ("stickv", "stickv_render")
         else getattr(job, "kind", "render"),
         "mode": getattr(job, "mode", "") or ("preview" if job.preview else "final"),
@@ -77,16 +97,28 @@ def job_view(job: Job) -> dict:
         "preview_seconds": job.preview_seconds,
         "created_at": job.created_at,
         "started_at": job.started_at,
+        "updated_at": getattr(job, "updated_at", None) or job.last_heartbeat or job.created_at,
         "finished_at": job.finished_at,
     }
 
 
 def _job_list_row(j: Job) -> dict:
     view_out = job_view(j)["output"] if j.output is not None else None
+    pub_kind = _public_kind(j)
+    engine, route = infer_engine_and_route(
+        pub_kind,
+        j.slug,
+        engine_hint=getattr(j, "engine", "") or "",
+        route_hint=getattr(j, "route", "") or "",
+    )
     return {
         "id": j.id,
+        "job_id": j.id,
         "slug": j.slug,
-        "kind": _public_kind(j),
+        "engine": engine,
+        "title": getattr(j, "title", "") or j.slug,
+        "route": route,
+        "kind": pub_kind,
         "mode": getattr(j, "mode", "") or ("preview" if j.preview else "final"),
         "status": j.status,
         "progress": round(j.progress, 1),
@@ -95,6 +127,7 @@ def _job_list_row(j: Job) -> dict:
         "current_beat": getattr(j, "current_beat", None),
         "total_beats": getattr(j, "total_beats", None),
         "started_at": j.started_at,
+        "updated_at": getattr(j, "updated_at", None) or j.last_heartbeat or j.created_at,
         "finished_at": j.finished_at,
         "output": view_out,
         "error": j.error,
@@ -117,9 +150,12 @@ def start_render(slug: str, state: State, body: RenderRequest | None = None):
 
 
 @router.get("/jobs")
-def list_active_jobs(state: State, include_recent: bool = False):
+def list_active_jobs(state: State, include_recent: bool = False, active_only: bool = False):
     """Chỉ đọc: job đang chạy/chờ; thêm `include_recent=true` để kèm các job vừa hoàn tất."""
-    jobs_list = state.jobs.recent() if include_recent else state.jobs.active()
+    if active_only:
+        jobs_list = state.jobs.active()
+    else:
+        jobs_list = state.jobs.recent() if include_recent else state.jobs.active()
     return [_job_list_row(j) for j in jobs_list]
 
 

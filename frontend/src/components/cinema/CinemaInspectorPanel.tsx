@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { cinemaApi, type CinemaSourcePayload } from '../../api/cinema';
 import type {
   CinemaContactSheetResponse,
@@ -8,6 +8,7 @@ import type {
   HbtCoreScript,
   StickvProject,
 } from '../../api/types';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { AlertIcon, CheckIcon, CpuIcon, EyeIcon, FilmIcon, PlayIcon } from '../icons';
@@ -38,6 +39,8 @@ export function CinemaInspectorPanel({
   const [sheet, setSheet] = useState<CinemaContactSheetResponse | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [beatRender, setBeatRender] = useState<CinemaRenderBeatResponse | null>(null);
+  const beatVideoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(beatVideoRef, beatRender?.url);
 
   const hwQuery = useQuery({
     queryKey: ['cinema-hardware'],
@@ -211,9 +214,11 @@ export function CinemaInspectorPanel({
           </div>
           <video
             key={beatRender.url}
+            ref={beatVideoRef}
             src={beatRender.url}
             controls
             playsInline
+            preload="metadata"
             className="max-h-72 w-full rounded-input bg-hero object-contain"
           />
         </div>

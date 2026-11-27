@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ STYLE_ANCHOR = (
 )
 
 STICKV_STYLE_ANCHOR = (
-    "Clean 2D flat editorial infographic illustration, crisp dark ink outlines, "
-    "vibrant modern educational colors, simple clear subject, "
-    "no text, no letters, no watermark."
+    "Clean 2D flat editorial scene illustration, crisp dark ink outlines, "
+    "vibrant modern educational colors, pure visual storytelling, "
+    "strictly no text, no labels, no callout lines, no watermark."
 )
 
 GEN_WIDTH = 768
@@ -366,17 +366,14 @@ def generate_illustration_image(
     base = (prompt or "").strip()
     styled = (
         base
-        if (base and "editorial infographic" in base.lower())
+        if (base and "editorial scene" in base.lower())
         else (f"{style_anchor} {base}".strip() if base else style_anchor)
     )
+    # @cf/black-forest-labs/flux-1-schnell chỉ nhận `prompt` và `steps` (không nhận width/height)
     payload: dict[str, Any] = {
         "prompt": styled,
-        "width": int(width),
-        "height": int(height),
-        "steps": int(steps),
+        "steps": max(1, min(8, int(steps))),
     }
-    if seed is not None:
-        payload["seed"] = int(seed)
 
     headers = {"Authorization": f"Bearer {clean_token}"}
     own_client = client is None
@@ -402,9 +399,14 @@ def generate_illustration_image(
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dest_path.with_name(dest_path.name + ".tmp")
     fmt = "JPEG" if dest_path.suffix.lower() in {".jpg", ".jpeg"} else "PNG"
+    target_w, target_h = max(64, int(width)), max(64, int(height))
     try:
         with Image.open(io.BytesIO(raw_bytes)) as src:
-            rgb = src.convert("RGB")
+            rgb = ImageOps.fit(
+                src.convert("RGB"),
+                (target_w, target_h),
+                method=Image.Resampling.LANCZOS,
+            )
             try:
                 if fmt == "JPEG":
                     rgb.save(tmp_path, format="JPEG", quality=90)

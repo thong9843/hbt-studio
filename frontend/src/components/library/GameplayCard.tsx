@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { AssetHubItem } from '../../api/types';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { PlayIcon, TrashIcon } from '../icons';
 import { Badge } from '../ui/Badge';
 
@@ -22,6 +23,7 @@ interface GameplayCardProps {
 export function GameplayCard({ item, onPreview, onDelete }: GameplayCardProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [hovering, setHovering] = useState(false);
+  useReleaseVideoOnUnmount(videoRef, item.url);
 
   const handleEnter = () => {
     setHovering(true);

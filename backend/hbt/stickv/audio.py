@@ -23,11 +23,15 @@ from hbt.pipeline.render import whisper_alignment
 from hbt.pipeline.text import parse_voice
 from hbt.pipeline.whisper import WhisperConfig, WhisperFailed
 from hbt.postv.voice import SynthItem, VoiceProvider
+from hbt.shared.audio_utils import extract_wav_rms_frames, write_fallback_speech_wav_atomic
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_RESOURCE_CLAMP,
     build_acrossfade_filter_graph,
     measure_audio_duration,
+    resolve_filter_complex_script_flag,
 )
+from hbt.shared.fs_utils import atomic_write_bytes as _atomic_write_bytes
+from hbt.shared.fs_utils import atomic_write_text as _atomic_write_text
 from hbt.shared.online_sources.freesound_audio import (
     import_freesound_audio,
     search_freesound_audio,
@@ -85,28 +89,6 @@ _MD_SYNTAX_RE = re.compile(r"\*\*|__|~~|`|#")
 _MULTI_SPACE_RE = re.compile(r"\s+")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?…])")
 _DUP_PUNCT_RE = re.compile(r"([.!?])\1+")
-
-
-def _atomic_write_bytes(dest: Path, data: bytes) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        tmp.write_bytes(data)
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-
-
-def _atomic_write_text(dest: Path, text: str) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 def _atomic_write_pcm_wav(dest: Path, pcm: np.ndarray, *, sr: int, ch: int = 1) -> None:
@@ -398,15 +380,7 @@ def clean_tts_wav(
 
 def _write_fallback_wav(dest: Path, text: str) -> None:
     """Tạo file WAV ước lượng theo độ dài chữ khi chạy unit test không có VieNeuProvider."""
-    dur_s = max(1.0, min(12.0, len(text.split()) * 0.36))
-    sr = 24000
-    n_frames = int(dur_s * sr)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(dest), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(b"\x00\x00" * n_frames)
+    write_fallback_speech_wav_atomic(dest, text, sample_rate=24000, audible=False)
 
 
 def _assemble_padded_beat_wav(
@@ -555,35 +529,7 @@ def resolve_sfx_file(
 
 def extract_wav_rms_envelope(wav_path: Path, fps: int, duration_sec: float) -> list[float]:
     """Trích biên độ RMS theo từng khung hình (0.0..1.0) để đồng bộ nhép miệng (Lip-sync)."""
-    n_frames = max(1, int(round(duration_sec * fps)))
-    if not wav_path.is_file():
-        return [0.0] * n_frames
-    try:
-        with wave.open(str(wav_path), "rb") as wf:
-            sr = wf.getframerate()
-            ch = wf.getnchannels()
-            sw = wf.getsampwidth()
-            raw = wf.readframes(wf.getnframes())
-        if not raw or sw != 2:
-            return [0.0] * n_frames
-        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        if ch > 1:
-            samples = samples.reshape(-1, ch).mean(axis=1)
-        samples /= 32768.0
-        win = max(1, int(sr / fps))
-        out: list[float] = []
-        peak_ref = max(0.05, float(np.percentile(np.abs(samples), 95))) if len(samples) else 0.1
-        for f_idx in range(n_frames):
-            s0 = f_idx * win
-            s1 = s0 + win
-            if s0 >= len(samples):
-                out.append(0.0)
-            else:
-                rms = float(np.sqrt(np.mean(samples[s0:s1] ** 2)))
-                out.append(min(1.0, round(rms / peak_ref, 3)))
-        return out
-    except Exception:
-        return [0.0] * n_frames
+    return extract_wav_rms_frames(wav_path, fps, duration_sec, norm_mode="sample_p95")
 
 
 def compute_word_timings(
@@ -687,6 +633,29 @@ def align_beat_karaoke(
     return compute_word_timings(narration, speech_span, start_offset_s=act_st)
 
 
+def _beat_tts_cache_sig(
+    *,
+    narration: str,
+    voice_id: str,
+    scale: float,
+    lead_s: float,
+    gap_s: float,
+    tail_s: float,
+) -> str:
+    raw = json.dumps(
+        [
+            narration or "",
+            voice_id,
+            round(scale, 4),
+            round(lead_s, 4),
+            round(gap_s, 4),
+            round(tail_s, 4),
+        ],
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:24]
+
+
 def synth_stickv_beats_audio(
     beats: list[StickvBeat],
     audio_dir: Path,
@@ -708,6 +677,8 @@ def synth_stickv_beats_audio(
 
     beat_sub_wavs: list[tuple[list[Path], list[str]]] = []
     synth_items: list[SynthItem] = []
+    cached_beats: dict[int, Path] = {}
+    beat_sigs: dict[int, str] = {}
 
     if voice_provider is not None:
         status = voice_provider.status()
@@ -724,7 +695,31 @@ def synth_stickv_beats_audio(
         chosen_voice = resolve_voice_id(
             voice_id, default_voice, available_voices=available_ids or None
         )
-        for beat in beats:
+        for beat_idx, beat in enumerate(beats):
+            cur_lead_s = first_lead_s if beat_idx == 0 else lead_s
+            tail_s = compute_pause_after(beat.narration, pause_scale=scale)
+            sig = _beat_tts_cache_sig(
+                narration=beat.narration,
+                voice_id=chosen_voice,
+                scale=scale,
+                lead_s=cur_lead_s,
+                gap_s=gap_s,
+                tail_s=tail_s,
+            )
+            beat_sigs[beat_idx] = sig
+            wav_p = audio_dir / f"{beat.id}.wav"
+            seg_p = _segments_sidecar_path(wav_p)
+            sig_p = audio_dir / f"{beat.id}.tts.sha256"
+            if (
+                wav_p.is_file()
+                and wav_p.stat().st_size > 44
+                and seg_p.is_file()
+                and sig_p.is_file()
+                and sig_p.read_text(encoding="utf-8").strip() == sig
+            ):
+                cached_beats[beat_idx] = wav_p
+                beat_sub_wavs.append(([], []))
+                continue
             sents = split_beat_sentences(beat.narration)
             sub_paths: list[Path] = []
             for s_idx, sent in enumerate(sents, start=1):
@@ -751,6 +746,19 @@ def synth_stickv_beats_audio(
     for beat_idx, (beat, (sub_paths, sents)) in enumerate(zip(beats, beat_sub_wavs, strict=True)):
         if cancel is not None and hasattr(cancel, "check"):
             cancel.check()
+        cached_wav = cached_beats.get(beat_idx)
+        if cached_wav is not None:
+            probed_dur = measure_audio_duration(cached_wav)
+            anchored_dur = round(max(1.2, probed_dur), 3)
+            beat.duration_sec = anchored_dur
+            results.append((cached_wav, anchored_dur))
+            if on_progress is not None:
+                pct = 8.0 + ((beat_idx + 1) / total_beats_count) * 18.0
+                on_progress(
+                    round(pct, 1),
+                    f"Dùng lại giọng đọc cached beat {beat_idx + 1}/{total_beats_count}...",
+                )
+            continue
         if voice_provider is not None and sub_paths:
             for sp in sub_paths:
                 if not sp.is_file() or sp.stat().st_size <= 44:
@@ -777,6 +785,8 @@ def synth_stickv_beats_audio(
                 indent=2,
             ),
         )
+        if beat_idx in beat_sigs:
+            _atomic_write_text(audio_dir / f"{beat.id}.tts.sha256", beat_sigs[beat_idx])
         probed_dur = measure_audio_duration(wav_p)
         anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
         beat.duration_sec = anchored_dur
@@ -1345,20 +1355,18 @@ def mix_stickv_audio(
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
             "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck];"
             "[fg_mix][bgm_duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-            "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=PTS-STARTPTS,"
             f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
     else:
         filter_parts.append(
-            "[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            "[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=PTS-STARTPTS,"
             f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
 
     fc_text = ";\n".join(filter_parts) + "\n"
     script_path = out_wav.with_name(f"{out_wav.stem}_filtergraph.txt")
     _atomic_write_text(script_path, fc_text)
-
-    from hbt.cinema.hardware import resolve_filter_complex_script_flag
 
     tmp_wav = out_wav.with_name(f"{out_wav.stem}.tmp.wav")
     script_flag = resolve_filter_complex_script_flag()
@@ -1381,6 +1389,33 @@ def mix_stickv_audio(
     ]
     try:
         run_ffmpeg(cmd)
+        # Khoá cứng độ dài mẫu PCM 48kHz khớp tuyệt đối `total_dur` (bù 40ms lookahead của loudnorm)
+        target_pcm_frames = max(1, int(round(total_dur * 48000)))
+        pad_wav: Path | None = None
+        try:
+            with wave.open(str(tmp_wav), "rb") as rf:
+                ch = rf.getnchannels()
+                sw = rf.getsampwidth()
+                sr = rf.getframerate()
+                cur_frames = rf.getnframes()
+                if sr == 48000 and ch > 0 and sw > 0 and abs(cur_frames - target_pcm_frames) > 0:
+                    pcm_raw = rf.readframes(min(cur_frames, target_pcm_frames))
+                    pad_wav = tmp_wav.with_name(f"{tmp_wav.stem}.pad.wav")
+                    with wave.open(str(pad_wav), "wb") as wf:
+                        wf.setnchannels(ch)
+                        wf.setsampwidth(sw)
+                        wf.setframerate(sr)
+                        wf.writeframes(pcm_raw)
+                        if cur_frames < target_pcm_frames:
+                            wf.writeframes(b"\x00" * ((target_pcm_frames - cur_frames) * ch * sw))
+            if pad_wav is not None and pad_wav.is_file():
+                os.replace(pad_wav, out_wav)
+                return out_wav
+        except (wave.Error, EOFError):
+            pass
+        finally:
+            if pad_wav is not None and pad_wav.exists():
+                pad_wav.unlink(missing_ok=True)
         os.replace(tmp_wav, out_wav)
     finally:
         if tmp_wav.exists():

@@ -209,10 +209,16 @@ export interface JobOutput {
   warnings: string[];
 }
 
+export type StudioEngine = 'core' | 'postv' | 'chatting' | 'stickv';
+
 export interface Job {
   id: string;
+  job_id?: string;
   project: string;
   slug?: string;
+  engine?: StudioEngine;
+  title?: string;
+  route?: string;
   kind?: string;
   mode?: 'preview' | 'final';
   status: JobStatus;
@@ -222,6 +228,7 @@ export interface Job {
   current_beat?: number | null;
   total_beats?: number | null;
   started_at?: number | null;
+  updated_at?: number | null;
   finished_at?: number | null;
   log_tail: string[];
   output: JobOutput | null;
@@ -236,16 +243,23 @@ export interface Job {
 /** Một dòng của `GET /jobs`: job đang chạy/chờ (hoặc vừa hoàn tất khi `include_recent=true`). */
 export interface ActiveJob {
   id: string;
+  job_id?: string;
   slug: string;
+  engine?: StudioEngine;
+  title?: string;
+  route?: string;
   kind:
     | 'preview'
     | 'final'
+    | 'render'
     | 'voice'
     | 'postv_quick'
     | 'postv_auto'
     | 'hbt_core_auto'
     | 'hbt_core_images'
     | 'hbt_core_prepare'
+    | 'chatting_auto'
+    | 'chatting_render'
     | 'stickv';
   mode?: 'preview' | 'final';
   status: JobStatus;
@@ -255,6 +269,7 @@ export interface ActiveJob {
   current_beat?: number | null;
   total_beats?: number | null;
   started_at?: number | null;
+  updated_at?: number | null;
   finished_at?: number | null;
   output?: Record<string, unknown> | null;
   error?: string | null;

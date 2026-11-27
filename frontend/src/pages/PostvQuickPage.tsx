@@ -5,13 +5,9 @@ import { api, fileUrl } from '../api/endpoints';
 import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/SafeZoneOverlay';
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
-import type {
-  PostvPickComment,
-  PostvPickData,
-  PostvQuickOptions,
-  PostvStage,
-  PostvStageEvent,
-} from '../api/types';
+import { useRenderJobStatus } from '../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
+import type { PostvPickComment, PostvPickData, PostvQuickOptions, PostvStage } from '../api/types';
 import {
   AlertIcon,
   CheckIcon,
@@ -213,8 +209,10 @@ export function PostvQuickPage() {
   const [isFinished, setIsFinished] = useState(false);
   const [copiedPublish, setCopiedPublish] = useState(false);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const renderJob = useRenderJobStatus();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const outputVideoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(outputVideoRef, output?.video);
 
   // Tự co giãn chiều cao ô textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -225,173 +223,169 @@ export function PostvQuickPage() {
     }
   };
 
-  // Nối SSE cho một Job đang chạy
-  const connectSSE = useCallback(
-    (jId: string) => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-
-      const es = new EventSource(`/api/jobs/${encodeURIComponent(jId)}/events`);
-      eventSourceRef.current = es;
-
-      es.addEventListener('progress', (e) => {
-        try {
-          const payload: PostvStageEvent = JSON.parse(e.data);
-          if (payload.stage) {
-            setCurrentStage(payload.stage);
-            setStageStatuses((prev) => {
-              const next = { ...prev };
-              const currIdx = STAGE_ORDER.indexOf(payload.stage);
-              STAGE_ORDER.forEach((stg, i) => {
-                if (i < currIdx) next[stg] = 'done';
-                else if (i === currIdx) {
-                  next[stg] = payload.status === 'waiting_pick' ? 'running' : payload.status;
-                } else next[stg] = 'waiting';
-              });
-              return next;
-            });
-          }
-          if (typeof payload.progress === 'number') {
-            setProgressPct(payload.progress);
-          }
-          if (payload.message) {
-            setStageMessage(payload.message);
-          }
-          if (payload.stage === 'voice' || payload.step === 'voice') {
-            const cur = payload.current ?? payload.data?.current;
-            const tot = payload.total ?? payload.data?.total;
-            const pct = payload.percent ?? payload.data?.percent;
-            const msg = payload.data?.message || payload.message || '';
-            if (typeof cur === 'number' || typeof pct === 'number') {
-              setVoiceProgress({
-                current: typeof cur === 'number' ? cur : 0,
-                total: typeof tot === 'number' && tot > 0 ? tot : 1,
-                percent:
-                  typeof pct === 'number'
-                    ? pct
-                    : typeof cur === 'number' && typeof tot === 'number' && tot > 0
-                      ? Math.round((cur / tot) * 100)
-                      : 0,
-                message: msg,
-              });
-            }
-          }
-          if (payload.data) {
-            if (payload.stage === 'fetch') {
-              const total = payload.data.total_comments;
-              if (payload.data.low_comments_warning) {
-                setLowCommentsWarning(payload.data.low_comments_warning);
-              } else if (typeof total === 'number' && total < 10) {
-                setLowCommentsWarning(T.result.lowCommentsWarning(total));
-              }
-            } else if (payload.stage === 'pick') {
-              setPickData(payload.data);
-              const total = payload.data.total_comments;
-              if (payload.data.low_comments_warning) {
-                setLowCommentsWarning(payload.data.low_comments_warning);
-              } else if (typeof total === 'number' && total < 10) {
-                setLowCommentsWarning(T.result.lowCommentsWarning(total));
-              } else if (typeof total === 'number' && total >= 10) {
-                setLowCommentsWarning(null);
-              }
-              if (payload.status === 'waiting_pick') {
-                setIsWaitingPick(true);
-                setManualPickData(payload.data as unknown as PostvPickData);
-                if (payload.data.comments) {
-                  setOrderedComments(payload.data.comments);
-                  setCheckedCommentIds(
-                    payload.data.comments
-                      .filter((c: PostvPickComment) => c.picked)
-                      .map((c: PostvPickComment) => c.id),
-                  );
-                }
-              }
-            } else if (payload.stage === 'done') {
-              setOutput(payload.data as CompletedOutput);
-              setIsFinished(true);
-            }
-          }
-        } catch {
-          // bỏ qua frame lỗi parse
-        }
+  const attachQuickJob = useCallback(
+    (jId: string, slugValue: string | null) => {
+      const targetSlug = slugValue || 'postv-auto';
+      renderJob.attachJob({
+        jobId: jId,
+        slug: targetSlug,
+        kind: 'postv_quick',
+        engine: 'postv',
+        title: targetSlug,
+        route: '/postv',
+        progress: 5,
+        step: 'fetch',
+        stage: T.stages.fetch,
       });
-
-      es.addEventListener('end', (e) => {
-        try {
-          const payload = JSON.parse(e.data);
-          if (payload.status === 'done') {
-            setStageStatuses({
-              fetch: 'done',
-              pick: 'done',
-              script: 'done',
-              voice: 'done',
-              render: 'done',
-              done: 'done',
-            });
-            setProgressPct(100);
-            setIsFinished(true);
-            setIsWaitingPick(false);
-            if (payload.output) {
-              setOutput(payload.output);
-            }
-            refetchProjects();
-          } else if (payload.status === 'failed') {
-            setErrorMessage(payload.error || 'Có lỗi xảy ra trong quá trình tạo video');
-          }
-        } catch {
-          // bỏ qua
-        }
-        es.close();
-      });
-
-      es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED) {
-          void api
-            .getJob(jId)
-            .then((final) => {
-              if (final.status === 'done') {
-                setStageStatuses({
-                  fetch: 'done',
-                  pick: 'done',
-                  script: 'done',
-                  voice: 'done',
-                  render: 'done',
-                  done: 'done',
-                });
-                setProgressPct(100);
-                setIsFinished(true);
-                setIsWaitingPick(false);
-                if (final.output) {
-                  setOutput(final.output);
-                }
-                refetchProjects();
-              } else if (final.status === 'failed') {
-                setErrorMessage(final.error || 'Mất kết nối máy chủ');
-              } else if (final.status === 'waiting_pick') {
-                setIsWaitingPick(true);
-                void api.getPostvPickData(jId).then((data) => {
-                  setManualPickData(data);
-                  if (data.comments) {
-                    setOrderedComments(data.comments);
-                    setCheckedCommentIds(data.comments.filter((c) => c.picked).map((c) => c.id));
-                  }
-                });
-              }
-            })
-            .catch(() => undefined);
-        }
-      };
     },
-    [refetchProjects],
+    [renderJob],
   );
+
+  // Lắng nghe tiến độ từ external store (1 luồng SSE duy nhất ở RenderJobProvider -> SidebarRenderStatus)
+  useEffect(() => {
+    if (!jobId || renderJob.jobId !== jobId) return;
+    const applySnap = () => {
+      const snap = renderJob.progressStore.getSnapshot();
+      const stageKey = (snap.stage || snap.step || '') as PostvStage;
+      const payloadData = (snap.data ?? {}) as Record<string, unknown>;
+      if (stageKey && STAGE_ORDER.includes(stageKey)) {
+        setCurrentStage(stageKey);
+        setStageStatuses((prev) => {
+          const next = { ...prev };
+          const currIdx = STAGE_ORDER.indexOf(stageKey);
+          STAGE_ORDER.forEach((stg, i) => {
+            if (i < currIdx) next[stg] = 'done';
+            else if (i === currIdx) {
+              next[stg] =
+                snap.status === 'waiting_pick'
+                  ? 'running'
+                  : (snap.status as 'waiting' | 'running' | 'done' | 'failed') || 'running';
+            } else {
+              next[stg] = 'waiting';
+            }
+          });
+          return next;
+        });
+      }
+      if (typeof snap.percent === 'number' && snap.percent > 0) {
+        setProgressPct(snap.percent);
+      }
+      if (snap.message) {
+        setStageMessage(snap.message);
+      }
+      if (stageKey === 'voice' || snap.step === 'voice') {
+        const nested = payloadData as {
+          current?: number;
+          total?: number;
+          percent?: number;
+          message?: string;
+        };
+        const cur = snap.current ?? nested.current;
+        const tot = snap.total ?? nested.total;
+        const pct =
+          typeof nested.percent === 'number'
+            ? nested.percent
+            : typeof cur === 'number' && typeof tot === 'number' && tot > 0
+              ? Math.round((cur / tot) * 100)
+              : snap.percent;
+        const msg = nested.message || snap.message || '';
+        if (typeof cur === 'number' || (typeof pct === 'number' && pct > 0)) {
+          setVoiceProgress({
+            current: typeof cur === 'number' ? cur : 0,
+            total: typeof tot === 'number' && tot > 0 ? tot : 1,
+            percent:
+              typeof pct === 'number'
+                ? Math.round(pct)
+                : typeof cur === 'number' && typeof tot === 'number' && tot > 0
+                  ? Math.round((cur / tot) * 100)
+                  : 0,
+            message: msg,
+          });
+        }
+      }
+      if (snap.data) {
+        if (stageKey === 'fetch') {
+          const total = payloadData.total_comments as number | undefined;
+          const lowWarn = payloadData.low_comments_warning as string | null | undefined;
+          if (lowWarn) {
+            setLowCommentsWarning(lowWarn);
+          } else if (typeof total === 'number' && total < 10) {
+            setLowCommentsWarning(T.result.lowCommentsWarning(total));
+          }
+        } else if (stageKey === 'pick') {
+          setPickData(payloadData as unknown as PickSnippetData);
+          const total = payloadData.total_comments as number | undefined;
+          const lowWarn = payloadData.low_comments_warning as string | null | undefined;
+          if (lowWarn) {
+            setLowCommentsWarning(lowWarn);
+          } else if (typeof total === 'number' && total < 10) {
+            setLowCommentsWarning(T.result.lowCommentsWarning(total));
+          } else if (typeof total === 'number' && total >= 10) {
+            setLowCommentsWarning(null);
+          }
+          if (snap.status === 'waiting_pick') {
+            setIsWaitingPick(true);
+            setManualPickData(payloadData as unknown as PostvPickData);
+            const comments = payloadData.comments as PostvPickComment[] | undefined;
+            if (comments) {
+              setOrderedComments(comments);
+              setCheckedCommentIds(comments.filter((c) => c.picked).map((c) => c.id));
+            }
+          }
+        } else if (stageKey === 'done') {
+          setOutput(payloadData as unknown as CompletedOutput);
+          setIsFinished(true);
+        }
+      }
+    };
+    applySnap();
+    return renderJob.progressStore.subscribe(applySnap);
+  }, [jobId, renderJob.jobId, renderJob.progressStore]);
+
+  useEffect(() => {
+    if (!jobId || !renderJob.finished || renderJob.finished.id !== jobId) return;
+    const fin = renderJob.finished;
+    if (fin.status === 'done') {
+      setStageStatuses({
+        fetch: 'done',
+        pick: 'done',
+        script: 'done',
+        voice: 'done',
+        render: 'done',
+        done: 'done',
+      });
+      setProgressPct(100);
+      setIsFinished(true);
+      setIsWaitingPick(false);
+      if (fin.output) {
+        setOutput(fin.output as unknown as CompletedOutput);
+      }
+      void refetchProjects();
+    } else if (fin.status === 'failed') {
+      setErrorMessage(fin.error || 'Có lỗi xảy ra trong quá trình tạo video');
+    } else if ((fin.status as string) === 'waiting_pick') {
+      setIsWaitingPick(true);
+      void api.getPostvPickData(jobId).then((data) => {
+        setManualPickData(data);
+        if (data.comments) {
+          setOrderedComments(data.comments);
+          setCheckedCommentIds(data.comments.filter((c) => c.picked).map((c) => c.id));
+        }
+      });
+    }
+  }, [jobId, renderJob.finished, refetchProjects]);
+
+  useEffect(() => {
+    if (!jobId || !renderJob.connectionError || renderJob.jobId !== jobId) return;
+    setErrorMessage(renderJob.connectionError);
+  }, [jobId, renderJob.connectionError, renderJob.jobId]);
 
   // Phục hồi job đang chạy khi tải lại trang
   const hasRestoredJobRef = useRef(false);
   const { data: activeJobs } = useQuery({
     queryKey: ['active-jobs'],
-    queryFn: api.listActiveJobs,
-    refetchInterval: isFinished || !!errorMessage || !!jobId ? false : 3000,
+    queryFn: () => api.listActiveJobs(),
+    refetchInterval: false,
   });
 
   useEffect(() => {
@@ -416,19 +410,17 @@ export function PostvQuickPage() {
             }
           });
         }
-        connectSSE(runningJob.id);
+        attachQuickJob(runningJob.id, runningJob.slug);
       }
     }
-  }, [activeJobs, jobId, connectSSE]);
+  }, [activeJobs, jobId, attachQuickJob]);
 
-  // Dọn dẹp SSE và audio khi unmount
+  // Dọn dẹp audio mẫu khi unmount
   useEffect(() => {
+    const audioEl = audioSampleRef.current;
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      if (audioSampleRef.current) {
-        audioSampleRef.current.pause();
+      if (audioEl) {
+        audioEl.pause();
       }
     };
   }, []);
@@ -488,7 +480,7 @@ export function PostvQuickPage() {
           done: 'waiting',
         });
         setProgressPct(5);
-        connectSSE(res.job_id);
+        attachQuickJob(res.job_id, res.project_slug);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -508,9 +500,6 @@ export function PostvQuickPage() {
     setIsUnlocking(true);
     try {
       await api.unlockProject(unlockTargetSlug);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
       setErrorMessage(null);
       setIsWaitingPick(false);
       setJobId(null);
@@ -528,10 +517,7 @@ export function PostvQuickPage() {
   const handleCancel = async () => {
     if (!jobId) return;
     try {
-      await api.cancelJob(jobId);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
+      await (renderJob.jobId === jobId ? renderJob.cancel() : api.cancelJob(jobId));
       setIsWaitingPick(false);
       setErrorMessage('Đã huỷ tác vụ');
     } catch (err: unknown) {
@@ -550,7 +536,7 @@ export function PostvQuickPage() {
       if (res.job_id) {
         hasRestoredJobRef.current = true;
         setJobId(res.job_id);
-        connectSSE(res.job_id);
+        attachQuickJob(res.job_id, res.project_slug || projectSlug);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -572,7 +558,7 @@ export function PostvQuickPage() {
       setIsWaitingPick(false);
       if (res.job_id && res.job_id !== jobId) {
         setJobId(res.job_id);
-        connectSSE(res.job_id);
+        attachQuickJob(res.job_id, res.project_slug || projectSlug);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -639,9 +625,6 @@ export function PostvQuickPage() {
 
   // Reset về trạng thái khung chat ban đầu
   const handleReset = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
     setJobId(null);
     setProjectSlug(null);
     setSubmittedInput('');
@@ -694,6 +677,7 @@ export function PostvQuickPage() {
                 disabled: !input.trim() || isSubmitting || Boolean(jobId && !isFinished),
                 isSubmitting,
                 isRendering: Boolean(jobId && !isFinished),
+                subscribeGlobalProgress: Boolean(jobId && !isFinished && renderJob.jobId === jobId),
                 progressPct,
                 progressStage: stageMessage || currentStage,
                 onCancelRender: jobId && !isFinished ? () => void handleCancel() : undefined,
@@ -1270,9 +1254,11 @@ export function PostvQuickPage() {
                 <SafeZoneOverlay platform={safeZone} />
                 {output.video ? (
                   <video
+                    ref={outputVideoRef}
                     src={fileUrl(output.video)}
                     controls
                     playsInline
+                    preload="metadata"
                     className="aspect-[9/16] w-full object-contain"
                   />
                 ) : (

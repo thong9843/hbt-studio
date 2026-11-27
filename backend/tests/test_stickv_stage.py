@@ -1164,3 +1164,86 @@ def test_v10_board_dict_sanitization_2line_takeaway_and_no_empty_polaroid() -> N
             )
     finally:
         bad_frame.close()
+
+
+def test_stage_board_schemas_no_empty_comparison_or_fake_100_percent() -> None:
+    """stage.py đọc đủ alias schema và tự fallback sạch khi comparison trống hoặc big_number ảo."""
+    from hbt.stickv.stage import _draw_smart_board_content, resolve_stage_palette
+
+    pal = resolve_stage_palette("history_geo", "cream")
+    box = (56, 125, 1024, 830)
+    sample_photo = Image.new("RGBA", (400, 300), (60, 120, 180, 255))
+    beats_to_render = [
+        StickvBeat(
+            id="b_cmp_alias",
+            narration="So sánh ngày và đêm ở Thung lũng Chết.",
+            board_type="comparison",
+            board_title="Ngày và Đêm",
+            board_data={
+                "left_title": "Ban đêm",
+                "left": "Nhiệt độ xuống dưới 0°C tạo lớp băng mỏng",
+                "right_title": "Ban ngày",
+                "right": "Gió thổi đẩy tảng đá nặng 300 kg trượt dài",
+            },
+        ),
+        StickvBeat(
+            id="b_cmp_empty",
+            narration="Hồ Natron có tính kiềm cực cao làm vôi hóa xác chim.",
+            board_type="comparison",
+            board_title="Hồ Natron Tanzania",
+            board_data={"left_title": "Trước", "right_title": "Sau"},
+        ),
+        StickvBeat(
+            id="b_bn_real",
+            narration="Tảng đá nặng tới 300 kg vẫn tự di chuyển trên cát.",
+            board_type="big_number",
+            board_title="Khối lượng đá biết đi",
+            board_data={"number": "300", "unit": "kg", "label": "Trọng lượng tảng đá trượt"},
+        ),
+        StickvBeat(
+            id="b_bn_fake",
+            narration="Vùng biển này nổi tiếng với nhiều truyền thuyết bí ẩn.",
+            board_type="big_number",
+            board_title="Tam giác Bermuda",
+            board_data={"value": "100%", "label": "Truyền thuyết hàng hải"},
+        ),
+        StickvBeat(
+            id="b_recap",
+            narration="Tóm tắt 3 địa điểm kỳ lạ nhất hành tinh.",
+            board_type="recap_card",
+            board_title="TÓM TẮT 3 Ý CỐT LÕI",
+            board_data={
+                "items": [
+                    "**Tam giác Bermuda:** Vùng biển 500.000 km² giàu dòng hải lưu mạnh.",
+                    "**Đá biết đi California:** Lớp băng mỏng và gió nhẹ đẩy tảng đá 300 kg.",
+                    "**Hồ Natron Tanzania:** Độ pH 10,5 bảo quản xác động vật như tượng đá.",
+                ],
+                "takeaway": "Mọi bí ẩn địa lý đều có cơ chế tự nhiên lý giải",
+            },
+        ),
+        StickvBeat(
+            id="b_photo",
+            narration="Đá biết đi tại Thung lũng Chết, California.",
+            board_type="pinned_photo",
+            board_title="Đá biết đi — Thung lũng Chết",
+            board_data={"caption": "PHÂN TÍCH CƠ CHẾ", "pin_style": "tape"},
+        ),
+    ]
+    try:
+        for b in beats_to_render:
+            canvas = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+            try:
+                rect = _draw_smart_board_content(
+                    canvas,
+                    b,
+                    box,
+                    pal,
+                    progress=1.0,
+                    prop_img=sample_photo if b.board_type == "pinned_photo" else None,
+                )
+                assert rect[2] > rect[0] and rect[3] > rect[1]
+                assert canvas.getbbox() is not None
+            finally:
+                canvas.close()
+    finally:
+        sample_photo.close()

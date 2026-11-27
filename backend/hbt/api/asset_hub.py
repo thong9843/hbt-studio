@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -141,38 +140,12 @@ def _read_index_map(folder: Path) -> dict[str, dict[str, Any]]:
 def _probe_and_thumb_video_pose(
     video_path: Path, thumb_dir: Path
 ) -> tuple[float, int, int, Path | None]:
-    """Đo duration_sec, width, height bằng ffprobe và xuất thumbnail .jpg cho Video Pose."""
-    dur, w, h = 0.0, 0, 0
-    try:
-        pr = subprocess.run(
-            [
-                shutil.which("ffprobe") or "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                str(video_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if pr.returncode == 0 and pr.stdout.strip():
-            info = json.loads(pr.stdout)
-            streams = info.get("streams") or []
-            if streams:
-                w = int(streams[0].get("width") or 0)
-                h = int(streams[0].get("height") or 0)
-            dur = round(float((info.get("format") or {}).get("duration") or 0.0), 2)
-    except Exception:
-        pass
+    """Đo duration_sec, width, height bằng `probe_media_info` và tạo thumbnail .jpg."""
+    from hbt.shared.ffmpeg_utils import probe_media_info
+
+    info = probe_media_info(video_path, timeout=10.0)
+    dur = round(info.duration_s, 2)
+    w, h = info.width, info.height
 
     thumb_dir.mkdir(parents=True, exist_ok=True)
     thumb_path = thumb_dir / f"{video_path.stem}.jpg"

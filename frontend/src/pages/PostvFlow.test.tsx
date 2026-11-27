@@ -9,7 +9,6 @@ import { project } from '../test/project';
 import { renderWithProviders } from '../test/render';
 import { PostvLayout } from './PostvLayout';
 import { PostvPickPage } from './PostvPickPage';
-import { PostvSoonPage } from './PostvSoonPage';
 import { PostvSourcePage } from './PostvSourcePage';
 import { ProjectsPage } from './ProjectsPage';
 
@@ -88,7 +87,7 @@ function app(path = '/postv/bai') {
           <Route path="/postv/:slug" element={<PostvLayout />}>
             <Route index element={<PostvSourcePage />} />
             <Route path="pick" element={<PostvPickPage />} />
-            <Route path="script" element={<PostvSoonPage step={2} />} />
+            <Route path="script" element={<p>trình soạn kịch bản PostV</p>} />
           </Route>
           <Route path="/p/:slug" element={<p>trình soạn cảnh</p>} />
         </Routes>
@@ -151,7 +150,7 @@ describe('PostvLayout: thanh bước ở đầu', () => {
       'page',
     );
     await user.click(screen.getByRole('link', { name: 'Bước 3/5: Kịch bản' }));
-    expect(await screen.findByText('Sắp có')).toBeVisible();
+    expect(await screen.findByText('trình soạn kịch bản PostV')).toBeVisible();
   });
 
   it('sends a video project to the scene editor', async () => {
@@ -488,7 +487,7 @@ describe('Bước 2 · Chọn đoạn', () => {
       await screen.findByText('Chưa có bình luận. Quay lại bước Nguồn để thêm.'),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Tiếp: Kịch bản' }));
-    expect(await screen.findByText('Sắp có')).toBeVisible();
+    expect(await screen.findByText('trình soạn kịch bản PostV')).toBeVisible();
   });
 });
 

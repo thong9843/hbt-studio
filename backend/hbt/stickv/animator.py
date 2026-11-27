@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import math
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,8 +10,14 @@ from pathlib import Path
 from PIL import Image
 
 from hbt.pipeline.ffutil import ffmpeg_exe
-from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
-from hbt.stickv.puppet import PuppetPoseState, PuppetRig, compute_smoothed_rms, is_puppet_ready
+from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP, probe_media_info
+from hbt.stickv.puppet import (
+    PuppetAssetCache,
+    PuppetPoseState,
+    PuppetRig,
+    compute_smoothed_rms,
+    is_puppet_ready,
+)
 from hbt.stickv.stage import resolve_pose_png
 
 ANIM_VIDEO_EXTS = {".webm", ".mov"}
@@ -101,36 +105,8 @@ def resolve_animation_source(
 
 
 def _probe_video_dimensions(path: Path) -> tuple[int, int]:
-    try:
-        proc = subprocess.run(
-            [
-                shutil.which("ffprobe") or "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height",
-                "-of",
-                "json",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            data = json.loads(proc.stdout)
-            streams = data.get("streams") or []
-            if streams:
-                w = int(streams[0].get("width") or 0)
-                h = int(streams[0].get("height") or 0)
-                if w > 0 and h > 0:
-                    return w, h
-    except Exception:
-        pass
-    return 0, 0
+    info = probe_media_info(path, timeout=10.0)
+    return info.width, info.height
 
 
 def _decode_video_rgba_frames(
@@ -289,6 +265,7 @@ class StickmanAnimator:
         prev_pose_state: PuppetPoseState | None = None,
         global_t_offset: float = 0.0,
         board_type: str = "bullets",
+        asset_cache: PuppetAssetCache | None = None,
     ) -> None:
         self.facing = facing
         self.duration_sec = max(0.5, float(duration_sec))
@@ -329,6 +306,7 @@ class StickmanAnimator:
                     prev_pose_state=prev_pose_state,
                     global_t_offset=global_t_offset,
                     board_type=board_type,
+                    asset_cache=asset_cache,
                 )
             except Exception:
                 self.puppet_rig = None
@@ -378,10 +356,12 @@ class StickmanAnimator:
                     )
                     self._owns_fallback = True
 
-    def frame_at(self, frame_idx: int, t_sec: float) -> tuple[Image.Image | None, AnimatorMotion]:
+    def frame_at(
+        self, frame_idx: int, t_sec: float, *, output_scale: float = 1.0
+    ) -> tuple[Image.Image | None, AnimatorMotion]:
         if self.puppet_rig is not None:
             self.puppet_rig.facing = self.facing
-            img = self.puppet_rig.render_frame(frame_idx, t_sec)
+            img = self.puppet_rig.render_frame(frame_idx, t_sec, output_scale=output_scale)
             return img, AnimatorMotion(phase="puppet", used_fallback=False)
 
         rms = self.rms_env[frame_idx] if 0 <= frame_idx < len(self.rms_env) else 0.0

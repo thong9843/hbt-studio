@@ -86,6 +86,7 @@ class StickvBeat(BaseModel):
     interaction: StickvInteraction = "none"
     camera_shot: StickvCameraShot = "wide_stage"
     prop_query: str | None = Field(default=None, max_length=120)
+    beat_entity_en: str = Field(default="", max_length=100)
     image_prompt: str | None = Field(default=None, max_length=320)
     facing: StickvFacing = "right"
     motion: StickvMotion = "bounce"
@@ -156,6 +157,7 @@ class StickvProject(BaseModel):
     slug: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=200)
     topic: str = Field(default="science", max_length=40)
+    primary_entity_en: str = Field(default="", max_length=100)
     domain: StickvDomain = "paper_classic"
     animation_mode: StickvAnimationMode = "auto"
     aspect: StickvAspect = "9:16"

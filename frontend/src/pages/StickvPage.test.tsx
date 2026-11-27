@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useRef } from 'react';
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
-import { GlobalJobDock } from '../components/layout/GlobalJobDock';
+import { AppLayout } from '../components/layout/AppLayout';
 import { RenderJobProvider } from '../components/RenderJobProvider';
 import { ToastProvider } from '../components/Toast';
 import { resetActiveStreams } from '../hooks/useJob';
@@ -89,6 +89,7 @@ vi.mock('../api/endpoints', async (importOriginal) => {
           { id: 'Thanh Bình', label: 'Thanh Bình' },
         ],
       }),
+      listProjects: vi.fn().mockResolvedValue([]),
       listActiveJobs: vi.fn().mockResolvedValue([]),
       listJobs: vi.fn().mockResolvedValue([]),
     },
@@ -205,7 +206,7 @@ describe('StickvPage', () => {
     expect(screen.getByLabelText('Lời đọc beat')).toHaveValue('Lời thoại mới chưa lưu.');
   });
 
-  it('hides GlobalJobDock while on /stickv, shows it when navigating away, and re-renders StickvPage 0 times during 1% -> 100% progress updates', async () => {
+  it('shows SidebarRenderStatus persistently on /stickv and across routes with 0 StickvPage re-renders during 1% -> 100% progress updates', async () => {
     vi.mocked(stickvApi.save).mockResolvedValue({ project: {} as never });
     vi.mocked(stickvApi.render).mockResolvedValue({
       job_id: 'sv-job-99',
@@ -227,16 +228,12 @@ describe('StickvPage', () => {
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={['/stickv']}>
           <ToastProvider>
-            <RenderJobProvider>
-              <nav>
-                <Link to="/library">Đi tới Thư viện</Link>
-              </nav>
-              <Routes>
+            <Routes>
+              <Route element={<AppLayout />}>
                 <Route path="/stickv" element={<MonitoredStickvPage />} />
                 <Route path="/library" element={<div>Trang Thư viện</div>} />
-              </Routes>
-              <GlobalJobDock />
-            </RenderJobProvider>
+              </Route>
+            </Routes>
           </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -253,10 +250,15 @@ describe('StickvPage', () => {
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(FakeEventSource.instances[0].url).toBe('/api/jobs/sv-job-99/events');
 
+    // SidebarRenderStatus hiển thị NGAY KHI đang đứng ở /stickv (không còn GlobalJobDock nổi)
+    const sidebarCard = await screen.findByRole('status', { name: 'Đang dựng' });
+    expect(sidebarCard).toHaveTextContent('StickV');
+    expect(sidebarCard).toHaveTextContent('Video Demo StickV');
+
     // Ghi nhận số lần render của StickvPage ngay khi job bắt đầu chạy
     const rendersBeforeProgressTicks = stickvPageRenderCount;
 
-    // Phát liên tiếp các sự kiện tiến độ 15% -> 48% -> 82%
+    // Phát liên tiếp các sự kiện tiến độ 15% -> 48%
     act(() => {
       FakeEventSource.instances[0].emit('progress', {
         progress: 15,
@@ -280,28 +282,25 @@ describe('StickvPage', () => {
     // StickvPage re-render ĐÚNG 0 LẦN khi progress nhảy liên tục!
     expect(stickvPageRenderCount).toBe(rendersBeforeProgressTicks);
 
-    // Nút Xuất trên Topbar vẫn cập nhật mượt mà qua external store: "Đang xuất · 48%"
+    // Cả ExportPopover trên Topbar lẫn SidebarRenderStatus bên trái đều cập nhật 48% qua external store
     const banner = screen.getByRole('banner');
     expect(within(banner).getByRole('button', { name: /Đang xuất · 48%/i })).toBeInTheDocument();
-    // Không có nút Hủy dựng thừa đứng ngoài Topbar; Hủy dựng nằm gọn trong ExportPopover
     const popoverDialog = screen.getByRole('dialog', { name: 'Cấu hình & Xuất video' });
     expect(within(popoverDialog).getByRole('button', { name: 'Hủy dựng' })).toBeInTheDocument();
     expect(within(banner).getAllByRole('button', { name: 'Hủy dựng' })).toHaveLength(1);
-    expect(screen.getByText(/Dựng khung hình/)).toBeInTheDocument();
-    expect(screen.getByText(/Beat 2\/4/)).toBeInTheDocument();
+    expect(sidebarCard).toHaveTextContent('48%');
 
-    // Khi đang ở trang /stickv, GlobalJobDock TỰ ĐỘNG ẨN để không bị 3 thanh tiến độ trùng lặp
+    // Không có hộp GlobalJobDock nổi góc dưới phải
     expect(screen.queryByRole('complementary', { name: 'Tiến trình dựng toàn cục' })).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Tiến trình dựng video StickV' })).toBeNull();
 
-    // Chuyển sang trang Thư viện -> GlobalJobDock TỰ ĐỘNG HIỆN ở góc dưới phải
-    fireEvent.click(screen.getByRole('link', { name: 'Đi tới Thư viện' }));
+    // Chuyển sang trang Thư viện -> SidebarRenderStatus GIỮ NGUYÊN tiến độ & liên kết về đúng StickV
+    const nav = screen.getByRole('navigation', { name: 'Điều hướng chính' });
+    fireEvent.click(within(nav).getByRole('link', { name: 'Thư viện' }));
     expect(await screen.findByText('Trang Thư viện')).toBeInTheDocument();
 
-    const dock = screen.getByRole('complementary', { name: 'Tiến trình dựng toàn cục' });
-    expect(dock).toBeInTheDocument();
-    const dockLink = within(dock).getByRole('link', { name: /Xem tiến trình StickV/i });
-    expect(dockLink).toHaveAttribute('href', '/stickv?slug=demo-stickv');
+    const sidebarAfterNav = screen.getByRole('status', { name: 'Đang dựng' });
+    const backLink = within(sidebarAfterNav).getByRole('link', { name: /Đi tới dự án/i });
+    expect(backLink).toHaveAttribute('href', '/stickv?slug=demo-stickv');
 
     // Tiến độ tăng lên 74% trong lúc đang ở trang Thư viện
     act(() => {
@@ -312,13 +311,12 @@ describe('StickvPage', () => {
         message: 'Đang nén âm chuẩn -14 LUFS',
       });
     });
-    expect(within(dock).getByText(/74%/)).toBeInTheDocument();
+    expect(within(sidebarAfterNav).getByText(/74%/)).toBeInTheDocument();
 
-    // Bấm nút trong GlobalJobDock để quay về /stickv -> GlobalJobDock tự ẩn lại, Topbar hiện Đang xuất · 74%
-    fireEvent.click(dockLink);
+    // Bấm nút trong SidebarRenderStatus quay về /stickv -> Topbar hiện Đang xuất · 74%
+    fireEvent.click(backLink);
 
     expect(await screen.findByRole('button', { name: /Đang xuất · 74%/i })).toBeInTheDocument();
-    expect(screen.queryByRole('complementary', { name: 'Tiến trình dựng toàn cục' })).toBeNull();
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 });

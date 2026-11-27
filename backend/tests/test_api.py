@@ -481,6 +481,8 @@ def test_list_active_jobs_is_read_only(client):
         (b, slug, "final", "queued"),
     ]
     assert all(isinstance(r["progress"], float | int) for r in rows)
+    assert all(r["engine"] == "core" and r["route"] == f"/p/{slug}/export" for r in rows)
+    assert client.get("/api/jobs?active_only=true").json() == rows
     assert client.get("/api/jobs").json() == rows  # đọc không đổi gì
     assert client.post("/api/jobs").status_code == 405
 

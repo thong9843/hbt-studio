@@ -374,7 +374,7 @@ def test_v3_expressive_18_poses_and_10_emotions(tmp_path: Path) -> None:
         resolve_stickv_emotion,
     )
 
-    assert SEG_CACHE_VERSION == "v4_hybrid_ik"
+    assert SEG_CACHE_VERSION == "v5_a_stance_legs"
     assert len(POSE_PRESETS) == 24
     assert len(VALID_EMOTIONS) == 10
     assert normalize_stickv_pose("explain") == "present_board"
@@ -582,60 +582,78 @@ def test_stickv_60fps_matches_30fps_realtime_motion_and_blink(tmp_path: Path) ->
         rig60.close()
 
 
-def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path) -> None:
-    """2-Bone IK hội tụ chính xác, kẹp giải phẫu chống gãy tay, 4 hand_shape & 3-phase."""
+def test_v5_a_stance_legs_and_arm_ik_choreography(tmp_path: Path) -> None:
+    """Giữ nguyên 2 chân chữ A gốc trong body_torso (v5_a_stance_legs), 2 tay IK + 4 hand_shape."""
     import math
 
     from hbt.stickv.puppet import (
+        ALL_SEGMENT_NAMES,
         SEG_CACHE_VERSION,
         VALID_HAND_SHAPES,
         clamp_arm_target,
+        clean_puppet_sprite,
         detect_rms_peaks,
         resolve_hand_shape,
         solve_2bone_ik,
     )
 
-    assert SEG_CACHE_VERSION == "v4_hybrid_ik"
+    assert SEG_CACHE_VERSION == "v5_a_stance_legs"
+    assert "shoe_left" not in ALL_SEGMENT_NAMES
+    assert "shoe_right" not in ALL_SEGMENT_NAMES
 
-    # 1. solve_2bone_ik bảo toàn độ dài L1, L2 và kẹp tầm với trong [0.25, 0.98]*(L1+L2)
+    # 1. solve_2bone_ik cho 2 cánh tay bảo toàn độ dài L1, L2 và kẹp tầm với [0.25, 0.98]*(L1+L2)
     root = (100.0, 100.0)
     l1, l2 = 60.0, 55.0
     elbow, wrist = solve_2bone_ik(root, (170.0, 150.0), l1, l2, bend_dir=1)
     assert abs(math.hypot(elbow[0] - root[0], elbow[1] - root[1]) - l1) < 0.5
     assert abs(math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]) - l2) < 0.5
 
-    # Mục tiêu quá xa -> tự kẹp <= 0.98*(L1+L2)
     _, wrist_far = solve_2bone_ik(root, (900.0, 900.0), l1, l2, bend_dir=1)
     assert math.hypot(wrist_far[0] - root[0], wrist_far[1] - root[1]) <= 0.98 * (l1 + l2) + 0.5
 
-    # 2. Khóa giải phẫu: tay trái không vắt chéo sâu sang phải (trừ arms_crossed / think_chin)
+    # 2. Khóa Silhouette Lock: cấm CẢ 2 tay vắt chéo qua trục cà vạt đỏ (kể cả arms_crossed)
     clamped_l = clamp_arm_target(
         "left", (80.0, 100.0), (220.0, 130.0), 100.0, 60.0, l1, l2, pose="present_board"
     )
-    assert clamped_l[0] <= 100.0 + 60.0 * 0.14 + 0.5
+    assert clamped_l[0] <= 100.0 - 60.0 * 0.14 + 0.5
     crossed_l = clamp_arm_target(
         "left", (80.0, 100.0), (145.0, 130.0), 100.0, 60.0, l1, l2, pose="arms_crossed"
     )
-    assert crossed_l[0] > 115.0
+    assert crossed_l[0] <= 100.0 - 60.0 * 0.14 + 0.5
+    clamped_r = clamp_arm_target(
+        "right", (120.0, 100.0), (40.0, 130.0), 100.0, 60.0, l1, l2, pose="think_chin"
+    )
+    assert clamped_r[0] >= 100.0 + 60.0 * 0.14 - 0.5
 
-    # 3. Đủ 4 hand_shape & ánh xạ đúng theo pose
-    assert set(VALID_HAND_SHAPES) == {"open_palm", "point_index", "fist_punch", "count_fingers"}
+    # 3. Đủ 4 dáng găng tay bo tròn liền khối (thay thế count_fingers bằng thumb_up)
+    assert set(VALID_HAND_SHAPES) == {"open_palm", "point_index", "fist_punch", "thumb_up"}
     assert resolve_hand_shape("point_up", "right") == "point_index"
     assert resolve_hand_shape("emphatic_chop", "right") == "fist_punch"
-    assert resolve_hand_shape("count_points", "right") == "count_fingers"
+    assert resolve_hand_shape("count_points", "right") == "thumb_up"
     assert resolve_hand_shape("present_board", "left") == "open_palm"
+    assert resolve_hand_shape("welcome_open", "right", board_type="recap_card") == "thumb_up"
 
-    # 4. 3-Phase Beat Choreography trong beat 4s có biến thiên cử chỉ & đỉnh nhấn RMS
+    # 4. body_torso giữ nguyên chiều dài 2 chân chữ A xuống tận đáy ảnh gốc (không cắt ngang hông)
     fps = 30
     env = [0.25] * (4 * fps)
-    env[30] = 0.85  # t=1.0s
-    env[65] = 0.90  # t=2.16s
+    env[30] = 0.85
+    env[65] = 0.90
     peaks = detect_rms_peaks(env, fps)
     assert len(peaks) >= 2
 
     lib = tmp_path / "lib"
     assets = tmp_path / "assets"
     _make_full_puppet_dir(lib / "stickman" / "puppet")
+    base_img_p = lib / "stickman" / "puppet" / "base_character.png"
+    seg_res = auto_segment_puppet(base_img_p, tmp_path / ".seg_check")
+    assert seg_res["rig_config"].get("torso_full_legs") is True
+    with Image.open(base_img_p) as raw_b:
+        cleaned_b = clean_puppet_sprite(raw_b, padding=4)
+        cleaned_h = cleaned_b.height
+        cleaned_b.close()
+    with Image.open(seg_res["segments"]["body_torso"]) as bt_im:
+        assert bt_im.height >= int(cleaned_h * 0.58)
+
     rig = PuppetRig(
         library_dir=lib,
         assets_dir=assets,
@@ -651,7 +669,6 @@ def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path
         f_p2a = rig.render_frame(32, 32 / fps)
         f_p2b = rig.render_frame(80, 80 / fps)
         f_p3 = rig.render_frame(112, 112 / fps)
-        # Các pha khác nhau tạo khung hình có chuyển động thật (không đóng băng)
         assert not np.array_equal(np.array(f_p1), np.array(f_p2a))
         assert not np.array_equal(np.array(f_p2a), np.array(f_p2b))
         assert not np.array_equal(np.array(f_p2b), np.array(f_p3))
@@ -659,3 +676,60 @@ def test_v4_hybrid_ik_solver_clamps_hands_and_3phase_choreography(tmp_path: Path
             im.close()
     finally:
         rig.close()
+
+
+def test_smooth_60fps_wrist_kinematics_across_beat_boundaries(tmp_path: Path) -> None:
+    """INV-09: Lò xo giảm chấn tới hạn xuyên beat (kể cả đổi facing), 0 nhảy cổ tay > 10px/f."""
+    import math
+
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    fps = 60
+    beats_spec = [
+        ("b001", "point_up", "right", "pinned_photo", 2.0),
+        ("b002", "shock_hands_up", "left", "myth_vs_fact", 2.0),
+        ("b003", "welcome_open", "right", "recap_card", 2.0),
+    ]
+    prev_state: PuppetPoseState | None = None
+    global_t = 0.0
+    traj_l: list[tuple[float, float]] = []
+    traj_r: list[tuple[float, float]] = []
+
+    for bid, pose, facing, btype, dur in beats_spec:
+        n_frames = int(dur * fps)
+        # Sóng RMS 4.5Hz dày đặc để xác nhận kênh tay đã tách khỏi RMS nhanh
+        env = [0.5 + 0.48 * math.sin(2.0 * math.pi * 4.5 * (i / fps)) for i in range(n_frames)]
+        rig = PuppetRig(
+            library_dir=lib,
+            assets_dir=assets,
+            target_height=420,
+            pose=pose,
+            facing=facing,
+            beat_id=bid,
+            fps=fps,
+            duration_sec=dur,
+            speech_end=dur - 0.25,
+            rms_env=env,
+            prev_pose_state=prev_state,
+            global_t_offset=global_t,
+            board_type=btype,
+        )
+        try:
+            for fi in range(n_frames):
+                fr = rig.render_frame(fi, fi / float(fps))
+                fr.close()
+                traj_l.append(rig.last_wrists[0])
+                traj_r.append(rig.last_wrists[1])
+            prev_state = rig.last_pose_state
+        finally:
+            rig.close()
+        global_t += dur
+
+    steps = [
+        math.hypot(t[i][0] - t[i - 1][0], t[i][1] - t[i - 1][1])
+        for t in (traj_l, traj_r)
+        for i in range(1, len(t))
+    ]
+    assert max(steps) <= 10.0
+    assert float(np.percentile(steps, 95)) <= 3.5

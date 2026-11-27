@@ -1,10 +1,30 @@
 import { createContext, useContext, useMemo, useSyncExternalStore } from 'react';
-import type { ActiveJob, Job, RenderOptions } from '../api/types';
+import type { ActiveJob, Job, RenderOptions, StudioEngine } from '../api/types';
+import {
+  createRenderJobProgressStore,
+  EMPTY_PROGRESS_SNAPSHOT,
+  inferJobEngine,
+  resolveJobRoute,
+  type RenderJobProgressSnapshot,
+  type RenderJobProgressStore,
+} from '../stores/jobProgressStore';
+
+export {
+  createRenderJobProgressStore,
+  EMPTY_PROGRESS_SNAPSHOT,
+  inferJobEngine,
+  resolveJobRoute,
+  type RenderJobProgressSnapshot,
+  type RenderJobProgressStore,
+};
 
 export interface AttachJobInput {
   jobId: string;
   slug: string;
   kind: ActiveJob['kind'];
+  engine?: StudioEngine;
+  title?: string;
+  route?: string;
   preview?: boolean;
   progress?: number;
   step?: string;
@@ -16,68 +36,18 @@ export interface AttachJobInput {
   estimateSeconds?: number | null;
 }
 
-export interface RenderJobProgressSnapshot {
-  percent: number;
-  step: string;
-  stage: string;
-  message: string;
-  currentBeat: number | null;
-  totalBeats: number | null;
-}
-
-export interface RenderJobProgressStore {
-  getSnapshot: () => RenderJobProgressSnapshot;
-  setSnapshot: (next: RenderJobProgressSnapshot) => void;
-  subscribe: (listener: () => void) => () => void;
-}
-
-export const EMPTY_PROGRESS_SNAPSHOT: RenderJobProgressSnapshot = {
-  percent: 0,
-  step: '',
-  stage: '',
-  message: '',
-  currentBeat: null,
-  totalBeats: null,
-};
-
-export function createRenderJobProgressStore(
-  initial: RenderJobProgressSnapshot = EMPTY_PROGRESS_SNAPSHOT,
-): RenderJobProgressStore {
-  let current = initial;
-  const listeners = new Set<() => void>();
-  return {
-    getSnapshot: () => current,
-    setSnapshot: (next: RenderJobProgressSnapshot) => {
-      if (
-        current.percent === next.percent &&
-        current.step === next.step &&
-        current.stage === next.stage &&
-        current.message === next.message &&
-        current.currentBeat === next.currentBeat &&
-        current.totalBeats === next.totalBeats
-      ) {
-        return;
-      }
-      current = next;
-      for (const listener of listeners) {
-        listener();
-      }
-    },
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-}
-
 export interface RenderJobStatusApi {
   /** Dự án của job gần nhất (đang chạy hoặc vừa xong); `null` khi chưa dựng gì trong phiên. */
   slug: string | null;
   jobId: string | null;
   /** Loại job đang theo dõi (`stickv`, `preview`, `final`, ...). */
   kind: ActiveJob['kind'] | null;
+  /** Động cơ chủ quản (`core | postv | chatting | stickv`). */
+  engine: StudioEngine | null;
+  /** Tiêu đề hiển thị ngắn gọn trên thanh tiến độ Sidebar. */
+  title: string | null;
+  /** Route điều hướng về đúng dự án đang dựng. */
+  route: string | null;
   /** Đang xếp hàng hoặc đang dựng: SSE đang mở. */
   running: boolean;
   /** Đang gọi `POST /render`. */
@@ -107,6 +77,9 @@ const IDLE_STATUS: RenderJobStatusApi = {
   slug: null,
   jobId: null,
   kind: null,
+  engine: null,
+  title: null,
+  route: null,
   running: false,
   starting: false,
   startedAt: null,
@@ -132,7 +105,7 @@ export function useRenderJobStatus(): RenderJobStatusApi {
 
 /**
  * Chỉ đăng ký nhận `percent`, `step`, `stage`, `message`, `currentBeat`, `totalBeats` qua `useSyncExternalStore`.
- * Chỉ dùng ở các widget tiến độ siêu nhỏ (`ExportPopover`, `GlobalJobDock`, `SidebarRenderCard`).
+ * Chỉ dùng ở các widget tiến độ siêu nhỏ (`ExportPopover`, `SidebarRenderStatus`).
  */
 export function useRenderJobProgress(): RenderJobProgressSnapshot {
   const { progressStore } = useContext(RenderJobContext);
@@ -141,25 +114,6 @@ export function useRenderJobProgress(): RenderJobProgressSnapshot {
     progressStore.getSnapshot,
     progressStore.getSnapshot,
   );
-}
-
-/** Đúng trang đang hiển thị trực tiếp tiến độ của job active (ẩn Dock/Sidebar lặp). */
-export function isOnActiveJobPage(
-  pathname: string,
-  kind: ActiveJob['kind'] | null,
-  slug: string | null,
-): boolean {
-  if (kind === 'stickv' && pathname.startsWith('/stickv')) {
-    return true;
-  }
-  if (
-    (kind === 'preview' || kind === 'final') &&
-    slug &&
-    pathname.startsWith(`/p/${slug}/export`)
-  ) {
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -173,6 +127,9 @@ export function useRenderJob(): RenderJobApi {
       slug: status.slug,
       jobId: status.jobId,
       kind: status.kind,
+      engine: status.engine,
+      title: status.title,
+      route: status.route,
       running: status.running,
       starting: status.starting,
       startedAt: status.startedAt,
