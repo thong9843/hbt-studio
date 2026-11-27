@@ -58,6 +58,11 @@ from hbt.stickv.audio import (
     verify_zero_drift_timeline,
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
+from hbt.stickv.beat_cache import (
+    StickvBeatCache,
+    compute_beat_cache_key,
+    hash_file_sha256,
+)
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
 from hbt.stickv.puppet import PuppetAssetCache, is_puppet_ready, normalize_stickv_pose
 from hbt.stickv.stage import (
@@ -1338,6 +1343,11 @@ def render_stickv(
 
         shared_backdrop = BackdropRenderer(norm_domain, w, h)
         shared_puppet_assets = PuppetAssetCache()
+        beat_cache = StickvBeatCache(build_dir / "beat_cache")
+        total_beats_count = max(1, len(beats))
+        total_chapters = max((b.chapter for b in beats), default=1)
+        anim_mode = getattr(project, "animation_mode", "auto")
+        prim_ent = getattr(project, "primary_entity_en", "") or ""
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
@@ -1352,9 +1362,9 @@ def render_stickv(
                     pct,
                     f"Đang dựng cụm {c_idx}/{total_chunks} (Chương {first_b.chapter})...",
                 )
-                chunk_mp4 = chunks_dir / f"chunk_{c_idx:03d}.mp4"
 
                 if c_kind == "video":
+                    chunk_mp4 = chunks_dir / f"chunk_{c_idx:03d}.mp4"
                     _g_idx, beat, wav_p, dur_b = c_items[0]
                     bg_png, char_png = render_beat_layers(
                         beat,
@@ -1386,7 +1396,7 @@ def render_stickv(
                         assets_dir=assets_dir,
                         domain=norm_domain,
                         theme=project.theme,
-                        animation_mode=getattr(project, "animation_mode", "auto"),
+                        animation_mode=anim_mode,
                         pause_scale=pause_scale,
                         cancel=cancel,
                         global_frame_offset=global_frame_offset,
@@ -1405,7 +1415,158 @@ def render_stickv(
                     bg_png.unlink(missing_ok=True)
                     if char_png is not None:
                         char_png.unlink(missing_ok=True)
+                    chunk_clips.append(chunk_mp4)
+                elif beat_cache.enabled:
+                    for g_idx, beat, wav_p, dur_b in c_items:
+                        check_cancel()
+                        tl_entry = beat_timeline[g_idx] if 0 <= g_idx < len(beat_timeline) else None
+                        eff_dur_b = tl_entry.duration_s if tl_entry is not None else dur_b
+                        target_end_s = (
+                            tl_entry.beat_end_s
+                            if tl_entry is not None
+                            else (acc_audio_t + eff_dur_b)
+                        )
+                        target_total_frames = max(
+                            global_frame_offset + 1, int(round(target_end_s * fps))
+                        )
+                        n_frames_beat = target_total_frames - global_frame_offset
+                        pause_after = compute_pause_after(beat.narration, pause_scale=pause_scale)
+                        lead_in = (
+                            GLOBAL_LEAD_SILENCE_S
+                            if g_idx == 0
+                            else (LEAD_IN_SILENCE_S * pause_scale)
+                        )
+                        spoken_segs = load_beat_spoken_segments(wav_p)
+                        speech_start = (
+                            max(0.0, tl_entry.speech_start_s - tl_entry.beat_start_s)
+                            if tl_entry is not None
+                            else (spoken_segs[0][0] if spoken_segs else lead_in)
+                        )
+                        speech_end = (
+                            min(
+                                eff_dur_b,
+                                max(speech_start, tl_entry.speech_end_s - tl_entry.beat_start_s),
+                            )
+                            if tl_entry is not None
+                            else (
+                                min(eff_dur_b, spoken_segs[-1][1])
+                                if spoken_segs
+                                else max(lead_in + 0.3, eff_dur_b - pause_after)
+                            )
+                        )
+                        if master_word_timings is not None and g_idx in master_word_timings:
+                            w_timings = master_word_timings[g_idx]
+                        else:
+                            w_timings = align_beat_karaoke(
+                                beat.narration,
+                                wav_p,
+                                eff_dur_b,
+                                lead_in_s=speech_start,
+                                pause_after_s=pause_after,
+                                spoken_segments=spoken_segs,
+                            )
+                        next_b = beats[g_idx + 1] if g_idx + 1 < len(beats) else None
+                        has_next_diff = next_b is None or (
+                            (next_b.board_title or "").strip() != (beat.board_title or "").strip()
+                            or next_b.board_type != beat.board_type
+                            or not (beat.board_title or "").strip()
+                        )
+                        prev_ch = (
+                            prev_stage_state.last_chapter if prev_stage_state is not None else None
+                        )
+                        show_banner = (
+                            total_chapters > 1
+                            and bool((getattr(beat, "chapter_title", "") or "").strip())
+                            and (g_idx == 0 or beat.chapter != prev_ch)
+                        )
+                        wav_sha = hash_file_sha256(wav_p) if wav_p.is_file() else ""
+                        cache_key = compute_beat_cache_key(
+                            beat=beat,
+                            aspect=project.aspect,
+                            w=w,
+                            h=h,
+                            fps=fps,
+                            domain=norm_domain,
+                            theme=project.theme,
+                            animation_mode=anim_mode,
+                            pause_scale=pause_scale,
+                            primary_entity_en=prim_ent,
+                            total_chapters=total_chapters,
+                            has_next_diff_title=has_next_diff,
+                            show_chapter_banner=show_banner,
+                            watermark=wm,
+                            n_frames_beat=n_frames_beat,
+                            eff_dur_b=eff_dur_b,
+                            speech_start=speech_start,
+                            speech_end=speech_end,
+                            word_timings=w_timings,
+                            spoken_segs=spoken_segs,
+                            wav_sha256=wav_sha,
+                            global_frame_offset=global_frame_offset,
+                            prev_stage_state=prev_stage_state,
+                            prev_board_img=board_carry.get("img"),
+                        )
+                        hit = beat_cache.lookup(cache_key)
+                        if hit is not None:
+                            cached_mp4, next_state, next_board = hit
+                            old_carried = board_carry.get("img")
+                            board_carry["img"] = next_board
+                            if old_carried is not None and old_carried is not next_board:
+                                old_carried.close()
+                            prev_stage_state = next_state
+                            global_frame_offset += n_frames_beat
+                            acc_audio_t = target_end_s
+                            chunk_clips.append(cached_mp4)
+                            emit(
+                                round(35.0 + ((g_idx + 1) / total_beats_count) * 48.0, 1),
+                                f"Dùng cache beat {g_idx + 1}/{total_beats_count}"
+                                f" (Chương {beat.chapter})...",
+                            )
+                        else:
+                            beat_mp4 = chunks_dir / f"beat_{g_idx:04d}.mp4"
+                            global_frame_offset, acc_audio_t, prev_stage_state = (
+                                _stream_chunk_frames_to_ffmpeg(
+                                    chunk_items=[(g_idx, beat, wav_p, dur_b)],
+                                    all_beats=beats,
+                                    out_mp4=beat_mp4,
+                                    w=w,
+                                    h=h,
+                                    fps=fps,
+                                    aspect=project.aspect,
+                                    project_dir=project_dir,
+                                    library_dir=library_dir,
+                                    assets_dir=assets_dir,
+                                    chunks_dir=chunks_dir,
+                                    domain=norm_domain,
+                                    theme=project.theme,
+                                    animation_mode=anim_mode,
+                                    pause_scale=pause_scale,
+                                    cancel=cancel,
+                                    global_frame_offset=global_frame_offset,
+                                    acc_audio_t=acc_audio_t,
+                                    prev_stage_state=prev_stage_state,
+                                    backdrop_renderer=shared_backdrop,
+                                    on_progress=on_progress,
+                                    master_word_timings=master_word_timings,
+                                    beat_timeline=beat_timeline,
+                                    ai_photo_budget=ai_photo_budget,
+                                    board_carry=board_carry,
+                                    primary_entity_en=prim_ent,
+                                    asset_cache=shared_puppet_assets,
+                                    watermark_img=wm_img,
+                                    watermark_patch=wm_patch,
+                                )
+                            )
+                            if beat_mp4.is_file() and beat_mp4.stat().st_size > 128:
+                                beat_cache.store(
+                                    cache_key,
+                                    beat_mp4,
+                                    prev_stage_state,
+                                    board_carry.get("img"),
+                                )
+                            chunk_clips.append(beat_mp4)
                 else:
+                    chunk_mp4 = chunks_dir / f"chunk_{c_idx:03d}.mp4"
                     global_frame_offset, acc_audio_t, prev_stage_state = (
                         _stream_chunk_frames_to_ffmpeg(
                             chunk_items=c_items,
@@ -1421,7 +1582,7 @@ def render_stickv(
                             chunks_dir=chunks_dir,
                             domain=norm_domain,
                             theme=project.theme,
-                            animation_mode=getattr(project, "animation_mode", "auto"),
+                            animation_mode=anim_mode,
                             pause_scale=pause_scale,
                             cancel=cancel,
                             global_frame_offset=global_frame_offset,
@@ -1433,13 +1594,13 @@ def render_stickv(
                             beat_timeline=beat_timeline,
                             ai_photo_budget=ai_photo_budget,
                             board_carry=board_carry,
-                            primary_entity_en=(getattr(project, "primary_entity_en", "") or ""),
+                            primary_entity_en=prim_ent,
                             asset_cache=shared_puppet_assets,
                             watermark_img=wm_img,
                             watermark_patch=wm_patch,
                         )
                     )
-                chunk_clips.append(chunk_mp4)
+                    chunk_clips.append(chunk_mp4)
                 gc.collect()
         finally:
             if wm_patch is not None:

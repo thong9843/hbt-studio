@@ -633,6 +633,29 @@ def align_beat_karaoke(
     return compute_word_timings(narration, speech_span, start_offset_s=act_st)
 
 
+def _beat_tts_cache_sig(
+    *,
+    narration: str,
+    voice_id: str,
+    scale: float,
+    lead_s: float,
+    gap_s: float,
+    tail_s: float,
+) -> str:
+    raw = json.dumps(
+        [
+            narration or "",
+            voice_id,
+            round(scale, 4),
+            round(lead_s, 4),
+            round(gap_s, 4),
+            round(tail_s, 4),
+        ],
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:24]
+
+
 def synth_stickv_beats_audio(
     beats: list[StickvBeat],
     audio_dir: Path,
@@ -654,6 +677,8 @@ def synth_stickv_beats_audio(
 
     beat_sub_wavs: list[tuple[list[Path], list[str]]] = []
     synth_items: list[SynthItem] = []
+    cached_beats: dict[int, Path] = {}
+    beat_sigs: dict[int, str] = {}
 
     if voice_provider is not None:
         status = voice_provider.status()
@@ -670,7 +695,31 @@ def synth_stickv_beats_audio(
         chosen_voice = resolve_voice_id(
             voice_id, default_voice, available_voices=available_ids or None
         )
-        for beat in beats:
+        for beat_idx, beat in enumerate(beats):
+            cur_lead_s = first_lead_s if beat_idx == 0 else lead_s
+            tail_s = compute_pause_after(beat.narration, pause_scale=scale)
+            sig = _beat_tts_cache_sig(
+                narration=beat.narration,
+                voice_id=chosen_voice,
+                scale=scale,
+                lead_s=cur_lead_s,
+                gap_s=gap_s,
+                tail_s=tail_s,
+            )
+            beat_sigs[beat_idx] = sig
+            wav_p = audio_dir / f"{beat.id}.wav"
+            seg_p = _segments_sidecar_path(wav_p)
+            sig_p = audio_dir / f"{beat.id}.tts.sha256"
+            if (
+                wav_p.is_file()
+                and wav_p.stat().st_size > 44
+                and seg_p.is_file()
+                and sig_p.is_file()
+                and sig_p.read_text(encoding="utf-8").strip() == sig
+            ):
+                cached_beats[beat_idx] = wav_p
+                beat_sub_wavs.append(([], []))
+                continue
             sents = split_beat_sentences(beat.narration)
             sub_paths: list[Path] = []
             for s_idx, sent in enumerate(sents, start=1):
@@ -697,6 +746,19 @@ def synth_stickv_beats_audio(
     for beat_idx, (beat, (sub_paths, sents)) in enumerate(zip(beats, beat_sub_wavs, strict=True)):
         if cancel is not None and hasattr(cancel, "check"):
             cancel.check()
+        cached_wav = cached_beats.get(beat_idx)
+        if cached_wav is not None:
+            probed_dur = measure_audio_duration(cached_wav)
+            anchored_dur = round(max(1.2, probed_dur), 3)
+            beat.duration_sec = anchored_dur
+            results.append((cached_wav, anchored_dur))
+            if on_progress is not None:
+                pct = 8.0 + ((beat_idx + 1) / total_beats_count) * 18.0
+                on_progress(
+                    round(pct, 1),
+                    f"Dùng lại giọng đọc cached beat {beat_idx + 1}/{total_beats_count}...",
+                )
+            continue
         if voice_provider is not None and sub_paths:
             for sp in sub_paths:
                 if not sp.is_file() or sp.stat().st_size <= 44:
@@ -723,6 +785,8 @@ def synth_stickv_beats_audio(
                 indent=2,
             ),
         )
+        if beat_idx in beat_sigs:
+            _atomic_write_text(audio_dir / f"{beat.id}.tts.sha256", beat_sigs[beat_idx])
         probed_dur = measure_audio_duration(wav_p)
         anchored_dur = round(max(1.2, probed_dur if probed_dur > 0 else assembled_dur), 3)
         beat.duration_sec = anchored_dur
