@@ -235,20 +235,15 @@ def test_v9_meaningful_boards_anti_parrot_cta_recap_and_emotion_diversity() -> N
     ]
 
     enforced = _enforce_meaningful_boards(raw_beats)
-    assert enforced[0].board_title == ""  # Đã xóa tiêu đề sáo rỗng "Mở đầu video"
-    assert all("tìm hiểu" not in it.lower() for it in enforced[0].board_data["items"])
-    # Beat 0 giữ nội dung chủ đề thật, tuyệt đối không tiêm văn mẫu gym/sinh học
-    joined_b0 = " ".join(enforced[0].board_data["items"]).lower()
-    assert "chu kỳ phục hồi" not in joined_b0 and "quy luật tự nhiên" not in joined_b0
-
-    # Beat cuối CTA bắt buộc chuyển thành recap_card rút từ chính kiến thức thật của video
-    assert enforced[-1].board_type == "recap_card"
-    assert enforced[-1].board_title == "TÓM TẮT 3 Ý CỐT LÕI"
-    assert len(enforced[-1].board_data["items"]) >= 2
-    assert all(
-        "cảm tính" not in it.lower() and "nguyên lý gốc" not in it.lower()
-        for it in enforced[-1].board_data["items"]
-    )
+    # 100% beat chuyển sang Visual-First (pinned_photo + tiêu đề ngắn 3-6 từ, xóa văn mẫu)
+    for b in enforced:
+        assert b.board_type == "pinned_photo"
+        assert b.board_items == [] and b.takeaway == ""
+        w_cnt = len(b.board_title.split())
+        assert 3 <= w_cnt <= 6
+        low_t = b.board_title.lower()
+        assert "mở đầu video" not in low_t and "tóm tắt 3 ý cốt lõi" not in low_t
+        assert "kết luận" not in low_t and "..." not in b.board_title
 
     # 3. enforce_pose_diversity phải chống trùng cả pose lẫn emotion liên tiếp
     diversified = enforce_pose_diversity(enforced)
@@ -257,108 +252,72 @@ def test_v9_meaningful_boards_anti_parrot_cta_recap_and_emotion_diversity() -> N
         assert a.emotion != b.emotion
 
 
-def test_phase9_meaningful_boards_anti_parrot_55_rich_myth_and_single_recap() -> None:
+def test_phase9_visual_first_prompt_no_text_wall_and_tts_friendly() -> None:
     from hbt.stickv.llm import (
-        ANTI_PARROT_THRESHOLD,
         _enforce_meaningful_boards,
         build_director_prompt,
+        shorten_visual_title,
     )
     from hbt.stickv.models import StickvBeat
 
-    assert ANTI_PARROT_THRESHOLD == 0.55
     prompt = build_director_prompt(idea="Vì sao đau cơ sau khi tập gym?")
-    assert "55%" in prompt
-    assert "DUY NHẤT 1 RECAP" in prompt
+    assert "VISUAL-FIRST" in prompt
+    assert "pinned_photo" in prompt
+    assert "3-6 từ" in prompt
+    assert "VieNeu-TTS" in prompt or "vận động viên chạy đường dài" in prompt
+    assert "không chữ" in prompt and "không mũi tên" in prompt
+
+    short_fb = shorten_visual_title(
+        "**Mở đầu video**", fallback_narration="Cơ bắp phục hồi khi ngủ sâu."
+    )
+    assert 3 <= len(short_fb.split()) <= 6 and "mở đầu" not in short_fb.lower()
+    trimmed = shorten_visual_title("Tại sao nền móng yếu và sụt lún nhanh hơn dự kiến...")
+    assert 3 <= len(trimmed.split()) <= 6
+    assert "..." not in trimmed and not trimmed.lower().endswith("và")
 
     raw_beats = [
-        # Beat 0: Tiêu đề & item trùng >55% lời thoại (nhưng <70% kiểu cũ)
         StickvBeat(
             id="b001",
             narration=(
                 "Nhiều người nghĩ đau nhức cơ bắp sau buổi tập là dấu hiệu tốt nhất để tăng cơ."
             ),
             board_type="bullets",
-            board_title="Đau nhức cơ bắp sau buổi tập",
-            board_data={
-                "items": [
-                    "Đau nhức cơ bắp sau buổi tập là dấu hiệu tăng cơ",
-                    "Nhiều người nghĩ đau nhức sau buổi tập là tốt",
-                ],
-                "takeaway": "DOMS chỉ là phản ứng viêm tạm thời sau tải mới",
-            },
+            board_title="Đau nhức cơ bắp sau buổi tập kéo dài",
+            board_data={"items": ["..."], "takeaway": "DOMS chỉ là viêm tạm thời"},
         ),
-        # Beat 1: myth_vs_fact thưa chữ (3 chữ cụt lủn) -> phải được làm đầy đặn có cơ chế
         StickvBeat(
             id="b002",
             narration="Cơ bắp tăng trưởng nhờ áp lực cơ học và phục hồi trong giấc ngủ sâu.",
             board_type="myth_vs_fact",
             board_title="Giải mã tăng cơ",
-            board_data={
-                "myth": "Đau là tốt",
-                "fact": "Ngủ đủ giấc",
-                "takeaway": "Áp lực cơ học kết hợp giấc ngủ 8 giờ mới quyết định phì đại sợi cơ",
-            },
+            board_data={"myth": "Đau là tốt", "fact": "Ngủ đủ giấc"},
         ),
-        # Beat 2 (tổng kết) + Beat 3 (CTA) -> PHẢI dùng chung DUY NHẤT 1 recap_card giống hệt nhau
         StickvBeat(
             id="b003",
-            narration="Tóm lại, bạn chỉ cần ghi nhớ 3 nguyên tắc vàng để tập luyện thông minh.",
-            board_type="recap_card",
-            board_title="TỔNG KẾT NHANH",
-            board_data={
-                "items": [
-                    "**DOMS không đo hiệu quả:** Đau cơ chỉ là viêm vi mô tạm thời.",
-                    "**Tải tăng tiến:** Kích thích cơ học ổn định mới làm sợi cơ dày lên.",
-                    "**Phục hồi khi ngủ:** Ngủ sâu 8 giờ tối ưu tổng hợp protein.",
-                ],
-                "takeaway": "Tập thông minh và phục hồi đủ thay vì chạy theo cảm giác đau",
-            },
-        ),
-        StickvBeat(
-            id="b004",
             narration="Cảm ơn bạn đã xem, nhớ bấm đăng ký kênh và bình luận trải nghiệm nhé!",
             board_type="recap_card",
-            board_title="BẢNG TÓM TẮT KHÁC BỊ TRÙNG",
-            board_data={
-                "items": ["Đăng ký kênh ngay", "Bình luận phía dưới"],
-            },
+            board_title="TÓM TẮT 3 Ý CỐT LÕI",
+            board_data={"items": ["Đăng ký kênh ngay"]},
         ),
     ]
 
     enforced = _enforce_meaningful_boards(raw_beats)
-
-    # 1. Cấm tuyệt đối tiêm văn mẫu cũ ("chu kỳ phục hồi", "quy luật tự nhiên", "PHÂN TÍCH CƠ CHẾ")
     banned_boilerplate = (
         "chu kỳ phục hồi",
         "quy luật tự nhiên",
-        "phản ứng sinh học chuẩn xác",
-        "ngộ nhận phổ biến",
         "phân tích cơ chế",
-        "lưu lại 3 nguyên tắc cốt lõi để áp dụng ngay hôm nay",
+        "tóm tắt 3 ý cốt lõi",
     )
     for b in enforced:
-        blob = f"{b.board_title} {b.takeaway} {b.board_data}".lower()
+        assert b.board_type == "pinned_photo"
+        assert 3 <= len(b.board_title.split()) <= 6
+        blob = f"{b.board_title} {b.board_data}".lower()
         for bad in banned_boilerplate:
-            assert bad not in blob, f"Phát hiện văn mẫu rác '{bad}' trong beat {b.id}"
-
-    # 2. myth_vs_fact giữ nguyên ý thật của kịch bản (không bịa câu mẫu)
-    b1 = enforced[1]
-    assert "Đau là tốt" in b1.board_data["myth"]
-    assert "Ngủ đủ giấc" in b1.board_data["fact"]
-
-    # 3. Hai beat cuối (tổng kết + CTA) dùng chung DUY NHẤT 1 bảng recap_card giống hệt nhau
-    assert enforced[-2].board_type == "recap_card"
-    assert enforced[-1].board_type == "recap_card"
-    assert enforced[-2].board_title == "TÓM TẮT 3 Ý CỐT LÕI"
-    assert enforced[-1].board_title == "TÓM TẮT 3 Ý CỐT LÕI"
-    assert enforced[-2].board_data["items"] == enforced[-1].board_data["items"]
-    assert enforced[-2].takeaway == enforced[-1].takeaway
-    assert len(enforced[-1].board_data["items"]) == 3
-    assert all("đăng ký" not in it.lower() for it in enforced[-1].board_data["items"])
+            assert bad not in blob
 
 
 def test_no_boilerplate_empty_comparison_or_fake_100_percent() -> None:
-    """Chặn sạch comparison trống, big_number '100%' ảo, caption chung chung và cắt giữa từ."""
+    """Visual-First loại sạch caption mẫu, bảng chữ dài và ép 100% beat dùng ảnh + tiêu đề ngắn."""
     payload = """{
       "title": "Những địa điểm bí ẩn trên Trái Đất",
       "primary_entity_en": "Bermuda Triangle",
@@ -383,17 +342,6 @@ def test_no_boilerplate_empty_comparison_or_fake_100_percent() -> None:
           "board_data": {"left_title": "Trước", "right_title": "Sau"}
         },
         {
-          "narration": "Băng tan ban ngày và gió mạnh ban đêm đẩy tảng đá nặng 300 kg.",
-          "board_type": "comparison",
-          "board_title": "Cơ chế đẩy đá",
-          "board_data": {
-            "left_title": "Đêm lạnh",
-            "left": "Tạo lớp băng mỏng dưới đá",
-            "right_title": "Sáng nắng",
-            "right": "Gió nhẹ đẩy tảng đá trượt đi"
-          }
-        },
-        {
           "narration": "Hãy bấm đăng ký kênh để khám phá thêm nhiều bí ẩn địa lý thú vị nhé!",
           "board_type": "recap_card",
           "board_title": "Tổng kết"
@@ -401,26 +349,13 @@ def test_no_boilerplate_empty_comparison_or_fake_100_percent() -> None:
       ]
     }"""
     _, beats = parse_stickv_json_payload(payload)
-    # 1. pinned_photo không dùng caption "PHÂN TÍCH CƠ CHẾ"
-    assert beats[0].board_data["caption"]
+    assert all(b.board_type == "pinned_photo" for b in beats)
     assert "phân tích cơ chế" not in beats[0].board_data["caption"].lower()
-    # 2. big_number không có số thật -> tự đổi sang bullets (cấm vẽ "100%")
-    assert beats[1].board_type == "bullets"
-    assert "100%" not in str(beats[1].board_data)
-    # 3. comparison trống 2 cột -> tự đổi sang bullets (cấm vẽ 2 hộp Trước/Sau trống)
-    assert beats[2].board_type == "bullets"
-    assert beats[2].board_data["items"]
-    # 4. comparison dùng alias left/right vẫn giữ nguyên dữ liệu thật
-    assert beats[3].board_type == "comparison"
-    assert beats[3].board_data["left_items"] == ["Tạo lớp băng mỏng dưới đá"]
-    assert beats[3].board_data["right_items"] == ["Gió nhẹ đẩy tảng đá trượt đi"]
-    # 5. recap_card rút kiến thức thật của video, không văn mẫu và không cắt cụt giữa từ
-    recap_items = beats[-1].board_data["items"]
-    assert len(recap_items) >= 2
-    assert all(
-        "chu kỳ phục hồi" not in it.lower() and "nguyên lý gốc" not in it.lower()
-        for it in recap_items
-    )
+    assert "tổng kết" not in beats[-1].board_title.lower()
+    for b in beats:
+        assert 3 <= len(b.board_title.split()) <= 6
+        assert b.board_items == [] and b.takeaway == ""
+        assert b.image_prompt and "no text" in b.image_prompt.lower()
 
 
 def test_llm_anchors_primary_entity_en_into_pinned_photo_queries() -> None:
@@ -503,7 +438,7 @@ def test_multi_location_beat_entity_no_umbrella_override_and_late_photo_balance(
     assert "mysterious places" not in (b2.prop_query or "").lower()
     assert "racetrack playa" in (b2.prop_query or "").lower()
     assert "racetrack playa" in b2.beat_entity_en.lower()
-    # 2. Kịch bản 8 beat phải có ít nhất 1 pinned_photo ở nửa sau (60%-85%, beat index 4..6)
+    # 2. Chế độ Visual-First: toàn bộ nửa sau đều là pinned_photo & giữ nguyên thực thể Richat
     late_photos = [b for b in beats[4:7] if b.board_type == "pinned_photo"]
-    assert len(late_photos) >= 1
-    assert late_photos[0].beat_entity_en == "Richat Structure Sahara"
+    assert len(late_photos) == 3
+    assert any(b.beat_entity_en == "Richat Structure Sahara" for b in late_photos)

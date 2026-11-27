@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import gc
+import hashlib
+import json
 import logging
 import math
 import os
@@ -33,7 +35,6 @@ from hbt.shared.ffmpeg_utils import (
 from hbt.shared.ffmpeg_utils import (
     run_ffmpeg_low_prio as run_ffmpeg,
 )
-from hbt.shared.online_sources.iconify_props import resolve_prop_png
 from hbt.shared.online_sources.reference_images import (
     DEFAULT_AI_IMAGE_BUDGET,
     resolve_reference_image,
@@ -284,27 +285,12 @@ def _stream_beat_frames_to_ffmpeg(
         asset_cache=asset_cache,
     )
 
-    prop_img: Image.Image | None = None
-    prop_query = (getattr(beat, "prop_query", None) or "").strip()
-    if beat.board_type == "pinned_photo":
-        photo_path: Path | None = None
-        if beat.media_path:
-            cand_m = out_mp4.parents[2] / beat.media_path
-            if cand_m.is_file():
-                photo_path = cand_m
-        if photo_path is None:
-            ref_q = prop_query or beat.board_title or infer_auto_prop_query(beat.narration)
-            accent = DOMAIN_PALETTES[norm_domain]["accent"]
-            photo_path, _ = resolve_reference_image(ref_q, library_dir, accent_color=accent)
-        if photo_path is not None and photo_path.is_file():
-            with Image.open(photo_path) as raw_photo:
-                prop_img = raw_photo.convert("RGBA")
-    elif interaction == "hold_prop" and prop_query:
-        accent = DOMAIN_PALETTES[norm_domain]["accent"]
-        prop_path = resolve_prop_png(prop_query, library_dir, accent_color=accent)
-        if prop_path.is_file():
-            with Image.open(prop_path) as raw_prop:
-                prop_img = raw_prop.convert("RGBA")
+    prop_img, _ = _resolve_beat_visual_image(
+        beat,
+        project_dir=out_mp4.parents[2],
+        library_dir=library_dir,
+        accent=DOMAIN_PALETTES[norm_domain]["accent"],
+    )
 
     last_char_size: tuple[int, int] | None = None
     beat_board_cache: dict[str, Any] = {}
@@ -616,6 +602,205 @@ def group_beats_into_chunks(
     return chunks
 
 
+_SCENE_QUERY_HINTS: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (
+        ("kiến trúc sư", "cố tình", "lầm tưởng", "ý đồ"),
+        "medieval architecture tilted tower blueprint",
+        "2D editorial illustration of an astonished medieval architect inspecting a tilting "
+        "stone tower blueprint, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("cát mịn", "bùn non", "địa chất", "mềm yếu", "thổ nhưỡng", "nền móng"),
+        "soft clay soil foundation geology layers",
+        "2D cross-section editorial illustration of a heavy marble tower base sinking "
+        "into soft sandy clay soil strata, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("chiến tranh", "gián đoạn", "ngừng nghỉ", "thế kỷ"),
+        "medieval war history fortification italy",
+        "2D editorial storybook scene of an unfinished stone tower standing quietly in "
+        "medieval Italy during wartime pause, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("nén chặt", "ổn định", "cân bằng", "nghỉ"),
+        "ground settlement equilibrium tower",
+        "2D editorial illustration showing compacted soil beneath a stabilized historic "
+        "bell tower at golden hour, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("kỹ sư", "bẻ cong", "bù lại", "độ lệch"),
+        "tower curved upper floors architecture",
+        "2D editorial illustration of engineers checking subtle vertical correction on the "
+        "upper arches of a tilted marble tower, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("gia cố", "cáp", "sụp đổ", "bảo tồn"),
+        "steel cable stabilization monument engineering",
+        "2D editorial illustration of counterweights and tension cables gently stabilizing an "
+        "iconic leaning marble tower, no text, no labels, no arrows, no watermark",
+    ),
+    (
+        ("kỳ quan", "biểu tượng", "đăng ký", "khám phá", "hấp dẫn"),
+        "italy square monument aerial view",
+        "Clean 2D editorial sunset panorama of the famous Leaning Tower of Pisa and "
+        "cathedral plaza, no text, no labels, no arrows, no watermark",
+    ),
+)
+
+
+def _infer_visual_scene_hint(narration: str, entity_anchor: str) -> tuple[str, str]:
+    """Tạo truy vấn ảnh & prompt 2D không chữ cho beat cũ chưa có `prop_query`/`image_prompt`."""
+    low = (narration or "").strip().lower()
+    scene_q = ""
+    scene_prompt = ""
+    for kws, q_en, p_en in _SCENE_QUERY_HINTS:
+        if any(kw in low for kw in kws):
+            scene_q = q_en
+            scene_prompt = p_en
+            break
+    if not scene_q:
+        scene_q = infer_auto_prop_query(narration)
+    query = f"{entity_anchor} {scene_q}".strip() if entity_anchor else scene_q
+    if not scene_prompt:
+        subj = entity_anchor or "historical science concept"
+        scene_prompt = (
+            f"Clean 2D flat editorial illustration representing {subj} ({scene_q}), "
+            "no text, no labels, no arrows, no watermark"
+        )
+    return query[:80].strip(), scene_prompt[:320]
+
+
+def _resolve_beat_visual_image(
+    beat: StickvBeat,
+    *,
+    project_dir: Path,
+    library_dir: Path,
+    accent: tuple[int, int, int, int],
+    primary_entity_en: str = "",
+    ai_photo_budget: list[int] | None = None,
+    visual_sources_log: list[dict[str, Any]] | None = None,
+    prev_image_path: str = "",
+    out_meta: dict[str, str] | None = None,
+) -> tuple[Image.Image | None, str]:
+    """Giải quyết ảnh minh họa cho 100% beat (Wikimedia -> Pixabay -> Cloudflare Flux 2D)."""
+    photo_path: Path | None = None
+    photo_src = "none"
+    ref_q = ""
+
+    prev_p = Path(prev_image_path) if prev_image_path else None
+    prev_norm = str(prev_p.resolve()).lower() if prev_p and prev_p.is_file() else ""
+    prev_sha = (
+        hashlib.sha1(prev_p.read_bytes(), usedforsecurity=False).hexdigest()
+        if prev_p and prev_p.is_file()
+        else ""
+    )
+
+    def _is_dup(cand: Path | None) -> bool:
+        if cand is None or not cand.is_file() or not prev_norm:
+            return False
+        if str(cand.resolve()).lower() == prev_norm:
+            return True
+        if prev_sha:
+            try:
+                return (
+                    hashlib.sha1(cand.read_bytes(), usedforsecurity=False).hexdigest() == prev_sha
+                )
+            except OSError:
+                return False
+        return False
+
+    if beat.media_path:
+        cand_m = project_dir / beat.media_path
+        if cand_m.is_file() and cand_m.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            photo_path = cand_m
+            photo_src = "media_path"
+            ref_q = beat.media_path
+
+    if photo_path is None:
+        raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
+        entity_anchor = (getattr(beat, "beat_entity_en", "") or primary_entity_en or "").strip()
+        raw_prompt = (getattr(beat, "image_prompt", None) or "").strip()
+        inferred_q, inferred_prompt = _infer_visual_scene_hint(beat.narration, entity_anchor)
+        ref_q = raw_prop_q or inferred_q
+        ill_prompt = raw_prompt or inferred_prompt
+        try:
+            cand_p, cand_src = resolve_reference_image(
+                ref_q,
+                library_dir,
+                workspace_dir=project_dir.parent.parent,
+                accent_color=accent,
+                illustration_prompt=ill_prompt,
+                primary_entity_en=entity_anchor,
+                allow_ai_fallback=True,
+                ai_budget=ai_photo_budget,
+            )
+            photo_src = cand_src
+            if cand_src != "iconify" and cand_p.is_file():
+                photo_path = cand_p
+        except Exception:
+            photo_path = None
+            photo_src = "fallback_icon"
+
+        if _is_dup(photo_path):
+            base_ent = entity_anchor or ref_q
+            scene_ctx = beat.board_title or beat.narration[:60]
+            no_text = "no text, no labels, no arrows, no watermark"
+            alt_specs = (
+                (
+                    f"{base_ent} bell tower monument exterior",
+                    f"Clean 2D flat editorial illustration showing a fresh angle of "
+                    f"{base_ent} ({scene_ctx}), {no_text}",
+                ),
+                (
+                    f"alternate editorial scene {beat.id} {base_ent}",
+                    f"Clean 2D flat editorial illustration illustrating: "
+                    f"{beat.narration[:140]} ({base_ent}, {beat.id}), {no_text}",
+                ),
+            )
+            for alt_q, alt_prompt in alt_specs:
+                try:
+                    # Tắt pass 1b (`primary_entity_en=""`) để không tải lại đúng ảnh #1 của thực thể
+                    alt_p, alt_src = resolve_reference_image(
+                        alt_q,
+                        library_dir,
+                        workspace_dir=project_dir.parent.parent,
+                        accent_color=accent,
+                        illustration_prompt=alt_prompt,
+                        primary_entity_en="",
+                        allow_ai_fallback=True,
+                        ai_budget=ai_photo_budget,
+                    )
+                    if alt_src != "iconify" and alt_p.is_file() and not _is_dup(alt_p):
+                        photo_path = alt_p
+                        photo_src = alt_src
+                        ref_q = alt_q
+                        break
+                except Exception:
+                    continue
+
+    prop_img: Image.Image | None = None
+    if photo_path is not None and photo_path.is_file():
+        with Image.open(photo_path) as raw_photo:
+            prop_img = raw_photo.convert("RGBA")
+
+    resolved_path_str = str(photo_path) if photo_path else ""
+    if out_meta is not None:
+        out_meta["path"] = resolved_path_str
+
+    logger.info("[StickV Visual-First] beat=%s source=%s query=%r", beat.id, photo_src, ref_q)
+    if visual_sources_log is not None:
+        visual_sources_log.append(
+            {
+                "beat_id": beat.id,
+                "source": photo_src,
+                "query": ref_q,
+                "board_title": beat.board_title,
+                "path": resolved_path_str,
+            }
+        )
+    return prop_img, photo_src
+
+
 def _stream_chunk_frames_to_ffmpeg(
     *,
     chunk_items: list[tuple[int, StickvBeat, Path, float]],
@@ -642,11 +827,12 @@ def _stream_chunk_frames_to_ffmpeg(
     master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
     beat_timeline: list[BeatTimelineEntry] | None = None,
     ai_photo_budget: list[int] | None = None,
-    board_carry: dict[str, Image.Image | None] | None = None,
+    board_carry: dict[str, Any] | None = None,
     primary_entity_en: str = "",
     asset_cache: PuppetAssetCache | None = None,
     watermark_img: Image.Image | None = None,
     watermark_patch: tuple[Image.Image, int, int] | None = None,
+    visual_sources_log: list[dict[str, Any]] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -819,60 +1005,23 @@ def _stream_chunk_frames_to_ffmpeg(
                 asset_cache=asset_cache,
             )
 
-            prop_img: Image.Image | None = None
-            raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
-            if beat.board_type == "pinned_photo":
-                photo_path: Path | None = None
-                if beat.media_path:
-                    cand_m = project_dir / beat.media_path
-                    if cand_m.is_file() and cand_m.suffix.lower() in {
-                        ".png",
-                        ".jpg",
-                        ".jpeg",
-                        ".webp",
-                    }:
-                        photo_path = cand_m
-                if photo_path is None:
-                    ref_q = raw_prop_q or beat.board_title or infer_auto_prop_query(beat.narration)
-                    entity_anchor = (
-                        getattr(beat, "beat_entity_en", "") or primary_entity_en or ""
-                    ).strip()
-                    try:
-                        cand_p, photo_src = resolve_reference_image(
-                            ref_q,
-                            library_dir,
-                            workspace_dir=project_dir.parent.parent,
-                            accent_color=accent,
-                            illustration_prompt=(getattr(beat, "image_prompt", None) or "").strip(),
-                            primary_entity_en=entity_anchor,
-                            allow_ai_fallback=True,
-                            ai_budget=ai_photo_budget,
-                        )
-                        if photo_src != "iconify" and cand_p.is_file():
-                            photo_path = cand_p
-                    except Exception:
-                        photo_path = None
-                if photo_path is not None and photo_path.is_file():
-                    with Image.open(photo_path) as raw_photo:
-                        prop_img = raw_photo.convert("RGBA")
-            else:
-                wants_card_icon = beat.board_type in (
-                    "none",
-                    "bullets",
-                    "list",
-                    "card",
-                    "recap_card",
-                )
-                if not raw_prop_q and wants_card_icon:
-                    raw_prop_q = infer_auto_prop_query(beat.narration)
-                if (interaction == "hold_prop" or wants_card_icon) and raw_prop_q:
-                    try:
-                        prop_path = resolve_prop_png(raw_prop_q, library_dir, accent_color=accent)
-                        if prop_path.is_file():
-                            with Image.open(prop_path) as raw_prop:
-                                prop_img = raw_prop.convert("RGBA")
-                    except Exception:
-                        prop_img = None
+            prev_img_path = (
+                str(board_carry.get("last_image_path") or "") if board_carry is not None else ""
+            )
+            resolved_meta: dict[str, str] = {}
+            prop_img, _photo_src = _resolve_beat_visual_image(
+                beat,
+                project_dir=project_dir,
+                library_dir=library_dir,
+                accent=accent,
+                primary_entity_en=primary_entity_en,
+                ai_photo_budget=ai_photo_budget,
+                visual_sources_log=visual_sources_log,
+                prev_image_path=prev_img_path,
+                out_meta=resolved_meta,
+            )
+            if board_carry is not None and resolved_meta.get("path"):
+                board_carry["last_image_path"] = resolved_meta["path"]
 
             next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
             has_next_diff_title = next_beat is None or (
@@ -1352,7 +1501,8 @@ def render_stickv(
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
         ai_photo_budget = [DEFAULT_AI_IMAGE_BUDGET]
-        board_carry: dict[str, Image.Image | None] = {"img": None}
+        board_carry: dict[str, Any] = {"img": None}
+        visual_sources_log: list[dict[str, Any]] = []
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
@@ -1555,6 +1705,7 @@ def render_stickv(
                                     asset_cache=shared_puppet_assets,
                                     watermark_img=wm_img,
                                     watermark_patch=wm_patch,
+                                    visual_sources_log=visual_sources_log,
                                 )
                             )
                             if beat_mp4.is_file() and beat_mp4.stat().st_size > 128:
@@ -1598,11 +1749,20 @@ def render_stickv(
                             asset_cache=shared_puppet_assets,
                             watermark_img=wm_img,
                             watermark_patch=wm_patch,
+                            visual_sources_log=visual_sources_log,
                         )
                     )
                     chunk_clips.append(chunk_mp4)
                 gc.collect()
         finally:
+            if visual_sources_log:
+                try:
+                    (build_dir / "visual_sources.json").write_text(
+                        json.dumps(visual_sources_log, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
             if wm_patch is not None:
                 wm_patch[0].close()
             if wm_img is not None:
