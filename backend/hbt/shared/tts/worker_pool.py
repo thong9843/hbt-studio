@@ -7,6 +7,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,8 @@ class WarmTTSPool:
         self._worker_pid: int | None = None
         self._spawn_count: int = 0
         self._reaper_thread: threading.Thread | None = None
+        self._stderr_tail: deque[str] = deque(maxlen=20)
+        self._stderr_thread: threading.Thread | None = None
 
     def is_available(self) -> bool:
         """Kiểm tra có tiến trình worker cấu hình riêng hoặc đủ `.venv-tts` + trọng số local."""
@@ -175,10 +178,26 @@ class WarmTTSPool:
             cwd=str(BACKEND_DIR),
         )
         try:
+            if proc.stderr is not None:
+                self._stderr_tail.clear()
+
+                def _drain_stderr(stream=proc.stderr, buf=self._stderr_tail) -> None:
+                    try:
+                        for line in iter(stream.readline, ""):
+                            buf.append(line.rstrip())
+                    except Exception:
+                        pass
+
+                self._stderr_thread = threading.Thread(
+                    target=_drain_stderr, name="warm-tts-stderr", daemon=True
+                )
+                self._stderr_thread.start()
             assert proc.stdout is not None
             boot_line = proc.stdout.readline()
             if not boot_line:
-                err_txt = proc.stderr.read() if proc.stderr is not None else ""
+                if self._stderr_thread is not None:
+                    self._stderr_thread.join(timeout=0.5)
+                err_txt = "\n".join(self._stderr_tail)
                 raise RuntimeError(f"WarmTTS worker thoát sớm lúc khởi động: {err_txt[-300:]}")
             boot_data = json.loads(boot_line)
             if not boot_data.get("ok"):

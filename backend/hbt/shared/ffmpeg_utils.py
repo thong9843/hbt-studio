@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-from hbt.pipeline.ffutil import media_duration
+from hbt.pipeline import cancel as _cancel
+from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, media_duration
 
 FFMPEG_RESOURCE_CLAMP: tuple[str, ...] = (
     "-threads",
@@ -25,9 +28,51 @@ FFMPEG_ENCODE_CLAMP: tuple[str, ...] = (
     "veryfast",
     "-crf",
     "22",
+    "-threads",
+    "2",
+    "-x264-params",
+    "threads=2:lookahead_threads=1",
     "-max_muxing_queue_size",
     "512",
 )
+
+WINDOWS_LOW_PRIO_FLAGS: int = (
+    getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x00004000) if os.name == "nt" else 0
+)
+
+
+def run_ffmpeg_low_prio(
+    args: Sequence[str | Path],
+    *,
+    timeout: float | None = None,
+) -> None:
+    """Chạy `ffmpeg -y -v error` ở mức ưu tiên thấp (Windows) để không chiếm nghẹt CPU máy."""
+    cmd = [ffmpeg_exe(), "-hide_banner", "-v", "error", "-y", *map(str, args)]
+    token = _cancel.current()
+    if token is not None:
+        token.check()
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=WINDOWS_LOW_PRIO_FLAGS,
+    )
+    if token is not None:
+        token.track(proc)
+    try:
+        _, stderr = proc.communicate(timeout=timeout)
+    finally:
+        if token is not None:
+            token.untrack(proc)
+    if token is not None:
+        token.check()
+    if proc.returncode != 0:
+        tail = "\n".join((stderr or "").strip().splitlines()[-12:])
+        raise FFmpegError(f"ffmpeg lỗi (mã {proc.returncode}):\n{tail}")
+
 
 ACROSSFADE_DURATION_S = 2.0
 

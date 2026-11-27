@@ -11,7 +11,13 @@ from PIL import Image
 
 from hbt.pipeline.ffutil import ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP, probe_media_info
-from hbt.stickv.puppet import PuppetPoseState, PuppetRig, compute_smoothed_rms, is_puppet_ready
+from hbt.stickv.puppet import (
+    PuppetAssetCache,
+    PuppetPoseState,
+    PuppetRig,
+    compute_smoothed_rms,
+    is_puppet_ready,
+)
 from hbt.stickv.stage import resolve_pose_png
 
 ANIM_VIDEO_EXTS = {".webm", ".mov"}
@@ -259,6 +265,7 @@ class StickmanAnimator:
         prev_pose_state: PuppetPoseState | None = None,
         global_t_offset: float = 0.0,
         board_type: str = "bullets",
+        asset_cache: PuppetAssetCache | None = None,
     ) -> None:
         self.facing = facing
         self.duration_sec = max(0.5, float(duration_sec))
@@ -299,6 +306,7 @@ class StickmanAnimator:
                     prev_pose_state=prev_pose_state,
                     global_t_offset=global_t_offset,
                     board_type=board_type,
+                    asset_cache=asset_cache,
                 )
             except Exception:
                 self.puppet_rig = None
@@ -348,10 +356,12 @@ class StickmanAnimator:
                     )
                     self._owns_fallback = True
 
-    def frame_at(self, frame_idx: int, t_sec: float) -> tuple[Image.Image | None, AnimatorMotion]:
+    def frame_at(
+        self, frame_idx: int, t_sec: float, *, output_scale: float = 1.0
+    ) -> tuple[Image.Image | None, AnimatorMotion]:
         if self.puppet_rig is not None:
             self.puppet_rig.facing = self.facing
-            img = self.puppet_rig.render_frame(frame_idx, t_sec)
+            img = self.puppet_rig.render_frame(frame_idx, t_sec, output_scale=output_scale)
             return img, AnimatorMotion(phase="puppet", used_fallback=False)
 
         rms = self.rms_env[frame_idx] if 0 <= frame_idx < len(self.rms_env) else 0.0

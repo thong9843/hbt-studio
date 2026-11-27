@@ -1291,12 +1291,12 @@ def mix_stickv_audio(
             "[fg_bus]asplit=2[fg_sc][fg_mix];"
             "[bgm_low][fg_sc]sidechaincompress=threshold=0.02:ratio=6:attack=25:release=220[bgm_duck];"
             "[fg_mix][bgm_duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-            "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=PTS-STARTPTS,"
             f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
     else:
         filter_parts.append(
-            "[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS,"
+            "[fg_bus]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=PTS-STARTPTS,"
             f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}[aout]"
         )
 
@@ -1325,6 +1325,33 @@ def mix_stickv_audio(
     ]
     try:
         run_ffmpeg(cmd)
+        # Khoá cứng độ dài mẫu PCM 48kHz khớp tuyệt đối `total_dur` (bù 40ms lookahead của loudnorm)
+        target_pcm_frames = max(1, int(round(total_dur * 48000)))
+        pad_wav: Path | None = None
+        try:
+            with wave.open(str(tmp_wav), "rb") as rf:
+                ch = rf.getnchannels()
+                sw = rf.getsampwidth()
+                sr = rf.getframerate()
+                cur_frames = rf.getnframes()
+                if sr == 48000 and ch > 0 and sw > 0 and abs(cur_frames - target_pcm_frames) > 0:
+                    pcm_raw = rf.readframes(min(cur_frames, target_pcm_frames))
+                    pad_wav = tmp_wav.with_name(f"{tmp_wav.stem}.pad.wav")
+                    with wave.open(str(pad_wav), "wb") as wf:
+                        wf.setnchannels(ch)
+                        wf.setsampwidth(sw)
+                        wf.setframerate(sr)
+                        wf.writeframes(pcm_raw)
+                        if cur_frames < target_pcm_frames:
+                            wf.writeframes(b"\x00" * ((target_pcm_frames - cur_frames) * ch * sw))
+            if pad_wav is not None and pad_wav.is_file():
+                os.replace(pad_wav, out_wav)
+                return out_wav
+        except (wave.Error, EOFError):
+            pass
+        finally:
+            if pad_wav is not None and pad_wav.exists():
+                pad_wav.unlink(missing_ok=True)
         os.replace(tmp_wav, out_wav)
     finally:
         if tmp_wav.exists():

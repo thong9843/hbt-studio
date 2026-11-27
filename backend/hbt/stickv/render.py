@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import os
+import queue
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -18,13 +21,17 @@ from hbt.config import load_settings
 from hbt.pipeline import whisper as _whisper
 from hbt.pipeline.audio import build_outro_audio
 from hbt.pipeline.cancel import CancelToken
-from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe, run_ffmpeg
+from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe
 from hbt.pipeline.whisper import WhisperConfig
 from hbt.postv.voice import VoiceProvider
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_ENCODE_CLAMP,
     FFMPEG_RESOURCE_CLAMP,
+    WINDOWS_LOW_PRIO_FLAGS,
     measure_audio_duration,
+)
+from hbt.shared.ffmpeg_utils import (
+    run_ffmpeg_low_prio as run_ffmpeg,
 )
 from hbt.shared.online_sources.iconify_props import resolve_prop_png
 from hbt.shared.online_sources.reference_images import (
@@ -33,7 +40,6 @@ from hbt.shared.online_sources.reference_images import (
 )
 from hbt.shared.pipeline.watermark import (
     WatermarkSettings,
-    build_watermark_overlay_filter,
     render_watermark_png,
 )
 from hbt.stickv.animator import StickmanAnimator
@@ -53,9 +59,10 @@ from hbt.stickv.audio import (
 )
 from hbt.stickv.backdrops import DOMAIN_PALETTES, BackdropRenderer, normalize_domain
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
-from hbt.stickv.puppet import normalize_stickv_pose
+from hbt.stickv.puppet import PuppetAssetCache, is_puppet_ready, normalize_stickv_pose
 from hbt.stickv.stage import (
     BeatStageState,
+    close_stage_cache,
     compute_beat_character_target,
     compute_camera_state,
     compute_layered_camera_layout,
@@ -65,6 +72,57 @@ from hbt.stickv.stage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _AsyncPipeWriter:
+    """Đẩy raw RGB24 vào FFmpeg qua hàng đợi nhỏ (4 frame ≈ 25MB) để không nghẽn luồng Pillow."""
+
+    def __init__(self, pipe: Any, max_buffered: int = 4) -> None:
+        self._pipe = pipe
+        self._q: queue.Queue[bytes | None] = queue.Queue(maxsize=max_buffered)
+        self._err: BaseException | None = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="ffmpeg-pipe-writer", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            while True:
+                chunk = self._q.get()
+                if chunk is None:
+                    break
+                self._pipe.write(chunk)
+        except BaseException as exc:  # noqa: BLE001
+            self._err = exc
+
+    def write(self, data: bytes) -> None:
+        if self._err is not None:
+            raise self._err
+        self._q.put(data)
+
+    def finish(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._q.put(None)
+        self._thread.join(timeout=10.0)
+        if self._err is not None:
+            raise self._err
+
+    def abort(self) -> None:
+        if not self._closed:
+            self._closed = True
+            while not self._q.empty():
+                try:
+                    self._q.get_nowait()
+                except queue.Empty:
+                    break
+            try:
+                self._q.put_nowait(None)
+            except queue.Full:
+                pass
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
 
 # Chuẩn mã hóa tương thích tuyệt đối với Windows Media Player & mọi thiết bị di động
 STICKV_MP4_COMPAT_FLAGS: tuple[str, ...] = (
@@ -125,6 +183,8 @@ def _stream_beat_frames_to_ffmpeg(
     prev_stage_state: BeatStageState | None = None,
     stage_state_out: dict[str, Any] | None = None,
     backdrop_renderer: BackdropRenderer | None = None,
+    asset_cache: PuppetAssetCache | None = None,
+    watermark_img: Image.Image | None = None,
 ) -> Path:
     """Stream từng khung hình RGB (backdrop liên tục + tween + animator + karaoke) vào FFmpeg."""
     dur = max(1.0, float(beat.duration_sec or 2.0))
@@ -170,6 +230,10 @@ def _stream_beat_frames_to_ffmpeg(
         *FFMPEG_ENCODE_CLAMP,
         "-pix_fmt",
         "yuv420p",
+        "-profile:v",
+        "high",
+        "-level",
+        "4.1",
         "-video_track_timescale",
         "90000",
         str(tmp_mp4),
@@ -212,6 +276,7 @@ def _stream_beat_frames_to_ffmpeg(
         wav_path=wav_path,
         prev_pose_state=prev_stage_state.pose_state if prev_stage_state is not None else None,
         global_t_offset=global_frame_offset / max(1, fps),
+        asset_cache=asset_cache,
     )
 
     prop_img: Image.Image | None = None
@@ -237,11 +302,16 @@ def _stream_beat_frames_to_ffmpeg(
                 prop_img = raw_prop.convert("RGBA")
 
     last_char_size: tuple[int, int] | None = None
+    beat_board_cache: dict[str, Any] = {}
+    karaoke_cache: dict[str, Any] = {}
+    err_log_path = out_mp4.with_name(f"{out_mp4.stem}.ffmpeg.err.log")
+    err_file = open(err_log_path, "wb")  # noqa: SIM115
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=err_file,
+        creationflags=WINDOWS_LOW_PRIO_FLAGS,
     )
     try:
         assert proc.stdin is not None
@@ -253,7 +323,7 @@ def _stream_beat_frames_to_ffmpeg(
             mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
             if interaction == "versus_split":
                 animator.facing = "left" if t_sec < dur * 0.5 else "right"
-            bg_frame = backdrop.render_frame(global_t)
+            bg_frame = backdrop.render_frame_rgba(global_t)
             anim_char, motion = animator.frame_at(f_idx, t_sec)
             if anim_char is not None:
                 last_char_size = anim_char.size
@@ -275,6 +345,10 @@ def _stream_beat_frames_to_ffmpeg(
                     prev_stage_state=prev_stage_state,
                     spoken_segments=spoken_segs or None,
                     is_puppet=motion.phase == "puppet",
+                    board_cache=beat_board_cache,
+                    mutate_bg=True,
+                    karaoke_cache=karaoke_cache,
+                    watermark_img=watermark_img,
                 )
             finally:
                 bg_frame.close()
@@ -288,12 +362,15 @@ def _stream_beat_frames_to_ffmpeg(
             proc.stdin.flush()
             proc.stdin.close()
             proc.stdin = None
-        _, stderr_b = proc.communicate(timeout=300.0)
+        proc.wait(timeout=300.0)
+        err_file.close()
         if proc.returncode != 0:
-            raise FFmpegError(
-                f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): "
-                f"{stderr_b.decode('utf-8', errors='replace')[-300:]}"
+            err_tail = (
+                err_log_path.read_text(encoding="utf-8", errors="replace")[-300:]
+                if err_log_path.is_file()
+                else ""
             )
+            raise FFmpegError(f"FFmpeg stream beat {beat.id} lỗi ({proc.returncode}): {err_tail}")
         os.replace(tmp_mp4, out_mp4)
         if stage_state_out is not None:
             cw, ch_h = last_char_size or (
@@ -311,18 +388,24 @@ def _stream_beat_frames_to_ffmpeg(
                 x=tx, y=ty, scale=tsc, pose_state=animator.last_pose_state
             )
     finally:
-        for pipe in (proc.stdin, proc.stderr):
-            if pipe is not None:
-                try:
-                    pipe.close()
-                except OSError:
-                    pass
+        close_stage_cache(beat_board_cache)
+        close_stage_cache(karaoke_cache)
+        try:
+            err_file.close()
+        except Exception:
+            pass
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
         try:
             if proc.poll() is None:
                 proc.kill()
             proc.wait(timeout=2.0)
         except Exception:
             pass
+        err_log_path.unlink(missing_ok=True)
         if tmp_mp4.exists():
             tmp_mp4.unlink(missing_ok=True)
         if owns_backdrop:
@@ -383,6 +466,9 @@ def _render_single_beat_clip(
     prev_stage_state: BeatStageState | None = None,
     stage_state_out: dict[str, Any] | None = None,
     backdrop_renderer: BackdropRenderer | None = None,
+    asset_cache: PuppetAssetCache | None = None,
+    watermark_img: Image.Image | None = None,
+    watermark_png: Path | None = None,
 ) -> Path:
     dur = max(1.0, float(beat.duration_sec or 2.0))
     media_file = _resolve_beat_video_clip(
@@ -396,19 +482,44 @@ def _render_single_beat_clip(
             f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p"
         )
         loop_args = ["-stream_loop", "-1"] if (clip_dur <= 0 or clip_dur < dur) else []
-        cmd = [
-            *FFMPEG_RESOURCE_CLAMP,
-            *loop_args,
-            "-i",
-            str(media_file),
-            "-t",
-            f"{dur:.3f}",
-            "-an",
-            "-vf",
-            vf,
-            *FFMPEG_ENCODE_CLAMP,
-            str(out_mp4),
-        ]
+        if watermark_png is not None and watermark_png.is_file():
+            cmd = [
+                *FFMPEG_RESOURCE_CLAMP,
+                *loop_args,
+                "-i",
+                str(media_file),
+                "-i",
+                str(watermark_png),
+                "-t",
+                f"{dur:.3f}",
+                "-an",
+                "-filter_complex",
+                f"[0:v]{vf}[vbase];[vbase][1:v]overlay=0:0:format=auto[vout]",
+                "-map",
+                "[vout]",
+                *FFMPEG_ENCODE_CLAMP,
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "high",
+                "-level",
+                "4.1",
+                str(out_mp4),
+            ]
+        else:
+            cmd = [
+                *FFMPEG_RESOURCE_CLAMP,
+                *loop_args,
+                "-i",
+                str(media_file),
+                "-t",
+                f"{dur:.3f}",
+                "-an",
+                "-vf",
+                vf,
+                *FFMPEG_ENCODE_CLAMP,
+                str(out_mp4),
+            ]
         run_ffmpeg(cmd)
         return out_mp4
 
@@ -434,6 +545,8 @@ def _render_single_beat_clip(
         prev_stage_state=prev_stage_state,
         stage_state_out=stage_state_out,
         backdrop_renderer=backdrop_renderer,
+        asset_cache=asset_cache,
+        watermark_img=watermark_img,
     )
 
 
@@ -526,6 +639,9 @@ def _stream_chunk_frames_to_ffmpeg(
     ai_photo_budget: list[int] | None = None,
     board_carry: dict[str, Image.Image | None] | None = None,
     primary_entity_en: str = "",
+    asset_cache: PuppetAssetCache | None = None,
+    watermark_img: Image.Image | None = None,
+    watermark_patch: tuple[Image.Image, int, int] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -579,12 +695,14 @@ def _stream_chunk_frames_to_ffmpeg(
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=err_file,
+        creationflags=WINDOWS_LOW_PRIO_FLAGS,
     )
     if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
         with cancel._lock:
             cancel._procs.add(proc)
+    assert proc.stdin is not None
+    pipe_writer = _AsyncPipeWriter(proc.stdin)
     try:
-        assert proc.stdin is not None
         for g_idx, beat, wav_p, dur_b in chunk_items:
             if cancel is not None:
                 cancel.check()
@@ -609,26 +727,27 @@ def _stream_chunk_frames_to_ffmpeg(
             target_total_frames = max(cur_frame_offset + 1, int(round(target_end_s * fps)))
             n_frames_beat = target_total_frames - cur_frame_offset
 
-            bg_png, char_png = render_beat_layers(
-                beat,
-                aspect=aspect,  # type: ignore[arg-type]
-                theme=theme,
-                out_dir=chunks_dir,
-                library_dir=library_dir,
-                assets_dir=assets_dir,
-                project_dir=project_dir,
-                domain=norm_domain,
-            )
-
+            bg_png: Path | None = None
+            char_png: Path | None = None
             char_img: Image.Image | None = None
-            if char_png is not None and char_png.is_file():
-                with Image.open(char_png) as raw_char:
-                    char_img = raw_char.convert("RGBA")
+            puppet_mode = animation_mode != "static" and is_puppet_ready(library_dir, assets_dir)
+            if not puppet_mode:
+                bg_png, char_png = render_beat_layers(
+                    beat,
+                    aspect=aspect,  # type: ignore[arg-type]
+                    theme=theme,
+                    out_dir=chunks_dir,
+                    library_dir=library_dir,
+                    assets_dir=assets_dir,
+                    project_dir=project_dir,
+                    domain=norm_domain,
+                )
+                if char_png is not None and char_png.is_file():
+                    with Image.open(char_png) as raw_char:
+                        char_img = raw_char.convert("RGBA")
 
             target_char_h = (
-                char_img.height
-                if char_img is not None
-                else int(h * (0.48 if aspect == "9:16" else 0.64))
+                char_img.height if char_img is not None else (620 if aspect == "9:16" else 660)
             )
             interaction = getattr(beat, "interaction", "none") or "none"
             rms_env = extract_wav_rms_envelope(wav_p, fps, eff_dur_b)
@@ -692,6 +811,7 @@ def _stream_chunk_frames_to_ffmpeg(
                 prev_pose_state=cur_state.pose_state if cur_state is not None else None,
                 global_t_offset=cur_frame_offset / max(1, fps),
                 board_type=beat.board_type,
+                asset_cache=asset_cache,
             )
 
             prop_img: Image.Image | None = None
@@ -764,8 +884,24 @@ def _stream_chunk_frames_to_ffmpeg(
 
             last_char_size: tuple[int, int] | None = None
             last_cam = (1.0, 0.5, 0.5)
-            beat_board_cache: dict[str, Image.Image] = {}
+            beat_board_cache: dict[str, Any] = {}
+            karaoke_cache: dict[str, Any] = {}
             prev_board_img = board_carry.get("img") if board_carry is not None else None
+            puppet_unscaled = (
+                animator.puppet_rig.canvas_size if animator.puppet_rig is not None else None
+            )
+            puppet_target_scale = 1.0
+            if puppet_unscaled is not None:
+                _, _, puppet_target_scale = compute_beat_character_target(
+                    w,
+                    h,
+                    puppet_unscaled[0],
+                    puppet_unscaled[1],
+                    interaction=interaction,
+                    aspect=aspect,  # type: ignore[arg-type]
+                    camera_shot=camera_shot,
+                )
+                last_char_size = puppet_unscaled
             try:
                 for f_idx in range(n_frames_beat):
                     if cancel is not None and f_idx % 8 == 0:
@@ -775,9 +911,19 @@ def _stream_chunk_frames_to_ffmpeg(
                     mouth = rms_env[f_idx] if f_idx < len(rms_env) else 0.0
                     if interaction == "versus_split":
                         animator.facing = "left" if t_sec < eff_dur_b * 0.5 else "right"
-                    bg_frame = backdrop_renderer.render_frame(global_t)
-                    anim_char, motion = animator.frame_at(f_idx, t_sec)
-                    if anim_char is not None:
+                    bg_frame = backdrop_renderer.render_frame_rgba(global_t)
+                    out_char_scale = 1.0
+                    if puppet_unscaled is not None:
+                        if cur_state is not None and t_sec < 0.55:
+                            u_sc = max(0.0, min(1.0, t_sec / 0.55))
+                            p_sc = 0.5 * (1.0 - math.cos(math.pi * u_sc))
+                            out_char_scale = (
+                                cur_state.scale + (puppet_target_scale - cur_state.scale) * p_sc
+                            )
+                        else:
+                            out_char_scale = puppet_target_scale
+                    anim_char, motion = animator.frame_at(f_idx, t_sec, output_scale=out_char_scale)
+                    if anim_char is not None and puppet_unscaled is None:
                         last_char_size = anim_char.size
                     try:
                         frame = render_animated_beat_frame(
@@ -802,13 +948,18 @@ def _stream_chunk_frames_to_ffmpeg(
                             show_chapter_banner=show_chapter_banner,
                             board_cache=beat_board_cache,
                             prev_board_img=prev_board_img,
+                            mutate_bg=True,
+                            karaoke_cache=karaoke_cache,
+                            watermark_img=watermark_img,
+                            watermark_patch=watermark_patch,
+                            char_unscaled_size=puppet_unscaled,
                         )
                     finally:
                         bg_frame.close()
                         if anim_char is not None:
                             anim_char.close()
                     try:
-                        proc.stdin.write(frame.tobytes())
+                        pipe_writer.write(frame.tobytes())
                     finally:
                         frame.close()
 
@@ -857,7 +1008,14 @@ def _stream_chunk_frames_to_ffmpeg(
                 )
                 if board_carry is not None:
                     old_carried = board_carry.get("img")
-                    next_board = beat_board_cache.pop("static_board", None)
+                    raw_static = beat_board_cache.pop("static_board", None)
+                    next_board: Image.Image | None = None
+                    if isinstance(raw_static, tuple) and isinstance(raw_static[0], Image.Image):
+                        next_board = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                        next_board.paste(raw_static[0], (raw_static[1], raw_static[2]))
+                        raw_static[0].close()
+                    elif isinstance(raw_static, Image.Image):
+                        next_board = raw_static
                     if next_board is None and end_layout.board_alpha > 0.05:
                         from hbt.stickv.stage import (
                             _composite_transitioned_board,
@@ -886,15 +1044,15 @@ def _stream_chunk_frames_to_ffmpeg(
                     if old_carried is not None and old_carried is not next_board:
                         old_carried.close()
             finally:
-                for cached_im in beat_board_cache.values():
-                    cached_im.close()
-                beat_board_cache.clear()
+                close_stage_cache(karaoke_cache)
+                close_stage_cache(beat_board_cache)
                 animator.close()
                 if char_img is not None:
                     char_img.close()
                 if prop_img is not None:
                     prop_img.close()
-                bg_png.unlink(missing_ok=True)
+                if bg_png is not None:
+                    bg_png.unlink(missing_ok=True)
                 if char_png is not None:
                     char_png.unlink(missing_ok=True)
 
@@ -902,6 +1060,7 @@ def _stream_chunk_frames_to_ffmpeg(
             cur_audio_t = target_end_s
             gc.collect()
 
+        pipe_writer.finish()
         if proc.stdin is not None:
             proc.stdin.flush()
             proc.stdin.close()
@@ -917,6 +1076,7 @@ def _stream_chunk_frames_to_ffmpeg(
             raise FFmpegError(f"FFmpeg stream chunk lỗi ({proc.returncode}): {err_tail}")
         os.replace(tmp_mp4, out_mp4)
     finally:
+        pipe_writer.abort()
         if cancel is not None and hasattr(cancel, "_lock") and hasattr(cancel, "_procs"):
             with cancel._lock:
                 cancel._procs.discard(proc)
@@ -1061,6 +1221,12 @@ def render_stickv(
             on_progress=on_progress,
             cancel=cancel,
         )
+        try:
+            from hbt.api.cinema import evict_all_tts_pools
+
+            evict_all_tts_pools()
+        except Exception:
+            pass
 
         emit(24.0, "Đang chốt trục âm thanh chủ (48kHz) & căn mốc Karaoke Whisper...")
         check_cancel()
@@ -1147,7 +1313,31 @@ def render_stickv(
         chunk_clips: list[Path] = []
         total_chunks = max(1, len(chunks))
         norm_domain = normalize_domain(getattr(project, "domain", "paper_classic"))
+        wm = watermark or WatermarkSettings()
+        wm_png: Path | None = None
+        wm_img: Image.Image | None = None
+        wm_patch: tuple[Image.Image, int, int] | None = None
+        if wm.enabled:
+            wm_png = chunks_dir / "watermark.png"
+            render_watermark_png(
+                wm_png,
+                wm,
+                width=w,
+                height=h,
+                brand_dir=brand_dir,
+                assets_dir=assets_dir,
+            )
+            with Image.open(wm_png) as raw_wm:
+                wm_rgba = raw_wm.convert("RGBA")
+                wb = wm_rgba.getbbox()
+                if wb is not None:
+                    wm_patch = (wm_rgba.crop(wb), int(wb[0]), int(wb[1]))
+                    wm_rgba.close()
+                else:
+                    wm_img = wm_rgba
+
         shared_backdrop = BackdropRenderer(norm_domain, w, h)
+        shared_puppet_assets = PuppetAssetCache()
         global_frame_offset = 0
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
@@ -1204,6 +1394,9 @@ def render_stickv(
                         prev_stage_state=prev_stage_state,
                         stage_state_out=state_box,
                         backdrop_renderer=shared_backdrop,
+                        asset_cache=shared_puppet_assets,
+                        watermark_img=wm_img,
+                        watermark_png=wm_png,
                     )
                     global_frame_offset += n_frames_beat
                     acc_audio_t += float(dur_b)
@@ -1241,18 +1434,26 @@ def render_stickv(
                             ai_photo_budget=ai_photo_budget,
                             board_carry=board_carry,
                             primary_entity_en=(getattr(project, "primary_entity_en", "") or ""),
+                            asset_cache=shared_puppet_assets,
+                            watermark_img=wm_img,
+                            watermark_patch=wm_patch,
                         )
                     )
                 chunk_clips.append(chunk_mp4)
                 gc.collect()
         finally:
+            if wm_patch is not None:
+                wm_patch[0].close()
+            if wm_img is not None:
+                wm_img.close()
             carried = board_carry.get("img")
             if carried is not None:
                 carried.close()
                 board_carry["img"] = None
+            shared_puppet_assets.close()
             shared_backdrop.close()
 
-        emit(85.0, "Đang nối chương & gắn watermark HBT...")
+        emit(85.0, "Đang nối chương & ghép âm thanh hoàn chỉnh...")
         check_cancel()
         concat_txt = chunks_dir / "concat.txt"
         concat_txt.write_text(
@@ -1275,58 +1476,34 @@ def render_stickv(
             ]
         )
 
-        wm = watermark or WatermarkSettings()
         with_outro = bool(getattr(project, "outro", True)) and not preview
         body_mp4 = (chunks_dir / "body_muxed.mp4") if with_outro else out_mp4
 
-        if wm.enabled:
-            wm_png = chunks_dir / "watermark.png"
-            render_watermark_png(
-                wm_png,
-                wm,
-                width=w,
-                height=h,
-                brand_dir=brand_dir,
-                assets_dir=assets_dir,
-            )
-            wm_fc = build_watermark_overlay_filter(
-                input_video="0:v", input_wm="2:v", output_label="vout"
-            )
-            run_ffmpeg(
-                [
-                    *FFMPEG_RESOURCE_CLAMP,
-                    "-i",
-                    str(video_only),
-                    "-i",
-                    str(mixed_wav),
-                    "-i",
-                    str(wm_png),
-                    "-filter_complex",
-                    wm_fc,
-                    "-map",
-                    "[vout]",
-                    "-map",
-                    "1:a",
-                    "-shortest",
-                    *FFMPEG_ENCODE_CLAMP,
-                    *STICKV_MP4_COMPAT_FLAGS,
-                    str(body_mp4),
-                ]
-            )
-        else:
-            run_ffmpeg(
-                [
-                    *FFMPEG_RESOURCE_CLAMP,
-                    "-i",
-                    str(video_only),
-                    "-i",
-                    str(mixed_wav),
-                    "-shortest",
-                    *FFMPEG_ENCODE_CLAMP,
-                    *STICKV_MP4_COMPAT_FLAGS,
-                    str(body_mp4),
-                ]
-            )
+        # Watermark đã được ghép trực tiếp ở Pass 1 -> Pass 3 chỉ copy luồng video (0% re-encode)
+        run_ffmpeg(
+            [
+                *FFMPEG_RESOURCE_CLAMP,
+                "-i",
+                str(video_only),
+                "-i",
+                str(mixed_wav),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-ar",
+                "48000",
+                "-movflags",
+                "+faststart",
+                str(body_mp4),
+            ]
+        )
 
         if with_outro:
             emit(92.0, "Đang ghép Outro 4 giây HBT Studio...")
