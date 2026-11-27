@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +11,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from hbt.config import REPO_ROOT
+from hbt.shared.fs_utils import safe_slug
 
 ICONIFY_SEARCH_API = "https://api.iconify.design/search"
 ICONIFY_PNG_URL = "https://api.iconify.design/{prefix}/{name}.png?height=360"
@@ -20,8 +20,7 @@ _SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[dict[str, str]]]] = {}
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "prop").strip().lower()).strip("-")
-    return s[:64] or "prop"
+    return safe_slug(raw, default="prop", max_len=64, lowercase=True)
 
 
 def clear_iconify_cache() -> None:

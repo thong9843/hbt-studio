@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 from hbt.app_settings import resolve_online_api_key
+from hbt.shared.fs_utils import safe_slug
 from hbt.shared.image_gen.cloudflare_flux import (
     CloudflareImageError,
     generate_illustration_image,
@@ -168,8 +169,7 @@ _QUERY_STOPWORDS = frozenset(
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "ref").strip().lower()).strip("-")
-    return s[:48] or "ref"
+    return safe_slug(raw, default="ref", max_len=48, lowercase=True)
 
 
 def _normalize_match_text(text: str) -> str:

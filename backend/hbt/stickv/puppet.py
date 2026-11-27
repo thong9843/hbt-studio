@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from hbt.shared.audio_utils import extract_wav_rms_frames
 from hbt.stickv.poses_init import remove_white_background_image
 
 PUPPET_SLOTS: tuple[str, ...] = (
@@ -651,37 +651,8 @@ def smooth_rms_envelope(raw_rms: list[float], fps: int = 30) -> list[float]:
 
 def compute_smoothed_rms(wav_path: Path, fps: int, duration_sec: float) -> list[float]:
     """Tính RMS từng frame từ WAV (chuẩn hóa theo P92) và lọc mượt EMA."""
-    n_frames = max(1, int(round(max(0.1, duration_sec) * max(1, fps))))
-    if not wav_path.is_file():
-        return [0.0] * n_frames
-    try:
-        with wave.open(str(wav_path), "rb") as wf:
-            sr = wf.getframerate()
-            ch = wf.getnchannels()
-            sw = wf.getsampwidth()
-            raw = wf.readframes(wf.getnframes())
-        if not raw or sw != 2:
-            return [0.0] * n_frames
-        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        if ch > 1:
-            samples = samples.reshape(-1, ch).mean(axis=1)
-        samples /= 32768.0
-        win = max(1, int(sr / max(1, fps)))
-        frame_rms: list[float] = []
-        for idx in range(n_frames):
-            s0 = idx * win
-            s1 = s0 + win
-            if s0 >= len(samples):
-                frame_rms.append(0.0)
-            else:
-                seg = samples[s0:s1]
-                frame_rms.append(float(np.sqrt(np.mean(seg**2))))
-        p92 = float(np.percentile(frame_rms, 92)) if frame_rms else 0.1
-        peak_ref = max(0.02, p92)
-        rms_norm = [min(1.0, r / peak_ref) for r in frame_rms]
-        return smooth_rms_envelope(rms_norm, fps=fps)
-    except Exception:
-        return [0.0] * n_frames
+    rms_norm = extract_wav_rms_frames(wav_path, fps, duration_sec, norm_mode="frame_p92")
+    return smooth_rms_envelope(rms_norm, fps=fps)
 
 
 def compute_mouth_transform(env_val: float) -> tuple[str, float, float]:

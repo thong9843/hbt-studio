@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 
 from hbt.pipeline.ffutil import media_duration
+from hbt.shared.fs_utils import safe_slug
 
 PIXABAY_AUDIO_API = "https://pixabay.com/api/"
 DEFAULT_HEADERS = {
@@ -22,8 +22,7 @@ DEFAULT_HEADERS = {
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "audio").strip()).strip("-")
-    return s[:64] or "audio"
+    return safe_slug(raw, default="audio", max_len=64)
 
 
 async def search_pixabay_audio(

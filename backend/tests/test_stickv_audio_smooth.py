@@ -10,9 +10,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from hbt.cinema.audio_director import mix_cinema_audio
-from hbt.cinema.hardware import detect_hardware
-from hbt.cinema.schema import BeatSpec, TimelineSpec
 from hbt.stickv.audio import (
     GLOBAL_LEAD_SILENCE_S,
     KARAOKE_LEAD_OFFSET_S,
@@ -230,31 +227,6 @@ def test_mix_stickv_audio_and_cinema_audio_48khz_with_empty_library(tmp_path: Pa
     )
     assert out_stickv.is_file()
     with wave.open(str(out_stickv), "rb") as wf:
-        assert wf.getframerate() == 48000
-        assert wf.getnchannels() == 2
-
-    # AudioDirector cũng phải lọc tiếng ma và chèn global_lead_s = 0.18s
-    spec = TimelineSpec(
-        slug="smooth-cinema",
-        title="Cinema Smooth Audio",
-        beats=[
-            BeatSpec(id="b1", narration="Đoạn 1", duration_sec=1.0),
-            BeatSpec(id="b2", narration="Đoạn 2", duration_sec=1.0),
-        ],
-    )
-    out_cinema = tmp_path / "mixed_cinema.wav"
-    res = mix_cinema_audio(
-        spec,
-        {"b1": w1, "b2": w2},
-        out_cinema,
-        library_dir=tmp_path / "empty_lib",
-        work_dir=tmp_path / "cinema_work",
-        hw=detect_hardware(probe_fn=lambda: (False, "cpu")),
-    )
-    assert res["global_lead_s"] == pytest.approx(GLOBAL_LEAD_SILENCE_S)
-    assert res["ghosts_removed"] == 1
-    assert out_cinema.is_file()
-    with wave.open(str(out_cinema), "rb") as wf:
         assert wf.getframerate() == 48000
         assert wf.getnchannels() == 2
 

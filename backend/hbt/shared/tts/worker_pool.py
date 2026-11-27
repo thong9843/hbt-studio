@@ -7,12 +7,12 @@ import os
 import subprocess
 import threading
 import time
-import wave
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from hbt.postv.voice import BACKEND_DIR, WEIGHTS_REPO, venv_python
+from hbt.shared.audio_utils import write_fallback_speech_wav_atomic
 
 RESIDENT_WORKER = Path(__file__).with_name("resident_worker.py")
 DEFAULT_IDLE_TTL_SEC = 600.0
@@ -21,22 +21,9 @@ FALLBACK_SAMPLE_RATE = 24000
 
 def _write_fallback_wav_atomic(dest: Path, text: str) -> Path:
     """Tạo file WAV 24kHz mono 16-bit dự phòng khi chạy trên CI không có VieNeu/weights."""
-    words = max(1, len((text or "").split()))
-    dur_s = max(0.8, min(12.0, words * 0.34))
-    n_frames = int(round(dur_s * FALLBACK_SAMPLE_RATE))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        with wave.open(str(tmp), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(FALLBACK_SAMPLE_RATE)
-            wf.writeframes(b"\x00\x00" * n_frames)
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-    return dest
+    return write_fallback_speech_wav_atomic(
+        dest, text, sample_rate=FALLBACK_SAMPLE_RATE, audible=False
+    )
 
 
 def _close_proc_safely(proc: subprocess.Popen[str]) -> None:

@@ -1132,11 +1132,7 @@ class JobManager:
                 pct = data.get("percent", 0)
                 phase = data.get("phase", "")
                 msg = data.get("text", "")
-                extra = {
-                    k: v
-                    for k, v in data.items()
-                    if k not in ("progress", "step", "message")
-                }
+                extra = {k: v for k, v in data.items() if k not in ("progress", "step", "message")}
                 job._progress(pct, phase, msg, **extra)
             else:
                 job._emit(event_type, data)

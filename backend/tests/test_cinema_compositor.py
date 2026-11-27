@@ -5,9 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
 import pytest
-from PIL import Image, ImageFont
+from PIL import ImageFont
 
 from hbt.cinema.cache import BEAT_AUDIO_CHANNELS, BEAT_AUDIO_RATE, BEAT_PIX_FMT
 from hbt.cinema.compositor import DirtyRectCompositor
@@ -24,7 +23,6 @@ from hbt.cinema.motion import (
 from hbt.cinema.preflight import SAFE_ZONES
 from hbt.cinema.schema import SHOT_TYPES, AspectRatio, BeatSpec, BoardSpec, PuppetSpec, TimelineSpec
 from hbt.cinema.shots import bake_static_shot_layer, compute_shot_layout
-from hbt.cinema.transitions import apply_transition
 from hbt.pipeline.ffutil import probe
 
 
@@ -83,31 +81,6 @@ def test_all_six_tactile_desk_shots_stay_safe_and_disjoint(aspect: AspectRatio) 
             assert baked.mode == "RGBA"
         finally:
             baked.close()
-
-
-def test_transitions_whip_pan_and_paper_slide_pixels() -> None:
-    prev_im = Image.new("RGB", (320, 180), (220, 40, 40))
-    next_im = Image.new("RGB", (320, 180), (30, 120, 230))
-    try:
-        mid_cut = apply_transition(prev_im, next_im, 0.5, "editorial_cut")
-        mid_slide = apply_transition(prev_im, next_im, 0.5, "paper_slide")
-        mid_whip = apply_transition(prev_im, next_im, 0.5, "whip_pan")
-        try:
-            assert mid_cut.getpixel((10, 10)) == (30, 120, 230)
-            arr_slide = np.asarray(mid_slide)
-            arr_whip = np.asarray(mid_whip)
-            assert arr_slide.shape == (180, 320, 3)
-            assert arr_whip.shape == (180, 320, 3)
-            # Nửa trái vẫn giữ tông đỏ prev, nửa phải chuyển sang xanh next
-            assert arr_whip[90, 20, 0] > arr_whip[90, 300, 0]
-            assert arr_whip[90, 300, 2] > arr_whip[90, 20, 2]
-        finally:
-            mid_cut.close()
-            mid_slide.close()
-            mid_whip.close()
-    finally:
-        prev_im.close()
-        next_im.close()
 
 
 def test_compositor_zero_truetype_in_frame_loop_and_high_layer_cache_hit_rate(

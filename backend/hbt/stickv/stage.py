@@ -12,6 +12,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from hbt.config import REPO_ROOT
+from hbt.shared.pillow_utils import load_cached_font
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
 from hbt.stickv.llm import format_unwrapped_text, unwrap_board_text
 from hbt.stickv.models import (
@@ -135,12 +136,7 @@ THEME_PALETTES: dict[StickvTheme, dict[str, tuple[int, int, int, int]]] = {
 
 
 def _load_font(path: Path, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        if path.is_file():
-            return ImageFont.truetype(str(path), size=max(12, size))
-    except Exception:
-        pass
-    return ImageFont.load_default()
+    return load_cached_font(path, max(12, size))
 
 
 _POSE_IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}

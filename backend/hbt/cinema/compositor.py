@@ -10,25 +10,14 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
-from hbt.cinema.cache import BeatCache, build_normalized_beat_flags
-from hbt.cinema.hardware import (
-    HardwareProfile,
-    detect_hardware,
-    resolve_filter_complex_script_flag,
-)
+from hbt.cinema.cache import build_normalized_beat_flags
+from hbt.cinema.hardware import HardwareProfile, detect_hardware
 from hbt.cinema.layer_cache import FontCache, LayerCache
 from hbt.cinema.motion import ease_out_back, ease_out_cubic
-from hbt.cinema.preflight import PreflightQualityGate
 from hbt.cinema.schema import BeatSpec, TimelineSpec
 from hbt.cinema.shots import FONT_EXTRABOLD, ShotLayout, bake_static_shot_layer, compute_shot_layout
-from hbt.cinema.transitions import apply_transition
 from hbt.pipeline.cancel import CancelToken
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe
-from hbt.shared.pipeline.watermark import (
-    WatermarkSettings,
-    build_watermark_overlay_filter,
-    render_watermark_png,
-)
 from hbt.stickv.audio import align_beat_karaoke, extract_wav_rms_envelope
 from hbt.stickv.puppet import PuppetRig, is_puppet_ready
 
@@ -422,7 +411,6 @@ class DirtyRectCompositor:
             str(tmp_mp4),
         ]
 
-        trans_frames = max(1, min(6, int(round(fps * 0.20))))
         err_log_path = out_path.with_name(f"{out_path.stem}.ffmpeg.err.log")
         err_file = open(err_log_path, "wb")  # noqa: SIM115
         proc = subprocess.Popen(
@@ -454,23 +442,7 @@ class DirtyRectCompositor:
                     puppet_rig=puppet_rig,
                 )
                 try:
-                    if (
-                        prev_tail_frame is not None
-                        and beat.transition_in != "editorial_cut"
-                        and f_idx < trans_frames
-                    ):
-                        trans_frame = apply_transition(
-                            prev_tail_frame,
-                            frame,
-                            (f_idx + 1) / float(trans_frames),
-                            beat.transition_in,
-                        )
-                        try:
-                            proc.stdin.write(trans_frame.tobytes())
-                        finally:
-                            trans_frame.close()
-                    else:
-                        proc.stdin.write(frame.tobytes())
+                    proc.stdin.write(frame.tobytes())
                 finally:
                     frame.close()
 
@@ -521,149 +493,3 @@ class DirtyRectCompositor:
             err_log_path.unlink(missing_ok=True)
             if tmp_mp4.exists():
                 tmp_mp4.unlink(missing_ok=True)
-
-    def render_timeline(
-        self,
-        spec: TimelineSpec,
-        out_mp4: Path,
-        *,
-        cache_dir: Path,
-        work_dir: Path,
-        wav_paths: dict[str, Path] | None = None,
-        library_dir: Path | None = None,
-        assets_dir: Path | None = None,
-        brand_dir: Path | None = None,
-        watermark: WatermarkSettings | None = None,
-        cancel: CancelToken | None = None,
-    ) -> dict[str, Any]:
-        """Dựng toàn bộ TimelineSpec qua Preflight + BeatCache + Concat -c copy + Watermark."""
-        gate = PreflightQualityGate()
-        report = gate.validate_and_reflow(spec, auto_fix=True)
-        clean_spec = report.repaired_spec
-        if not clean_spec.beats:
-            raise ValueError("TimelineSpec chưa có beat nào để dựng")
-
-        bcache = BeatCache(cache_dir)
-        work = Path(work_dir)
-        work.mkdir(parents=True, exist_ok=True)
-
-        beat_mp4s: list[Path] = []
-        cache_hits = 0
-        cache_misses = 0
-
-        for beat in clean_spec.beats:
-            if cancel is not None:
-                cancel.check()
-            key = beat.content_hash(
-                aspect=clean_spec.aspect,
-                fps=clean_spec.fps,
-                theme=clean_spec.theme,
-                domain=clean_spec.domain,
-            )
-            cached = bcache.lookup(key)
-            if cached is not None:
-                cache_hits += 1
-                beat_mp4s.append(cached)
-                continue
-
-            cache_misses += 1
-            raw_beat_mp4 = work / f"beat_{beat.id}.mp4"
-            beat_wav = wav_paths.get(beat.id) if wav_paths else None
-            self.render_beat_to_mp4(
-                beat,
-                clean_spec,
-                raw_beat_mp4,
-                wav_path=beat_wav,
-                library_dir=library_dir,
-                assets_dir=assets_dir,
-                cancel=cancel,
-            )
-            stored = bcache.store_from_file(key, raw_beat_mp4)
-            beat_mp4s.append(stored)
-
-        out_path = Path(out_mp4)
-        joined_mp4 = work / "joined_no_wm.mp4" if (watermark and watermark.enabled) else out_path
-        bcache.concat_cached_beats(beat_mp4s, joined_mp4, work_dir=work, hw=self.hw)
-
-        if watermark is not None and watermark.enabled:
-            wm_png = work / "watermark.png"
-            render_watermark_png(
-                wm_png,
-                watermark,
-                width=clean_spec.width,
-                height=clean_spec.height,
-                brand_dir=brand_dir,
-                assets_dir=assets_dir,
-            )
-            fc_txt = work / "wm_filtergraph.txt"
-            fc_body = build_watermark_overlay_filter(
-                input_video="0:v", input_wm="1:v", output_label="v_wm"
-            )
-            fc_tmp = fc_txt.with_name(f"{fc_txt.name}.tmp")
-            try:
-                fc_tmp.write_text(fc_body, encoding="utf-8")
-                os.replace(fc_tmp, fc_txt)
-            finally:
-                if fc_tmp.exists():
-                    fc_tmp.unlink(missing_ok=True)
-
-            tmp_wm_out = out_path.with_name(f"{out_path.stem}.tmp.mp4")
-            script_flag = resolve_filter_complex_script_flag()
-            cmd = [
-                ffmpeg_exe(),
-                "-hide_banner",
-                "-v",
-                "error",
-                "-y",
-                *self.hw.ffmpeg_resource_clamp,
-                "-i",
-                str(joined_mp4),
-                "-i",
-                str(wm_png),
-                script_flag,
-                str(fc_txt),
-                "-map",
-                "[v_wm]",
-                "-map",
-                "0:a",
-                *build_normalized_beat_flags(fps=clean_spec.fps, hw=self.hw),
-                str(tmp_wm_out),
-            ]
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            try:
-                _, err_b = proc.communicate(timeout=180.0)
-                if proc.returncode != 0:
-                    raise FFmpegError(
-                        f"FFmpeg watermark lỗi ({proc.returncode}): "
-                        f"{err_b.decode('utf-8', errors='replace')[-300:]}"
-                    )
-                os.replace(tmp_wm_out, out_path)
-            finally:
-                if proc.stderr is not None:
-                    try:
-                        proc.stderr.close()
-                    except OSError:
-                        pass
-                try:
-                    if proc.poll() is None:
-                        proc.kill()
-                    proc.wait(timeout=2.0)
-                except Exception:
-                    pass
-                if tmp_wm_out.exists():
-                    tmp_wm_out.unlink(missing_ok=True)
-
-        return {
-            "file_path": str(out_path),
-            "beats_total": len(clean_spec.beats),
-            "cache_hits": cache_hits,
-            "cache_misses": cache_misses,
-            "preflight_fixed": report.fixed_count,
-            "hardware_mode": self.hw.mode,
-            "layer_cache": self.layer_cache.stats(),
-        }

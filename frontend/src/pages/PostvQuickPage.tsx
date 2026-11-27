@@ -6,12 +6,7 @@ import { SafeZoneOverlay, SafeZoneToolbar, useSafeZone } from '../components/Saf
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { WatermarkControl } from '../components/WatermarkControl';
 import { useRenderJobStatus } from '../hooks/renderJob';
-import type {
-  PostvPickComment,
-  PostvPickData,
-  PostvQuickOptions,
-  PostvStage,
-} from '../api/types';
+import type { PostvPickComment, PostvPickData, PostvQuickOptions, PostvStage } from '../api/types';
 import {
   AlertIcon,
   CheckIcon,
@@ -627,9 +622,6 @@ export function PostvQuickPage() {
 
   // Reset về trạng thái khung chat ban đầu
   const handleReset = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
     setJobId(null);
     setProjectSlug(null);
     setSubmittedInput('');

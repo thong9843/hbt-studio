@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 
-from hbt.pipeline.ffutil import media_duration, run_ffmpeg
-from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
+from hbt.pipeline.ffutil import media_duration
+from hbt.shared.audio_utils import normalize_audio_lufs
+from hbt.shared.fs_utils import safe_slug
 
 FREESOUND_SEARCH_API = "https://freesound.org/apiv2/search/text/"
 
@@ -25,31 +25,11 @@ FREESOUND_MOOD_QUERIES: dict[str, str] = {
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "freesound").strip()).strip("-")
-    return s[:64] or "freesound"
+    return safe_slug(raw, default="freesound", max_len=64)
 
 
 def _normalize_mp3_lufs(src_file: Path, target_lufs: float) -> None:
-    tmp = src_file.with_suffix(".norm.mp3")
-    try:
-        run_ffmpeg(
-            [
-                *FFMPEG_RESOURCE_CLAMP,
-                "-i",
-                str(src_file),
-                "-af",
-                f"loudnorm=I={target_lufs:.1f}:TP=-1.5:LRA=11",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                "192k",
-                str(tmp),
-            ]
-        )
-        if tmp.is_file() and tmp.stat().st_size > 0:
-            os.replace(tmp, src_file)
-    except Exception:
-        tmp.unlink(missing_ok=True)
+    normalize_audio_lufs(src_file, target_lufs=target_lufs)
 
 
 async def search_freesound_audio(

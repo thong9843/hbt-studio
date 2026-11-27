@@ -23,11 +23,15 @@ from hbt.pipeline.render import whisper_alignment
 from hbt.pipeline.text import parse_voice
 from hbt.pipeline.whisper import WhisperConfig, WhisperFailed
 from hbt.postv.voice import SynthItem, VoiceProvider
+from hbt.shared.audio_utils import extract_wav_rms_frames, write_fallback_speech_wav_atomic
 from hbt.shared.ffmpeg_utils import (
     FFMPEG_RESOURCE_CLAMP,
     build_acrossfade_filter_graph,
     measure_audio_duration,
+    resolve_filter_complex_script_flag,
 )
+from hbt.shared.fs_utils import atomic_write_bytes as _atomic_write_bytes
+from hbt.shared.fs_utils import atomic_write_text as _atomic_write_text
 from hbt.shared.online_sources.freesound_audio import (
     import_freesound_audio,
     search_freesound_audio,
@@ -85,28 +89,6 @@ _MD_SYNTAX_RE = re.compile(r"\*\*|__|~~|`|#")
 _MULTI_SPACE_RE = re.compile(r"\s+")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?…])")
 _DUP_PUNCT_RE = re.compile(r"([.!?])\1+")
-
-
-def _atomic_write_bytes(dest: Path, data: bytes) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        tmp.write_bytes(data)
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-
-
-def _atomic_write_text(dest: Path, text: str) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 def _atomic_write_pcm_wav(dest: Path, pcm: np.ndarray, *, sr: int, ch: int = 1) -> None:
@@ -398,15 +380,7 @@ def clean_tts_wav(
 
 def _write_fallback_wav(dest: Path, text: str) -> None:
     """Tạo file WAV ước lượng theo độ dài chữ khi chạy unit test không có VieNeuProvider."""
-    dur_s = max(1.0, min(12.0, len(text.split()) * 0.36))
-    sr = 24000
-    n_frames = int(dur_s * sr)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(dest), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(b"\x00\x00" * n_frames)
+    write_fallback_speech_wav_atomic(dest, text, sample_rate=24000, audible=False)
 
 
 def _assemble_padded_beat_wav(
@@ -555,35 +529,7 @@ def resolve_sfx_file(
 
 def extract_wav_rms_envelope(wav_path: Path, fps: int, duration_sec: float) -> list[float]:
     """Trích biên độ RMS theo từng khung hình (0.0..1.0) để đồng bộ nhép miệng (Lip-sync)."""
-    n_frames = max(1, int(round(duration_sec * fps)))
-    if not wav_path.is_file():
-        return [0.0] * n_frames
-    try:
-        with wave.open(str(wav_path), "rb") as wf:
-            sr = wf.getframerate()
-            ch = wf.getnchannels()
-            sw = wf.getsampwidth()
-            raw = wf.readframes(wf.getnframes())
-        if not raw or sw != 2:
-            return [0.0] * n_frames
-        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        if ch > 1:
-            samples = samples.reshape(-1, ch).mean(axis=1)
-        samples /= 32768.0
-        win = max(1, int(sr / fps))
-        out: list[float] = []
-        peak_ref = max(0.05, float(np.percentile(np.abs(samples), 95))) if len(samples) else 0.1
-        for f_idx in range(n_frames):
-            s0 = f_idx * win
-            s1 = s0 + win
-            if s0 >= len(samples):
-                out.append(0.0)
-            else:
-                rms = float(np.sqrt(np.mean(samples[s0:s1] ** 2)))
-                out.append(min(1.0, round(rms / peak_ref, 3)))
-        return out
-    except Exception:
-        return [0.0] * n_frames
+    return extract_wav_rms_frames(wav_path, fps, duration_sec, norm_mode="sample_p95")
 
 
 def compute_word_timings(
@@ -1357,8 +1303,6 @@ def mix_stickv_audio(
     fc_text = ";\n".join(filter_parts) + "\n"
     script_path = out_wav.with_name(f"{out_wav.stem}_filtergraph.txt")
     _atomic_write_text(script_path, fc_text)
-
-    from hbt.cinema.hardware import resolve_filter_complex_script_flag
 
     tmp_wav = out_wav.with_name(f"{out_wav.stem}.tmp.wav")
     script_flag = resolve_filter_complex_script_flag()

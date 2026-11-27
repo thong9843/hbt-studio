@@ -11,7 +11,8 @@ from urllib.parse import quote
 import httpx
 
 from hbt.pipeline.ffutil import media_duration, run_ffmpeg
-from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
+from hbt.shared.audio_utils import normalize_audio_lufs
+from hbt.shared.fs_utils import safe_slug
 
 TUNA_SEARCH_API = "https://api.tuna.voicemod.net/v1/sounds/search"
 TUNA_TAG_PAGE = "https://tuna.voicemod.net/sounds/tag/{tag}"
@@ -31,8 +32,7 @@ _NEXT_DATA_RE = re.compile(
 
 
 def _safe_slug(raw: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", (raw or "sfx").strip().lower()).strip("-")
-    return s[:64] or "sfx"
+    return safe_slug(raw, default="sfx", max_len=64, lowercase=True)
 
 
 def _normalize_sound_item(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -202,24 +202,7 @@ async def import_tuna_sfx(
 
     tmp_file.write_bytes(raw_bytes)
     try:
-        # Chuẩn hóa âm lượng về -16 LUFS để không rè khi trộn video
-        try:
-            run_ffmpeg(
-                [
-                    *FFMPEG_RESOURCE_CLAMP,
-                    "-i",
-                    str(tmp_file),
-                    "-af",
-                    "loudnorm=I=-16:TP=-1.5:LRA=11",
-                    "-c:a",
-                    "libmp3lame",
-                    "-b:a",
-                    "192k",
-                    str(out_file),
-                ]
-            )
-        except Exception:
-            tmp_file.replace(out_file)
+        normalize_audio_lufs(tmp_file, target_lufs=-16.0, dst_file=out_file, run_fn=run_ffmpeg)
     finally:
         tmp_file.unlink(missing_ok=True)
 

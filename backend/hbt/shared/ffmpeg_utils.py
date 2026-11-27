@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+import threading
 from pathlib import Path
+from typing import NamedTuple
 
 from hbt.pipeline.ffutil import media_duration
 
@@ -25,6 +30,110 @@ FFMPEG_ENCODE_CLAMP: tuple[str, ...] = (
 )
 
 ACROSSFADE_DURATION_S = 2.0
+
+_SCRIPT_FLAG_LOCK = threading.Lock()
+_CACHED_SCRIPT_FLAG: str | None = None
+
+
+class MediaInfo(NamedTuple):
+    """Thông số cơ bản từ `ffprobe`: `(duration_s, width, height)`."""
+
+    duration_s: float
+    width: int
+    height: int
+
+
+def probe_media_info(path: Path, *, timeout: float = 5.0) -> MediaInfo:
+    """Đo `duration_s`, `width`, `height` bằng `ffprobe` JSON (trả 0 nếu không khả dụng)."""
+    exe = shutil.which("ffprobe") or "ffprobe"
+    try:
+        pr = subprocess.run(
+            [
+                exe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if pr.returncode == 0 and pr.stdout.strip():
+            info = json.loads(pr.stdout)
+            streams = info.get("streams") or []
+            w = int(streams[0].get("width") or 0) if streams else 0
+            h = int(streams[0].get("height") or 0) if streams else 0
+            dur = round(max(0.0, float((info.get("format") or {}).get("duration") or 0.0)), 3)
+            return MediaInfo(duration_s=dur, width=w, height=h)
+    except Exception:
+        pass
+    return MediaInfo(duration_s=0.0, width=0, height=0)
+
+
+def resolve_filter_complex_script_flag(
+    *,
+    ffmpeg_bin: str | None = None,
+    help_output: str | None = None,
+) -> str:
+    """Chọn cờ filtergraph theo FFmpeg (`-/filter_complex` 7+ vs `-filter_complex_script` 6)."""
+    global _CACHED_SCRIPT_FLAG
+
+    if help_output is not None:
+        return (
+            "-filter_complex_script"
+            if "-filter_complex_script" in help_output
+            else "-/filter_complex"
+        )
+
+    if ffmpeg_bin is None:
+        with _SCRIPT_FLAG_LOCK:
+            if _CACHED_SCRIPT_FLAG is not None:
+                return _CACHED_SCRIPT_FLAG
+
+    exe = ffmpeg_bin or shutil.which("ffmpeg")
+    if exe is None:
+        return "-filter_complex_script"
+
+    try:
+        pr = subprocess.run(
+            [exe, "-hide_banner", "-h", "long"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5.0,
+            check=False,
+        )
+        out = (pr.stderr or pr.stdout or "").strip()
+        flag = (
+            "-filter_complex_script"
+            if (pr.returncode == 0 and "-filter_complex_script" in out)
+            else "-/filter_complex"
+        )
+    except OSError:
+        return "-filter_complex_script"
+
+    if ffmpeg_bin is None:
+        with _SCRIPT_FLAG_LOCK:
+            _CACHED_SCRIPT_FLAG = flag
+    return flag
+
+
+def reset_script_flag_cache() -> None:
+    """Xóa cache cờ filter_complex (dùng trong unit test)."""
+    global _CACHED_SCRIPT_FLAG
+    with _SCRIPT_FLAG_LOCK:
+        _CACHED_SCRIPT_FLAG = None
 
 
 def measure_audio_duration(audio_path: Path, fallback_us_fn=None) -> float:

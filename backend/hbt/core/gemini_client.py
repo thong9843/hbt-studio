@@ -1,64 +1,64 @@
-"""Tích hợp Gemini Flash API cho Chế độ V2 (1-Click Prompt) của HBT Core.
-
-- Đọc GEMINI_API_KEY qua cơ chế dò tìm file cấu hình đa tầng (Multi-path Resolver):
-  + Path(REPO_ROOT) / ".env"
-  + Path(BACKEND_DIR) / ".env"
-- Gọi endpoint v1beta models/{model_name}:generateContent với xác thực qua Header `x-goog-api-key`
-  và danh sách model thế hệ mới (loại bỏ hoàn toàn dòng 1.x và 2.0-*):
-  AVAILABLE_GEMINI_MODELS = [
-      {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Mặc định / Nhanh)"},
-      {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
-      {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)"},
-      {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite"},
-  ]
-- Payload chuẩn chống lỗi 400:
-  {
-    "contents": [{"role": "user", "parts": [{"text": system_prompt + "\\n\\n" + user_prompt}]}],
-    "generationConfig": {"temperature": 0.7, "responseMimeType": "application/json"}
-  }
-- System prompt ép model trả về đúng định dạng JSON tương thích 100% với cấu trúc đầu vào của V1.
-- Nếu model được chọn trả về lỗi, tự động fallback tuần tự qua các model còn lại trong danh sách
-  trước khi ném GeminiClientError kèm cờ fallback_v1=True để chuyển sang chế độ V1.
-"""
+"""Tích hợp Gemini Flash API cho HBT Core V2 (1-Click Prompt), dùng nền tảng `hbt.shared.llm`."""
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import re
 from pathlib import Path
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 
 from hbt.core.models import HbtCoreScript
+from hbt.shared.llm.gemini import (
+    AVAILABLE_GEMINI_MODELS,
+    BACKEND_DIR,
+    GEMINI_BASE_URL,
+    GEMINI_ENDPOINT,
+    GEMINI_MODEL,
+    MODELS,
+    PLACEHOLDER_KEYS,
+    REPO_ROOT,
+    GeminiClientError,
+    _clean_key_value,
+    _extract_json_text,
+    _safe_print_config,
+    build_gemini_headers,
+    build_gemini_url,
+    generate_structured_json,
+    is_valid_gemini_api_key,
+    load_gemini_api_key,
+    normalize_model_name,
+    resolve_candidate_env_paths,
+)
+from hbt.shared.llm.gemini import (
+    build_gemini_payload as _shared_build_gemini_payload,
+)
+
+__all__ = [
+    "AVAILABLE_GEMINI_MODELS",
+    "BACKEND_DIR",
+    "GEMINI_BASE_URL",
+    "GEMINI_ENDPOINT",
+    "GEMINI_MODEL",
+    "MODELS",
+    "PLACEHOLDER_KEYS",
+    "REPO_ROOT",
+    "SYSTEM_PROMPT",
+    "GeminiClientError",
+    "_clean_key_value",
+    "_extract_json_text",
+    "_safe_print_config",
+    "build_gemini_headers",
+    "build_gemini_payload",
+    "build_gemini_url",
+    "generate_script_from_prompt",
+    "is_valid_gemini_api_key",
+    "load_gemini_api_key",
+    "normalize_model_name",
+    "resolve_candidate_env_paths",
+]
 
 logger = logging.getLogger(__name__)
-
-# Xác định đường dẫn tuyệt đối của thư mục gốc project và backend thông qua Path(__file__).resolve()
-# __file__ = <REPO_ROOT>/backend/hbt/core/gemini_client.py
-BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
-REPO_ROOT: Path = Path(__file__).resolve().parents[3]
-
-PLACEHOLDER_KEYS = {
-    "",
-    "aizasy_your_gemini_api_key_here",
-    "your_gemini_api_key_here",
-    "your_api_key_here",
-}
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
-    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite (Mặc định / 500 RPD)"},
-    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Nhẹ / Tiết kiệm)"},
-    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
-    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Nhanh)"},
-]
-MODELS: list[str] = [item["id"] for item in AVAILABLE_GEMINI_MODELS]
-GEMINI_MODEL = MODELS[0]
-GEMINI_ENDPOINT = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
 
 SYSTEM_PROMPT = (
     "Bạn là biên kịch chuyên viết kịch bản video ngắn kiến thức chuẩn kênh 'Hay Biết Tuốt'.\n"
@@ -97,161 +97,9 @@ SYSTEM_PROMPT = (
 )
 
 
-class GeminiClientError(RuntimeError):
-    """Lỗi khi gọi Gemini API; luôn kèm `fallback_v1 = True` để chuyển hướng sang chế độ V1."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int | None = None,
-        reason: str = "api_error",
-        fallback_v1: bool = True,
-    ) -> None:
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
-        self.reason = reason
-        self.fallback_v1 = fallback_v1
-
-
-def normalize_model_name(model_name: str) -> str:
-    """Chuẩn hóa tên model, loại bỏ tiền tố 'models/' thừa để không bị lặp 'models/models/...'."""
-    clean = (model_name or "").strip()
-    while clean.startswith("models/"):
-        clean = clean[len("models/") :].strip()
-    return clean or MODELS[0]
-
-
-def build_gemini_url(model_name: str, api_key: str | None = None) -> str:
-    """Tạo URL endpoint sạch v1beta cho model Gemini (không gắn ?key= vào URL,
-    xác thực qua Header `x-goog-api-key`). Đảm bảo không bao giờ lặp 'models/models/...'.
-    """
-    _ = api_key
-    clean_model = normalize_model_name(model_name)
-    return f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent"
-
-
-def build_gemini_headers(api_key: str) -> dict[str, str]:
-    """Tạo Header chuẩn Google AI Studio với `x-goog-api-key`."""
-    return {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key.strip(),
-    }
-
-
-def _clean_key_value(raw: str | None) -> str:
-    """Chuẩn hóa chuỗi GEMINI_API_KEY: cắt khoảng trắng, dấu nháy kép/đơn và loại bỏ placeholder."""
-    key = (raw or "").strip().strip('"').strip("'").strip()
-    if key.lower() in PLACEHOLDER_KEYS:
-        return ""
-    return key
-
-
-def is_valid_gemini_api_key(api_key: str | None) -> bool:
-    """Kiểm tra tính hợp lệ của Key trước khi gọi:
-    Chấp nhận cả chuẩn cũ AIzaSy... và chuẩn mới AQ.... (độ dài >= 30).
-    """
-    if not api_key:
-        return False
-    k = _clean_key_value(api_key)
-    return (k.startswith("AIzaSy") or k.startswith("AQ.")) and len(k) >= 30
-
-
-def resolve_candidate_env_paths(env_file: Path | None = None) -> list[Path]:
-    """Trả về danh sách đường dẫn file cấu hình `.env` đa tầng (Multi-path Resolver)."""
-    candidate_paths: list[Path] = []
-    if env_file is not None:
-        candidate_paths.append(Path(env_file).resolve())
-    candidate_paths.extend(
-        [
-            Path(REPO_ROOT) / ".env",
-            Path(BACKEND_DIR) / ".env",
-        ]
-    )
-    return candidate_paths
-
-
-def _safe_print_config(msg: str) -> None:
-    """In log chẩn đoán an toàn ra stdout, chống lỗi UnicodeEncodeError (cp1252) trên Windows."""
-    try:
-        print(msg, flush=True)
-    except UnicodeEncodeError:
-        try:
-            import sys
-
-            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
-            safe_msg = msg.encode(enc, errors="replace").decode(enc, errors="replace")
-            print(safe_msg, flush=True)
-        except Exception:
-            pass
-    logger.info(msg)
-
-
-def load_gemini_api_key(env_file: Path | None = None) -> str:
-    """Dò tìm file cấu hình đa tầng bằng `load_dotenv(dotenv_path=env_path, override=True)`
-    và chuẩn hóa chuỗi `GEMINI_API_KEY`. Luôn ưu tiên đọc lại `.env` nếu tồn tại để cập nhật
-    ngay khi người dùng sửa key mà không cần khởi động lại server.
-    """
-    if env_file is not None:
-        candidate_paths = [Path(env_file)]
-    else:
-        candidate_paths = resolve_candidate_env_paths()
-
-    loaded_from_file = False
-    for env_path in candidate_paths:
-        if env_path.exists():
-            load_dotenv(dotenv_path=env_path, override=True)
-            loaded = _clean_key_value(os.getenv("GEMINI_API_KEY"))
-            if loaded:
-                loaded_from_file = True
-                break
-            # Nếu là giá trị mẫu placeholder thì xoá khỏi os.environ để tiếp tục dò
-            os.environ.pop("GEMINI_API_KEY", None)
-
-    key = _clean_key_value(os.getenv("GEMINI_API_KEY", ""))
-    _ = loaded_from_file
-
-    _safe_print_config(
-        f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
-        f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
-    )
-    return key
-
-
 def build_gemini_payload(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -> dict[str, Any]:
-    """Tạo payload chuẩn chống lỗi 400 cho v1beta models/{model_name}:generateContent."""
-    prompt_clean = user_prompt.strip()
-    combined_text = system_prompt + "\n\n" + prompt_clean
-    return {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": combined_text}],
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.7,
-            "responseMimeType": "application/json",
-        },
-    }
-
-
-def _extract_json_text(raw_text: str) -> str:
-    """Làm sạch khối JSON: tự động cắt bỏ markdown code block (```json ... ```) trước json.loads."""
-    s = (raw_text or "").strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\s*```$", "", s)
-        s = s.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
-    if fence:
-        return fence.group(1).strip()
-    start = s.find("{")
-    end = s.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return s[start : end + 1]
-    return s
+    """Tạo payload chuẩn cho v1beta models/{model_name}:generateContent."""
+    return _shared_build_gemini_payload(user_prompt, system_prompt, temperature=0.7)
 
 
 def generate_script_from_prompt(
@@ -265,12 +113,7 @@ def generate_script_from_prompt(
     timeout_s: float = 30.0,
     transport: httpx.BaseTransport | None = None,
 ) -> HbtCoreScript:
-    """Gọi Gemini Flash API sinh kịch bản JSON chuẩn V1 từ 1 câu prompt của người dùng.
-
-    Ưu tiên `model_name` được chọn (mặc định `"gemini-3.8-flash"`). Nếu model trả về lỗi,
-    tự động fallback tuần tự qua các model còn lại trong `AVAILABLE_GEMINI_MODELS` trước khi
-    kích hoạt `fallback_v1=True`.
-    """
+    """Gọi Gemini Flash API sinh kịch bản JSON chuẩn V1 từ 1 câu prompt của người dùng."""
     prompt_clean = (user_prompt or "").strip()
     if not prompt_clean:
         raise GeminiClientError(
@@ -279,157 +122,23 @@ def generate_script_from_prompt(
             fallback_v1=False,
         )
 
-    if api_key is not None:
-        key = _clean_key_value(api_key)
-        _safe_print_config(
-            f"[GEMINI_CONFIG] Đã tìm thấy GEMINI_API_KEY: {bool(key)} "
-            f"(Độ dài: {len(key)}, Bắt đầu bằng AIzaSy: {key.startswith('AIzaSy')})"
-        )
-    else:
-        key = load_gemini_api_key(env_file=env_file)
-
-    if not is_valid_gemini_api_key(key):
-        logger.warning(
-            "[GEMINI_CONFIG] GEMINI_API_KEY rỗng hoặc sai định dạng "
-            "-> Kích hoạt fallback_v1=True ngay lập tức."
-        )
-        raise GeminiClientError(
-            "Chưa cấu hình hoặc GEMINI_API_KEY không hợp lệ trong .env "
-            "(yêu cầu bắt đầu bằng 'AIzaSy' hoặc 'AQ.'). "
-            "Đã tự động chuyển sang Chế độ V1 (Dán JSON thủ công).",
-            status_code=401,
-            reason="invalid_or_missing_api_key",
-            fallback_v1=True,
-        )
-
     full_user_prompt = prompt_clean
     if topic_hint and topic_hint.strip():
         full_user_prompt = f"{prompt_clean}\n(Chủ đề ưu tiên: {topic_hint.strip()})"
 
-    payload = build_gemini_payload(full_user_prompt, system_prompt=SYSTEM_PROMPT)
-    headers = build_gemini_headers(key)
-    base_models = [normalize_model_name(m) for m in (models or MODELS) if m and m.strip()]
-    if not base_models:
-        base_models = list(MODELS)
-    if model_name and model_name.strip():
-        preferred = normalize_model_name(model_name)
-        candidate_models = [preferred] + [m for m in base_models if m != preferred]
-    else:
-        candidate_models = base_models
-
-    response: httpx.Response | None = None
-    last_error_detail = ""
-    last_timeout_exc: httpx.TimeoutException | None = None
-    last_req_exc: httpx.RequestError | None = None
-
-    with httpx.Client(timeout=timeout_s, transport=transport) as client:
-        for idx, cand_model in enumerate(candidate_models):
-            url = build_gemini_url(cand_model)
-            try:
-                resp = client.post(
-                    url,
-                    json=payload,
-                    headers=headers,
-                )
-            except httpx.TimeoutException as exc:
-                last_timeout_exc = exc
-                logger.warning(
-                    "Model Gemini '%s' quá thời gian chờ (%s)%s",
-                    cand_model,
-                    exc,
-                    f", fallback sang '{candidate_models[idx + 1]}'"
-                    if idx + 1 < len(candidate_models)
-                    else ", đã hết danh sách fallback",
-                )
-                continue
-            except httpx.RequestError as exc:
-                last_req_exc = exc
-                logger.warning(
-                    "Lỗi kết nối model Gemini '%s' (%s)%s",
-                    cand_model,
-                    exc,
-                    f", fallback sang '{candidate_models[idx + 1]}'"
-                    if idx + 1 < len(candidate_models)
-                    else ", đã hết danh sách fallback",
-                )
-                continue
-
-            response = resp
-            if resp.status_code >= 400:
-                try:
-                    err_body = resp.json()
-                    last_error_detail = err_body.get("error", {}).get("message", "")
-                except Exception:
-                    last_error_detail = resp.text[:200]
-                logger.warning(
-                    "Model Gemini '%s' trả về HTTP %s (%s)%s",
-                    cand_model,
-                    resp.status_code,
-                    last_error_detail,
-                    f", fallback sang '{candidate_models[idx + 1]}'"
-                    if idx + 1 < len(candidate_models)
-                    else ", đã hết danh sách fallback",
-                )
-                if idx + 1 < len(candidate_models):
-                    continue
-            break
-
-    if response is None:
-        if last_timeout_exc is not None:
-            raise GeminiClientError(
-                "Kết nối tới Gemini Flash API bị quá thời gian chờ (timeout). "
-                "Đã chuyển sang Chế độ V1 để bạn dán JSON thủ công.",
-                reason="network_timeout",
-                fallback_v1=True,
-            ) from last_timeout_exc
-        if last_req_exc is not None:
-            raise GeminiClientError(
-                f"Lỗi kết nối mạng khi gọi Gemini Flash API ({last_req_exc.__class__.__name__}). "
-                "Đã chuyển sang Chế độ V1 để không gián đoạn công việc.",
-                reason="network_error",
-                fallback_v1=True,
-            ) from last_req_exc
-        raise GeminiClientError(
-            "Không thể khởi tạo yêu cầu tới Gemini API. Đã tự động chuyển sang Chế độ V1.",
-            reason="api_error",
-            fallback_v1=True,
-        )
-
-    if response.status_code == 429:
-        raise GeminiClientError(
-            "Gemini API đã hết hạn mức (Quota 429). "
-            "Đã tự động chuyển sang Chế độ V1 (Bán tự động / JSON Thủ công).",
-            status_code=429,
-            reason="quota_exceeded",
-            fallback_v1=True,
-        )
-
-    if response.status_code >= 400:
-        detail = last_error_detail
-        if not detail:
-            try:
-                err_body = response.json()
-                detail = err_body.get("error", {}).get("message", "")
-            except Exception:
-                detail = response.text[:200]
-        suffix = f": {detail}" if detail else ""
-        raise GeminiClientError(
-            f"Gemini API trả về lỗi HTTP {response.status_code}{suffix}. "
-            "Đã tự động chuyển sang Chế độ V1.",
-            status_code=response.status_code,
-            reason="http_error",
-            fallback_v1=True,
-        )
-
+    resolved_key = api_key if api_key is not None else load_gemini_api_key(env_file=env_file)
+    parsed, _timings = generate_structured_json(
+        SYSTEM_PROMPT,
+        full_user_prompt,
+        model=model_name,
+        models=models,
+        api_key=resolved_key,
+        env_file=env_file,
+        temperature=0.7,
+        timeout=timeout_s,
+        transport=transport,
+    )
     try:
-        body = response.json()
-        candidates = body.get("candidates") or []
-        parts = candidates[0].get("content", {}).get("parts", [])
-        raw_text = "".join(str(p.get("text", "")) for p in parts).strip()
-        if not raw_text:
-            raise ValueError("Phản hồi từ Gemini không có nội dung văn bản")
-        cleaned_json = _extract_json_text(raw_text)
-        parsed = json.loads(cleaned_json)
         if topic_hint and not parsed.get("topic"):
             parsed["topic"] = topic_hint
         return HbtCoreScript.model_validate(parsed)

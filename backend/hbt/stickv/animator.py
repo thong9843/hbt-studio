@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import math
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from hbt.pipeline.ffutil import ffmpeg_exe
-from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
+from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP, probe_media_info
 from hbt.stickv.puppet import PuppetPoseState, PuppetRig, compute_smoothed_rms, is_puppet_ready
 from hbt.stickv.stage import resolve_pose_png
 
@@ -101,36 +99,8 @@ def resolve_animation_source(
 
 
 def _probe_video_dimensions(path: Path) -> tuple[int, int]:
-    try:
-        proc = subprocess.run(
-            [
-                shutil.which("ffprobe") or "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=width,height",
-                "-of",
-                "json",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            data = json.loads(proc.stdout)
-            streams = data.get("streams") or []
-            if streams:
-                w = int(streams[0].get("width") or 0)
-                h = int(streams[0].get("height") or 0)
-                if w > 0 and h > 0:
-                    return w, h
-    except Exception:
-        pass
-    return 0, 0
+    info = probe_media_info(path, timeout=10.0)
+    return info.width, info.height
 
 
 def _decode_video_rgba_frames(
