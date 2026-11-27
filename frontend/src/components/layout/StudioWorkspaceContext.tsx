@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { HbtCoreSegment, HbtCoreTopic } from '../../api/types';
 import { SAMPLE_V1_SCRIPT, StudioWorkspaceContext } from '../../hooks/studioWorkspace';
 
@@ -20,36 +20,50 @@ export function StudioWorkspaceProvider({ children }: { children: ReactNode }) {
   const [resultSlug, setResultSlug] = useState<string | null>(null);
   const [studioMode, setStudioMode] = useState(false);
 
+  const value = useMemo(
+    () => ({
+      mode,
+      setMode,
+      title,
+      setTitle,
+      topic,
+      setTopic,
+      segments,
+      setSegments,
+      jsonText,
+      setJsonText,
+      prompt,
+      setPrompt,
+      v2Topic,
+      setV2Topic,
+      selectedModel,
+      setSelectedModel,
+      fallbackNotice,
+      setFallbackNotice,
+      resultVideoUrl,
+      setResultVideoUrl,
+      resultSlug,
+      setResultSlug,
+      studioMode,
+      setStudioMode,
+    }),
+    [
+      mode,
+      title,
+      topic,
+      segments,
+      jsonText,
+      prompt,
+      v2Topic,
+      selectedModel,
+      fallbackNotice,
+      resultVideoUrl,
+      resultSlug,
+      studioMode,
+    ],
+  );
+
   return (
-    <StudioWorkspaceContext.Provider
-      value={{
-        mode,
-        setMode,
-        title,
-        setTitle,
-        topic,
-        setTopic,
-        segments,
-        setSegments,
-        jsonText,
-        setJsonText,
-        prompt,
-        setPrompt,
-        v2Topic,
-        setV2Topic,
-        selectedModel,
-        setSelectedModel,
-        fallbackNotice,
-        setFallbackNotice,
-        resultVideoUrl,
-        setResultVideoUrl,
-        resultSlug,
-        setResultSlug,
-        studioMode,
-        setStudioMode,
-      }}
-    >
-      {children}
-    </StudioWorkspaceContext.Provider>
+    <StudioWorkspaceContext.Provider value={value}>{children}</StudioWorkspaceContext.Provider>
   );
 }

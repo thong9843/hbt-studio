@@ -29,6 +29,7 @@ import { Dialog } from '../components/ui/Dialog';
 import { Skeleton } from '../components/ui/Skeleton';
 import { StudioSelect } from '../components/ui/StudioSelect';
 import { cx } from '../components/ui/cx';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
 import { releaseVideoElementLocks } from '../utils/media';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
@@ -110,6 +111,11 @@ export function AssetHubPage() {
   const [stickmanFilter, setStickmanFilter] = useState<'all' | 'pose' | 'oneshot' | 'loop'>('all');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(
+    previewVideoRef,
+    previewItem?.kind === 'video' ? previewItem.url : undefined,
+  );
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -118,27 +124,33 @@ export function AssetHubPage() {
   const rendersQuery = useQuery({
     queryKey: ['unified-renders'],
     queryFn: () => api.listUnifiedRenders(),
+    enabled: activeTab === 'renders',
   });
 
   const musicQuery = useQuery({
     queryKey: ['asset-hub', 'music'],
     queryFn: () => api.listAssetHub('music'),
+    enabled: activeTab === 'music',
   });
   const bgQuery = useQuery({
     queryKey: ['asset-hub', 'backgrounds'],
     queryFn: () => api.listAssetHub('backgrounds'),
+    enabled: activeTab === 'backgrounds',
   });
   const memeQuery = useQuery({
     queryKey: ['asset-hub', 'memes'],
     queryFn: () => api.listAssetHub('memes'),
+    enabled: activeTab === 'memes',
   });
   const stickerQuery = useQuery({
     queryKey: ['asset-hub', 'stickers'],
     queryFn: () => api.listAssetHub('stickers'),
+    enabled: activeTab === 'stickers',
   });
   const stickmanQuery = useQuery({
     queryKey: ['asset-hub', 'stickman'],
     queryFn: () => api.listAssetHub('stickman'),
+    enabled: activeTab === 'stickman',
   });
   const puppetQuery = useQuery({
     queryKey: ['asset-hub', 'stickman-puppet'],
@@ -163,6 +175,7 @@ export function AssetHubPage() {
   const watermarkQuery = useQuery({
     queryKey: ['asset-hub', 'watermarks'],
     queryFn: () => api.listAssetHub('watermarks'),
+    enabled: activeTab === 'watermarks',
   });
 
   const activeQueryMap = {
@@ -206,8 +219,11 @@ export function AssetHubPage() {
   });
 
   const removeAsset = useMutation({
-    mutationFn: (item: AssetHubItem) =>
-      api.deleteAssetHub(activeTab as AssetHubCategory, item.name, item.source),
+    mutationFn: (item: AssetHubItem) => {
+      if (previewItem?.url === item.url) setPreviewItem(null);
+      releaseVideoElementLocks(item.file_url || item.url);
+      return api.deleteAssetHub(activeTab as AssetHubCategory, item.name, item.source);
+    },
     onSuccess: (_res, item) => {
       void queryClient.invalidateQueries({ queryKey: ['asset-hub', activeTab] });
       toast.info(T.deleted(item.name));
@@ -498,7 +514,7 @@ export function AssetHubPage() {
                         src={`${item.video_url}#t=0.5`}
                         muted
                         playsInline
-                        preload="metadata"
+                        preload="none"
                         poster="/brand/hay-biet-tuot_avatar.png"
                         className="h-full w-full object-cover"
                       />
@@ -963,9 +979,13 @@ export function AssetHubPage() {
                           src={item.file_url || item.url}
                           muted
                           loop
-                          autoPlay={isHovered}
                           playsInline
                           preload="metadata"
+                          onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.pause();
+                            e.currentTarget.currentTime = 0;
+                          }}
                           className="h-full w-full object-cover"
                         />
                       ) : (
@@ -1065,10 +1085,12 @@ export function AssetHubPage() {
           <div className="flex flex-col items-center gap-4">
             {previewItem.kind === 'video' ? (
               <video
+                ref={previewVideoRef}
                 src={previewItem.url}
                 controls
                 autoPlay
                 playsInline
+                preload="metadata"
                 className="max-h-[70vh] w-full rounded-inner bg-hero"
               />
             ) : (

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../../api/endpoints';
 import { useSafeZone } from '../../components/SafeZoneOverlay';
@@ -7,6 +7,8 @@ import { PhonePreviewStage } from '../../components/studio/PhonePreviewStage';
 import { SceneTimelineStrip } from '../../components/studio/SceneTimelineStrip';
 import { StudioTopBar } from '../../components/studio/StudioTopBar';
 import type { ChatDoc, ChatCharacter, ChatMessage } from '../../api/types';
+import { useRenderJobStatus } from '../../hooks/renderJob';
+import { useReleaseVideoOnUnmount } from '../../hooks/useReleaseVideoOnUnmount';
 import { vi } from '../../i18n/vi';
 import { Button } from '../../components/ui/Button';
 import { Progress } from '../../components/ui/Progress';
@@ -41,11 +43,14 @@ const VOICE_OPTIONS = ['Adam bựa', 'Trúc Ly', 'Thiện Minh', 'Mai Anh', 'H�
 
 export function ChattingEditor() {
   const { slug } = useParams<{ slug: string }>();
+  const renderJob = useRenderJobStatus();
   const [selectedMsgIndex, setSelectedMsgIndex] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isRerolling, setIsRerolling] = useState<'meme' | 'sfx' | null>(null);
-  const [isRendering, setIsRendering] = useState(false);
+  const [startingRender, setStartingRender] = useState(false);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
+  const [avatarVersion, setAvatarVersion] = useState(0);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [autoProgress, setAutoProgress] = useState<{
     percent: number;
@@ -55,6 +60,12 @@ export function ChattingEditor() {
   } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { platform: safeZone, setPlatform: setSafeZone } = useSafeZone();
+
+  const isRendering =
+    startingRender ||
+    (renderJob.running &&
+      renderJob.kind === 'chatting_render' &&
+      (!slug || renderJob.slug === slug));
 
   // 1. Lấy dữ liệu dự án
   const { data, refetch: refetchProject } = useQuery({
@@ -80,95 +91,87 @@ export function ChattingEditor() {
 
   const doc = data?.doc;
   const activeRunningJob = jobInfo || data?.job;
+  const latestRender = data?.renders?.[0];
+  const videoUrl = latestRender
+    ? `/api/chatting/${slug}/renders/${latestRender.video_file}`
+    : data?.preview_url;
+  useReleaseVideoOnUnmount(previewVideoRef, videoUrl);
 
-  // Lắng nghe tiến độ tạo video tự động (nếu có job đang running)
+  // Đồng bộ job chatting_auto vào RenderJobProvider toàn cục (0 EventSource trùng)
   useEffect(() => {
     const jId = activeRunningJob?.job_id;
-    if (!jId || activeRunningJob?.status !== 'running') return;
-    if (typeof EventSource === 'undefined') return;
-
-    const es = new EventSource(`/api/jobs/${jId}/events`);
-
-    es.addEventListener('progress', (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        const timings = d.timings;
-        setAutoProgress({
-          percent: d.percent ?? d.progress ?? 0,
-          phase: d.phase ?? d.step ?? '',
-          text: d.text ?? d.message ?? '',
-          llmSeconds: timings?.llm_s,
-        });
-      } catch (err) {
-        console.error('SSE parse error:', err);
-      }
+    if (!jId || activeRunningJob?.status !== 'running' || !slug) return;
+    renderJob.attachJob({
+      jobId: jId,
+      slug,
+      kind: 'chatting_auto',
+      engine: 'chatting',
+      title: slug,
+      route: `/chatting/${encodeURIComponent(slug)}`,
+      progress: activeRunningJob.percent ?? 10,
+      step: 'fetch',
+      stage: activeRunningJob.text || 'Đang xử lý dự án...',
     });
+  }, [
+    activeRunningJob?.job_id,
+    activeRunningJob?.status,
+    activeRunningJob?.percent,
+    activeRunningJob?.text,
+    slug,
+    renderJob,
+  ]);
 
-    es.addEventListener('end', (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        es.close();
-        refetchJob();
-        refetchProject();
-        if (d.status === 'failed') {
-          setNotice(`Lỗi tạo video: ${d.error || 'Thất bại'}`);
-        }
-      } catch {
-        es.close();
-      }
-    });
-
-    es.onerror = () => {
-      es.close();
-    };
-
-    return () => {
-      es.close();
-    };
-  }, [activeRunningJob?.job_id, activeRunningJob?.status, refetchJob, refetchProject]);
-
-  // Lắng nghe tiến độ dựng SSE khi render thủ công trong editor
+  // Lắng nghe tiến độ chatting_auto từ external store
   useEffect(() => {
-    if (!renderJobId) return;
-    if (typeof EventSource === 'undefined') return;
-    const es = new EventSource(`/api/jobs/${renderJobId}/events`);
-
-    es.addEventListener('progress', (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        setRenderProgress(d.percent ?? d.progress ?? 0);
-      } catch {
-        // bỏ qua gói tin lỗi định dạng
-      }
-    });
-
-    es.addEventListener('end', (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        es.close();
-        setIsRendering(false);
-        setRenderJobId(null);
-        setRenderProgress(null);
-        if (d.status === 'done') {
-          refetchProject();
-          setNotice('Dựng video hoàn tất!');
-        } else {
-          setNotice(`Lỗi dựng video: ${d.error || 'Thất bại'}`);
-        }
-      } catch {
-        es.close();
-      }
-    });
-
-    es.onerror = () => {
-      es.close();
-      setIsRendering(false);
+    const jId = activeRunningJob?.job_id;
+    if (!jId || renderJob.jobId !== jId) return;
+    const apply = () => {
+      const snap = renderJob.progressStore.getSnapshot();
+      const timings = snap.timings as { llm_s?: number } | undefined;
+      setAutoProgress({
+        percent: snap.percent,
+        phase: snap.phase || snap.step,
+        text: snap.message || snap.stage,
+        llmSeconds: timings?.llm_s,
+      });
     };
+    apply();
+    return renderJob.progressStore.subscribe(apply);
+  }, [activeRunningJob?.job_id, renderJob.jobId, renderJob.progressStore]);
 
-    return () => {
-      es.close();
+  // Lắng nghe tiến độ chatting_render từ external store
+  useEffect(() => {
+    if (!renderJobId || renderJob.jobId !== renderJobId) return;
+    const apply = () => {
+      const snap = renderJob.progressStore.getSnapshot();
+      setRenderProgress(Math.round(snap.percent));
     };
-  }, [renderJobId, refetchProject]);
+    apply();
+    return renderJob.progressStore.subscribe(apply);
+  }, [renderJobId, renderJob.jobId, renderJob.progressStore]);
+
+  // Xử lý khi job Chatting (auto hoặc render) kết thúc
+  useEffect(() => {
+    const fin = renderJob.finished;
+    if (!fin) return;
+    if (activeRunningJob?.job_id && fin.id === activeRunningJob.job_id) {
+      void refetchJob();
+      void refetchProject();
+      if (fin.status === 'failed') {
+        setNotice(`Lỗi tạo video: ${fin.error || 'Thất bại'}`);
+      }
+    }
+    if (renderJobId && fin.id === renderJobId) {
+      setRenderJobId(null);
+      setRenderProgress(null);
+      if (fin.status === 'done') {
+        void refetchProject();
+        setNotice('Dựng video hoàn tất!');
+      } else if (fin.status === 'failed') {
+        setNotice(`Lỗi dựng video: ${fin.error || 'Thất bại'}`);
+      }
+    }
+  }, [renderJob.finished, activeRunningJob?.job_id, renderJobId, refetchJob, refetchProject]);
 
   // Nếu đang trong quá trình tạo video tự động (chưa có doc hoặc job đang chạy)
   if (!doc && (activeRunningJob?.status === 'running' || autoProgress)) {
@@ -398,15 +401,28 @@ export function ChattingEditor() {
 
   const handleRender = async (preview: boolean) => {
     if (!slug) return;
-    setIsRendering(true);
+    setStartingRender(true);
     setNotice(null);
     try {
       const res = await api.renderChattingProject(slug, preview);
       setRenderJobId(res.job_id);
+      renderJob.attachJob({
+        jobId: res.job_id,
+        slug,
+        kind: 'chatting_render',
+        engine: 'chatting',
+        title: doc?.title || slug,
+        route: `/chatting/${encodeURIComponent(slug)}`,
+        preview,
+        progress: 2,
+        step: 'render',
+        stage: 'Đang dựng video Chatting 60fps…',
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Không thể bắt đầu dựng: ${msg}`);
-      setIsRendering(false);
+    } finally {
+      setStartingRender(false);
     }
   };
 
@@ -420,6 +436,7 @@ export function ChattingEditor() {
         body: formData,
       });
       if (res.ok) {
+        setAvatarVersion((v) => v + 1);
         refetchProject();
       } else {
         alert('Tải ảnh đại diện thất bại');
@@ -428,11 +445,6 @@ export function ChattingEditor() {
       console.error(err);
     }
   };
-
-  const latestRender = data?.renders?.[0];
-  const videoUrl = latestRender
-    ? `/api/chatting/${slug}/renders/${latestRender.video_file}`
-    : data?.preview_url;
 
   return (
     <div className="flex h-screen max-h-screen flex-col overflow-hidden bg-bg text-text">
@@ -448,6 +460,8 @@ export function ChattingEditor() {
           finalLabel: vi.chatting.exportFinal,
           disabled: isRendering,
           isRendering,
+          subscribeGlobalProgress: isRendering,
+          onCancelRender: isRendering ? () => void renderJob.cancel() : undefined,
           progressPct: renderProgress ?? 0,
           progressStage: isRendering ? 'Đang dựng video Chatting 60fps…' : '',
         }}
@@ -470,7 +484,11 @@ export function ChattingEditor() {
                   <label className="relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-line bg-soft">
                     {char.avatar ? (
                       <img
-                        src={`/api/chatting/${slug}/${char.avatar}?t=${Date.now()}`}
+                        src={
+                          avatarVersion > 0
+                            ? `/api/chatting/${slug}/${char.avatar}?v=${avatarVersion}`
+                            : `/api/chatting/${slug}/${char.avatar}`
+                        }
                         alt={char.name}
                         className="h-full w-full object-cover"
                       />
@@ -851,9 +869,11 @@ export function ChattingEditor() {
             {videoUrl ? (
               <video
                 key={videoUrl}
+                ref={previewVideoRef}
                 src={videoUrl}
                 controls
                 autoPlay={false}
+                preload="metadata"
                 className="h-full w-full object-cover"
               />
             ) : (

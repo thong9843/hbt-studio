@@ -1,12 +1,21 @@
 import { useCallback, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
-import { isOnActiveJobPage, useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
+import { Outlet } from 'react-router-dom';
+import {
+  inferJobEngine,
+  resolveJobRoute,
+  useRenderJobProgress,
+  useRenderJobStatus,
+} from '../../hooks/renderJob';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useRemainingText } from '../../hooks/useRemaining';
 import { NewProjectProvider } from '../NewProjectDialog';
 import { RenderJobProvider } from '../RenderJobProvider';
-import { GlobalJobDock } from './GlobalJobDock';
-import { RenderCard, Sidebar, SIDEBAR_COLLAPSED_KEY, type RenderProgress } from './Sidebar';
+import {
+  Sidebar,
+  SIDEBAR_COLLAPSED_KEY,
+  SidebarRenderStatus,
+  type RenderProgress,
+} from './Sidebar';
 import { StudioWorkspaceProvider } from './StudioWorkspaceContext';
 
 /** Điểm gãy: từ 1280 px thanh trái mặc định mở rộng (224px), dưới đó mặc định thu gọn (64px). */
@@ -28,18 +37,23 @@ function readStoredSidebarCollapsed(): boolean | null {
   }
 }
 
-/** Cô lập đăng ký tiến độ % riêng cho thẻ tiến độ Sidebar để Sidebar re-render 0 lần khi % nhảy. */
+/** Cô lập đăng ký tiến độ % riêng cho SidebarRenderStatus để Sidebar/Layout re-render 0 lần khi % nhảy. */
 function LiveSidebarRenderCard({ mini }: { mini: boolean }) {
   const status = useRenderJobStatus();
   const progress = useRenderJobProgress();
   const remaining = useRemainingText();
   if (!status.running) return null;
+  const engine = inferJobEngine(status.kind, status.engine);
+  const route = resolveJobRoute(engine, status.kind, status.slug, status.route);
   return (
-    <RenderCard
+    <SidebarRenderStatus
       mini={mini}
       render={{
         percent: progress.percent,
-        step: progress.step,
+        step: progress.stage || progress.step,
+        engine,
+        title: status.title || status.slug || undefined,
+        route,
         remaining: remaining ?? undefined,
         onCancel: () => void status.cancel(),
       }}
@@ -48,12 +62,10 @@ function LiveSidebarRenderCard({ mini }: { mini: boolean }) {
 }
 
 /**
- * Thanh trái nhận tiến độ từ job toàn cục và cho phép người dùng chủ động mở rộng / thu gọn
- * trên mọi trang (không còn ép khóa cứng ở các trang Studio).
+ * Thanh trái nhận tiến độ tổng từ job toàn cục (luôn hiển thị xuyên suốt mọi route cho cả 4 động cơ).
  */
 function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderProgress | null }) {
   const status = useRenderJobStatus();
-  const location = useLocation();
   const [userCollapsed, setUserCollapsed] = useState<boolean | null>(() =>
     readStoredSidebarCollapsed(),
   );
@@ -72,10 +84,7 @@ function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderPro
     });
   }, [defaultMini]);
 
-  const showLiveCard =
-    render === undefined &&
-    status.running &&
-    !isOnActiveJobPage(location.pathname, status.kind, status.slug);
+  const showLiveCard = render === undefined && status.running;
 
   return (
     <Sidebar
@@ -89,7 +98,7 @@ function Nav({ defaultMini, render }: { defaultMini: boolean; render?: RenderPro
 
 /**
  * Khung bố cục tổng thể Unified Studio UI:
- * Sidebar cố định bên trái (có nút đóng/mở linh hoạt) + Main Workspace bên phải tự co giãn mượt mà.
+ * Sidebar cố định bên trái (chứa nút mở/thu gọn & SidebarRenderStatus duy nhất) + Main Workspace bên phải.
  */
 export function AppLayout({ render }: AppLayoutProps) {
   const wide = useMediaQuery(WIDE_QUERY);
@@ -102,7 +111,6 @@ export function AppLayout({ render }: AppLayoutProps) {
             <div className="min-w-0 flex-1">
               <Outlet />
             </div>
-            <GlobalJobDock />
           </div>
         </StudioWorkspaceProvider>
       </RenderJobProvider>

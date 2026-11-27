@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stubFetch } from '../test/fakes';
 import { renderWithProviders } from '../test/render';
 import { THEME_KEY } from '../utils/theme';
-import { AppShell } from './AppShell';
+import { AppLayout } from './layout/AppLayout';
 
 const health = { ok: true, ffmpeg: true, whisper: false, gpu: false, missing: [] };
 
@@ -13,7 +13,7 @@ function shell() {
   stubFetch({ 'GET /api/health': health, 'GET /api/projects': [] });
   return renderWithProviders(
     <Routes>
-      <Route element={<AppShell />}>
+      <Route element={<AppLayout />}>
         <Route path="/" element={<p>home</p>} />
       </Route>
     </Routes>,

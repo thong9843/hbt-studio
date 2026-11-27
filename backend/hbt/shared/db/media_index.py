@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -42,29 +41,10 @@ def resolve_media_path(stored_path: str | Path, base_dir: Path | None = None) ->
 
 
 def _probe_video_duration(mp4: Path) -> float:
-    """Đo nhanh thời lượng video bằng ffprobe (trả về 0.0 nếu không khả dụng)."""
-    try:
-        proc = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(mp4),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=2.5,
-            check=False,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return round(max(0.0, float(proc.stdout.strip())), 3)
-    except Exception:
-        pass
-    return 0.0
+    """Đo nhanh thời lượng video bằng `probe_media_info` (trả về 0.0 nếu không khả dụng)."""
+    from hbt.shared.ffmpeg_utils import probe_media_info
+
+    return probe_media_info(mp4, timeout=2.5).duration_s
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:

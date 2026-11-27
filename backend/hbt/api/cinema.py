@@ -43,6 +43,17 @@ def _get_tts_pool(models_dir: Path) -> WarmTTSPool:
     return pool
 
 
+def evict_all_tts_pools() -> None:
+    """Đóng và giải phóng mọi tiến trình WarmTTSPool thường trú khi nhường RAM render/tắt app."""
+    pools = list(_TTS_POOLS.values())
+    _TTS_POOLS.clear()
+    for pool in pools:
+        try:
+            pool.shutdown()
+        except Exception:
+            pass
+
+
 class _CinemaSourceBody(BaseModel):
     timeline: TimelineSpec | None = None
     stickv_slug: str | None = None

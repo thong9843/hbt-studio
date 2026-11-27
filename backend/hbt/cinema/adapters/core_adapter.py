@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-from hbt.cinema.director_ai import assign_editorial_shots
 from hbt.cinema.preflight import PreflightQualityGate
 from hbt.cinema.schema import (
     AspectRatio,
@@ -17,6 +16,7 @@ from hbt.cinema.schema import (
     TimelineSpec,
 )
 from hbt.core.models import HbtCoreScript, infer_music_topic
+from hbt.shared.fs_utils import safe_slug
 
 _TOPIC_TO_DOMAIN: dict[str, str] = {
     "history": "history_geo",
@@ -122,8 +122,9 @@ def core_script_to_timeline(
             )
         )
 
+    _ = run_director
     spec = TimelineSpec(
-        slug=slug or _slugify(script.title),
+        slug=slug or safe_slug(script.title, default="hbt-core", lowercase=True),
         title=script.title or "HBT Core Cinema",
         source_engine="core",
         topic=music_topic,
@@ -134,8 +135,6 @@ def core_script_to_timeline(
         audio=AudioPlan(voice_id=voice_id or "Thanh Bình", music_mood=music_topic),
         beats=beats,
     )
-    if run_director:
-        spec = assign_editorial_shots(spec)
     if run_preflight:
         spec = PreflightQualityGate().validate_and_reflow(spec, auto_fix=True).repaired_spec
     return spec

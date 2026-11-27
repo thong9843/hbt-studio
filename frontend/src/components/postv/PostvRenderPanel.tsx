@@ -3,7 +3,7 @@ import { useState, type ReactNode, type RefObject } from 'react';
 import { api } from '../../api/endpoints';
 import type { RenderOptions } from '../../api/types';
 import { usePostvEditor } from '../../hooks/postvEditor';
-import { useRenderJob } from '../../hooks/renderJob';
+import { useRenderJobProgress, useRenderJobStatus } from '../../hooks/renderJob';
 import { vi } from '../../i18n/vi';
 import { ErrorNote } from '../ErrorNote';
 import { DownloadIcon, FolderIcon, PlayIcon, StopIcon } from '../icons';
@@ -11,6 +11,25 @@ import { Button, type ButtonTone } from '../ui/Button';
 import { Progress } from '../ui/Progress';
 
 const T = vi.postv.render;
+
+function PostvLiveProgressBox({ onCancel }: { onCancel: () => void }) {
+  const progress = useRenderJobProgress();
+  const percent = Math.round(progress.percent);
+  return (
+    <div className="space-y-2 rounded-xl border border-line bg-soft/60 p-3">
+      <Progress value={progress.percent} label={T.progress} />
+      <div className="flex items-center justify-between gap-2 text-small">
+        <span className="truncate font-semibold text-ink">
+          <span className="tabular-nums text-brand">{percent}%</span>
+          {progress.step && <span> · {progress.step}</span>}
+        </span>
+        <Button tone="soft" size="sm" icon={<StopIcon size={16} />} onClick={onCancel}>
+          {T.cancel}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   label: string;
@@ -43,7 +62,7 @@ export function PostvRenderPanel({
   videoRef,
 }: Props) {
   const { project, flush } = usePostvEditor();
-  const job = useRenderJob();
+  const job = useRenderJobStatus();
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const mine = job.slug === project.slug;
@@ -89,7 +108,6 @@ export function PostvRenderPanel({
   const output =
     (sameKind && finished?.status === 'done' ? finished.output : null) ?? fallbackOutput;
   const activeVideoUrl = overrideVideoUrl ?? output?.video ?? null;
-  const percent = Math.round(job.percent);
   return (
     <div className="space-y-4" aria-live="polite">
       {activeVideoUrl && (
@@ -109,25 +127,7 @@ export function PostvRenderPanel({
         </div>
       )}
 
-      {running && (
-        <div className="space-y-2 rounded-xl border border-line bg-soft/60 p-3">
-          <Progress value={job.percent} label={T.progress} />
-          <div className="flex items-center justify-between gap-2 text-small">
-            <span className="truncate font-semibold text-ink">
-              <span className="tabular-nums text-brand">{percent}%</span>
-              {job.step && <span> · {job.step}</span>}
-            </span>
-            <Button
-              tone="soft"
-              size="sm"
-              icon={<StopIcon size={16} />}
-              onClick={() => void job.cancel()}
-            >
-              {T.cancel}
-            </Button>
-          </div>
-        </div>
-      )}
+      {running && <PostvLiveProgressBox onCancel={() => void job.cancel()} />}
 
       <Button
         tone={tone}

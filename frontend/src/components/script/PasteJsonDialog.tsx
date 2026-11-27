@@ -3,7 +3,7 @@ import type { ScriptCheck, ScriptExtra, ScriptIssue } from '../../api/types';
 import { ApiError } from '../../api/client';
 import { api } from '../../api/endpoints';
 import { useProjectEditor } from '../../hooks/projectEditor';
-import { useRenderJob } from '../../hooks/renderJob';
+import { useRenderJobStatus } from '../../hooks/renderJob';
 import { useToast } from '../../hooks/toast';
 import { vi } from '../../i18n/vi';
 import { appliedScenes } from '../../utils/scriptDiff';
@@ -35,7 +35,7 @@ interface Props {
  */
 export function PasteJsonDialog({ open, onClose }: Props) {
   const { project, flush, applyServer, bumpImages } = useProjectEditor();
-  const job = useRenderJob();
+  const job = useRenderJobStatus();
   const toast = useToast();
   /** Đang dựng chính dự án này: không áp, không hoàn tác (backend cũng trả 409). */
   const locked = (job.running || job.starting) && job.slug === project.slug;

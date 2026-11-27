@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import type { ProjectSummary, UnifiedRenderItem } from '../api/types';
@@ -24,6 +24,7 @@ import { Card } from '../components/ui/Card';
 import { Menu } from '../components/ui/Menu';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useNewProject } from '../hooks/newProject';
+import { useReleaseVideoOnUnmount } from '../hooks/useReleaseVideoOnUnmount';
 import { useToast } from '../hooks/toast';
 import { vi } from '../i18n/vi';
 import { formatDate, formatDuration } from '../utils/format';
@@ -191,6 +192,8 @@ function RecentCard({
 
 function RenderCoverPreview({ item }: { item: UnifiedRenderItem }) {
   const [imgFailed, setImgFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseVideoOnUnmount(videoRef, item.video_url);
 
   if (item.cover_url && !imgFailed) {
     return (
@@ -206,10 +209,11 @@ function RenderCoverPreview({ item }: { item: UnifiedRenderItem }) {
 
   return (
     <video
+      ref={videoRef}
       src={`${item.video_url}#t=0.5`}
       muted
       playsInline
-      preload="metadata"
+      preload="none"
       poster="/brand/hay-biet-tuot_avatar.png"
       className="h-full w-full object-cover"
     />

@@ -12,6 +12,7 @@ from pathlib import Path
 from hbt.cinema.hardware import HardwareProfile, detect_hardware
 from hbt.pipeline.ffutil import FFmpegError, ffmpeg_exe
 from hbt.shared.ffmpeg_utils import FFMPEG_RESOURCE_CLAMP
+from hbt.shared.fs_utils import atomic_write_text as _atomic_write_text
 
 BEAT_VIDEO_TIMESCALE = 90000
 BEAT_AUDIO_RATE = 48000
@@ -54,17 +55,6 @@ def build_normalized_beat_flags(
         "-movflags",
         "+faststart",
     ]
-
-
-def _atomic_write_text(dest: Path, text: str) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, dest)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 def _escape_concat_path(path: Path) -> str:
