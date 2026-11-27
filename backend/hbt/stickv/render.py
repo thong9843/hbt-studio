@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import logging
 import math
@@ -678,11 +679,36 @@ def _resolve_beat_visual_image(
     primary_entity_en: str = "",
     ai_photo_budget: list[int] | None = None,
     visual_sources_log: list[dict[str, Any]] | None = None,
+    prev_image_path: str = "",
+    out_meta: dict[str, str] | None = None,
 ) -> tuple[Image.Image | None, str]:
     """Giải quyết ảnh minh họa cho 100% beat (Wikimedia -> Pixabay -> Cloudflare Flux 2D)."""
     photo_path: Path | None = None
     photo_src = "none"
     ref_q = ""
+
+    prev_p = Path(prev_image_path) if prev_image_path else None
+    prev_norm = str(prev_p.resolve()).lower() if prev_p and prev_p.is_file() else ""
+    prev_sha = (
+        hashlib.sha1(prev_p.read_bytes(), usedforsecurity=False).hexdigest()
+        if prev_p and prev_p.is_file()
+        else ""
+    )
+
+    def _is_dup(cand: Path | None) -> bool:
+        if cand is None or not cand.is_file() or not prev_norm:
+            return False
+        if str(cand.resolve()).lower() == prev_norm:
+            return True
+        if prev_sha:
+            try:
+                return (
+                    hashlib.sha1(cand.read_bytes(), usedforsecurity=False).hexdigest() == prev_sha
+                )
+            except OSError:
+                return False
+        return False
+
     if beat.media_path:
         cand_m = project_dir / beat.media_path
         if cand_m.is_file() and cand_m.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -715,10 +741,51 @@ def _resolve_beat_visual_image(
             photo_path = None
             photo_src = "fallback_icon"
 
+        if _is_dup(photo_path):
+            base_ent = entity_anchor or ref_q
+            scene_ctx = beat.board_title or beat.narration[:60]
+            no_text = "no text, no labels, no arrows, no watermark"
+            alt_specs = (
+                (
+                    f"{base_ent} bell tower monument exterior",
+                    f"Clean 2D flat editorial illustration showing a fresh angle of "
+                    f"{base_ent} ({scene_ctx}), {no_text}",
+                ),
+                (
+                    f"alternate editorial scene {beat.id} {base_ent}",
+                    f"Clean 2D flat editorial illustration illustrating: "
+                    f"{beat.narration[:140]} ({base_ent}, {beat.id}), {no_text}",
+                ),
+            )
+            for alt_q, alt_prompt in alt_specs:
+                try:
+                    # Tắt pass 1b (`primary_entity_en=""`) để không tải lại đúng ảnh #1 của thực thể
+                    alt_p, alt_src = resolve_reference_image(
+                        alt_q,
+                        library_dir,
+                        workspace_dir=project_dir.parent.parent,
+                        accent_color=accent,
+                        illustration_prompt=alt_prompt,
+                        primary_entity_en="",
+                        allow_ai_fallback=True,
+                        ai_budget=ai_photo_budget,
+                    )
+                    if alt_src != "iconify" and alt_p.is_file() and not _is_dup(alt_p):
+                        photo_path = alt_p
+                        photo_src = alt_src
+                        ref_q = alt_q
+                        break
+                except Exception:
+                    continue
+
     prop_img: Image.Image | None = None
     if photo_path is not None and photo_path.is_file():
         with Image.open(photo_path) as raw_photo:
             prop_img = raw_photo.convert("RGBA")
+
+    resolved_path_str = str(photo_path) if photo_path else ""
+    if out_meta is not None:
+        out_meta["path"] = resolved_path_str
 
     logger.info("[StickV Visual-First] beat=%s source=%s query=%r", beat.id, photo_src, ref_q)
     if visual_sources_log is not None:
@@ -728,7 +795,7 @@ def _resolve_beat_visual_image(
                 "source": photo_src,
                 "query": ref_q,
                 "board_title": beat.board_title,
-                "path": str(photo_path) if photo_path else "",
+                "path": resolved_path_str,
             }
         )
     return prop_img, photo_src
@@ -760,7 +827,7 @@ def _stream_chunk_frames_to_ffmpeg(
     master_word_timings: dict[int, list[tuple[str, float, float]]] | None = None,
     beat_timeline: list[BeatTimelineEntry] | None = None,
     ai_photo_budget: list[int] | None = None,
-    board_carry: dict[str, Image.Image | None] | None = None,
+    board_carry: dict[str, Any] | None = None,
     primary_entity_en: str = "",
     asset_cache: PuppetAssetCache | None = None,
     watermark_img: Image.Image | None = None,
@@ -938,6 +1005,10 @@ def _stream_chunk_frames_to_ffmpeg(
                 asset_cache=asset_cache,
             )
 
+            prev_img_path = (
+                str(board_carry.get("last_image_path") or "") if board_carry is not None else ""
+            )
+            resolved_meta: dict[str, str] = {}
             prop_img, _photo_src = _resolve_beat_visual_image(
                 beat,
                 project_dir=project_dir,
@@ -946,7 +1017,11 @@ def _stream_chunk_frames_to_ffmpeg(
                 primary_entity_en=primary_entity_en,
                 ai_photo_budget=ai_photo_budget,
                 visual_sources_log=visual_sources_log,
+                prev_image_path=prev_img_path,
+                out_meta=resolved_meta,
             )
+            if board_carry is not None and resolved_meta.get("path"):
+                board_carry["last_image_path"] = resolved_meta["path"]
 
             next_beat = all_beats[g_idx + 1] if g_idx + 1 < len(all_beats) else None
             has_next_diff_title = next_beat is None or (
@@ -1426,7 +1501,7 @@ def render_stickv(
         acc_audio_t = 0.0
         prev_stage_state: BeatStageState | None = None
         ai_photo_budget = [DEFAULT_AI_IMAGE_BUDGET]
-        board_carry: dict[str, Image.Image | None] = {"img": None}
+        board_carry: dict[str, Any] = {"img": None}
         visual_sources_log: list[dict[str, Any]] = []
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):

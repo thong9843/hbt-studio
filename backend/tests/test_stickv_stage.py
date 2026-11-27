@@ -1247,3 +1247,97 @@ def test_stage_board_schemas_no_empty_comparison_or_fake_100_percent() -> None:
                 canvas.close()
     finally:
         sample_photo.close()
+
+
+def test_visual_first_title_unified_uppercase() -> None:
+    """Packet A3: 100% tiêu đề Visual-First đồng bộ UPPERCASE 3-6 từ, không cắt dấu '...'."""
+    from hbt.stickv.stage import _pick_visual_first_title
+
+    samples = [
+        StickvBeat(
+            id="b1",
+            narration="Kỹ sư phát hiện nền đất bị lún.",
+            board_type="pinned_photo",
+            board_title="Phát hiện lún móng",
+        ),
+        StickvBeat(
+            id="b2",
+            narration="Tháp nghiêng Pisa nổi tiếng toàn cầu.",
+            board_type="pinned_photo",
+            board_title="KIỆT TÁC KIẾN TRÚC",
+        ),
+        StickvBeat(
+            id="b3",
+            narration="Mực nước ngầm khiến nền đất sét mềm nghiêng về phía nam.",
+            board_type="pinned_photo",
+            board_title="",
+        ),
+    ]
+    for b in samples:
+        out = _pick_visual_first_title(b)
+        assert out == out.upper(), out
+        assert "..." not in out
+        assert 3 <= len(out.split()) <= 6, out
+
+
+def test_resolve_beat_visual_image_dedupes_adjacent_beats(tmp_path: Path, monkeypatch) -> None:
+    """Packet A3: 2 beat liền kề không trả cùng 1 file ảnh khi có phương án thay thế."""
+    from hbt.stickv import render as sr
+
+    proj_dir = tmp_path / "workspace" / "stickv" / "demo"
+    lib_dir = tmp_path / "library"
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    img_a = lib_dir / "ref_a.jpg"
+    img_b = lib_dir / "ref_b.jpg"
+    Image.new("RGB", (64, 64), (210, 40, 40)).save(img_a, format="JPEG")
+    Image.new("RGB", (64, 64), (40, 120, 210)).save(img_b, format="JPEG")
+
+    def _fake_resolve(query: str, *args, **kwargs):
+        if "detail closeup" in query or "panorama" in query or "alternate" in query:
+            return img_b, "cloudflare_flux"
+        return img_a, "wikimedia"
+
+    monkeypatch.setattr(sr, "resolve_reference_image", _fake_resolve)
+
+    b009 = StickvBeat(
+        id="b009",
+        narration="Toàn cảnh quảng trường tháp nghiêng.",
+        board_type="pinned_photo",
+        board_title="TOÀN CẢNH QUẢNG TRƯỜNG",
+        prop_query="Leaning Tower of Pisa aerial",
+    )
+    b010 = StickvBeat(
+        id="b010",
+        narration="Chi tiết phần đỉnh tháp.",
+        board_type="pinned_photo",
+        board_title="TÓM TẮT 3 Ý CỐT LÕI",
+        prop_query="Leaning Tower of Pisa aerial",
+    )
+    m1: dict[str, str] = {}
+    m2: dict[str, str] = {}
+    im1, _ = sr._resolve_beat_visual_image(
+        b009,
+        project_dir=proj_dir,
+        library_dir=lib_dir,
+        accent=(220, 38, 38, 255),
+        out_meta=m1,
+    )
+    im2, src2 = sr._resolve_beat_visual_image(
+        b010,
+        project_dir=proj_dir,
+        library_dir=lib_dir,
+        accent=(220, 38, 38, 255),
+        prev_image_path=m1["path"],
+        out_meta=m2,
+    )
+    if im1 is not None:
+        im1.close()
+    if im2 is not None:
+        im2.close()
+
+    assert m1["path"] == str(img_a)
+    assert m2["path"] == str(img_b)
+    assert m1["path"] != m2["path"]
+    assert src2 == "cloudflare_flux"

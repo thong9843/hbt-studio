@@ -24,8 +24,8 @@ from hbt.stickv.puppet import PuppetPoseState
 from hbt.stickv.stage import BeatStageState
 
 
-def test_beat_cache_schema_version_visual_first_arms_front() -> None:
-    assert BEAT_CACHE_SCHEMA_VERSION == "visual_first_v1_arms_front"
+def test_beat_cache_schema_version_visual_first_hip_rest() -> None:
+    assert BEAT_CACHE_SCHEMA_VERSION == "visual_first_v2_hip_rest"
 
 
 def test_stage_state_roundtrip_preserves_all_6_spring_velocities() -> None:

@@ -878,7 +878,9 @@ def _pick_visual_first_title(beat: StickvBeat) -> str:
         raw_cap and low_c not in _VISUAL_GENERIC_TITLES
     )
     seed = raw_cap if use_cap else raw_title
-    return shorten_visual_title(seed, fallback_narration=beat.narration, min_words=3, max_words=6)
+    return shorten_visual_title(
+        seed, fallback_narration=beat.narration, min_words=3, max_words=6
+    ).upper()
 
 
 def _draw_visual_first_board(
@@ -895,7 +897,7 @@ def _draw_visual_first_board(
     bw = max(260, x1 - x0)
     bh = max(260, y1 - y0)
 
-    headline = _pick_visual_first_title(beat)
+    headline = _pick_visual_first_title(beat).upper()
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     try:
         d = ImageDraw.Draw(layer)
