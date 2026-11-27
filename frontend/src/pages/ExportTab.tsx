@@ -21,7 +21,7 @@ import { Chip } from '../components/ui/Chip';
 import { Progress } from '../components/ui/Progress';
 import { Switch } from '../components/ui/Switch';
 import { useProjectEditor } from '../hooks/projectEditor';
-import { useRenderJob } from '../hooks/renderJob';
+import { useRenderJobProgress, useRenderJobStatus } from '../hooks/renderJob';
 import { useToast } from '../hooks/toast';
 import { useLatestCovers } from '../hooks/useCovers';
 import { HEAD_PREVIEW_SECONDS, projectFps, useEstimates } from '../hooks/useEstimates';
@@ -83,6 +83,58 @@ function DownloadLink({ href, file, label }: { href: string; file: string; label
   );
 }
 
+function ExportEstimateLine({
+  running,
+  mine,
+  idleLine,
+}: {
+  running: boolean;
+  mine: boolean;
+  idleLine: string;
+}) {
+  const remainingText = useRemainingText();
+  return (
+    <p data-slot="estimate" className="min-h-5 text-center text-small tabular-nums text-muted">
+      {running && mine ? remainingText : idleLine}
+    </p>
+  );
+}
+
+function ExportLiveStatusBody({
+  running,
+  finished,
+  onCancel,
+}: {
+  running: boolean;
+  finished: ReturnType<typeof useRenderJobStatus>['finished'];
+  onCancel: () => void;
+}) {
+  const progress = useRenderJobProgress();
+  const remainingText = useRemainingText();
+  const pct = finished?.progress ?? progress.percent;
+  const stepName = finished?.step ?? progress.step;
+  return (
+    <>
+      <Progress value={pct} label={X.progress} />
+      <p className="text-small">
+        <span className="tabular-nums">{Math.round(pct)}%</span>
+        {stepName && <span> · {stepName}</span>}
+        {running && progress.message && (
+          <span className="text-muted"> — {progress.message}</span>
+        )}
+      </p>
+      {running && (
+        <div className="flex items-center justify-between gap-2 text-small text-muted">
+          <span className="tabular-nums">{remainingText}</span>
+          <Button tone="soft" size="sm" icon={<StopIcon size={18} />} onClick={onCancel}>
+            {X.cancel}
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function ExportTab() {
   const editor = useProjectEditor();
   const toast = useToast();
@@ -91,8 +143,7 @@ export function ExportTab() {
   const { project } = editor;
   const slug = project.slug;
   const outro = project.settings.outro;
-  const rj = useRenderJob();
-  const remainingText = useRemainingText();
+  const rj = useRenderJobStatus();
   const estimates = useEstimates(project);
   const covers = useLatestCovers(slug);
   const mine = rj.slug === slug;
@@ -217,8 +268,6 @@ export function ExportTab() {
   const info = shown ? recordInfo(shown) : finished ? jobInfo(finished) : null;
   const currentId = shown?.job_id ?? (finished?.status === 'done' ? finished.id : null);
 
-  const pct = finished?.progress ?? (mine ? rj.percent : 0);
-  const stepName = finished?.step ?? (mine ? rj.step : '');
   const finalKind: RenderKind = { kind: 'final', fps: finalFps };
   const idleEstimate = (kind: RenderKind) => formatEstimate(estimates.estimate(kind));
 
@@ -314,39 +363,24 @@ export function ExportTab() {
               {reason}
             </p>
           )}
-          <p
-            data-slot="estimate"
-            className="min-h-5 text-center text-small tabular-nums text-muted"
-          >
-            {running && mine
-              ? remainingText
-              : estimates.loaded
+          <ExportEstimateLine
+            running={running}
+            mine={mine}
+            idleLine={
+              estimates.loaded
                 ? vi.estimate.line(idleEstimate(headKind), idleEstimate(finalKind), finalFps)
-                : ''}
-          </p>
+                : ''
+            }
+          />
         </Card>
 
         {(running || finished || connectionError) && mine && (
           <Card as="section" aria-label={X.progress} aria-live="polite" className="space-y-3">
-            <Progress value={pct} label={X.progress} />
-            <p className="text-small">
-              <span className="tabular-nums">{Math.round(pct)}%</span>
-              {stepName && <span> · {stepName}</span>}
-              {running && rj.message && <span className="text-muted"> — {rj.message}</span>}
-            </p>
-            {running && (
-              <div className="flex items-center justify-between gap-2 text-small text-muted">
-                <span className="tabular-nums">{remainingText}</span>
-                <Button
-                  tone="soft"
-                  size="sm"
-                  icon={<StopIcon size={18} />}
-                  onClick={() => void rj.cancel()}
-                >
-                  {X.cancel}
-                </Button>
-              </div>
-            )}
+            <ExportLiveStatusBody
+              running={running}
+              finished={finished}
+              onCancel={() => void rj.cancel()}
+            />
             <ErrorNote error={connectionError} />
             {finished?.status === 'cancelled' && <p className="text-small">{X.cancelled}</p>}
             {failure && (

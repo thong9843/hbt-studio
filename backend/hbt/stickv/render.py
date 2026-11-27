@@ -1156,7 +1156,7 @@ def render_stickv(
         try:
             for c_idx, (c_kind, c_items) in enumerate(chunks, start=1):
                 check_cancel()
-                pct = 35.0 + (c_idx / total_chunks) * 45.0
+                pct = 35.0 + ((c_idx - 1) / total_chunks) * 45.0
                 first_b = c_items[0][1]
                 emit(
                     pct,

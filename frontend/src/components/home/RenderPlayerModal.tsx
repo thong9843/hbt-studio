@@ -88,11 +88,13 @@ export function RenderPlayerModal({
                 {item.slug && (
                   <Link
                     to={
-                      item.engine === 'chatting'
-                        ? `/chatting/${item.slug}`
-                        : item.engine === 'postv'
-                          ? `/postv/${item.slug}`
-                          : `/p/${item.slug}`
+                      item.engine === 'stickv'
+                        ? `/stickv?slug=${encodeURIComponent(item.slug)}`
+                        : item.engine === 'chatting'
+                          ? `/chatting/${item.slug}`
+                          : item.engine === 'postv'
+                            ? `/postv/${item.slug}`
+                            : `/p/${item.slug}`
                     }
                     className="ui-btn ui-btn-soft ui-btn-sm"
                     onClick={onClose}

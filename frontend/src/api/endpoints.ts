@@ -342,9 +342,15 @@ export const api = {
     apiRequest<{ voice_id: string | null }>('PUT', '/gd2/voice/preferences', {
       json: { voice_id: voiceId },
     }),
-  listActiveJobs: () => apiGet<ActiveJob[]>('/jobs'),
-  listJobs: (opts?: { includeRecent?: boolean }) =>
-    apiGet<ActiveJob[]>(opts?.includeRecent ? '/jobs?include_recent=true' : '/jobs'),
+  listActiveJobs: (opts?: { activeOnly?: boolean }) =>
+    apiGet<ActiveJob[]>(opts?.activeOnly ? '/jobs?active_only=true' : '/jobs'),
+  listJobs: (opts?: { includeRecent?: boolean; activeOnly?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.includeRecent) params.set('include_recent', 'true');
+    if (opts?.activeOnly) params.set('active_only', 'true');
+    const qs = params.toString();
+    return apiGet<ActiveJob[]>(qs ? `/jobs?${qs}` : '/jobs');
+  },
   getJob: (jobId: string) => apiGet<Job>(`/jobs/${enc(jobId)}`),
   cancelJob: (jobId: string) => apiRequest<Job>('POST', `/jobs/${enc(jobId)}/cancel`),
   startPostvQuick: (body: {

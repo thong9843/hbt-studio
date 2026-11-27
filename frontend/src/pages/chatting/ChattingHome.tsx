@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { StudioSelect } from '../../components/ui/StudioSelect';
 import { ToggleSwitch } from '../../components/ui/ToggleSwitch';
 import { FilmIcon, MessagesSquareIcon, TrashIcon } from '../../components/icons';
+import { useRenderJobStatus } from '../../hooks/renderJob';
 import { useStudioWorkspace } from '../../hooks/studioWorkspace';
 import { vi } from '../../i18n/vi';
 
@@ -30,6 +31,7 @@ const DURATION_OPTIONS = [
 
 export function ChattingHome() {
   const navigate = useNavigate();
+  const renderJob = useRenderJobStatus();
   const ws = useStudioWorkspace();
   const setStudioMode = ws?.setStudioMode;
   const [inputText, setInputText] = useState('');
@@ -77,6 +79,19 @@ export function ChattingHome() {
         model: selectedModel,
         auto_fetch_online: autoFetchOnline,
       });
+      if (res.job_id) {
+        renderJob.attachJob({
+          jobId: res.job_id,
+          slug: res.slug,
+          kind: 'chatting_auto',
+          engine: 'chatting',
+          title: res.slug,
+          route: `/chatting/${encodeURIComponent(res.slug)}`,
+          progress: 5,
+          step: 'fetch',
+          stage: 'Đang phân tích bài viết',
+        });
+      }
       // Điều hướng ngay sang trang chi tiết để theo dõi tiến trình
       navigate(`/chatting/${res.slug}`);
     } catch (err: unknown) {

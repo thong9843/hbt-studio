@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/endpoints';
 import { stickvApi } from '../api/stickv';
@@ -359,9 +359,22 @@ export function StickvPage() {
     };
   }, [selectedSlug, attachJob, qc, toast]);
 
+  const loadedSlugRef = useRef<string>('');
   useEffect(() => {
     const found = projects.find((p) => p.slug === selectedSlug) ?? null;
     if (found) {
+      if (loadedSlugRef.current === found.slug) {
+        setDraft((prev) => {
+          if (!prev || prev.slug !== found.slug) return found;
+          // Chỉ cập nhật `last_render` từ server refetch để không ghi đè lời thoại đang sửa dở
+          if (JSON.stringify(prev.last_render) !== JSON.stringify(found.last_render)) {
+            return { ...prev, last_render: found.last_render };
+          }
+          return prev;
+        });
+        return;
+      }
+      loadedSlugRef.current = found.slug;
       setDraft(found);
       if (found.domain) setDomain(found.domain);
       if (found.music_mood) setMusicMood(found.music_mood);
@@ -544,6 +557,9 @@ export function StickvPage() {
         jobId: job_id,
         slug,
         kind: 'stickv',
+        engine: 'stickv',
+        title: draft?.title || slug,
+        route: `/stickv?slug=${encodeURIComponent(slug)}`,
         preview,
         progress: 2,
         step: 'Sinh giọng VieNeu-TTS',
@@ -565,7 +581,8 @@ export function StickvPage() {
     }
   }, [job.finished, job.kind]);
 
-  const isStickvJobRunning = job.running && job.kind === 'stickv';
+  const isStickvJobRunning =
+    job.running && job.kind === 'stickv' && (!draft?.slug || job.slug === draft.slug);
 
   const updateBeat = (beatId: string, patch: Partial<StickvBeat>) => {
     if (!draft) return;
