@@ -32,7 +32,7 @@ MIN_LONG_EDGE = 480
 MIN_ASPECT_RATIO = 0.55
 MAX_ASPECT_RATIO = 2.4
 MIN_RELEVANCE_SCORE = 0.45
-DEFAULT_AI_IMAGE_BUDGET = 6
+DEFAULT_AI_IMAGE_BUDGET = 8
 
 logger = logging.getLogger(__name__)
 
@@ -659,6 +659,12 @@ def resolve_reference_image_detailed(
             flux_prompt = clean_prompt or clean_q
             if clean_entity and clean_entity.lower() not in flux_prompt.lower():
                 flux_prompt = f"{clean_entity} — {flux_prompt}" if flux_prompt else clean_entity
+            _no_text_suffix = (
+                "clean 2D editorial illustration, strictly no text, no labels, "
+                "no arrows, no callout lines, no watermark"
+            )
+            if "no text" not in flux_prompt.lower() or "no arrows" not in flux_prompt.lower():
+                flux_prompt = f"{flux_prompt}, {_no_text_suffix}".strip(", ")
             try:
                 generate_illustration_image(
                     flux_prompt,

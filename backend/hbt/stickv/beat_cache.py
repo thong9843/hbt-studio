@@ -19,7 +19,7 @@ from hbt.stickv.models import StickvBeat
 from hbt.stickv.puppet import SEG_CACHE_VERSION, PuppetPoseState
 from hbt.stickv.stage import BeatStageState
 
-BEAT_CACHE_SCHEMA_VERSION = "v1_state_chained_60fps"
+BEAT_CACHE_SCHEMA_VERSION = "visual_first_v1_arms_front"
 DEFAULT_BEAT_CACHE_MAX_MB = 200.0
 
 

@@ -15,7 +15,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from hbt.config import REPO_ROOT
 from hbt.shared.pillow_utils import load_cached_font
 from hbt.stickv.backdrops import DOMAIN_PALETTES, normalize_domain
-from hbt.stickv.llm import format_unwrapped_text, unwrap_board_text
 from hbt.stickv.models import (
     STICKV_ASPECT_SIZES,
     StickvAspect,
@@ -845,6 +844,187 @@ def close_stage_cache(cache: dict[str, Any] | None) -> None:
     cache.clear()
 
 
+_VISUAL_GENERIC_TITLES = frozenset(
+    {
+        "phân tích cơ chế",
+        "dữ kiện định lượng",
+        "bản đồ ý chính",
+        "góc nhìn thực nghiệm",
+        "hồ sơ phân tích",
+        "tổng hợp khoa học",
+        "thông tin quan trọng",
+        "ảnh tư liệu minh họa",
+        "mở đầu video",
+        "tóm tắt 3 ý cốt lõi",
+        "kết luận",
+        "tổng kết",
+        "tổng kết nhanh",
+    }
+)
+
+
+def _pick_visual_first_title(beat: StickvBeat) -> str:
+    """Chọn tiêu đề Visual-First ngắn 3-6 từ (loại văn mẫu, không cắt '...')."""
+    from hbt.stickv.llm import shorten_visual_title
+
+    vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
+    data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
+    raw_title = strip_rich_markup(beat.board_title or "").strip()
+    raw_cap = strip_rich_markup(str(data.get("caption") or "")).strip()
+
+    low_t = raw_title.lower()
+    low_c = raw_cap.lower()
+    use_cap = (not raw_title or low_t in _VISUAL_GENERIC_TITLES) and bool(
+        raw_cap and low_c not in _VISUAL_GENERIC_TITLES
+    )
+    seed = raw_cap if use_cap else raw_title
+    return shorten_visual_title(seed, fallback_narration=beat.narration, min_words=3, max_words=6)
+
+
+def _draw_visual_first_board(
+    canvas: Image.Image,
+    beat: StickvBeat,
+    box: tuple[int, int, int, int],
+    pal: dict[str, tuple[int, int, int, int]],
+    *,
+    photo_img: Image.Image | None = None,
+    content_alpha: float = 1.0,
+) -> tuple[int, int, int, int]:
+    """Vẽ bố cục Visual-First tối giản: Tiêu đề ngắn (3-6 từ) + Khung Ảnh minh họa lớn."""
+    x0, y0, x1, y1 = box
+    bw = max(260, x1 - x0)
+    bh = max(260, y1 - y0)
+
+    headline = _pick_visual_first_title(beat)
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    try:
+        d = ImageDraw.Draw(layer)
+        # 1. Dải Tiêu đề ngắn (3-6 từ) nằm trong safe zone đầu vùng bảng (không cắt '...')
+        head_x0 = x0 + 8
+        head_x1 = x1 - 8
+        head_w = max(200, head_x1 - head_x0)
+        head_h = min(98, max(70, int(round(bh * 0.14))))
+        head_y0 = y0
+        head_y1 = y0 + head_h
+
+        d.rounded_rectangle(
+            (head_x0 + 4, head_y0 + 6, head_x1 + 4, head_y1 + 6),
+            radius=20,
+            fill=(15, 23, 42, 34),
+        )
+        d.rounded_rectangle(
+            (head_x0, head_y0, head_x1, head_y1),
+            radius=20,
+            fill=pal["card"],
+            outline=pal["accent"],
+            width=3,
+        )
+        # Thanh nhấn màu accent ở mép dưới tiêu đề
+        bar_w = min(132, max(64, head_w // 5))
+        bar_cx = (head_x0 + head_x1) // 2
+        d.rounded_rectangle(
+            (bar_cx - bar_w // 2, head_y1 - 8, bar_cx + bar_w // 2, head_y1 - 2),
+            radius=999,
+            fill=pal["accent"],
+        )
+
+        # Tự co cỡ chữ sao cho 3-6 từ nằm gọn 1-2 dòng trong head_w - 40, không chèn '...'
+        text_max_w = max(140, head_w - 40)
+        chosen_font = _load_font(FONT_EXTRABOLD, 38)
+        wrapped_lines: list[str] = [headline]
+        for fsz in range(42, 22, -2):
+            f_cand = _load_font(FONT_EXTRABOLD, fsz)
+            one_bb = d.textbbox((0, 0), headline, font=f_cand)
+            if (one_bb[2] - one_bb[0]) <= text_max_w:
+                chosen_font = f_cand
+                wrapped_lines = [headline]
+                break
+            words = headline.split()
+            if len(words) >= 4:
+                mid = len(words) // 2
+                l1 = " ".join(words[:mid])
+                l2 = " ".join(words[mid:])
+                bb1 = d.textbbox((0, 0), l1, font=f_cand)
+                bb2 = d.textbbox((0, 0), l2, font=f_cand)
+                if max(bb1[2] - bb1[0], bb2[2] - bb2[0]) <= text_max_w:
+                    chosen_font = f_cand
+                    wrapped_lines = [l1, l2]
+                    break
+            chosen_font = f_cand
+
+        line_heights: list[int] = []
+        line_widths: list[int] = []
+        for ln in wrapped_lines:
+            lbb = d.textbbox((0, 0), ln, font=chosen_font)
+            line_widths.append(lbb[2] - lbb[0])
+            line_heights.append(lbb[3] - lbb[1])
+        gap_y = 6 if len(wrapped_lines) > 1 else 0
+        total_th = sum(line_heights) + gap_y
+        cur_ty = head_y0 + max(8, (head_h - 8 - total_th) // 2)
+        for idx_l, ln in enumerate(wrapped_lines):
+            lbb = d.textbbox((0, 0), ln, font=chosen_font)
+            lx = head_x0 + max(16, (head_w - line_widths[idx_l]) // 2)
+            d.text((lx, cur_ty - lbb[1]), ln, font=chosen_font, fill=pal["text"])
+            cur_ty += line_heights[idx_l] + gap_y
+
+        # 2. Khung Ảnh minh họa lớn chiếm trọng tâm vùng trên
+        fy0 = head_y1 + 14
+        fy1 = max(fy0 + 150, y1 - 8)
+        frame_w = min(bw - 12, max(240, int(round((fy1 - fy0) * 1.48))))
+        fx0 = x0 + max(6, (bw - frame_w) // 2)
+        fx1 = fx0 + frame_w
+
+        d.rounded_rectangle(
+            (fx0 + 8, fy0 + 10, fx1 + 8, fy1 + 10),
+            radius=24,
+            fill=(15, 23, 42, 42),
+        )
+        d.rounded_rectangle(
+            (fx0, fy0, fx1, fy1),
+            radius=24,
+            fill=pal["card"],
+            outline=pal["card_border"],
+            width=3,
+        )
+
+        inset = 10
+        ix0, iy0 = fx0 + inset, fy0 + inset
+        ix1, iy1 = fx1 - inset, fy1 - inset
+        iw = max(80, ix1 - ix0)
+        ih = max(80, iy1 - iy0)
+
+        if photo_img is not None:
+            fitted = ImageOps.fit(
+                photo_img.convert("RGBA"),
+                (iw, ih),
+                method=Image.Resampling.LANCZOS,
+                centering=(0.5, 0.5),
+            )
+            mask = Image.new("L", (iw, ih), 0)
+            try:
+                md = ImageDraw.Draw(mask)
+                md.rounded_rectangle((0, 0, iw - 1, ih - 1), radius=18, fill=255)
+                fitted.putalpha(mask)
+                layer.alpha_composite(fitted, (ix0, iy0))
+            finally:
+                mask.close()
+                fitted.close()
+        else:
+            d.rounded_rectangle((ix0, iy0, ix1, iy1), radius=18, fill=pal["takeaway_bg"])
+            badge_sz = max(72, min(140, min(iw, ih) // 2))
+            _draw_topic_circle_badge(
+                layer, ((ix0 + ix1) // 2, (iy0 + iy1) // 2), badge_sz, pal, None
+            )
+
+        d.rounded_rectangle((ix0, iy0, ix1, iy1), radius=18, outline=pal["card_border"], width=2)
+
+        _scale_alpha_inplace(layer, content_alpha)
+        canvas.alpha_composite(layer)
+        return min(head_x0, fx0), head_y0, max(head_x1, fx1), fy1
+    finally:
+        layer.close()
+
+
 def _draw_smart_board_content(
     canvas: Image.Image,
     beat: StickvBeat,
@@ -857,866 +1037,16 @@ def _draw_smart_board_content(
     draw_shell: bool = True,
     content_alpha: float = 1.0,
 ) -> tuple[int, int, int, int]:
-    """Vẽ bảng minh họa 100% beat (gồm thẻ tự động `none` & thẻ Polaroid `pinned_photo`)."""
-    eff_btype = beat.board_type
-    if eff_btype == "pinned_photo":
-        if prop_img is not None:
-            return _draw_pinned_photo_card(
-                canvas, beat, box, pal, photo_img=prop_img, content_alpha=content_alpha
-            )
-        # Chốt chặn cuối: KHÔNG vẽ khung Polaroid rỗng -> chuyển mềm sang thẻ phân tích 2 tầng
-        eff_btype = "bullets"
-    prog = max(0.0, min(1.0, float(progress)))
-    x0, y0, x1, max_y1 = box
-    bw = x1 - x0
-
-    f_badge = _load_font(FONT_EXTRABOLD, 22)
-    f_title = _load_font(FONT_EXTRABOLD, 42)
-    f_body = _load_font(FONT_BOLD, 32)
-    f_sub = _load_font(FONT_MEDIUM, 26)
-
-    vdata: dict[str, Any] = getattr(beat, "visual_data", None) or {}
-    data: dict[str, Any] = {**(beat.board_data or {}), **vdata}
-    if not data.get("items") and getattr(beat, "board_items", None):
-        data["items"] = list(beat.board_items)
-
-    def _side_items(raw_val: Any) -> list[str]:
-        if isinstance(raw_val, list):
-            return [format_unwrapped_text(x) for x in raw_val if format_unwrapped_text(x)][:4]
-        s = format_unwrapped_text(raw_val)
-        return [s] if s else []
-
-    # Chốt chặn schema ở renderer: không vẽ comparison trống hoặc big_number "100%" vô nghĩa
-    if eff_btype == "comparison":
-        l_check = _side_items(data.get("left_items") or data.get("left"))
-        r_check = _side_items(data.get("right_items") or data.get("right"))
-        if not l_check and not r_check:
-            eff_btype = "bullets"
-    elif eff_btype == "big_number":
-        raw_bn = data.get("value")
-        if raw_bn is None or str(raw_bn).strip() == "":
-            raw_bn = data.get("number")
-        bn_str = strip_rich_markup(str(raw_bn or "")).strip()
-        if (
-            not bn_str
-            or not re.search(r"\d", bn_str)
-            or (bn_str == "100%" and "100%" not in (beat.narration or ""))
-        ):
-            eff_btype = "bullets"
-            if not data.get("items"):
-                lbl_s = format_unwrapped_text(data.get("label") or "")
-                sub_s = format_unwrapped_text(data.get("sub") or data.get("detail") or "")
-                data["items"] = [x for x in (lbl_s, sub_s) if x]
-
-    takeaway = (
-        format_unwrapped_text(getattr(beat, "takeaway", "") or data.get("takeaway") or "")
-        .replace("**", "")
-        .strip()
+    """Vẽ 100% beat theo chế độ Visual-First (Tiêu đề ngắn 3-6 từ + Ảnh minh họa lớn)."""
+    _ = progress, total_chapters, draw_shell
+    return _draw_visual_first_board(
+        canvas,
+        beat,
+        box,
+        pal,
+        photo_img=prop_img,
+        content_alpha=content_alpha,
     )
-    hl_fill = _highlight_color_for_card(pal)
-
-    tmp_draw = ImageDraw.Draw(canvas)
-    est_h = 104
-    eff_title = format_unwrapped_text(beat.board_title or "") or (
-        _extract_highlight_keyword(beat.narration) if eff_btype == "none" else ""
-    )
-    if eff_title:
-        th = _measure_rich_wrapped_height(
-            tmp_draw, eff_title, f_title, max_width_px=max(200, bw - 140), line_gap=8
-        )
-        est_h += max(58, th + 16)
-
-    if eff_btype in ("none", "bullets", "list", "card"):
-        items = [
-            format_unwrapped_text(it)
-            for it in (data.get("items") or [])
-            if format_unwrapped_text(it)
-        ][:3]
-        if not items:
-            clauses = [
-                c.strip()
-                for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
-                if len(c.strip().split()) >= 3
-            ]
-            items = clauses[:2] or [beat.narration[:70]]
-        for it in items:
-            ih = _measure_rich_wrapped_height(
-                tmp_draw, it, f_body, max_width_px=max(200, bw - 96), line_gap=8
-            )
-            est_h += max(56, ih) + 22
-    elif eff_btype == "recap_card":
-        est_h += 300
-    elif eff_btype in ("big_number", "counter_grow"):
-        est_h += 240
-    elif eff_btype == "quote":
-        q_txt = format_unwrapped_text(data.get("quote") or data.get("text") or beat.narration or "")
-        qh = _measure_rich_wrapped_height(
-            tmp_draw, q_txt, f_body, max_width_px=max(200, bw - 110), line_gap=12
-        )
-        est_h += max(140, qh + 64)
-    elif eff_btype == "comparison":
-        left_items = _side_items(data.get("left_items") or data.get("left"))
-        right_items = _side_items(data.get("right_items") or data.get("right"))
-        col_w_px = max(140, (bw - 120) // 2)
-        lh = sum(
-            _measure_rich_wrapped_height(
-                tmp_draw, f"• {x}", f_sub, max_width_px=col_w_px, line_gap=6
-            )
-            + 8
-            for x in left_items
-        )
-        rh = sum(
-            _measure_rich_wrapped_height(
-                tmp_draw, f"✓ {x}", f_sub, max_width_px=col_w_px, line_gap=6
-            )
-            + 8
-            for x in right_items
-        )
-        est_h += 96 + max(110, lh, rh)
-    elif eff_btype == "bar_compare":
-        bars = (data.get("values") or data.get("bars") or [])[:4]
-        est_h += max(230, len(bars) * 82 + 44)
-    elif eff_btype == "flow_steps":
-        steps = [
-            format_unwrapped_text(s)
-            for s in (data.get("steps") or data.get("items") or [])
-            if format_unwrapped_text(s)
-        ][:4]
-        for stp in steps:
-            sh = _measure_rich_wrapped_height(
-                tmp_draw, stp, f_sub, max_width_px=max(180, bw - 160), line_gap=6, max_lines=2
-            )
-            est_h += max(78, sh + 34) + 14
-    elif eff_btype == "timeline_era":
-        ev_count = max(2, len((data.get("events") or data.get("items") or [])[:4]))
-        est_h += ev_count * 88 + 24
-    elif eff_btype == "location_map":
-        est_h += 260
-    elif eff_btype == "myth_vs_fact":
-        m_txt = format_unwrapped_text(data.get("myth") or data.get("left") or "Lầm tưởng phổ biến")
-        f_txt = format_unwrapped_text(
-            data.get("fact") or data.get("right") or beat.narration or "Sự thật thực tế"
-        )
-        mh = _measure_rich_wrapped_height(
-            tmp_draw, m_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
-        )
-        fh = _measure_rich_wrapped_height(
-            tmp_draw, f_txt, f_sub, max_width_px=max(200, bw - 120), line_gap=8, max_lines=4
-        )
-        est_h += max(108, mh + 64) + max(108, fh + 64) + 28
-
-    if takeaway:
-        est_h += 116
-
-    # Co giãn thông minh theo mật độ thực tế (đủ đầy đặn nhưng không dư khoảng trống > 25%)
-    min_ratio = 0.68 if eff_btype in ("myth_vs_fact", "comparison") else 0.84
-    min_card_h = max(280, int(round((max_y1 - y0) * min_ratio)))
-    card_h = min(max_y1 - y0, max(min_card_h, est_h + 36))
-    y1 = y0 + card_h
-
-    if draw_shell:
-        shell_draw = ImageDraw.Draw(canvas)
-        shell_draw.rounded_rectangle(
-            (x0 + 6, y0 + 10, x1 + 6, y1 + 10), radius=34, fill=(15, 23, 42, 28)
-        )
-        shell_draw.rounded_rectangle(
-            (x0, y0, x1, y1),
-            radius=34,
-            fill=pal["card"],
-            outline=pal["card_border"],
-            width=3,
-        )
-
-        badge_txt = BOARD_BADGES.get(eff_btype, "PHÂN TÍCH")
-        bb = shell_draw.textbbox((0, 0), badge_txt, font=f_badge)
-        badge_w = (bb[2] - bb[0]) + 32
-        shell_draw.rounded_rectangle(
-            (x0 + 32, y0 + 24, x0 + 32 + badge_w, y0 + 62),
-            radius=999,
-            fill=pal["accent"],
-        )
-        shell_draw.text((x0 + 48, y0 + 30), badge_txt, font=f_badge, fill=(255, 255, 255, 255))
-
-        raw_chap = (beat.chapter_title or "").strip()
-        if total_chapters <= 1:
-            raw_chap = re.sub(r"(?i)^chương\s*\d+\s*[-:—·]*\s*", "", raw_chap).strip()
-        chap_txt = (
-            f"CHƯƠNG {beat.chapter}"
-            if total_chapters > 1
-            else (raw_chap or "KIẾN THỨC")[:18].upper()
-        )
-        cbb = shell_draw.textbbox((0, 0), chap_txt, font=f_badge)
-        cw_pill = (cbb[2] - cbb[0]) + 28
-        shell_draw.rounded_rectangle(
-            (x1 - 32 - cw_pill, y0 + 24, x1 - 32, y0 + 62),
-            radius=999,
-            fill=pal["pill_bg"],
-        )
-        shell_draw.text((x1 - 18 - cw_pill, y0 + 30), chap_txt, font=f_badge, fill=pal["pill_text"])
-
-    inner_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0)) if content_alpha < 0.999 else canvas
-    try:
-        draw = ImageDraw.Draw(inner_layer)
-        cur_y = y0 + 84
-
-        # TẦNG 1: Huy hiệu tròn Iconify 54x54 + Tiêu đề chính (auto-fit không tràn chiều cao)
-        title_max_h = max(72, int(round((y1 - y0) * 0.24)))
-        if eff_btype in ("none", "bullets", "list", "card", "recap_card"):
-            icon_sz = 56
-            _draw_topic_circle_badge(inner_layer, (x0 + 62, cur_y + 28), icon_sz, pal, prop_img)
-            title_x = x0 + 106
-            title_max_w = max(200, bw - 140)
-            if eff_title:
-                cur_y = _draw_rich_autofit_text(
-                    draw,
-                    eff_title,
-                    (title_x, cur_y + 4),
-                    FONT_EXTRABOLD,
-                    42,
-                    22,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=title_max_w,
-                    max_height_px=title_max_h,
-                    line_gap=8,
-                    max_lines=3,
-                )
-            cur_y = max(cur_y + 12, y0 + 156)
-        elif eff_title:
-            cur_y = _draw_rich_autofit_text(
-                draw,
-                eff_title,
-                (x0 + 36, cur_y),
-                FONT_EXTRABOLD,
-                42,
-                22,
-                pal["text"],
-                hl_fill,
-                max_width_px=max(200, bw - 72),
-                max_height_px=title_max_h,
-                line_gap=10,
-                max_lines=3,
-            )
-            cur_y += 10
-
-        content_bottom = y1 - (112 if takeaway else 28)
-
-        if eff_btype in ("none", "bullets", "list", "card"):
-            # TẦNG 2: 2-3 ý phân tích có vạch nhấn màu trái & auto-fit vừa khít `content_bottom`
-            items = [
-                format_unwrapped_text(it)
-                for it in (data.get("items") or [])
-                if format_unwrapped_text(it)
-            ][:3]
-            if not items:
-                clauses = [
-                    c.strip()
-                    for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
-                    if len(c.strip().split()) >= 3
-                ]
-                items = clauses[:2] or [(beat.narration or "Phân tích trọng tâm")[:75]]
-            avail_h = max(80, content_bottom - cur_y)
-            n_items = max(1, len(items))
-            item_gap = 12
-            per_item_max_h = max(44, (avail_h - item_gap * (n_items - 1)) // n_items)
-            for idx, item in enumerate(items):
-                rem_h = content_bottom - cur_y - 4
-                if rem_h < 32:
-                    break
-                bar_c = pal["accent"] if idx % 2 == 0 else pal["amber"]
-                row_top = cur_y + 4
-                slot_h = min(rem_h, per_item_max_h)
-                end_y = _draw_rich_autofit_text(
-                    draw,
-                    item,
-                    (x0 + 58, row_top),
-                    FONT_BOLD,
-                    32,
-                    18,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(200, bw - 96),
-                    max_height_px=slot_h,
-                    line_gap=8,
-                )
-                draw.rounded_rectangle(
-                    (x0 + 38, row_top + 2, x0 + 46, max(row_top + 24, end_y - 8)),
-                    radius=4,
-                    fill=bar_c,
-                )
-                cur_y = min(content_bottom, end_y + item_gap)
-
-        elif eff_btype == "recap_card":
-            # 3 thẻ ngang đúc kết kiến thức cốt lõi (1 · 2 · 3)
-            recap_items = [
-                format_unwrapped_text(it)
-                for it in (data.get("items") or data.get("bullets") or [])
-                if format_unwrapped_text(it)
-            ][:3]
-            if not recap_items:
-                clauses = [
-                    c.strip()
-                    for c in re.split(r"[.;:!?…]", (beat.narration or "").strip())
-                    if len(c.strip().split()) >= 3
-                ]
-                recap_items = clauses[:3] or [beat.board_title or beat.narration]
-            slot_h = max(72, (content_bottom - cur_y - 24) // max(1, len(recap_items)) - 12)
-            for idx, item in enumerate(recap_items, start=1):
-                if cur_y > content_bottom - 58:
-                    break
-                cy1 = min(content_bottom - 8, cur_y + slot_h)
-                fill_c = pal["takeaway_bg"] if idx % 2 == 1 else pal["pill_bg"]
-                badge_c = pal["accent"] if idx == 1 else pal["amber"]
-                draw.rounded_rectangle(
-                    (x0 + 34, cur_y, x1 - 34, cy1),
-                    radius=18,
-                    fill=fill_c,
-                    outline=badge_c,
-                    width=2,
-                )
-                draw.ellipse((x0 + 48, cur_y + 14, x0 + 92, cur_y + 58), fill=badge_c)
-                draw.text((x0 + 62, cur_y + 20), str(idx), font=f_body, fill=(255, 255, 255, 255))
-                _draw_rich_autofit_text(
-                    draw,
-                    item,
-                    (x0 + 108, cur_y + 10),
-                    FONT_BOLD,
-                    30,
-                    13,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(180, bw - 160),
-                    max_height_px=max(32, (cy1 - cur_y) - 16),
-                    line_gap=5,
-                    max_lines=3,
-                )
-                cur_y = cy1 + 12
-
-        elif eff_btype == "quote":
-            q_raw = data.get("quote") or data.get("text") or beat.narration or ""
-            q_txt = format_unwrapped_text(q_raw)
-            draw.rectangle((x0 + 36, cur_y + 8, x0 + 46, content_bottom - 18), fill=pal["accent"])
-            _draw_rich_autofit_text(
-                draw,
-                f'"{q_txt}"',
-                (x0 + 68, cur_y + 8),
-                FONT_BOLD,
-                32,
-                18,
-                pal["text"],
-                hl_fill,
-                max_width_px=max(200, bw - 110),
-                max_height_px=max(48, content_bottom - cur_y - 24),
-                line_gap=12,
-            )
-
-        elif eff_btype == "counter_grow":
-            raw_target = data.get("target", data.get("value", 100))
-            try:
-                target_num = float(
-                    strip_rich_markup(str(raw_target)).replace(",", "").replace("%", "").strip()
-                )
-            except ValueError:
-                target_num = 100.0
-            unit = strip_rich_markup(str(data.get("unit") or "")).strip()
-            cur_num = target_num * _ease_in_out(prog)
-            if abs(target_num - round(target_num)) < 1e-6:
-                num_str = f"{int(round(cur_num)):,}".replace(",", ".")
-            else:
-                num_str = f"{cur_num:.1f}"
-            val_display = f"{num_str} {unit}".strip()
-            f_stat = _fit_single_line_font(
-                draw, val_display, FONT_EXTRABOLD, 128, 40, max(200, bw - 88)
-            )
-            draw.text((x0 + 44, cur_y + 4), val_display, font=f_stat, fill=pal["accent"])
-            bbox = draw.textbbox((x0 + 44, cur_y + 4), val_display, font=f_stat)
-            cur_y = bbox[3] + 22
-            lbl = str(data.get("label") or "")
-            if lbl and cur_y < content_bottom - 24:
-                _draw_rich_autofit_text(
-                    draw,
-                    lbl,
-                    (x0 + 44, cur_y),
-                    FONT_EXTRABOLD,
-                    42,
-                    20,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(200, bw - 88),
-                    max_height_px=max(32, content_bottom - cur_y - 8),
-                    line_gap=8,
-                )
-
-        elif eff_btype == "bar_compare":
-            raw_bars = data.get("values") or data.get("bars") or []
-            bars: list[tuple[str, float]] = []
-            for idx, entry in enumerate(raw_bars[:4]):
-                if isinstance(entry, dict):
-                    lbl = str(entry.get("label") or entry.get("name") or f"Mục {idx + 1}")
-                    try:
-                        val = float(entry.get("value") or 0)
-                    except (TypeError, ValueError):
-                        val = 0.0
-                    bars.append((lbl, max(0.0, val)))
-                elif isinstance(entry, (int, float)):
-                    bars.append((f"Mục {idx + 1}", max(0.0, float(entry))))
-            max_val = max((v for _, v in bars), default=1.0) or 1.0
-            bar_max_w = max(120, bw - 120)
-            eased = _ease_in_out(prog)
-            for idx, (lbl, val) in enumerate(bars):
-                if cur_y > content_bottom - 64:
-                    break
-                cur_val = val * eased
-                fill_w = max(16, int(round((cur_val / max_val) * bar_max_w)))
-                bar_color = pal["accent"] if idx % 2 == 0 else pal["amber"]
-                draw_rich_text_line(
-                    draw,
-                    lbl,
-                    (x0 + 40, cur_y),
-                    f_sub,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(120, bw - 190),
-                )
-                val_txt = (
-                    f"{int(round(cur_val))}" if abs(val - round(val)) < 1e-6 else f"{cur_val:.1f}"
-                )
-                draw.text((x1 - 120, cur_y), val_txt, font=f_sub, fill=bar_color)
-                by = cur_y + 36
-                draw.rounded_rectangle(
-                    (x0 + 40, by, x0 + 40 + bar_max_w, by + 26),
-                    radius=12,
-                    fill=pal["pill_bg"],
-                )
-                draw.rounded_rectangle(
-                    (x0 + 40, by, x0 + 40 + fill_w, by + 26),
-                    radius=12,
-                    fill=bar_color,
-                )
-                cur_y += 78
-
-        elif eff_btype == "big_number":
-            raw_bn = data.get("value")
-            if raw_bn is None or str(raw_bn).strip() == "":
-                raw_bn = data.get("number")
-            val = strip_rich_markup(str(raw_bn or "")).strip()
-            unit = strip_rich_markup(str(data.get("unit") or "")).strip()
-            if val and unit and unit.lower() not in val.lower():
-                val = f"{val} {unit}".strip()
-            lbl = str(data.get("label") or "")
-            sub = str(data.get("sub") or data.get("detail") or "")
-            f_stat = _fit_single_line_font(draw, val, FONT_EXTRABOLD, 128, 40, max(200, bw - 88))
-            draw.text((x0 + 44, cur_y + 4), val, font=f_stat, fill=pal["accent"])
-            bbox = draw.textbbox((x0 + 44, cur_y + 4), val, font=f_stat)
-            cur_y = bbox[3] + 22
-            if lbl and cur_y < content_bottom - 24:
-                lbl_max_h = max(36, int((content_bottom - cur_y) * (0.55 if sub else 0.92)))
-                cur_y = _draw_rich_autofit_text(
-                    draw,
-                    lbl,
-                    (x0 + 44, cur_y),
-                    FONT_EXTRABOLD,
-                    42,
-                    20,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(200, bw - 88),
-                    max_height_px=lbl_max_h,
-                    line_gap=8,
-                )
-            if sub and cur_y < content_bottom - 20:
-                _draw_rich_autofit_text(
-                    draw,
-                    sub,
-                    (x0 + 44, cur_y + 6),
-                    FONT_MEDIUM,
-                    26,
-                    16,
-                    pal["muted"],
-                    hl_fill,
-                    max_width_px=max(200, bw - 88),
-                    max_height_px=max(24, content_bottom - cur_y - 12),
-                    line_gap=8,
-                )
-
-        elif eff_btype == "comparison":
-            mid_x = (x0 + x1) // 2
-            col_gap = 18
-            lx0, lx1 = x0 + 32, mid_x - col_gap
-            rx0, rx1 = mid_x + col_gap, x1 - 32
-            col_w_px = max(120, lx1 - lx0 - 32)
-            box_bottom = max(cur_y + 120, content_bottom - 10)
-            draw.rounded_rectangle(
-                (lx0, cur_y, lx1, box_bottom),
-                radius=18,
-                fill=pal["takeaway_bg"],
-                outline=pal["card_border"],
-                width=2,
-            )
-            draw.rounded_rectangle(
-                (rx0, cur_y, rx1, box_bottom),
-                radius=18,
-                fill=pal["pill_bg"],
-                outline=pal["accent"],
-                width=2,
-            )
-            draw.ellipse((mid_x - 26, cur_y + 8, mid_x + 26, cur_y + 60), fill=pal["accent"])
-            draw.text((mid_x - 16, cur_y + 22), "VS", font=f_badge, fill=(255, 255, 255, 255))
-
-            left_t = format_unwrapped_text(data.get("left_title") or "Bên A")
-            right_t = format_unwrapped_text(data.get("right_title") or "Bên B")
-            draw_rich_text_line(
-                draw,
-                left_t,
-                (lx0 + 16, cur_y + 14),
-                f_body,
-                pal["muted"],
-                hl_fill,
-                max_width_px=col_w_px,
-            )
-            draw_rich_text_line(
-                draw,
-                right_t,
-                (rx0 + 16, cur_y + 14),
-                f_body,
-                pal["accent"],
-                hl_fill,
-                max_width_px=col_w_px,
-            )
-            ly = cur_y + 66
-            ry = cur_y + 66
-            left_list = _side_items(data.get("left_items") or data.get("left"))
-            right_list = _side_items(data.get("right_items") or data.get("right"))
-            l_slot = max(32, (box_bottom - ly - 8) // max(1, len(left_list)))
-            r_slot = max(32, (box_bottom - ry - 8) // max(1, len(right_list)))
-            for item in left_list:
-                if ly > box_bottom - 24:
-                    break
-                ly = (
-                    _draw_rich_autofit_text(
-                        draw,
-                        f"• {item}",
-                        (lx0 + 16, ly),
-                        FONT_MEDIUM,
-                        26,
-                        15,
-                        pal["text"],
-                        hl_fill,
-                        max_width_px=col_w_px,
-                        max_height_px=min(l_slot - 4, box_bottom - ly - 6),
-                        line_gap=6,
-                    )
-                    + 6
-                )
-            for item in right_list:
-                if ry > box_bottom - 24:
-                    break
-                ry = (
-                    _draw_rich_autofit_text(
-                        draw,
-                        f"✓ {item}",
-                        (rx0 + 16, ry),
-                        FONT_MEDIUM,
-                        26,
-                        15,
-                        pal["text"],
-                        hl_fill,
-                        max_width_px=col_w_px,
-                        max_height_px=min(r_slot - 4, box_bottom - ry - 6),
-                        line_gap=6,
-                    )
-                    + 6
-                )
-
-        elif eff_btype == "flow_steps":
-            steps = [
-                format_unwrapped_text(s)
-                for s in (data.get("steps") or data.get("items") or [])
-                if format_unwrapped_text(s)
-            ][:4]
-            active_count = max(1, int(math.ceil(prog * max(1, len(steps)))))
-            n_steps = max(1, len(steps))
-            avail_h = max(160, content_bottom - cur_y - 8)
-            step_gap = 14
-            max_slot_h = max(72, (avail_h - step_gap * (n_steps - 1)) // n_steps)
-            text_max_w = max(180, bw - 168)
-            for idx, step in enumerate(steps, start=1):
-                if cur_y > content_bottom - 58:
-                    break
-                lit = idx <= active_count
-                fill_c = pal["pill_bg"] if lit else pal["takeaway_bg"]
-                out_c = pal["accent"] if lit else pal["card_border"]
-                needed_h = _measure_rich_wrapped_height(
-                    draw, step, f_sub, max_width_px=text_max_w, line_gap=6, max_lines=2
-                )
-                box_h = min(max_slot_h, max(72, needed_h + 24))
-                cy1 = min(content_bottom - 6, cur_y + box_h)
-                draw.rounded_rectangle(
-                    (x0 + 36, cur_y, x1 - 36, cy1),
-                    radius=18,
-                    fill=fill_c,
-                    outline=out_c,
-                    width=3 if lit else 2,
-                )
-                badge_r = 20
-                bx = x0 + 68
-                by = (cur_y + cy1) // 2
-                draw.ellipse(
-                    (bx - badge_r, by - badge_r, bx + badge_r, by + badge_r),
-                    fill=pal["accent"] if lit else pal["amber"],
-                )
-                nbb = draw.textbbox((0, 0), str(idx), font=f_badge)
-                draw.text(
-                    (bx - (nbb[2] - nbb[0]) // 2, by - (nbb[3] - nbb[1]) // 2 - nbb[1]),
-                    str(idx),
-                    font=f_badge,
-                    fill=(255, 255, 255, 255),
-                )
-                _draw_rich_autofit_text(
-                    draw,
-                    step,
-                    (x0 + 104, cur_y + 12),
-                    FONT_MEDIUM,
-                    26,
-                    15,
-                    pal["pill_text"],
-                    hl_fill,
-                    max_width_px=text_max_w,
-                    max_height_px=max(24, (cy1 - cur_y) - 20),
-                    line_gap=6,
-                    max_lines=2,
-                )
-                cur_y = cy1 + step_gap
-
-        elif eff_btype == "timeline_era":
-            raw_ev = data.get("events") or data.get("items") or []
-            events: list[tuple[str, str]] = []
-            for idx, ev in enumerate(raw_ev[:4]):
-                if isinstance(ev, dict):
-                    raw_yr = ev.get("year") or ev.get("era") or f"Mốc {idx + 1}"
-                    raw_tt = ev.get("title") or ev.get("label") or ev.get("text") or ""
-                    events.append(
-                        (
-                            strip_rich_markup(format_unwrapped_text(raw_yr)),
-                            format_unwrapped_text(raw_tt),
-                        )
-                    )
-                else:
-                    s = format_unwrapped_text(ev)
-                    if ":" in s:
-                        yr, tt = s.split(":", 1)
-                        events.append((strip_rich_markup(yr).strip(), tt.strip()))
-                    else:
-                        events.append((f"Mốc {idx + 1}", s))
-            if not events:
-                events = [("Cổ đại", _extract_highlight_keyword(beat.narration))]
-            spine_x = x0 + 62
-            ev_slot_h = max(58, (content_bottom - cur_y - 8) // max(1, len(events)))
-            end_y = min(content_bottom - 18, cur_y + len(events) * ev_slot_h - 20)
-            draw.line([(spine_x, cur_y + 18), (spine_x, end_y)], fill=pal["amber"], width=5)
-            lit_n = max(1, int(math.ceil(prog * len(events))))
-            for idx, (era_lbl, ev_txt) in enumerate(events, start=1):
-                if cur_y > content_bottom - 48:
-                    break
-                lit = idx <= lit_n
-                node_fill = pal["accent"] if lit else pal["pill_bg"]
-                draw.ellipse(
-                    (spine_x - 12, cur_y + 10, spine_x + 12, cur_y + 34),
-                    fill=node_fill,
-                    outline=pal["amber"],
-                    width=3,
-                )
-                draw_rich_text_line(
-                    draw,
-                    era_lbl,
-                    (spine_x + 28, cur_y + 2),
-                    f_badge,
-                    pal["accent"],
-                    pal["accent"],
-                    max_width_px=max(140, bw - 130),
-                )
-                _draw_rich_autofit_text(
-                    draw,
-                    ev_txt,
-                    (spine_x + 28, cur_y + 28),
-                    FONT_MEDIUM,
-                    26,
-                    15,
-                    pal["text"],
-                    hl_fill,
-                    max_width_px=max(160, bw - 130),
-                    max_height_px=max(24, min(ev_slot_h - 32, content_bottom - cur_y - 32)),
-                    line_gap=5,
-                    max_lines=2,
-                )
-                cur_y += ev_slot_h
-
-        elif eff_btype == "location_map":
-            loc_name = str(
-                data.get("location") or data.get("place") or eff_title or "Di tích cổ đại"
-            )
-            coords = strip_rich_markup(
-                str(data.get("coordinates") or data.get("region") or "29.9792° N, 31.1342° E")
-            )
-            map_x0, map_y0, map_x1, map_y1 = x0 + 36, cur_y + 4, x1 - 36, content_bottom - 10
-            draw.rounded_rectangle(
-                (map_x0, map_y0, map_x1, map_y1),
-                radius=22,
-                fill=pal["takeaway_bg"],
-                outline=pal["amber"],
-                width=2,
-            )
-            for gx in range(map_x0 + 48, map_x1, 72):
-                draw.line([(gx, map_y0 + 10), (gx, map_y1 - 10)], fill=pal["card_border"], width=1)
-            for gy in range(map_y0 + 42, map_y1, 56):
-                draw.line([(map_x0 + 10, gy), (map_x1 - 10, gy)], fill=pal["card_border"], width=1)
-            pin_x = (map_x0 + map_x1) // 2
-            pin_y = (map_y0 + map_y1) // 2 - 14
-            pulse_r = int(20 + 10 * abs(math.sin(prog * math.pi * 2.0)))
-            draw.ellipse(
-                (pin_x - pulse_r, pin_y - pulse_r, pin_x + pulse_r, pin_y + pulse_r),
-                outline=pal["accent"],
-                width=3,
-            )
-            draw.ellipse((pin_x - 10, pin_y - 10, pin_x + 10, pin_y + 10), fill=pal["accent"])
-            draw_rich_text_line(
-                draw,
-                loc_name,
-                (map_x0 + 20, map_y0 + 14),
-                f_body,
-                pal["text"],
-                hl_fill,
-                max_width_px=max(140, (map_x1 - map_x0) - 40),
-            )
-            draw_rich_text_line(
-                draw,
-                coords,
-                (map_x0 + 20, map_y1 - 40),
-                f_badge,
-                pal["pill_text"],
-                pal["pill_text"],
-                max_width_px=max(140, (map_x1 - map_x0) - 40),
-            )
-
-        elif eff_btype == "myth_vs_fact":
-            myth_title = (
-                format_unwrapped_text(data.get("myth_title") or "").replace("**", "").strip()
-            )
-            fact_title = (
-                format_unwrapped_text(data.get("fact_title") or "").replace("**", "").strip()
-            )
-            m_t, m_b = unwrap_board_text(
-                data.get("myth") or data.get("left") or "Lầm tưởng phổ biến"
-            )
-            f_t, f_b = unwrap_board_text(
-                data.get("fact") or data.get("right") or beat.narration or "Sự thật khoa học"
-            )
-            eff_mt = myth_title or m_t
-            eff_ft = fact_title or f_t
-            myth_full = f"**{eff_mt}:** {m_b}" if (eff_mt and m_b) else (eff_mt or m_b)
-            fact_full = f"**{eff_ft}:** {f_b}" if (eff_ft and f_b) else (eff_ft or f_b)
-
-            text_w = max(200, bw - 116)
-            m_text_h = _measure_rich_wrapped_height(
-                draw, myth_full, f_sub, max_width_px=text_w, line_gap=8, max_lines=4
-            )
-            f_text_h = _measure_rich_wrapped_height(
-                draw, fact_full, f_sub, max_width_px=text_w, line_gap=8, max_lines=4
-            )
-            avail_h = max(180, content_bottom - cur_y - 16)
-            m_want = max(96, m_text_h + 56)
-            f_want = max(96, f_text_h + 56)
-            total_want = m_want + f_want
-            if total_want > avail_h:
-                ratio = avail_h / total_want
-                m_h = max(84, int(round(m_want * ratio)))
-                f_h = max(84, avail_h - m_h)
-            else:
-                # Co giãn gọn gàng quanh chiều cao nội dung (trống thừa <= 25%)
-                slack = min(int(round(total_want * 0.20)), avail_h - total_want)
-                m_h = m_want + slack // 2
-                f_h = f_want + (slack - slack // 2)
-
-            # Tầng LẦM TƯỞNG (auto-fit trong đúng `m_h - 52`)
-            draw.rounded_rectangle(
-                (x0 + 36, cur_y, x1 - 36, cur_y + m_h),
-                radius=18,
-                fill=(254, 226, 226, 235),
-                outline=(220, 38, 38, 255),
-                width=2,
-            )
-            draw.text((x0 + 54, cur_y + 12), "✕ LẦM TƯỞNG", font=f_badge, fill=(185, 28, 28, 255))
-            _draw_rich_autofit_text(
-                draw,
-                myth_full,
-                (x0 + 54, cur_y + 42),
-                FONT_MEDIUM,
-                26,
-                14,
-                (69, 10, 10, 255),
-                (185, 28, 28, 255),
-                max_width_px=text_w,
-                max_height_px=max(24, m_h - 50),
-                line_gap=6,
-                max_lines=4,
-            )
-            # Tầng SỰ THẬT (auto-fit trong đúng `f_h - 52`)
-            fy0 = cur_y + m_h + 14
-            fy1 = min(content_bottom - 4, fy0 + f_h)
-            draw.rounded_rectangle(
-                (x0 + 36, fy0, x1 - 36, fy1),
-                radius=18,
-                fill=(209, 250, 229, 240),
-                outline=(5, 150, 105, 255),
-                width=2,
-            )
-            draw.text((x0 + 54, fy0 + 12), "✓ SỰ THẬT", font=f_badge, fill=(4, 120, 87, 255))
-            _draw_rich_autofit_text(
-                draw,
-                fact_full,
-                (x0 + 54, fy0 + 42),
-                FONT_MEDIUM,
-                26,
-                14,
-                (6, 78, 59, 255),
-                (4, 120, 87, 255),
-                max_width_px=text_w,
-                max_height_px=max(24, (fy1 - fy0) - 50),
-                line_gap=6,
-                max_lines=4,
-            )
-
-        if takeaway:
-            ty0 = y1 - 100
-            draw.rounded_rectangle(
-                (x0 + 28, ty0, x1 - 28, y1 - 16),
-                radius=16,
-                fill=pal["takeaway_bg"],
-                outline=pal["amber"],
-                width=2,
-            )
-            _draw_rich_autofit_text(
-                draw,
-                f"**CHỐT LẠI:** {takeaway}",
-                (x0 + 44, ty0 + 12),
-                FONT_MEDIUM,
-                24,
-                18,
-                pal["pill_text"],
-                hl_fill,
-                max_width_px=max(180, bw - 88),
-                max_height_px=64,
-                line_gap=5,
-                max_lines=2,
-            )
-
-        if inner_layer is not canvas:
-            _scale_alpha_inplace(inner_layer, content_alpha)
-            canvas.alpha_composite(inner_layer)
-    finally:
-        if inner_layer is not canvas:
-            inner_layer.close()
-    return x0, y0, x1, y1
 
 
 def _draw_smart_board(
