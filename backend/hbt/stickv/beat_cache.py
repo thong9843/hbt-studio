@@ -19,7 +19,7 @@ from hbt.stickv.models import StickvBeat
 from hbt.stickv.puppet import SEG_CACHE_VERSION, PuppetPoseState
 from hbt.stickv.stage import BeatStageState
 
-BEAT_CACHE_SCHEMA_VERSION = "visual_first_v2_hip_rest"
+BEAT_CACHE_SCHEMA_VERSION = "visual_first_v3_zero_jitter"
 DEFAULT_BEAT_CACHE_MAX_MB = 200.0
 
 
@@ -59,6 +59,10 @@ def deserialize_pose_state(data: dict[str, Any] | None) -> PuppetPoseState | Non
         rw_vy=float(data.get("rw_vy", 0.0)),
         head_vel=float(data.get("head_vel", 0.0)),
         torso_vel=float(data.get("torso_vel", 0.0)),
+        emotion=str(data.get("emotion", "")),
+        face_mood=str(data.get("face_mood", "")),
+        eye_slot=str(data.get("eye_slot", "")),
+        blink_remaining_s=float(data.get("blink_remaining_s", 0.0)),
     )
 
 
@@ -79,6 +83,7 @@ def serialize_stage_state(state: BeatStageState | None) -> dict[str, Any] | None
         "last_board_title": str(state.last_board_title),
         "last_board_type": str(state.last_board_type),
         "last_chapter": int(state.last_chapter),
+        "last_visual_title": str(getattr(state, "last_visual_title", "") or ""),
     }
 
 
@@ -99,6 +104,7 @@ def deserialize_stage_state(data: dict[str, Any] | None) -> BeatStageState | Non
         last_board_title=str(data.get("last_board_title", "")),
         last_board_type=str(data.get("last_board_type", "")),
         last_chapter=int(data.get("last_chapter", 1)),
+        last_visual_title=str(data.get("last_visual_title", "")),
     )
 
 

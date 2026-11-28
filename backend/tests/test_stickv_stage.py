@@ -1341,3 +1341,149 @@ def test_resolve_beat_visual_image_dedupes_adjacent_beats(tmp_path: Path, monkey
     assert m2["path"] == str(img_b)
     assert m1["path"] != m2["path"]
     assert src2 == "cloudflare_flux"
+
+
+def test_p11_locked_16_10_frame_zero_dest_y_jump_and_separated_title_fade() -> None:
+    """INV-12: Khung ảnh 16:10 cố định cho ảnh dọc/ngang, 0px nhảy dest_y, tách 2 pha tiêu đề."""
+    from unittest.mock import patch
+
+    from PIL import ImageDraw
+
+    from hbt.stickv.stage import (
+        BeatStageState,
+        _composite_transitioned_board,
+        _compute_visual_first_rects,
+        _draw_visual_first_board,
+        close_stage_cache,
+        compute_layered_camera_layout,
+        resolve_stage_palette,
+    )
+
+    pal = resolve_stage_palette("paper_classic", "cream")
+    box = (56, 125, 1024, 830)
+    rects = _compute_visual_first_rects(box)
+    ix0, iy0, ix1, iy1 = rects["inner"]
+    assert abs((ix1 - ix0) / max(1, iy1 - iy0) - 1.6) < 0.02
+
+    # 1. Ảnh dọc (trên xanh lá, dưới xanh dương) & ngang cùng khung 16:10, smart-crop phần trên
+    portrait = Image.new("RGBA", (600, 1200), (20, 40, 220, 255))
+    portrait.paste(Image.new("RGBA", (600, 500), (30, 180, 60, 255)), (0, 0))
+    landscape = Image.new("RGBA", (1200, 600), (210, 60, 40, 255))
+    c_p = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    c_l = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    try:
+        b1 = StickvBeat(
+            id="b_p",
+            narration="Bản đồ khu vực sa mạc trống.",
+            board_type="pinned_photo",
+            board_title="Bản đồ sa mạc trống",
+        )
+        r_p = _draw_visual_first_board(c_p, b1, box, pal, photo_img=portrait)
+        r_l = _draw_visual_first_board(c_l, b1, box, pal, photo_img=landscape)
+        assert r_p == r_l == rects["outer"]
+        # Smart-crop (0.5, 0.28): phần trên bên trong khung 16:10 giữ màu xanh lá từ đỉnh ảnh
+        top_px = c_p.getpixel(((ix0 + ix1) // 2, iy0 + 25))
+        assert top_px[1] > 140 and top_px[2] < 100
+    finally:
+        portrait.close()
+        landscape.close()
+        c_p.close()
+        c_l.close()
+
+    # 2. anchor_top_center liên tục khi chuyển wide_stage <-> focus_board
+    st_wide = BeatStageState(x=540.0, y=1200.0, camera_shot="wide_stage")
+    lay_start = compute_layered_camera_layout(
+        "focus_board", aspect="9:16", w=1080, h=1920, t_sec=0.0, prev_stage_state=st_wide
+    )
+    lay_end = compute_layered_camera_layout(
+        "focus_board", aspect="9:16", w=1080, h=1920, t_sec=0.70, prev_stage_state=st_wide
+    )
+    assert lay_start.anchor_top_center is not None and lay_end.anchor_top_center is not None
+    assert lay_start.anchor_top_center[1] == pytest.approx(115.0)
+    assert lay_end.anchor_top_center[1] == pytest.approx(118.0)
+
+    # 3. Tách 2 pha tiêu đề (0% overlap) & 0px nhảy dest_y qua các mốc thời gian
+    prev_board = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    photo_a = Image.new("RGBA", (800, 500), (200, 80, 60, 255))
+    photo_b = Image.new("RGBA", (500, 900), (50, 150, 210, 255))
+    beat_a = StickvBeat(
+        id="ba",
+        narration="Tiêu đề cũ đầu tiên.",
+        board_type="pinned_photo",
+        board_title="Tiêu đề cũ một",
+    )
+    beat_b = StickvBeat(
+        id="bb",
+        narration="Tiêu đề mới thứ hai.",
+        board_type="pinned_photo",
+        board_title="Tiêu đề mới hai",
+    )
+    prev_st = BeatStageState(
+        x=540.0,
+        y=1200.0,
+        camera_shot="wide_stage",
+        last_board_title="Tiêu đề cũ một",
+        last_board_type="pinned_photo",
+        last_visual_title="TIÊU ĐỀ CŨ MỘT",
+    )
+    cache: dict = {}
+    try:
+        _composite_transitioned_board(
+            prev_board,
+            beat_a,
+            box,
+            pal,
+            t_sec=1.0,
+            duration_sec=3.0,
+            progress=1.0,
+            prop_img=photo_a,
+            clamp_bounds=(20, 115, 1060, 865),
+            anchor_top_center=(540.0, 115.0),
+        )
+        seen_at_t: dict[float, list[str]] = {}
+        y_tops: list[int] = []
+        orig_text = ImageDraw.ImageDraw.text
+        for t_check in (0.03, 0.13, 0.20, 0.30, 0.50):
+            drawn: list[str] = []
+
+            def spy(self, xy, text, *args, _d=drawn, **kwargs):
+                _d.append(str(text))
+                return orig_text(self, xy, text, *args, **kwargs)
+
+            fr = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+            try:
+                with patch.object(ImageDraw.ImageDraw, "text", spy):
+                    _composite_transitioned_board(
+                        fr,
+                        beat_b,
+                        box,
+                        pal,
+                        t_sec=t_check,
+                        duration_sec=3.0,
+                        progress=min(1.0, t_check / 2.0),
+                        prop_img=photo_b,
+                        prev_stage_state=prev_st,
+                        clamp_bounds=(20, 115, 1060, 865),
+                        anchor_top_center=(540.0, 115.0),
+                        prev_board_img=prev_board,
+                        board_cache=cache,
+                    )
+                seen_at_t[t_check] = drawn
+                bbox = fr.getbbox()
+                assert bbox is not None
+                y_tops.append(bbox[1])
+            finally:
+                fr.close()
+
+        assert any("TIÊU ĐỀ CŨ MỘT" in t for t in seen_at_t[0.03])
+        assert not any("TIÊU ĐỀ MỚI HAI" in t for t in seen_at_t[0.03])
+        assert seen_at_t[0.13] == []
+        for tm in (0.20, 0.30):
+            assert any("TIÊU ĐỀ MỚI HAI" in t for t in seen_at_t[tm])
+            assert not any("TIÊU ĐỀ CŨ MỘT" in t for t in seen_at_t[tm])
+        assert len(set(y_tops)) == 1, f"dest_y jumped across transition: {y_tops}"
+    finally:
+        close_stage_cache(cache)
+        prev_board.close()
+        photo_a.close()
+        photo_b.close()

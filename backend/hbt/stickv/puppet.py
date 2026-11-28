@@ -1091,6 +1091,7 @@ class EyeController:
         interaction: str = "none",
         beat_id: str = "b001",
         fps: int = 30,
+        initial_blink_delay_s: float | None = None,
     ) -> None:
         self.fps = max(15, int(fps))
         self.raw_pose = (pose or "").strip().lower()
@@ -1102,17 +1103,29 @@ class EyeController:
         self.interaction = (interaction or "none").strip().lower()
         self.eye_slot = self._resolve_slot(pose, anim_oneshot, emotion=self.emotion)
         seed_num = sum(ord(ch) * (i + 1) for i, ch in enumerate(beat_id or "b001"))
-        # Lịch chớp mắt biến thiên tự nhiên 2.4s - 4.2s (không đều máy móc)
+        # Lịch chớp mắt biến thiên tự nhiên 2.4s - 4.2s; bỏ mốc 0 để không chớp ngay đầu beat
         self.blink_intervals_s: list[float] = []
-        self._blink_starts: list[int] = [0]
-        cur = 0
+        if initial_blink_delay_s is not None and float(initial_blink_delay_s) >= 0.45:
+            first_delay_s = min(4.2, float(initial_blink_delay_s))
+        else:
+            h0 = ((seed_num * 37 + 19) % 100) / 100.0
+            first_delay_s = round(1.2 + h0 * 1.4, 3)
+        cur = max(int(round(0.45 * self.fps)), int(round(first_delay_s * self.fps)))
+        self._blink_starts: list[int] = [cur]
         for step in range(40):
             h_val = ((seed_num * 37 + step * 73 + 19) % 100) / 100.0
             interval_s = round(2.4 + h_val * 1.8, 3)
             self.blink_intervals_s.append(interval_s)
             cur += max(30, int(round(interval_s * self.fps)))
             self._blink_starts.append(cur)
-        self.blink_period_frames = self._blink_starts[1]
+        self.blink_period_frames = self._blink_starts[0]
+
+    def remaining_to_next_blink_s(self, frame_idx: int) -> float:
+        """Thời gian còn lại (giây) tới lần chớp mắt kế tiếp để nối liền sang beat sau."""
+        for start in self._blink_starts:
+            if start > frame_idx:
+                return round(max(0.45, (start - frame_idx) / float(self.fps)), 3)
+        return 2.4
 
     @classmethod
     def _resolve_slot(cls, pose: str, anim_oneshot: str | None, *, emotion: str = "auto") -> str:
@@ -1220,6 +1233,10 @@ class PuppetPoseState:
     rw_vy: float = 0.0
     head_vel: float = 0.0
     torso_vel: float = 0.0
+    emotion: str = ""
+    face_mood: str = ""
+    eye_slot: str = ""
+    blink_remaining_s: float = 0.0
 
 
 def _hermite_smoothstep(t: float) -> float:
@@ -2006,6 +2023,11 @@ class PuppetRig:
             self.target_height,
         )
 
+        init_blink = (
+            prev_pose_state.blink_remaining_s
+            if (prev_pose_state is not None and prev_pose_state.blink_remaining_s >= 0.45)
+            else None
+        )
         self.eye_ctrl = EyeController(
             pose=pose,
             emotion=self.emotion,
@@ -2014,6 +2036,7 @@ class PuppetRig:
             interaction=self.interaction,
             beat_id=beat_id,
             fps=self.fps,
+            initial_blink_delay_s=init_blink,
         )
         self.oneshot_dur = 0.65 if self.anim_oneshot else 0.0
         self.blend_dur = 0.15  # 5 frames @ 30fps
@@ -2290,7 +2313,7 @@ class PuppetRig:
     def _build_head_layer(
         self, frame_idx: int, env_val: float, t_sec: float = 0.0
     ) -> tuple[Image.Image, tuple[float, float]]:
-        """Lắp Eyes, Mouth & Emotion trên Head (có lề an toàn không cắt ký hiệu) + trả pivot."""
+        """Lắp Eyes, Mouth & Emotion trên Head (có cross-fade biểu cảm mượt 0.18s) + trả pivot."""
         head_raw = self.parts["head_blank"]
         hw, hh = head_raw.size
         pad_x = max(24, int(round(hw * 0.40)))
@@ -2299,7 +2322,52 @@ class PuppetRig:
         head = Image.new("RGBA", (hw + 2 * pad_x, hh + pad_top + pad_bot), (0, 0, 0, 0))
         head.alpha_composite(head_raw, (pad_x, pad_top))
 
-        # 1. Eyes layer (kèm Prosody Micro-Brows & Gaze Target)
+        def _composite_faded(
+            dst: Image.Image, src: Image.Image, pos: tuple[int, int], factor: float
+        ) -> None:
+            clamped = max(0.0, min(1.0, float(factor)))
+            if clamped <= 0.01:
+                return
+            if clamped >= 0.995:
+                dst.alpha_composite(src, pos)
+                return
+            tmp = src.copy()
+            try:
+                a_ch = tmp.getchannel("A")
+                try:
+                    scaled_a = a_ch.point(lambda p: int(round(p * clamped)))
+                    try:
+                        tmp.putalpha(scaled_a)
+                    finally:
+                        scaled_a.close()
+                finally:
+                    a_ch.close()
+                dst.alpha_composite(tmp, pos)
+            finally:
+                tmp.close()
+
+        def _get_resized_eye(slot_name: str, ew: int, eh: int) -> Image.Image | None:
+            src = self.eyes.get(slot_name) or self.eyes.get("eyes_neutral")
+            if src is None:
+                return None
+            ekey = (slot_name, ew, eh)
+            cached = self._eye_resize_cache.get(ekey)
+            if cached is None:
+                if len(self._eye_resize_cache) >= 32:
+                    old_k = next(iter(self._eye_resize_cache))
+                    self._eye_resize_cache.pop(old_k).close()
+                cached = src.resize((ew, eh), Image.Resampling.LANCZOS)
+                self._eye_resize_cache[ekey] = cached
+            return cached
+
+        expr_blend_dur = 0.18
+        prev_st = self.prev_pose_state
+        prev_emo = (prev_st.emotion or "").strip().lower() if prev_st is not None else ""
+        prev_eslot = (prev_st.eye_slot or "").strip() if prev_st is not None else ""
+        in_expr_blend = prev_st is not None and t_sec < expr_blend_dur
+        u_expr = _hermite_smoothstep(t_sec / expr_blend_dur) if in_expr_blend else 1.0
+
+        # 1. Eyes layer (kèm Prosody Micro-Brows, Gaze Target & cross-fade khi đổi mắt giữa 2 beat)
         progress = min(1.0, max(0.0, t_sec / max(0.25, self.speech_end)))
         eslot, eye_sy, eox, eoy = self.eye_ctrl.state_at(
             frame_idx, env_val=env_val, progress=progress
@@ -2308,19 +2376,27 @@ class PuppetRig:
         if eye_src is not None:
             ew = max(8, int(round(hw * float(self.rig_cfg["eyes_width_ratio"]))))
             eh = max(2, int(round((ew * eye_src.height / max(1, eye_src.width)) * eye_sy)))
-            ekey = (eslot, ew, eh)
-            eye_resized = self._eye_resize_cache.get(ekey)
-            if eye_resized is None:
-                if len(self._eye_resize_cache) >= 32:
-                    old_k = next(iter(self._eye_resize_cache))
-                    self._eye_resize_cache.pop(old_k).close()
-                eye_resized = eye_src.resize((ew, eh), Image.Resampling.LANCZOS)
-                self._eye_resize_cache[ekey] = eye_resized
+            eye_resized = _get_resized_eye(eslot, ew, eh)
             ecx = pad_x + hw * float(self.rig_cfg["eyes_center_head"][0]) + eox
             ecy = pad_top + hh * float(self.rig_cfg["eyes_center_head"][1]) + eoy
             ex = max(pad_x + 2, min(pad_x + hw - ew - 2, int(round(ecx - ew / 2))))
             ey = max(pad_top + 2, min(pad_top + hh - eh - 2, int(round(ecy - eh / 2))))
-            head.alpha_composite(eye_resized, (ex, ey))
+            if in_expr_blend and prev_eslot and prev_eslot != eslot and prev_eslot in self.eyes:
+                prev_eye_src = self.eyes[prev_eslot]
+                prev_eh = max(
+                    2, int(round((ew * prev_eye_src.height / max(1, prev_eye_src.width)) * eye_sy))
+                )
+                prev_resized = _get_resized_eye(prev_eslot, ew, prev_eh)
+                if prev_resized is not None:
+                    p_ey = max(
+                        pad_top + 2,
+                        min(pad_top + hh - prev_eh - 2, int(round(ecy - prev_eh / 2))),
+                    )
+                    _composite_faded(head, prev_resized, (ex, p_ey), 1.0 - u_expr)
+                if eye_resized is not None:
+                    _composite_faded(head, eye_resized, (ex, ey), u_expr)
+            elif eye_resized is not None:
+                head.alpha_composite(eye_resized, (ex, ey))
 
         # 2. Mouth layer (3 mức closed -> half_open -> open + độ mở 1.18x khi shock/excited)
         mslot, msx, msy_target = compute_mouth_transform(env_val)
@@ -2351,9 +2427,41 @@ class PuppetRig:
             my = max(pad_top + 2, min(pad_top + hh - mh - 2, int(round(mcy - mh / 2))))
             head.alpha_composite(mouth_resized, (mx, my))
 
-        self._draw_emotion_details(
-            head, pad_x=pad_x, pad_top=pad_top, hw=hw, hh=hh, t_sec=t_sec, env_val=env_val
-        )
+        if in_expr_blend and prev_emo and prev_emo != self.emotion:
+            cur_emo = self.emotion
+            prev_det = Image.new("RGBA", head.size, (0, 0, 0, 0))
+            cur_det = Image.new("RGBA", head.size, (0, 0, 0, 0))
+            try:
+                self.emotion = prev_emo
+                self._draw_emotion_details(
+                    prev_det,
+                    pad_x=pad_x,
+                    pad_top=pad_top,
+                    hw=hw,
+                    hh=hh,
+                    t_sec=t_sec,
+                    env_val=env_val,
+                )
+                self.emotion = cur_emo
+                self._draw_emotion_details(
+                    cur_det,
+                    pad_x=pad_x,
+                    pad_top=pad_top,
+                    hw=hw,
+                    hh=hh,
+                    t_sec=t_sec,
+                    env_val=env_val,
+                )
+                _composite_faded(head, prev_det, (0, 0), 1.0 - u_expr)
+                _composite_faded(head, cur_det, (0, 0), u_expr)
+            finally:
+                self.emotion = cur_emo
+                prev_det.close()
+                cur_det.close()
+        else:
+            self._draw_emotion_details(
+                head, pad_x=pad_x, pad_top=pad_top, hw=hw, hh=hh, t_sec=t_sec, env_val=env_val
+            )
         head_piv = (
             pad_x + float(self.rig_cfg["neck_pivot_head"][0]) * hw,
             pad_top + float(self.rig_cfg["neck_pivot_head"][1]) * hh,
@@ -2709,6 +2817,10 @@ class PuppetRig:
                 rw_vy=self._wrist_springs["rw_y"].vel,
                 head_vel=self._springs["head_angle"].vel,
                 torso_vel=self._springs["torso_angle"].vel,
+                emotion=self.emotion,
+                face_mood=self.face_mood or "",
+                eye_slot=self.eye_ctrl.eye_slot,
+                blink_remaining_s=self.eye_ctrl.remaining_to_next_blink_s(frame_idx),
             )
 
             raw_el_l, wr_l = solve_arm_ik_natural("left", sh_l, smooth_l, arm_l1, arm_l2)

@@ -199,16 +199,20 @@ def test_compute_smoothed_rms_ema_and_mouth_squash_stretch(tmp_path: Path) -> No
 def test_eye_controller_blinking_and_happy_skip() -> None:
     ec = EyeController(pose="explain", interaction="hold_prop", beat_id="b001", fps=30)
     assert ec.eye_slot == "eyes_neutral"
-    _, sy0, ox, oy = ec.state_at(0)
-    _, sy1, _, _ = ec.state_at(1)
-    _, sy2, _, _ = ec.state_at(2)
-    _, sy3, _, _ = ec.state_at(3)
+    # P1.1: Không chớp mắt ở frame 0 mỗi beat
+    assert ec.state_at(0)[1] == 1.0
+    b0 = ec._blink_starts[0]
+    assert b0 >= int(round(1.2 * 30))
+    _, sy0, ox, oy = ec.state_at(b0)
+    _, sy1, _, _ = ec.state_at(b0 + 1)
+    _, sy2, _, _ = ec.state_at(b0 + 2)
+    _, sy3, _, _ = ec.state_at(b0 + 3)
     assert (sy0, sy1, sy2, sy3) == (0.45, 0.12, 0.50, 1.0)
     assert (ox, oy) == (4.0, -2.0)
 
     ec_happy = EyeController(pose="happy", beat_id="b002", fps=30)
     assert ec_happy.eye_slot == "eyes_happy"
-    assert ec_happy.state_at(1)[1] == 1.0
+    assert ec_happy.state_at(ec_happy._blink_starts[0] + 1)[1] == 1.0
 
 
 def test_lerp_pose_state_and_prefix_discovery_and_three_tier_fallback(tmp_path: Path) -> None:
@@ -541,8 +545,21 @@ def test_stickv_60fps_matches_30fps_realtime_motion_and_blink(tmp_path: Path) ->
     """Chuyển động 60fps phải khớp tốc độ thời gian thực 30fps (không chạy nhanh gấp đôi)."""
     ec30 = EyeController(pose="present_board", beat_id="b010", fps=30)
     ec60 = EyeController(pose="present_board", beat_id="b010", fps=60)
-    assert [ec30.state_at(i)[1] for i in range(4)] == [0.45, 0.12, 0.50, 1.0]
-    assert [ec60.state_at(i)[1] for i in range(7)] == [0.45, 0.45, 0.12, 0.12, 0.50, 0.50, 1.0]
+    assert ec30.state_at(0)[1] == 1.0
+    assert ec60.state_at(0)[1] == 1.0
+    s30 = ec30._blink_starts[0]
+    s60 = ec60._blink_starts[0]
+    assert abs((s60 / 60.0) - (s30 / 30.0)) < 0.05
+    assert [ec30.state_at(s30 + i)[1] for i in range(4)] == [0.45, 0.12, 0.50, 1.0]
+    assert [ec60.state_at(s60 + i)[1] for i in range(7)] == [
+        0.45,
+        0.45,
+        0.12,
+        0.12,
+        0.50,
+        0.50,
+        1.0,
+    ]
 
     lib = tmp_path / "lib"
     assets = tmp_path / "assets"
@@ -909,3 +926,72 @@ def test_outward_elbows_and_clear_red_tie_across_six_poses(tmp_path: Path) -> No
                 last_fr.close()
         finally:
             rig.close()
+
+
+def test_p11_no_frame0_blink_and_smooth_expression_carry_across_beats(tmp_path: Path) -> None:
+    """INV-12: 0 chớp mắt frame 0, nối lịch chớp & cross-fade biểu cảm mượt qua ranh giới beat."""
+    lib = tmp_path / "lib"
+    assets = tmp_path / "assets"
+    _make_full_puppet_dir(lib / "stickman" / "puppet")
+    fps = 60
+
+    rig1 = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=420,
+        pose="think_chin",
+        emotion="curious",
+        beat_id="b001",
+        fps=fps,
+        duration_sec=1.0,
+        rms_env=[0.3] * fps,
+    )
+    try:
+        assert rig1.eye_ctrl.state_at(0)[1] == 1.0
+        for fi in range(15):
+            fr = rig1.render_frame(fi, fi / float(fps))
+            fr.close()
+        st1 = rig1.last_pose_state
+        assert st1.emotion == "curious"
+        assert st1.eye_slot == "eyes_neutral"
+        assert st1.blink_remaining_s >= 0.45
+    finally:
+        rig1.close()
+
+    rig2 = PuppetRig(
+        library_dir=lib,
+        assets_dir=assets,
+        target_height=420,
+        pose="shock_hands_up",
+        emotion="shock",
+        beat_id="b002",
+        fps=fps,
+        duration_sec=1.0,
+        rms_env=[0.5] * fps,
+        prev_pose_state=st1,
+    )
+    try:
+        assert rig2.eye_ctrl.state_at(0)[1] == 1.0
+        assert abs(rig2.eye_ctrl._blink_starts[0] - int(round(st1.blink_remaining_s * fps))) <= 2
+
+        h0, _ = rig2._build_head_layer(0, 0.5, t_sec=0.0)
+        h_mid, _ = rig2._build_head_layer(5, 0.5, t_sec=0.09)
+        h_full, _ = rig2._build_head_layer(12, 0.5, t_sec=0.20)
+        try:
+
+            def _red_alpha_sum(img: Image.Image) -> int:
+                a = np.asarray(img)
+                mask = (a[..., 0] > 180) & (a[..., 1] < 70) & (a[..., 2] < 70) & (a[..., 3] > 20)
+                return int(a[..., 3][mask].sum())
+
+            red_t0 = _red_alpha_sum(h0)
+            red_mid = _red_alpha_sum(h_mid)
+            red_full = _red_alpha_sum(h_full)
+            assert red_t0 < red_mid < red_full
+            assert red_full > 0
+        finally:
+            h0.close()
+            h_mid.close()
+            h_full.close()
+    finally:
+        rig2.close()

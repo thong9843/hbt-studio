@@ -25,7 +25,7 @@ from hbt.stickv.stage import BeatStageState
 
 
 def test_beat_cache_schema_version_visual_first_hip_rest() -> None:
-    assert BEAT_CACHE_SCHEMA_VERSION == "visual_first_v2_hip_rest"
+    assert BEAT_CACHE_SCHEMA_VERSION == "visual_first_v3_zero_jitter"
 
 
 def test_stage_state_roundtrip_preserves_all_6_spring_velocities() -> None:
@@ -50,6 +50,10 @@ def test_stage_state_roundtrip_preserves_all_6_spring_velocities() -> None:
         rw_vy=0.625,
         head_vel=-2.125,
         torso_vel=1.375,
+        emotion="shock",
+        face_mood="shocked",
+        eye_slot="eyes_shock",
+        blink_remaining_s=1.85,
     )
     st = BeatStageState(
         x=180.5,
@@ -64,6 +68,7 @@ def test_stage_state_roundtrip_preserves_all_6_spring_velocities() -> None:
         last_board_title="Tháp nghiêng Pisa",
         last_board_type="pinned_photo",
         last_chapter=2,
+        last_visual_title="THÁP NGHIÊNG PISA",
     )
     raw = serialize_stage_state(st)
     restored = deserialize_stage_state(raw)

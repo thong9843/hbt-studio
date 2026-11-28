@@ -883,54 +883,132 @@ def _pick_visual_first_title(beat: StickvBeat) -> str:
     ).upper()
 
 
-def _draw_visual_first_board(
-    canvas: Image.Image,
-    beat: StickvBeat,
+def _compute_visual_first_rects(
     box: tuple[int, int, int, int],
-    pal: dict[str, tuple[int, int, int, int]],
-    *,
-    photo_img: Image.Image | None = None,
-    content_alpha: float = 1.0,
-) -> tuple[int, int, int, int]:
-    """Vẽ bố cục Visual-First tối giản: Tiêu đề ngắn (3-6 từ) + Khung Ảnh minh họa lớn."""
+) -> dict[str, tuple[int, int, int, int]]:
+    """Tính tọa độ cố định Visual-First: dải tiêu đề + khung ảnh khóa cứng tỷ lệ 16:10."""
     x0, y0, x1, y1 = box
     bw = max(260, x1 - x0)
     bh = max(260, y1 - y0)
 
-    headline = _pick_visual_first_title(beat).upper()
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    head_x0 = x0 + 8
+    head_x1 = x1 - 8
+    head_h = min(98, max(70, int(round(bh * 0.14))))
+    head_y0 = y0
+    head_y1 = y0 + head_h
+
+    avail_y0 = head_y1 + 14
+    avail_y1 = max(avail_y0 + 150, y1 - 8)
+    avail_h = avail_y1 - avail_y0
+    inset = 10
+    max_iw = max(220, bw - 12 - 2 * inset)
+    max_ih = max(120, avail_h - 2 * inset)
+    if (max_iw / max(1, max_ih)) >= 1.6:
+        ih = max_ih
+        iw = min(max_iw, int(round(ih * 1.6)))
+    else:
+        iw = max_iw
+        ih = min(max_ih, int(round(iw / 1.6)))
+    frame_w = iw + 2 * inset
+    frame_h = ih + 2 * inset
+    fx0 = x0 + (bw - frame_w) // 2
+    fx1 = fx0 + frame_w
+    fy0 = avail_y0 + max(0, (avail_h - frame_h) // 2)
+    fy1 = fy0 + frame_h
+
+    ix0, iy0 = fx0 + inset, fy0 + inset
+    ix1, iy1 = fx1 - inset, fy1 - inset
+    outer = (min(head_x0, fx0), head_y0, max(head_x1, fx1), fy1)
+    return {
+        "head": (head_x0, head_y0, head_x1, head_y1),
+        "frame": (fx0, fy0, fx1, fy1),
+        "inner": (ix0, iy0, ix1, iy1),
+        "outer": outer,
+    }
+
+
+def _smart_cover_crop(photo_img: Image.Image, iw: int, ih: int) -> Image.Image:
+    """Cover crop thông minh: ảnh dọc ưu tiên vùng trên (0.5, 0.28), ảnh ngang căn giữa."""
+    centering = (0.5, 0.28) if photo_img.height > photo_img.width else (0.5, 0.5)
+    rgba = photo_img.convert("RGBA") if photo_img.mode != "RGBA" else photo_img
     try:
-        d = ImageDraw.Draw(layer)
-        # 1. Dải Tiêu đề ngắn (3-6 từ) nằm trong safe zone đầu vùng bảng (không cắt '...')
-        head_x0 = x0 + 8
-        head_x1 = x1 - 8
-        head_w = max(200, head_x1 - head_x0)
-        head_h = min(98, max(70, int(round(bh * 0.14))))
-        head_y0 = y0
-        head_y1 = y0 + head_h
+        return ImageOps.fit(
+            rgba,
+            (iw, ih),
+            method=Image.Resampling.LANCZOS,
+            centering=centering,
+        )
+    finally:
+        if rgba is not photo_img:
+            rgba.close()
 
-        d.rounded_rectangle(
-            (head_x0 + 4, head_y0 + 6, head_x1 + 4, head_y1 + 6),
-            radius=20,
-            fill=(15, 23, 42, 34),
-        )
-        d.rounded_rectangle(
-            (head_x0, head_y0, head_x1, head_y1),
-            radius=20,
-            fill=pal["card"],
-            outline=pal["accent"],
-            width=3,
-        )
-        # Thanh nhấn màu accent ở mép dưới tiêu đề
-        bar_w = min(132, max(64, head_w // 5))
-        bar_cx = (head_x0 + head_x1) // 2
-        d.rounded_rectangle(
-            (bar_cx - bar_w // 2, head_y1 - 8, bar_cx + bar_w // 2, head_y1 - 2),
-            radius=999,
-            fill=pal["accent"],
-        )
 
-        # Tự co cỡ chữ sao cho 3-6 từ nằm gọn 1-2 dòng trong head_w - 40, không chèn '...'
+def _draw_visual_first_shell(
+    layer: Image.Image,
+    rects: dict[str, tuple[int, int, int, int]],
+    pal: dict[str, tuple[int, int, int, int]],
+) -> None:
+    """Vẽ vỏ khung cố định (hộp tiêu đề + khung ảnh 16:10 + bóng đổ)."""
+    d = ImageDraw.Draw(layer)
+    head_x0, head_y0, head_x1, head_y1 = rects["head"]
+    fx0, fy0, fx1, fy1 = rects["frame"]
+    ix0, iy0, ix1, iy1 = rects["inner"]
+    head_w = max(200, head_x1 - head_x0)
+
+    d.rounded_rectangle(
+        (head_x0 + 4, head_y0 + 6, head_x1 + 4, head_y1 + 6),
+        radius=20,
+        fill=(15, 23, 42, 34),
+    )
+    d.rounded_rectangle(
+        (head_x0, head_y0, head_x1, head_y1),
+        radius=20,
+        fill=pal["card"],
+        outline=pal["accent"],
+        width=3,
+    )
+    bar_w = min(132, max(64, head_w // 5))
+    bar_cx = (head_x0 + head_x1) // 2
+    d.rounded_rectangle(
+        (bar_cx - bar_w // 2, head_y1 - 8, bar_cx + bar_w // 2, head_y1 - 2),
+        radius=999,
+        fill=pal["accent"],
+    )
+
+    d.rounded_rectangle(
+        (fx0 + 8, fy0 + 10, fx1 + 8, fy1 + 10),
+        radius=24,
+        fill=(15, 23, 42, 42),
+    )
+    d.rounded_rectangle(
+        (fx0, fy0, fx1, fy1),
+        radius=24,
+        fill=pal["card"],
+        outline=pal["card_border"],
+        width=3,
+    )
+    d.rounded_rectangle((ix0, iy0, ix1, iy1), radius=18, fill=pal["takeaway_bg"])
+
+
+def _draw_visual_first_headline(
+    layer: Image.Image,
+    headline: str,
+    head_rect: tuple[int, int, int, int],
+    pal: dict[str, tuple[int, int, int, int]],
+    *,
+    alpha: float = 1.0,
+    dy_px: float = 0.0,
+) -> None:
+    """Vẽ tiêu đề ngắn (3-6 từ) tự co chữ, hỗ trợ fade alpha và dịch dọc mượt."""
+    if not headline or alpha <= 0.015:
+        return
+    head_x0, head_y0, head_x1, head_y1 = head_rect
+    head_w = max(200, head_x1 - head_x0)
+    head_h = max(48, head_y1 - head_y0)
+
+    text_layer = Image.new("RGBA", (head_w, head_h), (0, 0, 0, 0))
+    try:
+        d = ImageDraw.Draw(text_layer)
         text_max_w = max(140, head_w - 40)
         chosen_font = _load_font(FONT_EXTRABOLD, 38)
         wrapped_lines: list[str] = [headline]
@@ -962,67 +1040,76 @@ def _draw_visual_first_board(
             line_heights.append(lbb[3] - lbb[1])
         gap_y = 6 if len(wrapped_lines) > 1 else 0
         total_th = sum(line_heights) + gap_y
-        cur_ty = head_y0 + max(8, (head_h - 8 - total_th) // 2)
+        cur_ty = max(8, (head_h - 8 - total_th) // 2) + int(round(dy_px))
         for idx_l, ln in enumerate(wrapped_lines):
             lbb = d.textbbox((0, 0), ln, font=chosen_font)
-            lx = head_x0 + max(16, (head_w - line_widths[idx_l]) // 2)
+            lx = max(16, (head_w - line_widths[idx_l]) // 2)
             d.text((lx, cur_ty - lbb[1]), ln, font=chosen_font, fill=pal["text"])
             cur_ty += line_heights[idx_l] + gap_y
 
-        # 2. Khung Ảnh minh họa lớn chiếm trọng tâm vùng trên
-        fy0 = head_y1 + 14
-        fy1 = max(fy0 + 150, y1 - 8)
-        frame_w = min(bw - 12, max(240, int(round((fy1 - fy0) * 1.48))))
-        fx0 = x0 + max(6, (bw - frame_w) // 2)
-        fx1 = fx0 + frame_w
+        _scale_alpha_inplace(text_layer, alpha)
+        layer.alpha_composite(text_layer, (head_x0, head_y0))
+    finally:
+        text_layer.close()
 
-        d.rounded_rectangle(
-            (fx0 + 8, fy0 + 10, fx1 + 8, fy1 + 10),
-            radius=24,
-            fill=(15, 23, 42, 42),
-        )
-        d.rounded_rectangle(
-            (fx0, fy0, fx1, fy1),
-            radius=24,
-            fill=pal["card"],
-            outline=pal["card_border"],
-            width=3,
-        )
 
-        inset = 10
-        ix0, iy0 = fx0 + inset, fy0 + inset
-        ix1, iy1 = fx1 - inset, fy1 - inset
-        iw = max(80, ix1 - ix0)
-        ih = max(80, iy1 - iy0)
+def _build_visual_first_photo_patch(
+    photo_img: Image.Image | None,
+    iw: int,
+    ih: int,
+    pal: dict[str, tuple[int, int, int, int]],
+) -> Image.Image:
+    """Tạo lớp ảnh (iw x ih) bo góc 18px đã qua smart-cover crop (hoặc huy hiệu mặc định)."""
+    if photo_img is not None:
+        fitted = _smart_cover_crop(photo_img, iw, ih)
+        mask = Image.new("L", (iw, ih), 0)
+        try:
+            md = ImageDraw.Draw(mask)
+            md.rounded_rectangle((0, 0, iw - 1, ih - 1), radius=18, fill=255)
+            fitted.putalpha(mask)
+            return fitted
+        finally:
+            mask.close()
 
-        if photo_img is not None:
-            fitted = ImageOps.fit(
-                photo_img.convert("RGBA"),
-                (iw, ih),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.5),
-            )
-            mask = Image.new("L", (iw, ih), 0)
-            try:
-                md = ImageDraw.Draw(mask)
-                md.rounded_rectangle((0, 0, iw - 1, ih - 1), radius=18, fill=255)
-                fitted.putalpha(mask)
-                layer.alpha_composite(fitted, (ix0, iy0))
-            finally:
-                mask.close()
-                fitted.close()
-        else:
-            d.rounded_rectangle((ix0, iy0, ix1, iy1), radius=18, fill=pal["takeaway_bg"])
-            badge_sz = max(72, min(140, min(iw, ih) // 2))
-            _draw_topic_circle_badge(
-                layer, ((ix0 + ix1) // 2, (iy0 + iy1) // 2), badge_sz, pal, None
-            )
+    patch = Image.new("RGBA", (iw, ih), (0, 0, 0, 0))
+    d = ImageDraw.Draw(patch)
+    d.rounded_rectangle((0, 0, iw - 1, ih - 1), radius=18, fill=pal["takeaway_bg"])
+    badge_sz = max(72, min(140, min(iw, ih) // 2))
+    _draw_topic_circle_badge(patch, (iw // 2, ih // 2), badge_sz, pal, None)
+    return patch
 
+
+def _draw_visual_first_board(
+    canvas: Image.Image,
+    beat: StickvBeat,
+    box: tuple[int, int, int, int],
+    pal: dict[str, tuple[int, int, int, int]],
+    *,
+    photo_img: Image.Image | None = None,
+    content_alpha: float = 1.0,
+) -> tuple[int, int, int, int]:
+    """Vẽ bố cục Visual-First tối giản: Tiêu đề ngắn (3-6 từ) + Khung Ảnh cố định 16:10."""
+    rects = _compute_visual_first_rects(box)
+    ix0, iy0, ix1, iy1 = rects["inner"]
+    iw = max(80, ix1 - ix0)
+    ih = max(80, iy1 - iy0)
+
+    headline = _pick_visual_first_title(beat).upper()
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    try:
+        _draw_visual_first_shell(layer, rects, pal)
+        _draw_visual_first_headline(layer, headline, rects["head"], pal, alpha=1.0)
+        patch = _build_visual_first_photo_patch(photo_img, iw, ih, pal)
+        try:
+            layer.alpha_composite(patch, (ix0, iy0))
+        finally:
+            patch.close()
+        d = ImageDraw.Draw(layer)
         d.rounded_rectangle((ix0, iy0, ix1, iy1), radius=18, outline=pal["card_border"], width=2)
 
         _scale_alpha_inplace(layer, content_alpha)
         canvas.alpha_composite(layer)
-        return min(head_x0, fx0), head_y0, max(head_x1, fx1), fy1
+        return rects["outer"]
     finally:
         layer.close()
 
@@ -1063,6 +1150,116 @@ def _draw_smart_board(
     _draw_smart_board_content(canvas, beat, box, pal, progress=progress, prop_img=prop_img)
 
 
+def _compute_board_placement(
+    outer: tuple[int, int, int, int],
+    frame_w: int,
+    frame_h: int,
+    *,
+    scale: float,
+    clamp_bounds: tuple[int, int, int, int] | None,
+    anchor_top_center: tuple[float, float] | None,
+) -> tuple[int, int, int, int, int, int, int, int]:
+    """Tính `(cx0, cy0, sub_w, sub_h, nw, nh, dest_x, dest_y)` nhất quán giữa render & extract."""
+    pad = 16
+    bx0, by0, bx1, by1 = outer
+    cx0 = max(0, bx0 - pad)
+    cy0 = max(0, by0 - pad)
+    cx1 = min(frame_w, bx1 + pad)
+    cy1 = min(frame_h, by1 + pad)
+    sub_w = max(8, cx1 - cx0)
+    sub_h = max(8, cy1 - cy0)
+    if abs(scale - 1.0) >= 0.004:
+        nw = max(8, int(round(sub_w * scale)))
+        nh = max(8, int(round(sub_h * scale)))
+        if clamp_bounds is not None:
+            cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+            max_w = max(8, cb_x1 - cb_x0)
+            max_h = max(8, cb_y1 - cb_y0)
+            if nw > max_w or nh > max_h:
+                fit = min(max_w / nw, max_h / nh)
+                nw = max(8, int(round(nw * fit)))
+                nh = max(8, int(round(nh * fit)))
+    else:
+        nw, nh = sub_w, sub_h
+
+    if anchor_top_center is not None:
+        dest_x = int(round(anchor_top_center[0] - nw * 0.5))
+        dest_y = int(round(anchor_top_center[1]))
+    else:
+        dest_x = cx0 + (sub_w - nw) // 2
+        dest_y = cy0 + (sub_h - nh) // 2
+
+    if clamp_bounds is not None:
+        cb_x0, cb_y0, cb_x1, cb_y1 = clamp_bounds
+        dest_x = max(cb_x0, min(cb_x1 - nw, dest_x))
+        dest_y = max(cb_y0, min(cb_y1 - nh, dest_y))
+    else:
+        dest_x = max(0, min(frame_w - nw, dest_x))
+        dest_y = max(0, min(frame_h - nh, dest_y))
+    return cx0, cy0, sub_w, sub_h, nw, nh, dest_x, dest_y
+
+
+def _extract_prev_inner_photo(
+    prev_board_img: Image.Image,
+    *,
+    rects: dict[str, tuple[int, int, int, int]],
+    prev_stage_state: BeatStageState,
+    iw: int,
+    ih: int,
+) -> Image.Image:
+    """Trích ảnh nội dung 16:10 từ `prev_board_img` theo bố cục cuối của beat trước."""
+    pw, ph = prev_board_img.size
+    prev_aspect: StickvAspect = "9:16" if ph >= pw else "16:9"
+    prev_shot = (getattr(prev_stage_state, "camera_shot", "wide_stage") or "wide_stage").lower()
+    p_box, p_scale, _, p_clamp, p_anchor, _, _, _ = _target_layered_shot_params(
+        prev_shot, aspect=prev_aspect, w=pw, h=ph
+    )
+    p_rects = _compute_visual_first_rects(p_box)
+    p_cx0, p_cy0, p_sw, p_sh, p_nw, p_nh, p_dx, p_dy = _compute_board_placement(
+        p_rects["outer"],
+        pw,
+        ph,
+        scale=p_scale,
+        clamp_bounds=p_clamp,
+        anchor_top_center=p_anchor,
+    )
+    pix0, piy0, pix1, piy1 = p_rects["inner"]
+    sx_ratio = p_nw / max(1, p_sw)
+    sy_ratio = p_nh / max(1, p_sh)
+    crop_x0 = max(0, min(pw - 2, int(round(p_dx + (pix0 - p_cx0) * sx_ratio))))
+    crop_y0 = max(0, min(ph - 2, int(round(p_dy + (piy0 - p_cy0) * sy_ratio))))
+    crop_x1 = max(crop_x0 + 2, min(pw, int(round(p_dx + (pix1 - p_cx0) * sx_ratio))))
+    crop_y1 = max(crop_y0 + 2, min(ph, int(round(p_dy + (piy1 - p_cy0) * sy_ratio))))
+
+    cropped = prev_board_img.crop((crop_x0, crop_y0, crop_x1, crop_y1)).convert("RGBA")
+    mask = Image.new("L", (iw, ih), 0)
+    try:
+        resized = cropped.resize((iw, ih), Image.Resampling.LANCZOS)
+        md = ImageDraw.Draw(mask)
+        md.rounded_rectangle((0, 0, iw - 1, ih - 1), radius=18, fill=255)
+        resized.putalpha(mask)
+        return resized
+    finally:
+        mask.close()
+        cropped.close()
+
+
+def _resolve_prev_headline(prev_stage_state: BeatStageState | None) -> str:
+    if prev_stage_state is None:
+        return ""
+    explicit = strip_rich_markup(getattr(prev_stage_state, "last_visual_title", "") or "").strip()
+    if explicit:
+        return explicit.upper()
+    raw_prev = strip_rich_markup(getattr(prev_stage_state, "last_board_title", "") or "").strip()
+    if not raw_prev:
+        return ""
+    from hbt.stickv.llm import shorten_visual_title
+
+    return shorten_visual_title(
+        raw_prev, fallback_narration=raw_prev, min_words=3, max_words=6
+    ).upper()
+
+
 def _composite_transitioned_board(
     frame_rgba: Image.Image,
     beat: StickvBeat,
@@ -1083,63 +1280,167 @@ def _composite_transitioned_board(
     prev_board_img: Image.Image | None = None,
     board_cache: dict[str, Any] | None = None,
 ) -> None:
-    """Chuyển tiếp thẻ bằng Cross-Fade 0.28s Cosine Ease-In-Out (0% chớp trống, 0% cắt cứng)."""
+    """Chuyển tiếp Visual-First 0-jitter: khung 16:10 cố định, ảnh fade 0.28s, tách 2 pha chữ."""
     if cam_board_alpha <= 0.015:
         return
 
-    cur_title = strip_rich_markup(beat.board_title or "").strip()
-    prev_title = strip_rich_markup(getattr(prev_stage_state, "last_board_title", "") or "").strip()
-    same_title = prev_stage_state is not None and bool(cur_title) and cur_title == prev_title
-    same_recap = (
-        same_title
-        and beat.board_type == "recap_card"
-        and (getattr(prev_stage_state, "last_board_type", "") or "") == "recap_card"
-    )
-
-    if (
-        same_title
-        and abs(cam_board_scale - 1.0) < 0.004
-        and cam_board_alpha > 0.99
-        and clamp_bounds is None
-    ):
-        c_alpha = (
-            1.0
-            if same_recap
-            else (_ease_out_cubic(min(1.0, t_sec / 0.22)) if t_sec < 0.22 else 1.0)
-        )
-        _draw_smart_board_content(
-            frame_rgba,
-            beat,
-            box,
-            pal,
-            progress=progress,
-            prop_img=prop_img,
-            total_chapters=total_chapters,
-            draw_shell=True,
-            content_alpha=c_alpha,
-        )
-        return
-
     enter_t = 0.28
+    rects = _compute_visual_first_rects(box)
+    ix0, iy0, ix1, iy1 = rects["inner"]
+    iw = max(80, ix1 - ix0)
+    ih = max(80, iy1 - iy0)
     scale = float(cam_board_scale)
-    dy_px = 0.0
     alpha = float(cam_board_alpha)
-    if not same_title and t_sec < enter_t:
-        u = _cosine_ease_in_out(t_sec / enter_t)
-        if prev_board_img is not None and prev_board_img.size == frame_rgba.size:
-            prev_alpha = max(0.0, min(1.0, (1.0 - u) * float(cam_board_alpha)))
-            if prev_alpha > 0.015:
-                fading_prev = prev_board_img.copy()
-                try:
-                    _scale_alpha_inplace(fading_prev, prev_alpha)
-                    frame_rgba.alpha_composite(fading_prev)
-                finally:
-                    fading_prev.close()
-        scale *= 0.98 + 0.02 * u
-        dy_px = 12.0 * (1.0 - u)
-        alpha *= u
 
-    if abs(scale - 1.0) < 0.004 and abs(dy_px) < 0.5 and alpha > 0.995 and clamp_bounds is None:
+    if t_sec < enter_t:
+        u_photo = _cosine_ease_in_out(t_sec / enter_t)
+        if prev_stage_state is None:
+            # Beat 0 vào cảnh: fade-in nguyên khối giữ nguyên vị trí (0px dịch khung)
+            alpha *= u_photo
+        else:
+            cx0, cy0, sub_w, sub_h, nw, nh, dest_x, dest_y = _compute_board_placement(
+                rects["outer"],
+                frame_rgba.width,
+                frame_rgba.height,
+                scale=scale,
+                clamp_bounds=clamp_bounds,
+                anchor_top_center=anchor_top_center,
+            )
+
+            # 1. Vỏ khung cố định (cache 1 lần/beat)
+            shell_crop: Image.Image | None = None
+            owns_shell = False
+            cached_shell = board_cache.get("vf_shell") if board_cache is not None else None
+            if (
+                isinstance(cached_shell, tuple)
+                and len(cached_shell) == 2
+                and cached_shell[0] == box
+                and isinstance(cached_shell[1], Image.Image)
+            ):
+                shell_crop = cached_shell[1]
+            else:
+                shell_full = Image.new("RGBA", frame_rgba.size, (0, 0, 0, 0))
+                try:
+                    _draw_visual_first_shell(shell_full, rects, pal)
+                    shell_crop = shell_full.crop((cx0, cy0, cx0 + sub_w, cy0 + sub_h))
+                finally:
+                    shell_full.close()
+                if board_cache is not None:
+                    board_cache["vf_shell"] = (box, shell_crop)
+                else:
+                    owns_shell = True
+
+            # 2. Ảnh mới 16:10 (cache 1 lần/beat)
+            cur_photo: Image.Image | None = None
+            owns_cur_photo = False
+            cached_photo = board_cache.get("vf_photo") if board_cache is not None else None
+            if (
+                isinstance(cached_photo, tuple)
+                and len(cached_photo) == 2
+                and cached_photo[0] == (iw, ih)
+                and isinstance(cached_photo[1], Image.Image)
+            ):
+                cur_photo = cached_photo[1]
+            else:
+                cur_photo = _build_visual_first_photo_patch(prop_img, iw, ih, pal)
+                if board_cache is not None:
+                    board_cache["vf_photo"] = ((iw, ih), cur_photo)
+                else:
+                    owns_cur_photo = True
+
+            # 3. Ảnh cũ từ prev_board_img (cache 1 lần/beat)
+            prev_photo: Image.Image | None = None
+            owns_prev_photo = False
+            if prev_board_img is not None:
+                cached_prev = board_cache.get("vf_prev_photo") if board_cache is not None else None
+                if isinstance(cached_prev, Image.Image) and cached_prev.size == (iw, ih):
+                    prev_photo = cached_prev
+                else:
+                    prev_photo = _extract_prev_inner_photo(
+                        prev_board_img,
+                        rects=rects,
+                        prev_stage_state=prev_stage_state,
+                        iw=iw,
+                        ih=ih,
+                    )
+                    if board_cache is not None:
+                        board_cache["vf_prev_photo"] = prev_photo
+                    else:
+                        owns_prev_photo = True
+
+            sub_frame = shell_crop.copy()
+            try:
+                rel_ix0, rel_iy0 = ix0 - cx0, iy0 - cy0
+                rel_ix1, rel_iy1 = ix1 - cx0, iy1 - cy0
+                if prev_photo is not None:
+                    blended = Image.blend(prev_photo, cur_photo, u_photo)
+                    try:
+                        sub_frame.alpha_composite(blended, (rel_ix0, rel_iy0))
+                    finally:
+                        blended.close()
+                else:
+                    faded_cur = cur_photo.copy()
+                    try:
+                        _scale_alpha_inplace(faded_cur, u_photo)
+                        sub_frame.alpha_composite(faded_cur, (rel_ix0, rel_iy0))
+                    finally:
+                        faded_cur.close()
+
+                sd = ImageDraw.Draw(sub_frame)
+                sd.rounded_rectangle(
+                    (rel_ix0, rel_iy0, rel_ix1, rel_iy1),
+                    radius=18,
+                    outline=pal["card_border"],
+                    width=2,
+                )
+
+                # 4. Tiêu đề 2 pha tách rời (0% chồng 2 dòng chữ)
+                cur_headline = _pick_visual_first_title(beat).upper()
+                prev_headline = _resolve_prev_headline(prev_stage_state)
+                hx0, hy0, hx1, hy1 = rects["head"]
+                rel_head = (hx0 - cx0, hy0 - cy0, hx1 - cx0, hy1 - cy0)
+                if not prev_headline or cur_headline == prev_headline:
+                    h_alpha = 1.0 if prev_headline else u_photo
+                    _draw_visual_first_headline(
+                        sub_frame, cur_headline, rel_head, pal, alpha=h_alpha
+                    )
+                elif t_sec < 0.12:
+                    out_alpha = 1.0 - _cosine_ease_in_out(t_sec / 0.12)
+                    _draw_visual_first_headline(
+                        sub_frame, prev_headline, rel_head, pal, alpha=out_alpha
+                    )
+                elif t_sec >= 0.14:
+                    in_u = _cosine_ease_in_out((t_sec - 0.14) / 0.14)
+                    _draw_visual_first_headline(
+                        sub_frame,
+                        cur_headline,
+                        rel_head,
+                        pal,
+                        alpha=in_u,
+                        dy_px=4.0 * (1.0 - in_u),
+                    )
+
+                if (nw, nh) != (sub_w, sub_h):
+                    scaled_sub = sub_frame.resize((nw, nh), Image.Resampling.BICUBIC)
+                else:
+                    scaled_sub = sub_frame.copy()
+                try:
+                    if alpha < 0.995:
+                        _scale_alpha_inplace(scaled_sub, alpha)
+                    frame_rgba.alpha_composite(scaled_sub, (dest_x, dest_y))
+                finally:
+                    scaled_sub.close()
+                return
+            finally:
+                sub_frame.close()
+                if owns_shell and shell_crop is not None:
+                    shell_crop.close()
+                if owns_cur_photo and cur_photo is not None:
+                    cur_photo.close()
+                if owns_prev_photo and prev_photo is not None:
+                    prev_photo.close()
+
+    if abs(scale - 1.0) < 0.004 and alpha > 0.995 and clamp_bounds is None:
         _draw_smart_board_content(
             frame_rgba,
             beat,
@@ -1151,7 +1452,7 @@ def _composite_transitioned_board(
         )
         return
 
-    # Tái sử dụng bảng gốc tĩnh đã crop ở t_sec=0 để mọi frame tween không vẽ lại Polaroid
+    # Tái sử dụng bảng gốc tĩnh đã crop ở trạng thái ổn định để mọi frame tween không vẽ lại
     sub: Image.Image | None = None
     owns_sub = False
     cx0 = cy0 = 0
@@ -1213,10 +1514,10 @@ def _composite_transitioned_board(
                 _scale_alpha_inplace(scaled, alpha)
             if anchor_top_center is not None:
                 dest_x = int(round(anchor_top_center[0] - scaled.width * 0.5))
-                dest_y = int(round(anchor_top_center[1] + dy_px))
+                dest_y = int(round(anchor_top_center[1]))
             else:
                 dest_x = cx0 + (sub.width - scaled.width) // 2
-                dest_y = cy0 + (sub.height - scaled.height) // 2 + int(round(dy_px))
+                dest_y = cy0 + (sub.height - scaled.height) // 2
 
             # Kẹp cứng biên an toàn cho Bảng tri thức (không bao giờ lọt ngoài khung)
             if clamp_bounds is not None:
@@ -1510,6 +1811,7 @@ class BeatStageState:
     last_board_title: str = ""
     last_board_type: str = ""
     last_chapter: int = 1
+    last_visual_title: str = ""
 
 
 @dataclass(frozen=True)
@@ -1585,7 +1887,16 @@ def _target_layered_shot_params(
                 0.91 * h,
             )
         if shot_key == "closeup_react":
-            return base_box, 1.0, 0.0, None, None, 1.06, 0.50 * w, 0.92 * h
+            return (
+                base_box,
+                1.0,
+                0.0,
+                None,
+                (w * 0.5, 115.0 * sy),
+                1.06,
+                0.50 * w,
+                0.92 * h,
+            )
         return (
             base_box,
             1.0,
@@ -1596,7 +1907,7 @@ def _target_layered_shot_params(
                 w - int(round(20 * sx)),
                 int(round(865 * sy)),
             ),
-            None,
+            (w * 0.5, 115.0 * sy),
             1.0,
             0.50 * w,
             0.90 * h,
@@ -1610,6 +1921,7 @@ def _target_layered_shot_params(
         int(round(1840 * sx)),
         int(round(860 * sy)),
     )
+    anchor_169 = (float((base_box[0] + base_box[2]) * 0.5), 105.0 * sy)
     if shot_key == "focus_board":
         clamp = (
             int(round(650 * sx)),
@@ -1622,7 +1934,7 @@ def _target_layered_shot_params(
             1.08,
             1.0,
             clamp,
-            (float((base_box[0] + base_box[2]) * 0.5), 105.0 * sy),
+            anchor_169,
             0.88,
             0.16 * w,
             0.91 * h,
@@ -1638,12 +1950,12 @@ def _target_layered_shot_params(
                 int(round(1860 * sx)),
                 int(round(900 * sy)),
             ),
-            None,
+            anchor_169,
             1.22,
             0.24 * w,
             0.93 * h,
         )
-    return base_box, 1.0, 1.0, None, None, 1.0, 0.21 * w, 0.91 * h
+    return base_box, 1.0, 1.0, None, anchor_169, 1.0, 0.21 * w, 0.91 * h
 
 
 def compute_layered_camera_layout(
@@ -1674,7 +1986,7 @@ def compute_layered_camera_layout(
         )
 
     prev_shot = (getattr(prev_stage_state, "camera_shot", "wide_stage") or "wide_stage").lower()
-    _, p_bscale, _, _, _, p_cscale, p_cx, p_fy = _target_layered_shot_params(
+    _, p_bscale, _, _, p_anchor, p_cscale, p_cx, p_fy = _target_layered_shot_params(
         prev_shot, aspect=aspect, w=w, h=h
     )
     p_balpha = float(getattr(prev_stage_state, "board_alpha", 1.0))
@@ -1686,12 +1998,20 @@ def compute_layered_camera_layout(
         if (shot_key == "closeup_react" and aspect == "9:16")
         else u
     )
+    interp_anchor = (
+        (
+            p_anchor[0] + (anchor[0] - p_anchor[0]) * u,
+            p_anchor[1] + (anchor[1] - p_anchor[1]) * u,
+        )
+        if (p_anchor is not None and anchor is not None)
+        else anchor
+    )
     return LayeredCameraLayout(
         board_box=box,
         board_scale=p_bscale + (t_bscale - p_bscale) * u,
         board_alpha=p_balpha + (t_balpha - p_balpha) * alpha_u,
         clamp_bounds=clamp,
-        anchor_top_center=anchor,
+        anchor_top_center=interp_anchor,
         char_scale=p_cscale + (t_cscale - p_cscale) * u,
         char_center_x=p_cx + (t_cx - p_cx) * u,
         char_foot_y=p_fy + (t_fy - p_fy) * u,

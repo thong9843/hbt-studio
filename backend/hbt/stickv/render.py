@@ -68,6 +68,7 @@ from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, St
 from hbt.stickv.puppet import PuppetAssetCache, is_puppet_ready, normalize_stickv_pose
 from hbt.stickv.stage import (
     BeatStageState,
+    _pick_visual_first_title,
     close_stage_cache,
     compute_beat_character_target,
     compute_camera_state,
@@ -376,7 +377,14 @@ def _stream_beat_frames_to_ffmpeg(
                 aspect=aspect,  # type: ignore[arg-type]
             )
             stage_state_out["state"] = BeatStageState(
-                x=tx, y=ty, scale=tsc, pose_state=animator.last_pose_state
+                x=tx,
+                y=ty,
+                scale=tsc,
+                pose_state=animator.last_pose_state,
+                last_board_title=(beat.board_title or "").strip(),
+                last_board_type=beat.board_type,
+                last_chapter=beat.chapter,
+                last_visual_title=_pick_visual_first_title(beat),
             )
     finally:
         close_stage_cache(beat_board_cache)
@@ -1159,6 +1167,7 @@ def _stream_chunk_frames_to_ffmpeg(
                     last_board_title=(beat.board_title or "").strip(),
                     last_board_type=beat.board_type,
                     last_chapter=beat.chapter,
+                    last_visual_title=_pick_visual_first_title(beat),
                 )
                 if board_carry is not None:
                     old_carried = board_carry.get("img")
