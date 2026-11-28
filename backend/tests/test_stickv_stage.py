@@ -1487,3 +1487,54 @@ def test_p11_locked_16_10_frame_zero_dest_y_jump_and_separated_title_fade() -> N
         prev_board.close()
         photo_a.close()
         photo_b.close()
+
+
+def test_p12_resolve_beat_visual_image_routes_editorial_and_no_pisa_hardcode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """INV-13: _resolve_beat_visual_image truyền visual_mode và không còn hardcode Pisa."""
+    from hbt.stickv import render as sr
+
+    render_src = Path(sr.__file__).read_text(encoding="utf-8")
+    assert "bell tower monument exterior" not in render_src
+
+    proj_dir = tmp_path / "workspace" / "stickv" / "demo"
+    lib_dir = tmp_path / "library"
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    img_flux = lib_dir / "flux_out.jpg"
+    Image.new("RGB", (64, 64), (40, 140, 210)).save(img_flux, format="JPEG")
+    seen_calls: list[dict] = []
+
+    def _fake_resolve(query: str, *args, **kwargs):
+        seen_calls.append({"query": query, **kwargs})
+        return img_flux, "cloudflare_flux"
+
+    monkeypatch.setattr(sr, "resolve_reference_image", _fake_resolve)
+
+    beat_cta = StickvBeat(
+        id="b010",
+        narration="Hãy để lại bình luận phía dưới video nhé.",
+        pose="welcome_open",
+        board_type="pinned_photo",
+        board_title="Chia sẻ ý kiến ngay",
+        beat_entity_en="Audience engagement",
+        prop_query="Audience engagement speech bubble",
+    )
+    meta: dict[str, str] = {}
+    log_rows: list[dict] = []
+    im, src = sr._resolve_beat_visual_image(
+        beat_cta,
+        project_dir=proj_dir,
+        library_dir=lib_dir,
+        accent=(220, 38, 38, 255),
+        ai_photo_budget=[10],
+        visual_sources_log=log_rows,
+        out_meta=meta,
+    )
+    if im is not None:
+        im.close()
+    assert src == "cloudflare_flux"
+    assert seen_calls[0]["visual_mode"] == "editorial_illustration"
+    assert log_rows[0]["visual_mode"] == "editorial_illustration"

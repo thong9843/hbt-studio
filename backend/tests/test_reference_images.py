@@ -377,8 +377,8 @@ def test_wikimedia_junk_filter_and_entity_relevance_fallback_to_flux(tmp_path: P
     )
 
     clear_reference_image_cache()
-    assert REF_CACHE_VERSION == "v3_beat_entity_real_first"
-    assert DEFAULT_AI_IMAGE_BUDGET == 8
+    assert REF_CACHE_VERSION == "v4_visual_mode_gate"
+    assert DEFAULT_AI_IMAGE_BUDGET == 10
 
     junk_pages = {
         "1": {
@@ -590,7 +590,7 @@ def test_v3_real_first_pass1b_entity_fallback_and_render_wiring(tmp_path: Path) 
     assert len(seen_queries) == 2
     assert "Racetrack Playa" in seen_queries[1]
     assert budget == [DEFAULT_AI_IMAGE_BUDGET]  # Không tốn lượt AI khi có ảnh thật Wikimedia
-    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 8
+    assert stickv_render.DEFAULT_AI_IMAGE_BUDGET == 10
 
 
 def test_cloudflare_flux_prompt_enforces_zero_text_directive(tmp_path: Path, monkeypatch) -> None:
@@ -637,3 +637,114 @@ def test_cloudflare_flux_prompt_enforces_zero_text_directive(tmp_path: Path, mon
     p_low = seen_prompts[0].lower()
     assert "no text" in p_low and "no labels" in p_low and "no arrows" in p_low
     assert "no watermark" in p_low
+
+
+def test_p12_visual_mode_editorial_direct_flux_and_expanded_junk_filters(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """INV-13: editorial_illustration đi thẳng Flux; chặn PDF/MMPI, lễ trao bằng, Drosera, <0.72."""
+    from PIL import ImageDraw
+
+    from hbt.shared.online_sources.reference_images import (
+        DEFAULT_AI_IMAGE_BUDGET,
+        _is_text_heavy_document_image,
+        _valid_image_geometry,
+        is_junk_reference_candidate,
+        score_candidate_relevance,
+    )
+
+    clear_reference_image_cache()
+    assert DEFAULT_AI_IMAGE_BUDGET == 10
+
+    # 1. Chặn các mẫu rác mới từ video Khu vực 51
+    assert is_junk_reference_candidate("MMPI_2_questionnaire_page_3.jpg", query="CIA documents")
+    assert is_junk_reference_candidate(
+        "DHS_Homeland_Security_award_ceremony_2018.jpg", query="Modern military technology"
+    )
+    assert is_junk_reference_candidate(
+        "Drosera_capensis_sundew_specimen.jpg", query="Human curiosity magnifying glass"
+    )
+    assert is_junk_reference_candidate(
+        "Bound_for_Area_51_-_geograph.org.uk_-_6276736.jpg", query="Area 51 border"
+    )
+    assert is_junk_reference_candidate(
+        "Circus_Circus_Sky_Tower_and_parking_garage_night.jpg", query="Nevada night sky"
+    )
+    # Vẫn cho phép nếu query thực sự hỏi về thực vật
+    assert not is_junk_reference_candidate(
+        "Drosera_capensis_flower.jpg", query="Drosera sundew carnivorous plant"
+    )
+
+    # 2. Chặn ảnh dọc quá hẹp kiểu trang sách (< 0.72) & chặn trang chữ nền kem nhạt
+    assert not _valid_image_geometry(600, 900)  # 0.667 < 0.72
+    assert _valid_image_geometry(800, 600)
+    cream_doc = Image.new("RGB", (512, 512), (242, 236, 218))
+    try:
+        d = ImageDraw.Draw(cream_doc)
+        for y in range(40, 480, 22):
+            for x in range(40, 460, 28):
+                d.rectangle((x, y, x + 16, y + 6), fill=(35, 32, 28))
+        assert _is_text_heavy_document_image(cream_doc)
+    finally:
+        cream_doc.close()
+
+    landscape_sky = Image.new("RGB", (640, 480), (210, 225, 240))
+    try:
+        ImageDraw.Draw(landscape_sky).rectangle((0, 300, 640, 480), fill=(165, 130, 85))
+        assert not _is_text_heavy_document_image(landscape_sky)
+    finally:
+        landscape_sky.close()
+
+    # 3. Numeric/distinguishing token guard: trạm biên giới châu Âu không thể khớp Area 51
+    assert (
+        score_candidate_relevance(
+            {
+                "title": "Lithuania Belarus border area checkpoint.jpg",
+                "metadata_text": "Border warning sign post Europe",
+            },
+            "Area 51 border warning sign desert",
+            primary_entity_en="Area 51 border",
+        )
+        == 0.0
+    )
+
+    # 4. visual_mode='editorial_illustration' bỏ qua hoàn toàn Wikimedia/Pixabay -> thẳng Flux
+    stock_calls: list[str] = []
+    flux_calls: list[str] = []
+
+    def _stock_handler(req: httpx.Request) -> httpx.Response:
+        stock_calls.append(str(req.url))
+        return httpx.Response(200, json={})
+
+    def _fake_flux(prompt: str, dest: Path, **_kwargs) -> Path:
+        flux_calls.append(prompt)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(_png_bytes((768, 512), color=(45, 90, 150)))
+        return dest
+
+    monkeypatch.setattr(
+        "hbt.shared.online_sources.reference_images.generate_illustration_image",
+        _fake_flux,
+    )
+    client = httpx.Client(transport=httpx.MockTransport(_stock_handler))
+    budget = [10]
+    try:
+        out_p, src = resolve_reference_image(
+            "Human curiosity magnifying glass",
+            tmp_path / "lib",
+            illustration_prompt="Editorial 2D magnifying glass over blank map",
+            primary_entity_en="Human curiosity",
+            visual_mode="editorial_illustration",
+            cf_account_id="acc",
+            cf_api_token="tok",
+            ai_budget=budget,
+            client=client,
+        )
+    finally:
+        client.close()
+
+    assert src == "cloudflare_flux"
+    assert out_p.is_file()
+    assert stock_calls == []
+    assert len(flux_calls) == 1
+    assert budget == [9]

@@ -37,6 +37,7 @@ from hbt.shared.ffmpeg_utils import (
 )
 from hbt.shared.online_sources.reference_images import (
     DEFAULT_AI_IMAGE_BUDGET,
+    REF_CACHE_VERSION,
     resolve_reference_image,
 )
 from hbt.shared.pipeline.watermark import (
@@ -64,6 +65,7 @@ from hbt.stickv.beat_cache import (
     compute_beat_cache_key,
     hash_file_sha256,
 )
+from hbt.stickv.llm import classify_beat_visual_mode
 from hbt.stickv.models import STICKV_ASPECT_SIZES, StickvBeat, StickvProject, StickvTheme
 from hbt.stickv.puppet import PuppetAssetCache, is_puppet_ready, normalize_stickv_pose
 from hbt.stickv.stage import (
@@ -631,27 +633,27 @@ _SCENE_QUERY_HINTS: tuple[tuple[tuple[str, ...], str, str], ...] = (
     ),
     (
         ("nén chặt", "ổn định", "cân bằng", "nghỉ"),
-        "ground settlement equilibrium tower",
+        "ground settlement equilibrium structure",
         "2D editorial illustration showing compacted soil beneath a stabilized historic "
-        "bell tower at golden hour, no text, no labels, no arrows, no watermark",
+        "monument at golden hour, no text, no labels, no arrows, no watermark",
     ),
     (
         ("kỹ sư", "bẻ cong", "bù lại", "độ lệch"),
-        "tower curved upper floors architecture",
-        "2D editorial illustration of engineers checking subtle vertical correction on the "
-        "upper arches of a tilted marble tower, no text, no labels, no arrows, no watermark",
+        "structural engineering correction architecture",
+        "2D editorial illustration of engineers inspecting subtle structural alignment on a "
+        "historic monument, no text, no labels, no arrows, no watermark",
     ),
     (
         ("gia cố", "cáp", "sụp đổ", "bảo tồn"),
         "steel cable stabilization monument engineering",
-        "2D editorial illustration of counterweights and tension cables gently stabilizing an "
-        "iconic leaning marble tower, no text, no labels, no arrows, no watermark",
+        "2D editorial illustration of counterweights and tension cables gently stabilizing a "
+        "historic structure, no text, no labels, no arrows, no watermark",
     ),
     (
         ("kỳ quan", "biểu tượng", "đăng ký", "khám phá", "hấp dẫn"),
-        "italy square monument aerial view",
-        "Clean 2D editorial sunset panorama of the famous Leaning Tower of Pisa and "
-        "cathedral plaza, no text, no labels, no arrows, no watermark",
+        "historic plaza aerial view editorial",
+        "Clean 2D editorial sunset panorama illustrating discovery and wonder, "
+        "no text, no labels, no arrows, no watermark",
     ),
 )
 
@@ -724,6 +726,7 @@ def _resolve_beat_visual_image(
             photo_src = "media_path"
             ref_q = beat.media_path
 
+    eff_visual_mode = classify_beat_visual_mode(beat, primary_entity_en=primary_entity_en)
     if photo_path is None:
         raw_prop_q = (getattr(beat, "prop_query", None) or "").strip()
         entity_anchor = (getattr(beat, "beat_entity_en", "") or primary_entity_en or "").strip()
@@ -739,6 +742,7 @@ def _resolve_beat_visual_image(
                 accent_color=accent,
                 illustration_prompt=ill_prompt,
                 primary_entity_en=entity_anchor,
+                visual_mode=eff_visual_mode,
                 allow_ai_fallback=True,
                 ai_budget=ai_photo_budget,
             )
@@ -755,17 +759,19 @@ def _resolve_beat_visual_image(
             no_text = "no text, no labels, no arrows, no watermark"
             alt_specs = (
                 (
-                    f"{base_ent} bell tower monument exterior",
+                    f"{base_ent} detail closeup",
                     f"Clean 2D flat editorial illustration showing a fresh angle of "
                     f"{base_ent} ({scene_ctx}), {no_text}",
+                    "real_photo",
                 ),
                 (
                     f"alternate editorial scene {beat.id} {base_ent}",
                     f"Clean 2D flat editorial illustration illustrating: "
                     f"{beat.narration[:140]} ({base_ent}, {beat.id}), {no_text}",
+                    "editorial_illustration",
                 ),
             )
-            for alt_q, alt_prompt in alt_specs:
+            for alt_q, alt_prompt, alt_vmode in alt_specs:
                 try:
                     # Tắt pass 1b (`primary_entity_en=""`) để không tải lại đúng ảnh #1 của thực thể
                     alt_p, alt_src = resolve_reference_image(
@@ -775,6 +781,7 @@ def _resolve_beat_visual_image(
                         accent_color=accent,
                         illustration_prompt=alt_prompt,
                         primary_entity_en="",
+                        visual_mode=alt_vmode,
                         allow_ai_fallback=True,
                         ai_budget=ai_photo_budget,
                     )
@@ -782,6 +789,8 @@ def _resolve_beat_visual_image(
                         photo_path = alt_p
                         photo_src = alt_src
                         ref_q = alt_q
+                        if alt_vmode == "editorial_illustration":
+                            eff_visual_mode = "editorial_illustration"
                         break
                 except Exception:
                     continue
@@ -794,12 +803,21 @@ def _resolve_beat_visual_image(
     resolved_path_str = str(photo_path) if photo_path else ""
     if out_meta is not None:
         out_meta["path"] = resolved_path_str
+        out_meta["visual_mode"] = eff_visual_mode
+        out_meta["query"] = ref_q
 
-    logger.info("[StickV Visual-First] beat=%s source=%s query=%r", beat.id, photo_src, ref_q)
+    logger.info(
+        "[StickV Visual-First] beat=%s mode=%s source=%s query=%r",
+        beat.id,
+        eff_visual_mode,
+        photo_src,
+        ref_q,
+    )
     if visual_sources_log is not None:
         visual_sources_log.append(
             {
                 "beat_id": beat.id,
+                "visual_mode": eff_visual_mode,
                 "source": photo_src,
                 "query": ref_q,
                 "board_title": beat.board_title,
@@ -841,6 +859,7 @@ def _stream_chunk_frames_to_ffmpeg(
     watermark_img: Image.Image | None = None,
     watermark_patch: tuple[Image.Image, int, int] | None = None,
     visual_sources_log: list[dict[str, Any]] | None = None,
+    pre_resolved_visual: tuple[Image.Image | None, str, dict[str, str]] | None = None,
 ) -> tuple[int, float, BeatStageState | None]:
     """Stream liên tục nhiều beat trong 1 cụm chương qua cùng ống FFmpeg, giữ liền mạch 100%."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -1013,21 +1032,24 @@ def _stream_chunk_frames_to_ffmpeg(
                 asset_cache=asset_cache,
             )
 
-            prev_img_path = (
-                str(board_carry.get("last_image_path") or "") if board_carry is not None else ""
-            )
-            resolved_meta: dict[str, str] = {}
-            prop_img, _photo_src = _resolve_beat_visual_image(
-                beat,
-                project_dir=project_dir,
-                library_dir=library_dir,
-                accent=accent,
-                primary_entity_en=primary_entity_en,
-                ai_photo_budget=ai_photo_budget,
-                visual_sources_log=visual_sources_log,
-                prev_image_path=prev_img_path,
-                out_meta=resolved_meta,
-            )
+            if pre_resolved_visual is not None and len(chunk_items) == 1:
+                prop_img, _photo_src, resolved_meta = pre_resolved_visual
+            else:
+                prev_img_path = (
+                    str(board_carry.get("last_image_path") or "") if board_carry is not None else ""
+                )
+                resolved_meta = {}
+                prop_img, _photo_src = _resolve_beat_visual_image(
+                    beat,
+                    project_dir=project_dir,
+                    library_dir=library_dir,
+                    accent=accent,
+                    primary_entity_en=primary_entity_en,
+                    ai_photo_budget=ai_photo_budget,
+                    visual_sources_log=visual_sources_log,
+                    prev_image_path=prev_img_path,
+                    out_meta=resolved_meta,
+                )
             if board_carry is not None and resolved_meta.get("path"):
                 board_carry["last_image_path"] = resolved_meta["path"]
 
@@ -1639,6 +1661,28 @@ def render_stickv(
                             and (g_idx == 0 or beat.chapter != prev_ch)
                         )
                         wav_sha = hash_file_sha256(wav_p) if wav_p.is_file() else ""
+                        pre_meta: dict[str, str] = {}
+                        pre_prop_img, pre_photo_src = _resolve_beat_visual_image(
+                            beat,
+                            project_dir=project_dir,
+                            library_dir=library_dir,
+                            accent=DOMAIN_PALETTES[norm_domain]["accent"],
+                            primary_entity_en=prim_ent,
+                            ai_photo_budget=ai_photo_budget,
+                            visual_sources_log=visual_sources_log,
+                            prev_image_path=str(board_carry.get("last_image_path") or ""),
+                            out_meta=pre_meta,
+                        )
+                        res_p_str = pre_meta.get("path", "")
+                        res_sha = (
+                            hash_file_sha256(Path(res_p_str))[:16]
+                            if (res_p_str and Path(res_p_str).is_file())
+                            else "none"
+                        )
+                        cache_prim_ent = (
+                            f"{prim_ent}|{REF_CACHE_VERSION}"
+                            f"|{pre_meta.get('visual_mode', 'real_photo')}|{res_sha}"
+                        )
                         cache_key = compute_beat_cache_key(
                             beat=beat,
                             aspect=project.aspect,
@@ -1649,7 +1693,7 @@ def render_stickv(
                             theme=project.theme,
                             animation_mode=anim_mode,
                             pause_scale=pause_scale,
-                            primary_entity_en=prim_ent,
+                            primary_entity_en=cache_prim_ent,
                             total_chapters=total_chapters,
                             has_next_diff_title=has_next_diff,
                             show_chapter_banner=show_banner,
@@ -1667,6 +1711,10 @@ def render_stickv(
                         )
                         hit = beat_cache.lookup(cache_key)
                         if hit is not None:
+                            if pre_prop_img is not None:
+                                pre_prop_img.close()
+                            if res_p_str:
+                                board_carry["last_image_path"] = res_p_str
                             cached_mp4, next_state, next_board = hit
                             old_carried = board_carry.get("img")
                             board_carry["img"] = next_board
@@ -1715,6 +1763,7 @@ def render_stickv(
                                     watermark_img=wm_img,
                                     watermark_patch=wm_patch,
                                     visual_sources_log=visual_sources_log,
+                                    pre_resolved_visual=(pre_prop_img, pre_photo_src, pre_meta),
                                 )
                             )
                             if beat_mp4.is_file() and beat_mp4.stat().st_size > 128:

@@ -442,3 +442,92 @@ def test_multi_location_beat_entity_no_umbrella_override_and_late_photo_balance(
     late_photos = [b for b in beats[4:7] if b.board_type == "pinned_photo"]
     assert len(late_photos) == 3
     assert any(b.beat_entity_en == "Richat Structure Sahara" for b in late_photos)
+
+
+def test_p12_visual_mode_schema_backcompat_prompt_and_classifier() -> None:
+    """INV-13: JSON cũ thiếu `visual_mode`, prompt & classifier phân luồng đúng."""
+    from hbt.stickv.llm import classify_beat_visual_mode
+    from hbt.stickv.models import StickvBeat, StickvProject
+
+    # 1. JSON cũ không có trường visual_mode -> mặc định 'real_photo'
+    legacy = StickvBeat.model_validate({"id": "b1", "narration": "Sa mạc Nevada."})
+    assert legacy.visual_mode == "real_photo"
+
+    # 2. Prompt chứa hướng dẫn visual_mode
+    prompt = build_director_prompt(idea="Bí ẩn Area 51")
+    assert "visual_mode" in prompt
+    assert "editorial_illustration" in prompt and "real_photo" in prompt
+
+    # 3. Phân luồng đúng trên các beat Khu vực 51
+    samples = [
+        (
+            "Area 51 Nevada desert aerial",
+            "Area 51",
+            "Bản đồ quân sự trống",
+            "present_board",
+            "real_photo",
+        ),
+        (
+            "Lockheed U-2 vintage spy plane",
+            "Lockheed U-2",
+            "Máy bay gián điệp Mỹ",
+            "explain",
+            "real_photo",
+        ),
+        (
+            "CIA declassified documents official government document",
+            "CIA declassified documents",
+            "Tài liệu giải mật chậm",
+            "arms_crossed",
+            "editorial_illustration",
+        ),
+        (
+            "UFO sighting glowing metallic flying",
+            "UFO sighting",
+            "Công nghệ bay kỳ lạ",
+            "lean_secret",
+            "editorial_illustration",
+        ),
+        (
+            "Human curiosity magnifying glass exploring",
+            "Human curiosity",
+            "Sự tò mò con người",
+            "point_up",
+            "editorial_illustration",
+        ),
+        (
+            "Hidden mystery padlock door",
+            "Hidden mystery",
+            "Bí mật còn bỏ ngỏ",
+            "nod_yes",
+            "editorial_illustration",
+        ),
+        (
+            "Modern military technology stealth drone silhouette",
+            "Modern military technology",
+            "Thử nghiệm vũ khí hiện đại",
+            "explain",
+            "editorial_illustration",
+        ),
+        (
+            "Audience engagement speech bubble comment",
+            "Audience engagement",
+            "Chia sẻ ý kiến ngay",
+            "welcome_open",
+            "editorial_illustration",
+        ),
+    ]
+    for q, ent, title, pose, expected in samples:
+        b = StickvBeat(
+            id="t",
+            narration="Nội dung minh họa.",
+            pose=pose,
+            prop_query=q,
+            beat_entity_en=ent,
+            board_title=title,
+        )
+        assert classify_beat_visual_mode(b) == expected, (q, expected)
+
+    # 4. Đọc StickvProject cũ không crash
+    proj = StickvProject(slug="area51-test", title="Area 51", beats=[legacy])
+    assert proj.beats[0].visual_mode == "real_photo"

@@ -10,7 +10,7 @@ from typing import Any
 
 from hbt.shared.llm import GEMINI_MODEL, generate_structured_json
 from hbt.stickv.backdrops import normalize_domain
-from hbt.stickv.models import StickvAspect, StickvBeat
+from hbt.stickv.models import StickvAspect, StickvBeat, StickvVisualMode
 from hbt.stickv.poses_init import DEFAULT_POSES
 
 POSES_V9: tuple[str, ...] = (
@@ -88,8 +88,11 @@ def _build_system_prompt(available_poses: list[str] | None = None) -> str:
         "`beat_entity_en` (tên địa danh/sự vật thật cụ thể của beat bằng tiếng Anh), "
         "`prop_query` (2-5 từ tiếng Anh neo đúng thực thể + bối cảnh từng beat để ưu tiên tìm ảnh "
         "thật Wikimedia Commons -> Pixabay, cấm từ chung chung như 'ruler', 'blueprint', "
-        "'old building') và `image_prompt` (1 câu tiếng Anh mô tả tranh minh họa editorial 2D "
-        "trực quan, không chữ, không nhãn chú thích, không mũi tên sơ đồ, không watermark).\n"
+        "'old building'), `image_prompt` (1 câu tiếng Anh mô tả tranh minh họa editorial 2D "
+        "trực quan, không chữ, không nhãn chú thích, không mũi tên sơ đồ, không watermark) và "
+        "`visual_mode` (`real_photo` CHỈ cho địa danh/công trình/máy móc/vật thể/nhân vật có ảnh "
+        "chụp thật rõ ràng; `editorial_illustration` BẮT BUỘC cho khái niệm trừu tượng, tâm lý, "
+        "giả thuyết bí ẩn, cảm xúc, ẩn dụ, tài liệu văn bản hoặc beat CTA cuối video).\n"
         "LUẬT ĐA DẠNG: Không dùng cùng 1 `pose` hoặc 1 `emotion` cho 2 beat đứng liền kề.\n"
         "domain: paper_classic|physics_science|history_geo|psychology_story|cosmos_mystery.\n"
         "music_mood: curious_science|history_epic|funny_quirky|mysterious_tense|calm_lofi.\n"
@@ -456,6 +459,119 @@ _DANGLING_VI_ENDINGS = frozenset(
 
 _NO_TEXT_IMAGE_DIRECTIVE = "no text, no labels, no arrows, no watermark"
 
+_EDITORIAL_CTA_PHRASES = (
+    "audience engagement",
+    "speech bubble",
+    "comment below",
+    "subscribe",
+    "call to action",
+    "cta",
+    "community group",
+)
+_EDITORIAL_ABSTRACT_PHRASES = (
+    "curiosity",
+    "human curiosity",
+    "mystery",
+    "hidden mystery",
+    "conspiracy",
+    "hypothesis",
+    "psychology",
+    "mindset",
+    "emotion",
+    "metaphor",
+    "illusion",
+    "paradox",
+    "concept",
+    "abstract",
+    "philosophy",
+    "imagination",
+    "dopamine",
+    "stress",
+    "anxiety",
+    "motivation",
+    "padlock",
+    "magnifying glass",
+    "lightbulb",
+    "silhouette",
+    "cartoon",
+    "stickman",
+    "cross section",
+    "microscopic",
+    "molecular",
+    "muscle fiber",
+    "ufo",
+    "alien",
+    "extraterrestrial",
+    "flying saucer",
+    "supernatural",
+    "unexplained",
+    "modern military technology",
+    "future technology",
+    "secret weapon",
+    "declassified document",
+    "secret document",
+    "official government document",
+    "classified document",
+    "classified file",
+)
+_EDITORIAL_VI_PHRASES = (
+    "sự tò mò",
+    "bí mật còn bỏ ngỏ",
+    "chia sẻ ý kiến",
+    "để lại bình luận",
+    "đăng ký kênh",
+    "giả thuyết",
+    "thuyết âm mưu",
+    "tâm lý",
+    "ẩn dụ",
+    "công nghệ bay kỳ lạ",
+    "tài liệu giải mật",
+)
+
+
+def classify_beat_visual_mode(beat: StickvBeat, *, primary_entity_en: str = "") -> StickvVisualMode:
+    """Phân luồng beat sang `real_photo` (vật thể/địa danh thật) hay `editorial_illustration`."""
+    explicit = str(getattr(beat, "visual_mode", "") or "").strip().lower()
+    if explicit in {"editorial_illustration", "illustration", "editorial", "2d", "ai"}:
+        return "editorial_illustration"
+
+    if (
+        getattr(beat, "face_mood", None) == "warm_cta"
+        or getattr(beat, "board_type", "") == "recap_card"
+        or str(getattr(beat, "pose", "") or "").strip().lower() == "welcome_open"
+        or _is_tail_recap_or_cta(beat)
+    ):
+        return "editorial_illustration"
+
+    en_blob = re.sub(
+        r"\s+",
+        " ",
+        f"{getattr(beat, 'beat_entity_en', '')} {getattr(beat, 'prop_query', '') or ''}".lower(),
+    ).strip()
+    if any(p in en_blob for p in (*_EDITORIAL_CTA_PHRASES, *_EDITORIAL_ABSTRACT_PHRASES)):
+        return "editorial_illustration"
+
+    cap_val = ""
+    if isinstance(getattr(beat, "board_data", None), dict):
+        cap_val = str(beat.board_data.get("caption") or "")
+    vi_blob = re.sub(
+        r"\s+",
+        " ",
+        f"{getattr(beat, 'board_title', '')} {cap_val}".lower(),
+    ).strip()
+    if any(p in vi_blob for p in _EDITORIAL_VI_PHRASES):
+        return "editorial_illustration"
+
+    ent = (getattr(beat, "beat_entity_en", "") or "").strip()
+    proj_ent = (primary_entity_en or "").strip()
+    if (
+        (not ent or _is_generic_umbrella_entity(ent))
+        and (not proj_ent or _is_generic_umbrella_entity(proj_ent))
+        and len(_core_en_tokens(en_blob)) < 2
+    ):
+        return "editorial_illustration"
+    return "real_photo"
+
 
 def shorten_visual_title(
     raw_title: str,
@@ -645,6 +761,7 @@ def _enforce_meaningful_boards(beats: list[StickvBeat]) -> list[StickvBeat]:
                     "takeaway": "",
                     "board_data": {"caption": short_title, "pin_style": pin_style},
                     "image_prompt": raw_prompt or None,
+                    "visual_mode": classify_beat_visual_mode(beat),
                     "camera_shot": eff_shot,
                 }
             )
@@ -811,6 +928,9 @@ def _ensure_balanced_pinned_photos(
                     "beat_entity_en": ent[:100],
                     "prop_query": pq[:80] if pq else None,
                     "image_prompt": raw_prompt or b.image_prompt,
+                    "visual_mode": classify_beat_visual_mode(
+                        b, primary_entity_en=primary_entity_en
+                    ),
                     "board_data": {"caption": cap, "pin_style": pin_style},
                 }
             )
@@ -1001,35 +1121,44 @@ def sanitize_beats(
             else []
         )
         facing = "left" if str(item.get("facing") or "right").strip().lower() == "left" else "right"
+        raw_vm = str(item.get("visual_mode") or "real_photo").strip().lower()
+        visual_mode: StickvVisualMode = (
+            "editorial_illustration"
+            if raw_vm in {"editorial_illustration", "illustration", "editorial", "2d", "ai"}
+            else "real_photo"
+        )
         idx = start_idx + len(out)
         c_title = str(item.get("chapter_title") or (chapter_title if len(out) == 0 else "")).strip()
-        out.append(
-            StickvBeat(
-                id=f"b{idx:03d}",
-                chapter=chapter,
-                chapter_title=c_title[:120],
-                narration=narration[:750],
-                pose=pose,
-                emotion=emotion,  # type: ignore[arg-type]
-                face_mood=face_mood,  # type: ignore[arg-type]
-                anim_oneshot=anim_oneshot,
-                anim_loop=anim_loop,
-                interaction=interaction,  # type: ignore[arg-type]
-                camera_shot=camera_shot,  # type: ignore[arg-type]
-                prop_query=prop_query,
-                beat_entity_en=beat_entity_en,
-                image_prompt=image_prompt,
-                facing=facing,
-                motion=motion,  # type: ignore[arg-type]
-                sfx_tag=sfx,  # type: ignore[arg-type]
-                board_type=btype,  # type: ignore[arg-type]
-                board_title=str(item.get("board_title") or "").strip()[:80],
-                board_items=bitems,
-                takeaway=takeaway,
-                board_data=_sanitize_board_data(btype, raw_bdata),
-                visual_data=vdata,
-            )
+        beat_obj = StickvBeat(
+            id=f"b{idx:03d}",
+            chapter=chapter,
+            chapter_title=c_title[:120],
+            narration=narration[:750],
+            pose=pose,
+            emotion=emotion,  # type: ignore[arg-type]
+            face_mood=face_mood,  # type: ignore[arg-type]
+            anim_oneshot=anim_oneshot,
+            anim_loop=anim_loop,
+            interaction=interaction,  # type: ignore[arg-type]
+            camera_shot=camera_shot,  # type: ignore[arg-type]
+            prop_query=prop_query,
+            beat_entity_en=beat_entity_en,
+            image_prompt=image_prompt,
+            visual_mode=visual_mode,
+            facing=facing,
+            motion=motion,  # type: ignore[arg-type]
+            sfx_tag=sfx,  # type: ignore[arg-type]
+            board_type=btype,  # type: ignore[arg-type]
+            board_title=str(item.get("board_title") or "").strip()[:80],
+            board_items=bitems,
+            takeaway=takeaway,
+            board_data=_sanitize_board_data(btype, raw_bdata),
+            visual_data=vdata,
         )
+        eff_vm = classify_beat_visual_mode(beat_obj, primary_entity_en=primary_entity_en)
+        if eff_vm != beat_obj.visual_mode:
+            beat_obj = beat_obj.model_copy(update={"visual_mode": eff_vm})
+        out.append(beat_obj)
     return anchor_beat_image_queries(out, primary_entity_en=primary_entity_en)
 
 
@@ -1158,7 +1287,8 @@ def generate_stickv_script(
             '"beats":[{"narration":"...","pose":"point_up","camera_shot":"wide_stage",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"pinned_photo",'
             '"board_title":"Tiêu đề ngắn 3-6 từ","beat_entity_en":"English entity",'
-            '"prop_query":"English search query","image_prompt":"2D editorial scene, no text",'
+            '"visual_mode":"real_photo","prop_query":"English search query",'
+            '"image_prompt":"2D editorial scene, no text",'
             '"board_data":{"caption":"Tiêu đề ngắn 3-6 từ","pin_style":"pin"}}]}'
         )
         parsed, timings = generate_structured_json(
@@ -1227,7 +1357,8 @@ def generate_stickv_script(
             'JSON: {"beats":[{"narration":"...","pose":"point_up","camera_shot":"focus_board",'
             '"facing":"right","motion":"bounce","sfx_tag":"whoosh","board_type":"pinned_photo",'
             '"board_title":"Tiêu đề ngắn 3-6 từ","beat_entity_en":"English entity",'
-            '"prop_query":"English search query","image_prompt":"2D editorial scene, no text",'
+            '"visual_mode":"real_photo","prop_query":"English search query",'
+            '"image_prompt":"2D editorial scene, no text",'
             '"board_data":{"caption":"Tiêu đề ngắn 3-6 từ","pin_style":"tape"}}]}'
         )
         ch_parsed, ch_t = generate_structured_json(

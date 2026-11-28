@@ -60,6 +60,7 @@ StickvBoardType = Literal[
 ]
 StickvSfxTag = Literal["none", "whoosh", "pop", "vine_boom", "ding"]
 StickvFacing = Literal["left", "right"]
+StickvVisualMode = Literal["real_photo", "editorial_illustration"]
 
 STICKV_ASPECT_SIZES: dict[StickvAspect, tuple[int, int]] = {
     "9:16": (1080, 1920),
@@ -88,6 +89,7 @@ class StickvBeat(BaseModel):
     prop_query: str | None = Field(default=None, max_length=120)
     beat_entity_en: str = Field(default="", max_length=100)
     image_prompt: str | None = Field(default=None, max_length=320)
+    visual_mode: StickvVisualMode = "real_photo"
     facing: StickvFacing = "right"
     motion: StickvMotion = "bounce"
     sfx_tag: StickvSfxTag = "whoosh"
@@ -148,6 +150,12 @@ class StickvBeat(BaseModel):
         raw_mood = str(out.get("face_mood") or "").strip().lower()
         valid_moods = {"explaining", "curious", "excited", "skeptical", "shocked", "warm_cta"}
         out["face_mood"] = raw_mood if raw_mood in valid_moods else None
+        raw_vm = str(out.get("visual_mode") or "real_photo").strip().lower()
+        out["visual_mode"] = (
+            "editorial_illustration"
+            if raw_vm in {"editorial_illustration", "illustration", "editorial", "2d", "ai"}
+            else "real_photo"
+        )
         return out
 
 
